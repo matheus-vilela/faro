@@ -168,6 +168,15 @@ export function Despesas() {
   const [editSaving, setEditSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [linkItemSheetOpen, setLinkItemSheetOpen] = useState(false);
+  const [linkItem, setLinkItem] = useState<{
+    id: string;
+    product_name: string;
+    quantity: number;
+    unit_value: number;
+  } | null>(null);
+  const [linkProductId, setLinkProductId] = useState<string>("");
+  const [linkSaving, setLinkSaving] = useState(false);
 
   const getBoletoForExpense = (expenseId: string) =>
     boletos.find((b) => b.expense_id === expenseId);
@@ -337,6 +346,43 @@ export function Despesas() {
       .eq("id", boletoId);
     if (error) console.error(error);
     else fetchData();
+  };
+
+  const openLinkItemSheet = (it: {
+    id: string;
+    product_name: string;
+    quantity: number;
+    unit_value: number;
+  }) => {
+    setLinkItem(it);
+    setLinkProductId("");
+    setLinkItemSheetOpen(true);
+  };
+
+  const handleLinkItemSave = async () => {
+    if (!linkItem?.id || !linkProductId) return;
+    setLinkSaving(true);
+    const { error } = await supabase
+      .from("expense_items")
+      .update({ product_id: linkProductId, stock_added: false })
+      .eq("id", linkItem.id);
+    setLinkSaving(false);
+    if (error) {
+      toast.error("Erro ao vincular");
+      return;
+    }
+    toast.success("Produto vinculado");
+    setLinkItemSheetOpen(false);
+    setLinkItem(null);
+    if (detailExpense?.id) {
+      const { data } = await supabase
+        .from("expenses")
+        .select("*, expense_items (*, products (id, name, current_quantity, min_quantity))")
+        .eq("id", detailExpense.id)
+        .single();
+      if (data) setDetailExpense(data as Expense);
+    }
+    fetchData();
   };
 
   const handleDeleteExpense = async () => {
@@ -1507,12 +1553,25 @@ export function Despesas() {
                                   )}
                                 </td>
                                 <td className="p-2">
-                                  {it.product_id && it.stock_added ? (
-                                    <Badge variant="default" className="bg-green-600">Adicionado</Badge>
-                                  ) : it.product_id ? (
+                                  {it.product_id ? (
                                     <Badge variant="secondary">Vinculado</Badge>
                                   ) : (
-                                    <span className="text-muted-foreground">—</span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openLinkItemSheet({
+                                          id: it.id!,
+                                          product_name: it.product_name,
+                                          quantity: Number(it.quantity),
+                                          unit_value: Number(it.unit_value),
+                                        });
+                                      }}
+                                    >
+                                      Vincular
+                                    </Button>
                                   )}
                                 </td>
                                 <td className="p-2 text-right">
@@ -1589,6 +1648,77 @@ export function Despesas() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet
+        open={linkItemSheetOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setLinkItemSheetOpen(false);
+            setLinkItem(null);
+          }
+        }}
+      >
+        <SheetContent>
+          {linkItem && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Vincular ao produto</SheetTitle>
+                <SheetDescription>
+                  Vincule este item da nota a um produto do estoque. O estoque será
+                  atualizado quando o recebimento for confirmado.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="space-y-4 py-6">
+                <div className="rounded-lg border p-3">
+                  <p className="font-medium">{linkItem.product_name || "—"}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {Number(linkItem.quantity).toLocaleString("pt-BR")} un ×{" "}
+                    {formatCurrency(linkItem.unit_value)}
+                  </p>
+                </div>
+                <div>
+                  <Label>Produto (estoque)</Label>
+                  <Select
+                    value={linkProductId}
+                    onValueChange={setLinkProductId}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Selecione o produto" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products
+                        .filter((p) => p.is_active !== false)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                            {p.sku && ` (${p.sku})`} — Estoque:{" "}
+                            {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
+                            {p.unit}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <SheetFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setLinkItemSheetOpen(false)}
+                  disabled={linkSaving}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleLinkItemSave}
+                  disabled={!linkProductId || linkSaving}
+                >
+                  {linkSaving ? "Vinculando..." : "Vincular"}
+                </Button>
+              </SheetFooter>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -25,10 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
-import { AlertTriangle, Package, Plus, Power, PowerOff } from "lucide-react";
+import { AlertTriangle, Package, Plus, PowerOff } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export function Produtos() {
@@ -339,26 +340,13 @@ export function Produtos() {
                   <div>
                     <Label className="text-base">Status</Label>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      Itens inativos não aparecem ao vincular em despesas
+                      {stockIsActive ? "Ativo" : "Inativo"} — itens inativos não aparecem ao vincular em despesas
                     </p>
                   </div>
-                  <Button
-                    variant={stockIsActive ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setStockIsActive(!stockIsActive)}
-                  >
-                    {stockIsActive ? (
-                      <>
-                        <Power className="h-4 w-4 mr-2" />
-                        Ativo
-                      </>
-                    ) : (
-                      <>
-                        <PowerOff className="h-4 w-4 mr-2" />
-                        Inativo
-                      </>
-                    )}
-                  </Button>
+                  <Switch
+                    checked={stockIsActive}
+                    onCheckedChange={setStockIsActive}
+                  />
                 </div>
               </div>
               <SheetFooter>
