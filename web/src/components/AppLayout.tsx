@@ -27,20 +27,33 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { cn } from "@/lib/utils";
+import { ROLE_LABELS } from "@/lib/roles";
 import {
+  BarChart3,
+  Bell,
   Building2,
   LayoutDashboard,
   LogOut,
   Monitor,
   Moon,
+  PackageCheck,
   Receipt,
   Sun,
+  Wallet,
+  FileText,
+  Truck,
 } from "lucide-react";
 import { Link, Navigate, Outlet } from "react-router-dom";
 
-const navItems = [
-  { title: "Dashboard", url: "/app", icon: LayoutDashboard },
-  { title: "Documentos", url: "/app/documentos", icon: Receipt },
+const NAV_ITEMS = [
+  { title: "Dashboard", url: "/app", icon: LayoutDashboard, roles: ["operador", "gestor", "owner"] },
+  { title: "Despesas", url: "/app/despesas", icon: Wallet, roles: ["operador", "gestor", "owner"] },
+  { title: "Boletos", url: "/app/boletos", icon: FileText, roles: ["operador", "gestor", "owner"] },
+  { title: "Fornecedores", url: "/app/fornecedores", icon: Truck, roles: ["operador", "gestor", "owner"] },
+  { title: "Recebimento", url: "/app/recebimento", icon: PackageCheck, roles: ["operador", "gestor", "owner"] },
+  { title: "Alertas", url: "/app/alertas", icon: Bell, roles: ["gestor", "owner"] },
+  { title: "Relatórios", url: "/app/relatorios", icon: BarChart3, roles: ["gestor", "owner"] },
+  { title: "Documentos", url: "/app/documentos", icon: Receipt, roles: ["operador", "gestor", "owner"] },
 ];
 
 export function AppLayout() {
@@ -69,7 +82,11 @@ export function AppLayout() {
 function AppLayoutContent() {
   const { user, signOut } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { currentCompany } = useCompany();
+  const { currentCompany, currentRole } = useCompany();
+
+  const navItems = (currentRole
+    ? NAV_ITEMS.filter((item) => item.roles.includes(currentRole))
+    : NAV_ITEMS);
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
@@ -186,10 +203,17 @@ function AppLayoutContent() {
                   <div className="flex flex-col space-y-1 leading-none">
                     <p className="font-medium">{user?.email}</p>
                     {currentCompany && (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Building2 className="h-3 w-3" />
-                        {currentCompany.name}
-                      </p>
+                      <div className="flex flex-col gap-0.5">
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          {currentCompany.name}
+                        </p>
+                        {currentRole && (
+                          <p className="text-xs text-muted-foreground/80">
+                            {ROLE_LABELS[currentRole]}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

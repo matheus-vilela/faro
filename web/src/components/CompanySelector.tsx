@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { maskCpfCnpj } from '@/lib/masks'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { Company } from '@/contexts/CompanyContext'
+import { ROLE_LABELS } from '@/lib/roles'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,7 +29,7 @@ import { Building2, ChevronDown, Plus } from 'lucide-react'
 export function CompanySelector() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { companies, currentCompany, setCurrentCompany, refetchCompanies } = useCompany()
+  const { userCompanies, currentCompany, setCurrentCompany, refetchCompanies } = useCompany()
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')
   const [document, setDocument] = useState('')
@@ -51,7 +53,7 @@ export function CompanySelector() {
         .insert({
           id: companyId,
           name,
-          document: document || null,
+          document: (document || '').replace(/\D/g, '') || null,
           email: email || null,
         })
 
@@ -68,7 +70,7 @@ export function CompanySelector() {
       const company = {
         id: companyId,
         name,
-        document: document || null,
+        document: (document || '').replace(/\D/g, '') || null,
         email: email || null,
         phone: null,
         address: null,
@@ -116,15 +118,18 @@ export function CompanySelector() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-[200px]">
-          {companies.map((company) => (
+          {userCompanies.map(({ company, role }) => (
             <DropdownMenuItem
               key={company.id}
               onClick={() => handleSelectCompany(company)}
             >
               <Building2 className="mr-2 h-4 w-4" />
-              <span className={company.id === currentCompany.id ? 'font-medium' : ''}>
-                {company.name}
-              </span>
+              <div className="flex flex-col">
+                <span className={company.id === currentCompany?.id ? 'font-medium' : ''}>
+                  {company.name}
+                </span>
+                <span className="text-xs text-muted-foreground">{ROLE_LABELS[role]}</span>
+              </div>
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
@@ -170,7 +175,7 @@ export function CompanySelector() {
                   id="company-document"
                   placeholder="00.000.000/0001-00"
                   value={document}
-                  onChange={(e) => setDocument(e.target.value)}
+                  onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
                 />
               </div>
               <div className="space-y-2">

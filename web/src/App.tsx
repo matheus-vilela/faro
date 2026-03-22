@@ -10,6 +10,13 @@ import { Companies } from '@/pages/Companies'
 import { AppLayout } from '@/components/AppLayout'
 import { Dashboard } from '@/pages/Dashboard'
 import { Documentos } from '@/pages/Documentos'
+import { Despesas } from '@/pages/Despesas'
+import { Recebimento } from '@/pages/Recebimento'
+import { Alertas } from '@/pages/Alertas'
+import { Relatorios } from '@/pages/Relatorios'
+import { Boletos } from '@/pages/Boletos'
+import { Fornecedores } from '@/pages/Fornecedores'
+import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -33,6 +40,12 @@ function AuthenticatedLayout() {
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="documentos" element={<Documentos />} />
+          <Route path="despesas" element={<Despesas />} />
+          <Route path="boletos" element={<Boletos />} />
+          <Route path="fornecedores" element={<Fornecedores />} />
+          <Route path="recebimento" element={<Recebimento />} />
+          <Route path="alertas" element={<Alertas />} />
+          <Route path="relatorios" element={<Relatorios />} />
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
       </Routes>
@@ -46,6 +59,7 @@ function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/atualizar-pagamento/:token" element={<AtualizarPagamento />} />
       <Route
         path="/*"
         element={

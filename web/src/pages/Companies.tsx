@@ -2,25 +2,33 @@ import { useEffect } from 'react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { maskCpfCnpj } from '@/lib/masks'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { Company } from '@/contexts/CompanyContext'
+import { ROLE_LABELS } from '@/lib/roles'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Card,
-  CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetFooter,
+} from '@/components/ui/sheet'
 
 export function Companies() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { companies, currentCompany, setCurrentCompany, refetchCompanies, loading: companiesLoading } = useCompany()
+  const { companies, userCompanies, currentCompany, setCurrentCompany, refetchCompanies, loading: companiesLoading } = useCompany()
 
   useEffect(() => {
     if (!companiesLoading && companies.length > 0 && currentCompany) {
@@ -51,7 +59,7 @@ export function Companies() {
         .insert({
           id: companyId,
           name,
-          document: document || null,
+          document: (document || '').replace(/\D/g, '') || null,
           email: email || null,
         })
 
@@ -68,7 +76,7 @@ export function Companies() {
       const company = {
         id: companyId,
         name,
-        document: document || null,
+        document: (document || '').replace(/\D/g, '') || null,
         email: email || null,
         phone: null,
         address: null,
@@ -114,14 +122,19 @@ export function Companies() {
         {!showCreate ? (
           <>
             <div className="grid gap-4">
-              {companies.map((company) => (
+              {userCompanies.map(({ company, role }) => (
                 <Card
                   key={company.id}
                   className="cursor-pointer hover:border-primary transition-colors"
                   onClick={() => handleSelectCompany(company)}
                 >
                   <CardHeader>
-                    <CardTitle>{company.name}</CardTitle>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>{company.name}</CardTitle>
+                      <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
+                        {ROLE_LABELS[role]}
+                      </span>
+                    </div>
                     {company.document && (
                       <CardDescription>CNPJ: {company.document}</CardDescription>
                     )}
@@ -138,70 +151,73 @@ export function Companies() {
               </Button>
             </div>
           </>
-        ) : (
-          <Card>
-            <form onSubmit={handleCreateCompany}>
-              <CardHeader>
-                <CardTitle>Cadastrar nova empresa</CardTitle>
-                <CardDescription>
-                  Preencha os dados do estabelecimento
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {error && (
-                  <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                    {error}
-                  </p>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nome *</Label>
-                  <Input
-                    id="name"
-                    placeholder="Nome do bar/restaurante"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="document">CNPJ</Label>
-                  <Input
-                    id="document"
-                    placeholder="00.000.000/0001-00"
-                    value={document}
-                    onChange={(e) => setDocument(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="contato@estabelecimento.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </CardContent>
-              <CardFooter className="flex gap-2">
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Criando...' : 'Criar empresa'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowCreate(false)
-                    setError(null)
-                  }}
-                >
-                  Cancelar
-                </Button>
-              </CardFooter>
-            </form>
-          </Card>
-        )}
+        ) : null}
       </div>
+
+      <Sheet open={showCreate} onOpenChange={(open) => {
+        setShowCreate(open)
+        if (!open) setError(null)
+      }}>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Cadastrar nova empresa</SheetTitle>
+            <SheetDescription>
+              Preencha os dados do estabelecimento
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleCreateCompany} className="space-y-4 py-4">
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+                {error}
+              </p>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="name">Nome *</Label>
+              <Input
+                id="name"
+                placeholder="Nome do bar/restaurante"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document">CNPJ</Label>
+              <Input
+                id="document"
+                placeholder="00.000.000/0001-00"
+                value={document}
+                onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="contato@estabelecimento.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <SheetFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowCreate(false)
+                  setError(null)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Criando...' : 'Criar empresa'}
+              </Button>
+            </SheetFooter>
+          </form>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
