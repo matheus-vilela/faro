@@ -4,7 +4,7 @@ import {
   getMonthRange,
   type MonthYear,
 } from "@/components/MonthSelector";
-import { Badge } from "@/components/ui/badge";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,11 +38,20 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDebounce } from "@/hooks/useDebounce";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import type { Supplier } from "@/types/supplier";
-import { Check, Copy, CreditCard, Link2, Pencil, Plus, Truck } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Check,
+  Copy,
+  CreditCard,
+  Link2,
+  Pencil,
+  Plus,
+  Truck,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 const ACCOUNT_TYPES = [
   { value: "conta_corrente", label: "Conta corrente" },
@@ -65,6 +74,10 @@ export function Fornecedores() {
     year: now.getFullYear(),
   });
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliersCount, setSuppliersCount] = useState(0);
+  const [suppliersPage, setSuppliersPage] = useState(1);
+  const [suppliersSearch, setSuppliersSearch] = useState("");
+  const debouncedSearch = useDebounce(suppliersSearch, 300);
   const [loading, setLoading] = useState(true);
   const [supplierSheetOpen, setSupplierSheetOpen] = useState(false);
 
@@ -97,22 +110,33 @@ export function Fornecedores() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [linkGenerating, setLinkGenerating] = useState(false);
 
-  const fetchSuppliers = async () => {
+  const fetchSuppliers = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
     const { start, end } = getMonthRange(period.month, period.year);
-    const { data } = await supabase
+    let query = supabase
       .from("suppliers")
       .select(
         `
         *,
         supplier_payment_info (*)
       `,
+        { count: "exact" },
       )
       .eq("company_id", currentCompany.id)
       .gte("created_at", start)
       .lte("created_at", end)
       .order("name");
+    if (debouncedSearch.trim()) {
+      const term = `%${debouncedSearch.trim()}%`;
+      query = query.or(
+        `name.ilike.${term},document.ilike.${term},email.ilike.${term}`,
+      );
+    }
+    const { data, count } = await query.range(
+      (suppliersPage - 1) * PAGE_SIZE,
+      suppliersPage * PAGE_SIZE - 1,
+    );
     const list = (data ?? []).map((s: Record<string, unknown>) => ({
       ...s,
       payment_info: Array.isArray(s.supplier_payment_info)
@@ -120,15 +144,23 @@ export function Fornecedores() {
         : s.supplier_payment_info,
     }));
     setSuppliers(list as Supplier[]);
+    setSuppliersCount(count ?? 0);
     setLoading(false);
-  };
+  }, [
+    currentCompany,
+    period.month,
+    period.year,
+    debouncedSearch,
+    suppliersPage,
+  ]);
 
   useEffect(() => {
-    const load = async () => {
-      await fetchSuppliers();
-    };
-    load();
-  }, [currentCompany?.id, period.month, period.year]);
+    queueMicrotask(() => setSuppliersPage(1));
+  }, [debouncedSearch, period.month, period.year]);
+
+  useEffect(() => {
+    queueMicrotask(() => void fetchSuppliers());
+  }, [fetchSuppliers]);
 
   const openPaymentDialog = (s: Supplier) => {
     setPaymentSupplier(s);
@@ -312,6 +344,14 @@ export function Fornecedores() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap gap-3 items-center">
+            <Input
+              placeholder="Filtrar por nome, documento ou e-mail..."
+              value={suppliersSearch}
+              onChange={(e) => setSuppliersSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : suppliers.length === 0 ? (
@@ -332,13 +372,13 @@ export function Fornecedores() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">{s.name}</span>
-                      {hasPaymentInfo(s) ? (
+                      {/* {hasPaymentInfo(s) ? (
                         <Badge variant="default" className="bg-green-600">
                           Conta cadastrada
                         </Badge>
                       ) : (
                         <Badge variant="secondary">Sem conta</Badge>
-                      )}
+                      )} */}
                     </div>
                     {(s.document || s.email) && (
                       <p className="text-sm text-muted-foreground mt-1">
@@ -346,14 +386,27 @@ export function Fornecedores() {
                       </p>
                     )}
                   </div>
-                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                  <div
+                    className="flex gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => openPaymentDialog(s)}
-                      title="Inserir conta de pagamento"
+                      title={
+                        hasPaymentInfo(s)
+                          ? "Editar conta de pagamento"
+                          : "Inserir conta de pagamento"
+                      }
                     >
-                      <CreditCard className="h-4 w-4" />
+                      <CreditCard
+                        className={
+                          hasPaymentInfo(s)
+                            ? "h-4 w-4 text-green-600 dark:text-green-500"
+                            : "h-4 w-4 text-red-600 dark:text-red-500"
+                        }
+                      />
                     </Button>
                     <Button
                       variant="outline"
@@ -367,6 +420,13 @@ export function Fornecedores() {
                 </div>
               ))}
             </div>
+          )}
+          {!loading && (
+            <Pagination
+              page={suppliersPage}
+              totalCount={suppliersCount}
+              onPageChange={setSuppliersPage}
+            />
           )}
         </CardContent>
       </Card>
@@ -535,7 +595,9 @@ export function Fornecedores() {
                 <div className="flex items-center justify-between pr-8">
                   <SheetTitle className="flex items-center gap-2">
                     <Truck className="h-5 w-5" />
-                    {detailEditMode ? "Editar fornecedor" : "Dados do fornecedor"}
+                    {detailEditMode
+                      ? "Editar fornecedor"
+                      : "Dados do fornecedor"}
                   </SheetTitle>
                   {!detailEditMode && (
                     <Button
@@ -624,9 +686,7 @@ export function Fornecedores() {
                   <div className="grid gap-4 text-sm">
                     {detailSupplier.document && (
                       <div>
-                        <span className="text-muted-foreground">
-                          CNPJ/CPF:
-                        </span>{" "}
+                        <span className="text-muted-foreground">CNPJ/CPF:</span>{" "}
                         {maskCpfCnpj(detailSupplier.document)}
                       </div>
                     )}
@@ -638,9 +698,7 @@ export function Fornecedores() {
                     )}
                     {detailSupplier.phone && (
                       <div>
-                        <span className="text-muted-foreground">
-                          Telefone:
-                        </span>{" "}
+                        <span className="text-muted-foreground">Telefone:</span>{" "}
                         {maskPhone(detailSupplier.phone)}
                       </div>
                     )}
@@ -669,15 +727,13 @@ export function Fornecedores() {
                         {(detailSupplier.payment_info.agency ||
                           detailSupplier.payment_info.account) && (
                           <p>
-                            Agência:{" "}
-                            {detailSupplier.payment_info.agency || "—"} • Conta:{" "}
+                            Agência: {detailSupplier.payment_info.agency || "—"}{" "}
+                            • Conta:{" "}
                             {detailSupplier.payment_info.account || "—"}
                           </p>
                         )}
                         {detailSupplier.payment_info.pix_key && (
-                          <p>
-                            PIX: {detailSupplier.payment_info.pix_key}
-                          </p>
+                          <p>PIX: {detailSupplier.payment_info.pix_key}</p>
                         )}
                         {!detailSupplier.payment_info.bank_name &&
                           !detailSupplier.payment_info.pix_key && (

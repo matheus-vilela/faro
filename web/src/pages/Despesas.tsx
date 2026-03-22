@@ -5,6 +5,8 @@ import {
   getMonthRange,
   type MonthYear,
 } from "@/components/MonthSelector";
+import { Pagination, PAGE_SIZE } from "@/components/Pagination";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -119,6 +121,10 @@ export function Despesas() {
     year: now.getFullYear(),
   });
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expensesCount, setExpensesCount] = useState(0);
+  const [expensesPage, setExpensesPage] = useState(1);
+  const [expensesSearch, setExpensesSearch] = useState("");
+  const debouncedSearch = useDebounce(expensesSearch, 300);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -185,7 +191,7 @@ export function Despesas() {
     if (!currentCompany?.id) return;
     setLoading(true);
     const { start, end } = getMonthRange(period.month, period.year);
-    const { data: ex } = await supabase
+    let exQuery = supabase
       .from("expenses")
       .select(
         `
@@ -193,11 +199,20 @@ export function Despesas() {
         expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
       `,
+        { count: "exact" },
       )
       .eq("company_id", currentCompany.id)
       .gte("created_at", start)
       .lte("created_at", end)
       .order("created_at", { ascending: false });
+    if (debouncedSearch.trim()) {
+      const term = `%${debouncedSearch.trim()}%`;
+      exQuery = exQuery.or(
+        `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term}`,
+      );
+    }
+    const { data: ex, count } = await exQuery
+      .range((expensesPage - 1) * PAGE_SIZE, expensesPage * PAGE_SIZE - 1);
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
@@ -213,11 +228,16 @@ export function Despesas() {
       .eq("company_id", currentCompany.id)
       .order("name");
     setExpenses((ex as Expense[]) ?? []);
+    setExpensesCount(count ?? 0);
     setBoletos((bo as Boleto[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
     setProducts((prod as Product[]) ?? []);
     setLoading(false);
-  }, [currentCompany, period.month, period.year]);
+  }, [currentCompany, period.month, period.year, debouncedSearch, expensesPage]);
+
+  useEffect(() => {
+    setExpensesPage(1);
+  }, [debouncedSearch, period.month, period.year]);
 
   useEffect(() => {
     queueMicrotask(() => fetchData());
@@ -864,6 +884,14 @@ export function Despesas() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap gap-3 items-center">
+            <Input
+              placeholder="Filtrar por fornecedor ou nota..."
+              value={expensesSearch}
+              onChange={(e) => setExpensesSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : expenses.length === 0 ? (
@@ -946,6 +974,13 @@ export function Despesas() {
                 );
               })}
             </div>
+          )}
+          {!loading && (
+            <Pagination
+              page={expensesPage}
+              totalCount={expensesCount}
+              onPageChange={setExpensesPage}
+            />
           )}
         </CardContent>
       </Card>

@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { MonthSelector, getMonthRange, type MonthYear } from '@/components/MonthSelector'
+import { Pagination, PAGE_SIZE } from '@/components/Pagination'
+import { Input } from '@/components/ui/input'
+import { useDebounce } from '@/hooks/useDebounce'
 import {
   Card,
   CardContent,
@@ -35,27 +38,42 @@ export function Boletos() {
     year: now.getFullYear(),
   })
   const [boletos, setBoletos] = useState<Boleto[]>([])
+  const [boletosCount, setBoletosCount] = useState(0)
+  const [boletosPage, setBoletosPage] = useState(1)
+  const [boletosSearch, setBoletosSearch] = useState('')
+  const debouncedSearch = useDebounce(boletosSearch, 300)
   const [loading, setLoading] = useState(true)
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false)
 
-  const fetchBoletos = async () => {
+  const fetchBoletos = useCallback(async () => {
     if (!currentCompany?.id) return
     setLoading(true)
     const { start, end } = getMonthRange(period.month, period.year)
-    const { data } = await supabase
+    let query = supabase
       .from('boletos')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('company_id', currentCompany.id)
       .gte('due_date', start.slice(0, 10))
       .lte('due_date', end.slice(0, 10))
       .order('due_date', { ascending: true })
+    if (debouncedSearch.trim()) {
+      const term = `%${debouncedSearch.trim()}%`
+      query = query.or(`description.ilike.${term},provider.ilike.${term}`)
+    }
+    const { data, count } = await query
+      .range((boletosPage - 1) * PAGE_SIZE, boletosPage * PAGE_SIZE - 1)
     setBoletos((data as Boleto[]) ?? [])
+    setBoletosCount(count ?? 0)
     setLoading(false)
-  }
+  }, [currentCompany?.id, period.month, period.year, debouncedSearch, boletosPage])
+
+  useEffect(() => {
+    setBoletosPage(1)
+  }, [debouncedSearch, period.month, period.year])
 
   useEffect(() => {
     fetchBoletos()
-  }, [currentCompany?.id, period.month, period.year])
+  }, [fetchBoletos])
 
   useEffect(() => {
     if (expenseIdFromUrl) setBoletoSheetOpen(true)
@@ -110,12 +128,20 @@ export function Boletos() {
           <div className="flex items-center gap-4">
             <MonthSelector value={period} onChange={setPeriod} />
             <Button onClick={() => setBoletoSheetOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
+              <Plus className="h-4 w-4 mr-1" />
               Novo boleto
             </Button>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap gap-3 items-center">
+            <Input
+              placeholder="Filtrar por descrição ou provedor..."
+              value={boletosSearch}
+              onChange={(e) => setBoletosSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : boletos.length === 0 ? (
@@ -163,6 +189,13 @@ export function Boletos() {
                 </div>
               ))}
             </div>
+          )}
+          {!loading && (
+            <Pagination
+              page={boletosPage}
+              totalCount={boletosCount}
+              onPageChange={setBoletosPage}
+            />
           )}
         </CardContent>
       </Card>

@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -14,11 +15,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Pagination, PAGE_SIZE } from "@/components/Pagination";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Recebimento } from "@/types/recebimento";
 import { Check, PackageCheck, PackageX, Share2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 interface ItemStatus {
@@ -29,6 +32,10 @@ interface ItemStatus {
 export function Recebimento() {
   const { currentCompany } = useCompany();
   const [recebimentos, setRecebimentos] = useState<Recebimento[]>([]);
+  const [recebimentosCount, setRecebimentosCount] = useState(0);
+  const [recebimentosPage, setRecebimentosPage] = useState(1);
+  const [recebimentosSearch, setRecebimentosSearch] = useState("");
+  const debouncedSearch = useDebounce(recebimentosSearch, 300);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [detailRecebimento, setDetailRecebimento] = useState<Recebimento | null>(
@@ -36,7 +43,7 @@ export function Recebimento() {
   );
   const [itemStatuses, setItemStatuses] = useState<ItemStatus[]>([]);
 
-  const fetchRecebimentos = async () => {
+  const fetchRecebimentos = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
     const { data: expensesData } = await supabase
@@ -46,10 +53,11 @@ export function Recebimento() {
     const expenseIds = (expensesData ?? []).map((e) => e.id);
     if (expenseIds.length === 0) {
       setRecebimentos([]);
+      setRecebimentosCount(0);
       setLoading(false);
       return;
     }
-    const { data } = await supabase
+    let query = supabase
       .from("recebimentos")
       .select(
         `
@@ -68,23 +76,40 @@ export function Recebimento() {
         ),
         recebimento_item_status (expense_item_id, status)
       `,
+        { count: "exact" },
       )
       .in("expense_id", expenseIds)
       .order("created_at", { ascending: false });
+    if (debouncedSearch.trim()) {
+      const term = `%${debouncedSearch.trim()}%`;
+      const { data: expFilter } = await supabase
+        .from("expenses")
+        .select("id")
+        .eq("company_id", currentCompany.id)
+        .or(`supplier_name.ilike.${term},display_name.ilike.${term},invoice_number.ilike.${term}`);
+      const filteredIds = (expFilter ?? []).map((e) => e.id);
+      if (filteredIds.length > 0) {
+        query = query.in("expense_id", filteredIds);
+      } else {
+        setRecebimentos([]);
+        setRecebimentosCount(0);
+        setLoading(false);
+        return;
+      }
+    }
+    const { data, count } = await query
+      .range((recebimentosPage - 1) * PAGE_SIZE, recebimentosPage * PAGE_SIZE - 1);
     setRecebimentos((data ?? []) as Recebimento[]);
+    setRecebimentosCount(count ?? 0);
     setLoading(false);
-  };
+  }, [currentCompany, debouncedSearch, recebimentosPage]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchRecebimentos());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCompany?.id]);
+  }, [fetchRecebimentos]);
 
   useEffect(() => {
-    if (!detailRecebimento?.id) {
-      setItemStatuses([]);
-      return;
-    }
+    if (!detailRecebimento?.id) return;
     const load = async () => {
       const { data } = await supabase
         .from("recebimento_item_status")
@@ -139,6 +164,17 @@ export function Recebimento() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap gap-3 items-center">
+            <Input
+              placeholder="Filtrar por fornecedor ou nota..."
+              value={recebimentosSearch}
+              onChange={(e) => {
+                setRecebimentosSearch(e.target.value);
+                setRecebimentosPage(1);
+              }}
+              className="max-w-sm"
+            />
+          </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : recebimentos.length === 0 ? (
@@ -172,14 +208,20 @@ export function Recebimento() {
                     tabIndex={isReceived ? 0 : undefined}
                     onClick={
                       isReceived
-                        ? () => setDetailRecebimento(r)
+                        ? () => {
+                            setDetailRecebimento(r);
+                            setItemStatuses([]);
+                          }
                         : undefined
                     }
                     onKeyDown={
                       isReceived
-                        ? (e) =>
-                            (e.key === "Enter" || e.key === " ") &&
-                            setDetailRecebimento(r)
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              setDetailRecebimento(r);
+                              setItemStatuses([]);
+                            }
+                          }
                         : undefined
                     }
                     className={`rounded-lg border p-4 space-y-3 ${
@@ -265,12 +307,24 @@ export function Recebimento() {
               })}
             </div>
           )}
+          {!loading && (
+            <Pagination
+              page={recebimentosPage}
+              totalCount={recebimentosCount}
+              onPageChange={setRecebimentosPage}
+            />
+          )}
         </CardContent>
       </Card>
 
       <Sheet
         open={!!detailRecebimento}
-        onOpenChange={(open) => !open && setDetailRecebimento(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailRecebimento(null);
+            setItemStatuses([]);
+          }
+        }}
       >
         <SheetContent side="right" className="sm:max-w-md overflow-y-auto">
           {detailRecebimento && (() => {
@@ -410,7 +464,10 @@ export function Recebimento() {
                   <Button asChild variant="outline" className="w-full">
                     <Link
                       to={`/app/despesas?expense=${detailRecebimento.expense_id}`}
-                      onClick={() => setDetailRecebimento(null)}
+                      onClick={() => {
+                setDetailRecebimento(null);
+                setItemStatuses([]);
+              }}
                     >
                       Ver despesa completa
                     </Link>

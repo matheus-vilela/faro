@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
 import { supabase } from '@/lib/supabase'
 import type { Product } from '@/types/product'
@@ -40,6 +41,9 @@ export function Alertas() {
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
   const [expensesWithoutBoleto, setExpensesWithoutBoleto] = useState<ExpenseWithoutBoleto[]>([])
   const [itensNaoEntregues, setItensNaoEntregues] = useState<ItemNaoEntregue[]>([])
+  const [filterItens, setFilterItens] = useState('')
+  const [filterDespesas, setFilterDespesas] = useState('')
+  const [filterEstoque, setFilterEstoque] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -132,6 +136,31 @@ export function Alertas() {
     load()
   }, [currentCompany?.id])
 
+  const filteredItens = filterItens.trim()
+    ? itensNaoEntregues.filter(
+        (i) =>
+          (i.product_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
+          (i.display_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
+          (i.supplier_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
+          (i.invoice_number ?? '').toLowerCase().includes(filterItens.toLowerCase())
+      )
+    : itensNaoEntregues
+  const filteredDespesas = filterDespesas.trim()
+    ? expensesWithoutBoleto.filter(
+        (e) =>
+          (e.display_name ?? '').toLowerCase().includes(filterDespesas.toLowerCase()) ||
+          (e.supplier_name ?? '').toLowerCase().includes(filterDespesas.toLowerCase()) ||
+          (e.invoice_number ?? '').toLowerCase().includes(filterDespesas.toLowerCase())
+      )
+    : expensesWithoutBoleto
+  const filteredLowStock = filterEstoque.trim()
+    ? lowStockProducts.filter(
+        (p) =>
+          p.name.toLowerCase().includes(filterEstoque.toLowerCase()) ||
+          (p.sku ?? '').toLowerCase().includes(filterEstoque.toLowerCase())
+      )
+    : lowStockProducts
+
   const totalAlertas =
     itensNaoEntregues.length + expensesWithoutBoleto.length + lowStockProducts.length
   const hasAnyAlerta = totalAlertas > 0
@@ -186,8 +215,16 @@ export function Alertas() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="mb-3 flex flex-wrap gap-3 items-center">
+                <Input
+                  placeholder="Filtrar por produto, fornecedor ou nota..."
+                  value={filterItens}
+                  onChange={(e) => setFilterItens(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {itensNaoEntregues.map((item) => (
+                {filteredItens.map((item) => (
                   <div
                     key={item.id}
                     className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
@@ -235,8 +272,16 @@ export function Alertas() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="mb-3 flex flex-wrap gap-3 items-center">
+                <Input
+                  placeholder="Filtrar por fornecedor ou nota..."
+                  value={filterDespesas}
+                  onChange={(e) => setFilterDespesas(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {expensesWithoutBoleto.slice(0, 8).map((e) => (
+                {filteredDespesas.slice(0, 8).map((e) => (
                   <div
                     key={e.id}
                     className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
@@ -255,9 +300,9 @@ export function Alertas() {
                     </Button>
                   </div>
                 ))}
-                {expensesWithoutBoleto.length > 8 && (
+                {filteredDespesas.length > 8 && (
                   <p className="text-sm text-muted-foreground text-center py-2">
-                    + {expensesWithoutBoleto.length - 8} despesa(s)
+                    + {filteredDespesas.length - 8} despesa(s)
                   </p>
                 )}
               </div>
@@ -287,8 +332,16 @@ export function Alertas() {
               </div>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 flex flex-wrap gap-3 items-center">
+                <Input
+                  placeholder="Filtrar por nome ou SKU..."
+                  value={filterEstoque}
+                  onChange={(e) => setFilterEstoque(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {lowStockProducts.map((p) => (
+                {filteredLowStock.map((p) => (
                   <div
                     key={p.id}
                     className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"

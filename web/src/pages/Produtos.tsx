@@ -26,20 +26,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Pagination, PAGE_SIZE } from "@/components/Pagination";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import { AlertTriangle, Package, Plus, PowerOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function Produtos() {
   const { currentCompany } = useCompany();
   const [products, setProducts] = useState<Product[]>([]);
+  const [productsCount, setProductsCount] = useState(0);
+  const [productsPage, setProductsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">(
     "active",
   );
+  const [lowStockCount, setLowStockCount] = useState(0);
   const [productSheetOpen, setProductSheetOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [stockName, setStockName] = useState("");
@@ -48,36 +54,55 @@ export function Produtos() {
   const [stockIsActive, setStockIsActive] = useState(true);
   const [stockSaving, setStockSaving] = useState(false);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from("products")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", currentCompany.id)
       .order("name");
+    if (debouncedSearch.trim()) {
+      const term = `%${debouncedSearch.trim()}%`;
+      query = query.or(`name.ilike.${term},sku.ilike.${term}`);
+    }
+    if (filterActive === "active") {
+      query = query.or("is_active.is.null,is_active.eq.true");
+    } else if (filterActive === "inactive") {
+      query = query.eq("is_active", false);
+    }
+    const { data, count } = await query
+      .range((productsPage - 1) * PAGE_SIZE, productsPage * PAGE_SIZE - 1);
     setProducts((data as Product[]) ?? []);
+    setProductsCount(count ?? 0);
     setLoading(false);
-  };
+  }, [currentCompany?.id, debouncedSearch, filterActive, productsPage]);
+
+  const fetchLowStockCount = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    const { data } = await supabase
+      .from("products")
+      .select("current_quantity, min_quantity")
+      .eq("company_id", currentCompany.id)
+      .gt("min_quantity", 0)
+      .or("is_active.is.null,is_active.eq.true");
+    const low = (data ?? []).filter(
+      (p) => Number(p.current_quantity) <= Number(p.min_quantity),
+    ).length;
+    setLowStockCount(low);
+  }, [currentCompany?.id]);
+
+  useEffect(() => {
+    setProductsPage(1);
+  }, [debouncedSearch, filterActive]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchProducts());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCompany?.id]);
+  }, [fetchProducts]);
 
-  const filtered = products.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.sku ?? "").toLowerCase().includes(search.toLowerCase());
-    const isActive = p.is_active !== false;
-    if (filterActive === "active") return matchSearch && isActive;
-    if (filterActive === "inactive") return matchSearch && !isActive;
-    return matchSearch;
-  });
-
-  const lowStock = filtered.filter(
-    (p) => p.current_quantity <= p.min_quantity && p.min_quantity > 0,
-  );
+  useEffect(() => {
+    queueMicrotask(() => void fetchLowStockCount());
+  }, [fetchLowStockCount]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
@@ -212,11 +237,11 @@ export function Produtos() {
           </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
-          ) : filtered.length === 0 ? (
+          ) : products.length === 0 ? (
             <p className="text-muted-foreground">Nenhum produto cadastrado</p>
           ) : (
             <div className="space-y-2">
-              {filtered.map((p) => {
+              {products.map((p) => {
                 const isLowStock =
                   p.min_quantity > 0 && p.current_quantity <= p.min_quantity;
                 return (
@@ -277,6 +302,13 @@ export function Produtos() {
                 );
               })}
             </div>
+          )}
+          {!loading && (
+            <Pagination
+              page={productsPage}
+              totalCount={productsCount}
+              onPageChange={setProductsPage}
+            />
           )}
         </CardContent>
       </Card>
@@ -366,12 +398,12 @@ export function Produtos() {
         </SheetContent>
       </Sheet>
 
-      {lowStock.length > 0 && (
+      {lowStockCount > 0 && (
         <Card className="border-destructive/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
-              {lowStock.length} produto(s) com estoque abaixo do mínimo
+              {lowStockCount} produto(s) com estoque abaixo do mínimo
             </CardTitle>
             <CardDescription>
               Verifique o recebimento de notas ou ajuste as quantidades mínimas
