@@ -4,9 +4,12 @@ export type BoletoStatus = 'pending' | 'paid'
 
 export interface ExpenseItem {
   id?: string
+  product_id?: string | null
+  stock_added?: boolean
   product_name: string
   quantity: number
   unit_value: number
+  products?: { id: string; name: string; current_quantity: number; min_quantity: number } | null
 }
 
 export interface Expense {

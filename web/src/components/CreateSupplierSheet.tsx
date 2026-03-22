@@ -1,25 +1,45 @@
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
-  SheetFooter,
-} from '@/components/ui/sheet'
-import { supabase } from '@/lib/supabase'
-import { maskCpfCnpj, maskPhone } from '@/lib/masks'
-import type { Supplier } from '@/types/supplier'
-import { Building2, Plus } from 'lucide-react'
+} from "@/components/ui/sheet";
+import { maskCpfCnpj, maskPhone } from "@/lib/masks";
+import { supabase } from "@/lib/supabase";
+import type { Supplier } from "@/types/supplier";
+import { Building2, CreditCard, Plus } from "lucide-react";
+import { useState } from "react";
+
+const ACCOUNT_TYPES = [
+  { value: "conta_corrente", label: "Conta corrente" },
+  { value: "poupanca", label: "Poupança" },
+];
+
+const PIX_TYPES = [
+  { value: "cpf", label: "CPF" },
+  { value: "cnpj", label: "CNPJ" },
+  { value: "email", label: "E-mail" },
+  { value: "phone", label: "Telefone" },
+  { value: "random", label: "Chave aleatória" },
+];
 
 interface CreateSupplierSheetProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  companyId: string
-  onSuccess?: (supplier: Supplier) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  companyId: string;
+  onSuccess?: (supplier: Supplier) => void;
 }
 
 export function CreateSupplierSheet({
@@ -28,55 +48,89 @@ export function CreateSupplierSheet({
   companyId,
   onSuccess,
 }: CreateSupplierSheetProps) {
-  const [name, setName] = useState('')
-  const [document, setDocument] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [notes, setNotes] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [name, setName] = useState("");
+  const [document, setDocument] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankCode, setBankCode] = useState("");
+  const [agency, setAgency] = useState("");
+  const [account, setAccount] = useState("");
+  const [accountType, setAccountType] = useState("conta_corrente");
+  const [pixKey, setPixKey] = useState("");
+  const [pixType, setPixType] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const hasPaymentInfo =
+    bankName.trim() ||
+    bankCode.trim() ||
+    agency.trim() ||
+    account.trim() ||
+    pixKey.trim();
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!companyId || !name.trim()) return
-    setLoading(true)
+    e.preventDefault();
+    if (!companyId || !name.trim()) return;
+    setLoading(true);
     const { data, error } = await supabase
-      .from('suppliers')
+      .from("suppliers")
       .insert({
         company_id: companyId,
         name: name.trim(),
-        document: document.trim().replace(/\D/g, '') || null,
+        document: document.trim().replace(/\D/g, "") || null,
         email: email.trim() || null,
-        phone: phone.trim().replace(/\D/g, '') || null,
+        phone: phone.trim().replace(/\D/g, "") || null,
         notes: notes.trim() || null,
       })
       .select()
-      .single()
-    setLoading(false)
+      .single();
+    setLoading(false);
     if (error) {
-      console.error(error)
-      return
+      console.error(error);
+      return;
     }
-    const supplier = data as Supplier
-    setName('')
-    setDocument('')
-    setEmail('')
-    setPhone('')
-    setNotes('')
-    onOpenChange(false)
-    onSuccess?.(supplier)
-  }
+    const supplier = data as Supplier;
+    if (hasPaymentInfo) {
+      await supabase.from("supplier_payment_info").upsert(
+        {
+          supplier_id: supplier.id,
+          bank_name: bankName.trim() || null,
+          bank_code: bankCode.trim() || null,
+          agency: agency.trim() || null,
+          account: account.trim() || null,
+          account_type: accountType,
+          pix_key: pixKey.trim() || null,
+          pix_type: pixType || null,
+        },
+        { onConflict: "supplier_id" },
+      );
+    }
+    setName("");
+    setDocument("");
+    setEmail("");
+    setPhone("");
+    setNotes("");
+    setBankName("");
+    setBankCode("");
+    setAgency("");
+    setAccount("");
+    setAccountType("conta_corrente");
+    setPixKey("");
+    setPixType("");
+    onOpenChange(false);
+    onSuccess?.(supplier);
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
+      <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             Novo fornecedor
           </SheetTitle>
-          <SheetDescription>
-            Dados básicos do fornecedor
-          </SheetDescription>
+          <SheetDescription>Dados básicos do fornecedor</SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -125,14 +179,105 @@ export function CreateSupplierSheet({
               placeholder="Opcional"
             />
           </div>
+
+          <div className="border-t pt-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4" />
+              <Label className="text-base font-medium">Meio de pagamento</Label>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Opcional. Informe dados bancários ou PIX para facilitar
+              pagamentos.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <Label className="text-xs">Banco</Label>
+                <Input
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  placeholder="Nome do banco"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Código</Label>
+                <Input
+                  value={bankCode}
+                  onChange={(e) => setBankCode(e.target.value)}
+                  placeholder="001"
+                />
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <Label className="text-xs">Agência</Label>
+                <Input
+                  value={agency}
+                  onChange={(e) => setAgency(e.target.value)}
+                  placeholder="0000"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Conta</Label>
+                <Input
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  placeholder="00000-0"
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Tipo de conta</Label>
+              <Select value={accountType} onValueChange={setAccountType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACCOUNT_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="border-t pt-4">
+              <Label className="text-xs font-medium">PIX</Label>
+              <div className="flex gap-2 mt-2 ">
+                <div>
+                  <Label className="text-xs">Tipo da chave</Label>
+                  <Select value={pixType} onValueChange={setPixType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PIX_TYPES.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1">
+                  <Label className="text-xs">Chave PIX</Label>
+                  <Input
+                    value={pixKey}
+                    onChange={(e) => setPixKey(e.target.value)}
+                    placeholder="Chave PIX"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <SheetFooter>
             <Button type="submit" disabled={!name.trim() || loading}>
               <Plus className="h-4 w-4 mr-2" />
-              {loading ? 'Cadastrando...' : 'Cadastrar fornecedor'}
+              {loading ? "Cadastrando..." : "Cadastrar fornecedor"}
             </Button>
           </SheetFooter>
         </form>
       </SheetContent>
     </Sheet>
-  )
+  );
 }

@@ -1,5 +1,10 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
+import {
+  MonthSelector,
+  getMonthRange,
+  type MonthYear,
+} from "@/components/MonthSelector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,8 +49,8 @@ import type {
   ExpenseItem,
   ExpenseType,
 } from "@/types/expense";
+import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { MonthSelector, getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -106,6 +111,7 @@ export function Despesas() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Form state
@@ -142,7 +148,9 @@ export function Despesas() {
   const [editSupplierDocument, setEditSupplierDocument] = useState("");
   const [editSupplierName, setEditSupplierName] = useState("");
   const [editNotes, setEditNotes] = useState("");
-  const [editStatus, setEditStatus] = useState<"pending" | "approved" | "rejected">("pending");
+  const [editStatus, setEditStatus] = useState<
+    "pending" | "approved" | "rejected"
+  >("pending");
   const [editItems, setEditItems] = useState<ExpenseItem[]>([
     { product_name: "", quantity: 1, unit_value: 0 },
   ]);
@@ -160,7 +168,7 @@ export function Despesas() {
       .select(
         `
         *,
-        expense_items (*),
+        expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
       `,
       )
@@ -177,9 +185,15 @@ export function Despesas() {
       .select("*")
       .eq("company_id", currentCompany.id)
       .order("name");
+    const { data: prod } = await supabase
+      .from("products")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .order("name");
     setExpenses((ex as Expense[]) ?? []);
     setBoletos((bo as Boleto[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
+    setProducts((prod as Product[]) ?? []);
     setLoading(false);
   }, [currentCompany, period.month, period.year]);
 
@@ -259,6 +273,9 @@ export function Despesas() {
         unit_value: it.unit_value,
       });
     }
+    await supabase.from("recebimentos").insert({
+      expense_id: exp.id,
+    });
     setType("nota_fiscal");
     setSupplierId("");
     setInvoiceNumber("");
@@ -333,11 +350,13 @@ export function Despesas() {
       (detailExpense.expense_items?.length ?? 0) > 0
         ? detailExpense.expense_items!.map((it) => ({
             id: it.id,
+            product_id: it.product_id ?? undefined,
+            stock_added: it.stock_added ?? false,
             product_name: it.product_name ?? "",
             quantity: Number(it.quantity),
             unit_value: Number(it.unit_value),
           }))
-        : [{ product_name: "", quantity: 1, unit_value: 0 }]
+        : [{ product_name: "", quantity: 1, unit_value: 0 }],
     );
     setDetailEditMode(true);
   };
@@ -353,16 +372,16 @@ export function Despesas() {
     ]);
   const editRemoveItem = (i: number) =>
     setEditItems((prev) =>
-      prev.length > 1 ? prev.filter((_, ix) => ix !== i) : prev
+      prev.length > 1 ? prev.filter((_, ix) => ix !== i) : prev,
     );
   const editUpdateItem = (i: number, f: Partial<ExpenseItem>) =>
     setEditItems((prev) =>
-      prev.map((it, ix) => (ix === i ? { ...it, ...f } : it))
+      prev.map((it, ix) => (ix === i ? { ...it, ...f } : it)),
     );
 
   const editTotalItems = editItems.reduce(
     (s, it) => s + Number(it.quantity) * Number(it.unit_value),
-    0
+    0,
   );
 
   const canEditSubmit =
@@ -370,7 +389,7 @@ export function Despesas() {
       (it) =>
         it.product_name.trim() !== "" &&
         Number(it.quantity) > 0 &&
-        Number(it.unit_value) >= 0
+        Number(it.unit_value) >= 0,
     ) &&
     (editSupplierId !== "" || editSupplierName.trim() !== "") &&
     (editType !== "nota_fiscal" || editInvoiceNumber.trim() !== "");
@@ -392,7 +411,8 @@ export function Despesas() {
           ((selectedSupplier?.document ?? editSupplierDocument) || "")
             .replace(/\D/g, "")
             .trim() || null,
-        supplier_name: ((selectedSupplier?.name ?? editSupplierName) || "").trim() || null,
+        supplier_name:
+          ((selectedSupplier?.name ?? editSupplierName) || "").trim() || null,
         notes: editNotes || null,
         status: editStatus,
         updated_at: new Date().toISOString(),
@@ -403,21 +423,64 @@ export function Despesas() {
       setEditSaving(false);
       return;
     }
+
+    const oldItems = (detailExpense.expense_items ?? []) as Array<{
+      id?: string;
+      product_id?: string | null;
+      stock_added?: boolean;
+      quantity: number;
+    }>;
+
+    for (const it of oldItems) {
+      if (it.product_id && it.stock_added) {
+        const qty = Number(it.quantity);
+        await supabase.rpc("adjust_product_stock", {
+          p_product_id: it.product_id,
+          p_delta: -qty,
+          p_type: "out",
+          p_reference_type: "expense_item",
+          p_reference_id: it.id ?? null,
+        });
+      }
+    }
+
     await supabase
       .from("expense_items")
       .delete()
       .eq("expense_id", detailExpense.id);
+
     for (const it of editItems) {
-      await supabase.from("expense_items").insert({
-        expense_id: detailExpense.id,
-        product_name: it.product_name,
-        quantity: it.quantity,
-        unit_value: it.unit_value,
-      });
+      const productId = it.product_id || null;
+      const stockAdded = !!productId;
+      const { data: inserted } = await supabase
+        .from("expense_items")
+        .insert({
+          expense_id: detailExpense.id,
+          product_name: it.product_name,
+          quantity: it.quantity,
+          unit_value: it.unit_value,
+          product_id: productId,
+          stock_added: stockAdded,
+        })
+        .select("id")
+        .single();
+      if (productId && inserted) {
+        const qty = Number(it.quantity);
+        const unitVal = Number(it.unit_value);
+        await supabase.rpc("adjust_product_stock", {
+          p_product_id: productId,
+          p_delta: qty,
+          p_type: "in",
+          p_reference_type: "expense_item",
+          p_reference_id: inserted.id,
+          p_unit_value: unitVal,
+        });
+      }
     }
+
     const { data: updated } = await supabase
       .from("expenses")
-      .select("*, expense_items (*)")
+      .select("*, expense_items (*, products (id, name, current_quantity, min_quantity))")
       .eq("id", detailExpense.id)
       .single();
     setDetailExpense(updated as Expense);
@@ -437,10 +500,6 @@ export function Despesas() {
               : "Registrar despesas e vincular boletos"}
           </p>
         </div>
-        <Button onClick={() => setExpenseSheetOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nova despesa
-        </Button>
       </div>
 
       <Sheet open={expenseSheetOpen} onOpenChange={setExpenseSheetOpen}>
@@ -863,7 +922,9 @@ export function Despesas() {
                 </div>
                 <SheetDescription>
                   {detailExpense.supplier_name ||
-                    TYPE_LABELS[detailExpense.type as keyof typeof TYPE_LABELS] ||
+                    TYPE_LABELS[
+                      detailExpense.type as keyof typeof TYPE_LABELS
+                    ] ||
                     "Sem fornecedor"}
                 </SheetDescription>
               </SheetHeader>
@@ -916,7 +977,9 @@ export function Despesas() {
                           <Label className="text-xs">Nome (manual)</Label>
                           <Input
                             value={editSupplierName}
-                            onChange={(e) => setEditSupplierName(e.target.value)}
+                            onChange={(e) =>
+                              setEditSupplierName(e.target.value)
+                            }
                             placeholder="Ou informe manualmente"
                           />
                         </div>
@@ -925,7 +988,9 @@ export function Despesas() {
                           <Input
                             value={editSupplierDocument}
                             onChange={(e) =>
-                              setEditSupplierDocument(maskCpfCnpj(e.target.value))
+                              setEditSupplierDocument(
+                                maskCpfCnpj(e.target.value),
+                              )
                             }
                             placeholder="000.000.000-00"
                           />
@@ -949,7 +1014,9 @@ export function Despesas() {
                       <Select
                         value={editStatus}
                         onValueChange={(v) =>
-                          setEditStatus(v as "pending" | "approved" | "rejected")
+                          setEditStatus(
+                            v as "pending" | "approved" | "rejected",
+                          )
                         }
                       >
                         <SelectTrigger className="w-full">
@@ -975,55 +1042,92 @@ export function Despesas() {
                         <Plus className="h-4 w-4 mr-1" /> Adicionar
                       </Button>
                     </div>
-                    <div className="mt-2 space-y-2">
+                    <div className="mt-2 space-y-3">
                       {editItems.map((it, i) => (
-                        <div key={i} className="flex gap-2 items-end">
-                          <div className="flex-1">
-                            <Input
-                              placeholder="Produto"
-                              value={it.product_name}
-                              onChange={(e) =>
-                                editUpdateItem(i, { product_name: e.target.value })
-                              }
-                            />
+                        <div key={i} className="space-y-2 rounded-lg border p-3">
+                          <div className="flex gap-2 items-end">
+                            <div className="flex-1">
+                              <Label className="text-xs">Descrição da nota</Label>
+                              <Input
+                                placeholder="Produto (como vem na nota)"
+                                value={it.product_name}
+                                onChange={(e) =>
+                                  editUpdateItem(i, {
+                                    product_name: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="w-24">
+                              <Label className="text-xs">Qtd</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="Qtd"
+                                value={it.quantity || ""}
+                                onChange={(e) =>
+                                  editUpdateItem(i, {
+                                    quantity: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="w-28">
+                              <Label className="text-xs">Valor un.</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="Valor un."
+                                value={it.unit_value || ""}
+                                onChange={(e) =>
+                                  editUpdateItem(i, {
+                                    unit_value: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => editRemoveItem(i)}
+                              disabled={editItems.length === 1}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
                           </div>
-                          <div className="w-24">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              placeholder="Qtd"
-                              value={it.quantity || ""}
-                              onChange={(e) =>
+                          <div>
+                            <Label className="text-xs">Vincular ao produto (estoque)</Label>
+                            <Select
+                              value={it.product_id ?? "__none__"}
+                              onValueChange={(v) =>
                                 editUpdateItem(i, {
-                                  quantity: parseFloat(e.target.value) || 0,
+                                  product_id: v === "__none__" ? undefined : v,
                                 })
                               }
-                            />
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Não vincular" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">
+                                  Não vincular
+                                </SelectItem>
+                                {products.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    {p.name}
+                                    {p.sku && ` (${p.sku})`} — Estoque: {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
+                                    {p.last_unit_value != null && p.last_unit_value > 0 && ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Ao vincular, a quantidade será somada ao estoque do produto
+                            </p>
                           </div>
-                          <div className="w-28">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              placeholder="Valor un."
-                              value={it.unit_value || ""}
-                              onChange={(e) =>
-                                editUpdateItem(i, {
-                                  unit_value: parseFloat(e.target.value) || 0,
-                                })
-                              }
-                            />
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => editRemoveItem(i)}
-                            disabled={editItems.length === 1}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
                         </div>
                       ))}
                     </div>
@@ -1048,117 +1152,156 @@ export function Despesas() {
                     >
                       Cancelar
                     </Button>
-                    <Button type="submit" disabled={!canEditSubmit || editSaving}>
+                    <Button
+                      type="submit"
+                      disabled={!canEditSubmit || editSaving}
+                    >
                       {editSaving ? "Salvando..." : "Salvar"}
                     </Button>
                   </SheetFooter>
                 </form>
               ) : (
                 <div className="space-y-6 py-6">
-                <div className="grid gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Tipo:</span>{" "}
-                    {detailExpense.type === "nota_fiscal"
-                      ? "Nota fiscal"
-                      : TYPE_LABELS[detailExpense.type as keyof typeof TYPE_LABELS]}
+                  <div className="grid gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Tipo:</span>{" "}
+                      {detailExpense.type === "nota_fiscal"
+                        ? "Nota fiscal"
+                        : TYPE_LABELS[
+                            detailExpense.type as keyof typeof TYPE_LABELS
+                          ]}
+                    </div>
+                    {detailExpense.supplier_name && (
+                      <div>
+                        <span className="text-muted-foreground">
+                          Fornecedor:
+                        </span>{" "}
+                        {detailExpense.supplier_name}
+                      </div>
+                    )}
+                    {detailExpense.supplier_document && (
+                      <div>
+                        <span className="text-muted-foreground">
+                          Documento:
+                        </span>{" "}
+                        {formatDocForDisplay(detailExpense.supplier_document)}
+                      </div>
+                    )}
+                    {detailExpense.invoice_number && (
+                      <div>
+                        <span className="text-muted-foreground">Nº nota:</span>{" "}
+                        {detailExpense.invoice_number}
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-muted-foreground">Status:</span>{" "}
+                      <Badge
+                        variant={
+                          detailExpense.status === "approved"
+                            ? "default"
+                            : detailExpense.status === "rejected"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {STATUS_LABELS[detailExpense.status]}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Criada em:</span>{" "}
+                      {formatDate(detailExpense.created_at)}
+                    </div>
+                    {detailExpense.notes && (
+                      <div>
+                        <span className="text-muted-foreground">
+                          Observações:
+                        </span>{" "}
+                        {detailExpense.notes}
+                      </div>
+                    )}
                   </div>
-                  {detailExpense.supplier_name && (
-                    <div>
-                      <span className="text-muted-foreground">Fornecedor:</span>{" "}
-                      {detailExpense.supplier_name}
-                    </div>
-                  )}
-                  {detailExpense.supplier_document && (
-                    <div>
-                      <span className="text-muted-foreground">Documento:</span>{" "}
-                      {formatDocForDisplay(detailExpense.supplier_document)}
-                    </div>
-                  )}
-                  {detailExpense.invoice_number && (
-                    <div>
-                      <span className="text-muted-foreground">Nº nota:</span>{" "}
-                      {detailExpense.invoice_number}
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-muted-foreground">Status:</span>{" "}
-                    <Badge
-                      variant={
-                        detailExpense.status === "approved"
-                          ? "default"
-                          : detailExpense.status === "rejected"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {STATUS_LABELS[detailExpense.status]}
-                    </Badge>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Criada em:</span>{" "}
-                    {formatDate(detailExpense.created_at)}
-                  </div>
-                  {detailExpense.notes && (
-                    <div>
-                      <span className="text-muted-foreground">Observações:</span>{" "}
-                      {detailExpense.notes}
-                    </div>
-                  )}
-                </div>
 
-                {(detailExpense.expense_items?.length ?? 0) > 0 && (
-                  <div>
-                    <p className="font-medium mb-2">Itens</p>
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/50">
-                            <th className="text-left p-2 font-medium">Produto</th>
-                            <th className="text-right p-2 font-medium">Qtd</th>
-                            <th className="text-right p-2 font-medium">Valor un.</th>
-                            <th className="text-right p-2 font-medium">Subtotal</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {detailExpense.expense_items!.map((it, i) => (
-                            <tr key={i} className="border-t">
-                              <td className="p-2">{it.product_name || "—"}</td>
-                              <td className="p-2 text-right">{it.quantity}</td>
-                              <td className="p-2 text-right">
-                                {formatCurrency(Number(it.unit_value))}
-                              </td>
-                              <td className="p-2 text-right">
-                                {formatCurrency(
-                                  Number(it.quantity) * Number(it.unit_value)
-                                )}
-                              </td>
+                  {(detailExpense.expense_items?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="font-medium mb-2">Itens</p>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-muted/50">
+                              <th className="text-left p-2 font-medium">
+                                Produto
+                              </th>
+                              <th className="text-left p-2 font-medium">
+                                Estoque
+                              </th>
+                              <th className="text-right p-2 font-medium">
+                                Qtd
+                              </th>
+                              <th className="text-right p-2 font-medium">
+                                Valor un.
+                              </th>
+                              <th className="text-right p-2 font-medium">
+                                Subtotal
+                              </th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {detailExpense.expense_items!.map((it, i) => (
+                              <tr key={i} className="border-t">
+                                <td className="p-2">
+                                  <span>{it.product_name || "—"}</span>
+                                  {it.product_id && it.products && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      → {it.products.name}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="p-2">
+                                  {it.product_id && it.stock_added ? (
+                                    <Badge variant="default" className="bg-green-600">Adicionado</Badge>
+                                  ) : it.product_id ? (
+                                    <Badge variant="secondary">Vinculado</Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-right">
+                                  {it.quantity}
+                                </td>
+                                <td className="p-2 text-right">
+                                  {formatCurrency(Number(it.unit_value))}
+                                </td>
+                                <td className="p-2 text-right">
+                                  {formatCurrency(
+                                    Number(it.quantity) * Number(it.unit_value),
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-right font-medium mt-2">
+                        Total:{" "}
+                        {formatCurrency(
+                          detailExpense.expense_items!.reduce(
+                            (s, it) =>
+                              s + Number(it.quantity) * Number(it.unit_value),
+                            0,
+                          ),
+                        )}
+                      </p>
                     </div>
-                    <p className="text-right font-medium mt-2">
-                      Total:{" "}
-                      {formatCurrency(
-                        detailExpense.expense_items!.reduce(
-                          (s, it) =>
-                            s +
-                            Number(it.quantity) * Number(it.unit_value),
-                          0
-                        )
-                      )}
-                    </p>
-                  </div>
-                )}
+                  )}
 
-                {getBoletoForExpense(detailExpense.id) ? (
-                  <BoletoLinkedBlock
-                    boleto={getBoletoForExpense(detailExpense.id)!}
-                    formatCurrency={formatCurrency}
-                    formatDate={formatDate}
-                    onVerBoleto={() => navigate("/app/boletos")}
-                  />
-                ) : null}
+                  {getBoletoForExpense(detailExpense.id) ? (
+                    <BoletoLinkedBlock
+                      boleto={getBoletoForExpense(detailExpense.id)!}
+                      formatCurrency={formatCurrency}
+                      formatDate={formatDate}
+                      onVerBoleto={() => navigate("/app/boletos")}
+                    />
+                  ) : null}
                 </div>
               )}
             </>

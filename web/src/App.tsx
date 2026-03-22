@@ -16,7 +16,9 @@ import { Alertas } from '@/pages/Alertas'
 import { Relatorios } from '@/pages/Relatorios'
 import { Boletos } from '@/pages/Boletos'
 import { Fornecedores } from '@/pages/Fornecedores'
+import { Produtos } from '@/pages/Produtos'
 import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
+import { ConfirmarRecebimento } from '@/pages/ConfirmarRecebimento'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -43,6 +45,7 @@ function AuthenticatedLayout() {
           <Route path="despesas" element={<Despesas />} />
           <Route path="boletos" element={<Boletos />} />
           <Route path="fornecedores" element={<Fornecedores />} />
+          <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="relatorios" element={<Relatorios />} />
@@ -60,6 +63,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/atualizar-pagamento/:token" element={<AtualizarPagamento />} />
+      <Route path="/confirmar-recebimento/:token" element={<ConfirmarRecebimento />} />
       <Route
         path="/*"
         element={

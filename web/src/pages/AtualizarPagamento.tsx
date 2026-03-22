@@ -1,130 +1,149 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from "@/components/ui/select";
+import { maskCpfCnpj, maskPhone } from "@/lib/masks";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 
 const ACCOUNT_TYPES = [
-  { value: 'conta_corrente', label: 'Conta corrente' },
-  { value: 'poupanca', label: 'Poupança' },
-]
+  { value: "conta_corrente", label: "Conta corrente" },
+  { value: "poupanca", label: "Poupança" },
+];
 
 const PIX_TYPES = [
-  { value: 'cpf', label: 'CPF' },
-  { value: 'cnpj', label: 'CNPJ' },
-  { value: 'email', label: 'E-mail' },
-  { value: 'phone', label: 'Telefone' },
-  { value: 'random', label: 'Chave aleatória' },
-]
+  { value: "cpf", label: "CPF" },
+  { value: "cnpj", label: "CNPJ" },
+  { value: "email", label: "E-mail" },
+  { value: "phone", label: "Telefone" },
+  { value: "random", label: "Chave aleatória" },
+];
 
 export function AtualizarPagamento() {
-  const { token } = useParams<{ token: string }>()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [supplierName, setSupplierName] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [bankCode, setBankCode] = useState('')
-  const [agency, setAgency] = useState('')
-  const [account, setAccount] = useState('')
-  const [accountType, setAccountType] = useState('conta_corrente')
-  const [pixKey, setPixKey] = useState('')
-  const [pixType, setPixType] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [success, setSuccess] = useState(false)
+  const { token } = useParams<{ token: string }>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [supplierName, setSupplierName] = useState("");
+  const [document, setDocument] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankCode, setBankCode] = useState("");
+  const [agency, setAgency] = useState("");
+  const [account, setAccount] = useState("");
+  const [accountType, setAccountType] = useState("conta_corrente");
+  const [pixKey, setPixKey] = useState("");
+  const [pixType, setPixType] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    if (!token) {
-      setError('Link inválido')
-      setLoading(false)
-      return
-    }
     const load = async () => {
-      const { data, error: err } = await supabase.rpc('get_supplier_update_form', {
-        p_token: token,
-      })
+      if (!token) {
+        setError("Link inválido");
+        setLoading(false);
+        return;
+      }
+      const { data, error: err } = await supabase.rpc(
+        "get_supplier_update_form",
+        {
+          p_token: token,
+        },
+      );
       if (err) {
-        setError('Erro ao carregar')
-        setLoading(false)
-        return
+        setError("Erro ao carregar");
+        setLoading(false);
+        return;
       }
       const res = data as {
-        error?: string
-        supplier_name?: string
-        bank_name?: string
-        bank_code?: string
-        agency?: string
-        account?: string
-        account_type?: string
-        pix_key?: string
-        pix_type?: string
-      } | null
+        error?: string;
+        supplier_name?: string;
+        document?: string;
+        email?: string;
+        phone?: string;
+        bank_name?: string;
+        bank_code?: string;
+        agency?: string;
+        account?: string;
+        account_type?: string;
+        pix_key?: string;
+        pix_type?: string;
+      } | null;
       if (res?.error) {
-        setError(res.error)
-        setLoading(false)
-        return
+        setError(res.error);
+        setLoading(false);
+        return;
       }
-      setSupplierName(res?.supplier_name ?? '')
-      setBankName(res?.bank_name ?? '')
-      setBankCode(res?.bank_code ?? '')
-      setAgency(res?.agency ?? '')
-      setAccount(res?.account ?? '')
-      setAccountType(res?.account_type ?? 'conta_corrente')
-      setPixKey(res?.pix_key ?? '')
-      setPixType(res?.pix_type ?? '')
-      setLoading(false)
-    }
-    load()
-  }, [token])
+      setSupplierName(res?.supplier_name ?? "");
+      setDocument(res?.document ? maskCpfCnpj(res.document) : "");
+      setEmail(res?.email ?? "");
+      setPhone(res?.phone ? maskPhone(res.phone) : "");
+      setBankName(res?.bank_name ?? "");
+      setBankCode(res?.bank_code ?? "");
+      setAgency(res?.agency ?? "");
+      setAccount(res?.account ?? "");
+      setAccountType(res?.account_type ?? "conta_corrente");
+      setPixKey(res?.pix_key ?? "");
+      setPixType(res?.pix_type ?? "");
+      setLoading(false);
+    };
+    load();
+  }, [token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!token) return
-    setSaving(true)
-    setError(null)
-    const { data, error: err } = await supabase.rpc('complete_supplier_payment_update', {
-      p_token: token,
-      p_bank_name: bankName.trim(),
-      p_bank_code: bankCode.trim(),
-      p_agency: agency.trim(),
-      p_account: account.trim(),
-      p_account_type: accountType,
-      p_pix_key: pixKey.trim(),
-      p_pix_type: pixType || null,
-    })
-    setSaving(false)
+    e.preventDefault();
+    if (!token) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: err } = await supabase.rpc(
+      "complete_supplier_payment_update",
+      {
+        p_token: token,
+        p_document: document.trim().replace(/\D/g, ""),
+        p_email: email.trim(),
+        p_phone: phone.trim().replace(/\D/g, ""),
+        p_bank_name: bankName.trim(),
+        p_bank_code: bankCode.trim(),
+        p_agency: agency.trim(),
+        p_account: account.trim(),
+        p_account_type: accountType,
+        p_pix_key: pixKey.trim(),
+        p_pix_type: pixType || null,
+      },
+    );
+    setSaving(false);
     if (err) {
-      setError('Erro ao salvar')
-      return
+      setError("Erro ao salvar");
+      return;
     }
-    const res = data as { success?: boolean; error?: string }
+    const res = data as { success?: boolean; error?: string };
     if (!res?.success) {
-      setError(res?.error ?? 'Erro ao salvar')
-      return
+      setError(res?.error ?? "Erro ao salvar");
+      return;
     }
-    setSuccess(true)
-  }
+    setSuccess(true);
+  };
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
       </div>
-    )
+    );
   }
 
   if (error && !success) {
@@ -142,7 +161,7 @@ export function AtualizarPagamento() {
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
   if (success) {
@@ -162,7 +181,7 @@ export function AtualizarPagamento() {
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
   return (
@@ -173,11 +192,48 @@ export function AtualizarPagamento() {
           <CardDescription>
             {supplierName && `Fornecedor: ${supplierName}`}
             <br />
-            Preencha seus dados bancários ou PIX. Este link é válido para uma única atualização.
+            Atualize seus dados e informações bancárias. Este link é válido para
+            uma única atualização.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium">Seus dados</Label>
+              <div className="grid gap-2 mt-2 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs">CPF/CNPJ</Label>
+                  <Input
+                    value={document}
+                    onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
+                    placeholder="000.000.000-00"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">E-mail</Label>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="email@exemplo.com"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Telefone</Label>
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(maskPhone(e.target.value))}
+                    placeholder="(11) 99999-9999"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <Label className="text-sm font-medium">
+                Conta para pagamento
+              </Label>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div>
                 <Label>Banco</Label>
@@ -231,7 +287,7 @@ export function AtualizarPagamento() {
             </div>
             <div className="border-t pt-4">
               <Label className="text-sm font-medium">PIX</Label>
-              <div className="grid gap-2 mt-2 sm:grid-cols-2">
+              <div className="flex gap-2 mt-2">
                 <div>
                   <Label className="text-xs">Tipo da chave</Label>
                   <Select value={pixType} onValueChange={setPixType}>
@@ -247,7 +303,7 @@ export function AtualizarPagamento() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="flex-1">
                   <Label className="text-xs">Chave PIX</Label>
                   <Input
                     value={pixKey}
@@ -257,15 +313,13 @@ export function AtualizarPagamento() {
                 </div>
               </div>
             </div>
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={saving}>
-              {saving ? 'Salvando...' : 'Salvar'}
+              {saving ? "Salvando..." : "Salvar"}
             </Button>
           </form>
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
