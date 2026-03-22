@@ -26,12 +26,13 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/roles";
+import { cn } from "@/lib/utils";
 import {
   BarChart3,
   Bell,
   Building2,
+  FileText,
   LayoutDashboard,
   LogOut,
   Monitor,
@@ -40,22 +41,66 @@ import {
   PackageCheck,
   Receipt,
   Sun,
-  Wallet,
-  FileText,
   Truck,
+  Wallet,
 } from "lucide-react";
 import { Link, Navigate, Outlet } from "react-router-dom";
 
 const NAV_ITEMS = [
-  { title: "Dashboard", url: "/app", icon: LayoutDashboard, roles: ["operador", "gestor", "owner"] },
-  { title: "Despesas", url: "/app/despesas", icon: Wallet, roles: ["operador", "gestor", "owner"] },
-  { title: "Boletos", url: "/app/boletos", icon: FileText, roles: ["operador", "gestor", "owner"] },
-  { title: "Fornecedores", url: "/app/fornecedores", icon: Truck, roles: ["operador", "gestor", "owner"] },
-  { title: "Produtos", url: "/app/produtos", icon: Package, roles: ["operador", "gestor", "owner"] },
-  { title: "Recebimento", url: "/app/recebimento", icon: PackageCheck, roles: ["operador", "gestor", "owner"] },
-  { title: "Alertas", url: "/app/alertas", icon: Bell, roles: ["gestor", "owner"] },
-  { title: "Relatórios", url: "/app/relatorios", icon: BarChart3, roles: ["gestor", "owner"] },
-  { title: "Documentos", url: "/app/documentos", icon: Receipt, roles: ["operador", "gestor", "owner"] },
+  {
+    title: "Dashboard",
+    url: "/app",
+    icon: LayoutDashboard,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Despesas",
+    url: "/app/despesas",
+    icon: Wallet,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Boletos",
+    url: "/app/boletos",
+    icon: FileText,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Fornecedores",
+    url: "/app/fornecedores",
+    icon: Truck,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Produtos",
+    url: "/app/produtos",
+    icon: Package,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Recebimento",
+    url: "/app/recebimento",
+    icon: PackageCheck,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Alertas",
+    url: "/app/alertas",
+    icon: Bell,
+    roles: ["gestor", "owner"],
+  },
+  {
+    title: "Relatórios",
+    url: "/app/relatorios",
+    icon: BarChart3,
+    roles: ["gestor", "owner"],
+  },
+  {
+    title: "Documentos",
+    url: "/app/documentos",
+    icon: Receipt,
+    roles: ["operador", "gestor", "owner"],
+  },
 ];
 
 export function AppLayout() {
@@ -65,7 +110,9 @@ export function AppLayout() {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-sm font-medium text-muted-foreground">Carregando...</p>
+        <p className="text-sm font-medium text-muted-foreground">
+          Carregando...
+        </p>
       </div>
     );
   }
@@ -86,9 +133,9 @@ function AppLayoutContent() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { currentCompany, currentRole } = useCompany();
 
-  const navItems = (currentRole
+  const navItems = currentRole
     ? NAV_ITEMS.filter((item) => item.roles.includes(currentRole))
-    : NAV_ITEMS);
+    : NAV_ITEMS;
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
@@ -150,7 +197,7 @@ function AppLayoutContent() {
         </SidebarContent>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-16 items-center gap-4 border-b px-6">
+        <header className="flex h-16 items-center gap-4 border-b px-6 sticky top-0 bg-background z-10">
           <SidebarTrigger />
           <CompanySelector />
           <div className="flex-1" />

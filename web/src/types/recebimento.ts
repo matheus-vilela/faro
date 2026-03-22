@@ -10,6 +10,7 @@ export interface Recebimento {
     invoice_number: string | null
     notes: string | null
     expense_items?: Array<{
+      id: string
       product_name: string
       quantity: number
       unit_value: number
