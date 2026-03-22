@@ -7,6 +7,7 @@ export interface Product {
   min_quantity: number
   current_quantity: number
   last_unit_value: number | null
+  is_active?: boolean
   created_at: string
   updated_at: string
 }

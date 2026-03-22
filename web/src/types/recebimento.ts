@@ -7,6 +7,7 @@ export interface Recebimento {
   received_at: string | null
   expenses?: {
     supplier_name: string | null
+    display_name: string | null
     invoice_number: string | null
     notes: string | null
     expense_items?: Array<{
@@ -16,4 +17,5 @@ export interface Recebimento {
       unit_value: number
     }>
   }
+  recebimento_item_status?: Array<{ expense_item_id: string; status: string }>
 }

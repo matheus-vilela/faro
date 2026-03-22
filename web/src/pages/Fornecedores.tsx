@@ -38,9 +38,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import type { Supplier } from "@/types/supplier";
-import { Check, Copy, CreditCard, Link2, Plus } from "lucide-react";
+import { Check, Copy, CreditCard, Link2, Pencil, Plus, Truck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const ACCOUNT_TYPES = [
@@ -78,6 +79,16 @@ export function Fornecedores() {
   const [pixKey, setPixKey] = useState("");
   const [pixType, setPixType] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
+
+  // Sheet detalhe do fornecedor
+  const [detailSupplier, setDetailSupplier] = useState<Supplier | null>(null);
+  const [detailEditMode, setDetailEditMode] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDocument, setEditDocument] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   // Dialog gerar link
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -223,6 +234,48 @@ export function Fornecedores() {
   const hasPaymentInfo = (s: Supplier) =>
     s.payment_info && (s.payment_info.bank_name || s.payment_info.pix_key);
 
+  const openDetail = (s: Supplier) => {
+    setDetailSupplier(s);
+    setDetailEditMode(false);
+    setEditName(s.name);
+    setEditDocument(s.document ? maskCpfCnpj(s.document) : "");
+    setEditEmail(s.email ?? "");
+    setEditPhone(s.phone ? maskPhone(s.phone) : "");
+    setEditNotes(s.notes ?? "");
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailSupplier) return;
+    setEditSaving(true);
+    await supabase
+      .from("suppliers")
+      .update({
+        name: editName.trim(),
+        document: editDocument.replace(/\D/g, "") || null,
+        email: editEmail.trim() || null,
+        phone: editPhone.replace(/\D/g, "") || null,
+        notes: editNotes.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", detailSupplier.id);
+    setEditSaving(false);
+    setDetailEditMode(false);
+    fetchSuppliers();
+    setDetailSupplier((prev) =>
+      prev
+        ? {
+            ...prev,
+            name: editName.trim(),
+            document: editDocument.replace(/\D/g, "") || null,
+            email: editEmail.trim() || null,
+            phone: editPhone.replace(/\D/g, "") || null,
+            notes: editNotes.trim() || null,
+          }
+        : null,
+    );
+  };
+
   return (
     <div className="space-y-8">
       <div>
@@ -270,7 +323,11 @@ export function Fornecedores() {
               {suppliers.map((s) => (
                 <div
                   key={s.id}
-                  className="flex items-center justify-between gap-4 rounded-lg border p-4"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openDetail(s)}
+                  onKeyDown={(e) => e.key === "Enter" && openDetail(s)}
+                  className="flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -289,7 +346,7 @@ export function Fornecedores() {
                       </p>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                     <Button
                       variant="outline"
                       size="sm"
@@ -460,6 +517,201 @@ export function Fornecedores() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Sheet resumo do fornecedor */}
+      <Sheet
+        open={!!detailSupplier}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailSupplier(null);
+            setDetailEditMode(false);
+          }
+        }}
+      >
+        <SheetContent className="overflow-y-auto sm:max-w-lg">
+          {detailSupplier && (
+            <>
+              <SheetHeader>
+                <div className="flex items-center justify-between pr-8">
+                  <SheetTitle className="flex items-center gap-2">
+                    <Truck className="h-5 w-5" />
+                    {detailEditMode ? "Editar fornecedor" : "Dados do fornecedor"}
+                  </SheetTitle>
+                  {!detailEditMode && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDetailEditMode(true)}
+                    >
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Editar
+                    </Button>
+                  )}
+                </div>
+                <SheetDescription>{detailSupplier.name}</SheetDescription>
+              </SheetHeader>
+              {detailEditMode ? (
+                <form onSubmit={handleSaveEdit} className="space-y-4 py-6">
+                  <div>
+                    <Label>Nome</Label>
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Nome do fornecedor"
+                      required
+                      className="mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label>CNPJ/CPF</Label>
+                    <Input
+                      value={editDocument}
+                      onChange={(e) =>
+                        setEditDocument(maskCpfCnpj(e.target.value))
+                      }
+                      placeholder="000.000.000-00"
+                      className="mt-2"
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label>E-mail</Label>
+                      <Input
+                        type="email"
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        placeholder="email@exemplo.com"
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label>Telefone</Label>
+                      <Input
+                        value={editPhone}
+                        onChange={(e) =>
+                          setEditPhone(maskPhone(e.target.value))
+                        }
+                        placeholder="(11) 99999-9999"
+                        className="mt-2"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Observações</Label>
+                    <Input
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      placeholder="Opcional"
+                      className="mt-2"
+                    />
+                  </div>
+                  <SheetFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDetailEditMode(false)}
+                      disabled={editSaving}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={editSaving}>
+                      {editSaving ? "Salvando..." : "Salvar"}
+                    </Button>
+                  </SheetFooter>
+                </form>
+              ) : (
+                <div className="space-y-6 py-6">
+                  <div className="grid gap-4 text-sm">
+                    {detailSupplier.document && (
+                      <div>
+                        <span className="text-muted-foreground">
+                          CNPJ/CPF:
+                        </span>{" "}
+                        {maskCpfCnpj(detailSupplier.document)}
+                      </div>
+                    )}
+                    {detailSupplier.email && (
+                      <div>
+                        <span className="text-muted-foreground">E-mail:</span>{" "}
+                        {detailSupplier.email}
+                      </div>
+                    )}
+                    {detailSupplier.phone && (
+                      <div>
+                        <span className="text-muted-foreground">
+                          Telefone:
+                        </span>{" "}
+                        {maskPhone(detailSupplier.phone)}
+                      </div>
+                    )}
+                    {detailSupplier.notes && (
+                      <div>
+                        <span className="text-muted-foreground">Obs:</span>{" "}
+                        {detailSupplier.notes}
+                      </div>
+                    )}
+                  </div>
+                  {detailSupplier.payment_info && (
+                    <div>
+                      <p className="font-medium mb-2 flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        Conta de pagamento
+                      </p>
+                      <div className="rounded-lg border p-4 space-y-2 text-sm">
+                        {detailSupplier.payment_info.bank_name && (
+                          <p>
+                            Banco: {detailSupplier.payment_info.bank_name}
+                            {detailSupplier.payment_info.bank_code && (
+                              <> ({detailSupplier.payment_info.bank_code})</>
+                            )}
+                          </p>
+                        )}
+                        {(detailSupplier.payment_info.agency ||
+                          detailSupplier.payment_info.account) && (
+                          <p>
+                            Agência:{" "}
+                            {detailSupplier.payment_info.agency || "—"} • Conta:{" "}
+                            {detailSupplier.payment_info.account || "—"}
+                          </p>
+                        )}
+                        {detailSupplier.payment_info.pix_key && (
+                          <p>
+                            PIX: {detailSupplier.payment_info.pix_key}
+                          </p>
+                        )}
+                        {!detailSupplier.payment_info.bank_name &&
+                          !detailSupplier.payment_info.pix_key && (
+                            <p className="text-muted-foreground">
+                              Nenhum dado cadastrado
+                            </p>
+                          )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openPaymentDialog(detailSupplier)}
+                    >
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      Conta de pagamento
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openLinkDialog(detailSupplier)}
+                    >
+                      <Link2 className="h-4 w-4 mr-2" />
+                      Gerar link
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

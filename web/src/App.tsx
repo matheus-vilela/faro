@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { CompanyProvider } from '@/contexts/CompanyContext'
-import { ThemeProvider } from '@/contexts/ThemeContext'
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
+import { Toaster } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Landing } from '@/pages/Landing'
 import { Login } from '@/pages/Login'
@@ -77,6 +78,26 @@ function AppRoutes() {
   )
 }
 
+function ThemeAwareToaster() {
+  const { resolvedTheme } = useTheme()
+  return (
+    <Toaster
+      theme={resolvedTheme}
+      position="bottom-right"
+      closeButton
+      richColors
+      offset="1.5rem"
+      toastOptions={{
+        style: {
+          borderRadius: '0.75rem',
+          boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+          border: '1px solid hsl(var(--border))',
+        },
+      }}
+    />
+  )
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -84,6 +105,7 @@ export default function App() {
         <AuthProvider>
           <TooltipProvider>
             <AppRoutes />
+            <ThemeAwareToaster />
           </TooltipProvider>
         </AuthProvider>
       </BrowserRouter>

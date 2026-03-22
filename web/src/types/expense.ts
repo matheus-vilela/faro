@@ -21,6 +21,8 @@ export interface Expense {
   invoice_number: string | null
   supplier_document: string | null
   supplier_name: string | null
+  is_recurring?: boolean
+  display_name?: string | null
   status: ExpenseStatus
   notes: string | null
   created_at: string

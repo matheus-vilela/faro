@@ -56,6 +56,7 @@ export function Recebimento() {
         *,
         expenses (
           supplier_name,
+          display_name,
           invoice_number,
           notes,
           expense_items (
@@ -64,7 +65,8 @@ export function Recebimento() {
             quantity,
             unit_value
           )
-        )
+        ),
+        recebimento_item_status (expense_item_id, status)
       `,
       )
       .in("expense_id", expenseIds)
@@ -154,6 +156,15 @@ export function Recebimento() {
                   0,
                 );
                 const isReceived = r.status === "received";
+                const itemStatusesList = (r.recebimento_item_status ?? []) as ItemStatus[];
+                const hasNotReceived = isReceived && itemStatusesList.some(
+                  (s) => s.status === "not_received",
+                );
+                const badgeLabel = !isReceived
+                  ? "Pendente"
+                  : hasNotReceived
+                    ? "Confirmado parcialmente"
+                    : "Confirmado";
                 return (
                   <div
                     key={r.id}
@@ -181,7 +192,7 @@ export function Recebimento() {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">
-                            {exp?.supplier_name || "Sem fornecedor"}
+                            {exp?.display_name?.trim() || exp?.supplier_name || "Sem fornecedor"}
                           </span>
                           {exp?.invoice_number && (
                             <span className="text-sm text-muted-foreground">
@@ -190,14 +201,25 @@ export function Recebimento() {
                           )}
                           <Badge
                             variant={isReceived ? "default" : "secondary"}
-                            className={isReceived ? "bg-green-600" : ""}
+                            className={
+                              isReceived
+                                ? hasNotReceived
+                                  ? "bg-amber-600"
+                                  : "bg-green-600"
+                                : ""
+                            }
                           >
-                            {isReceived ? "Confirmado" : "Pendente"}
+                            {badgeLabel}
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
                           {formatDate(r.created_at)} • {items.length} item(ns) •{" "}
                           {formatCurrency(total)}
+                          {hasNotReceived && (
+                            <span className="text-amber-600 dark:text-amber-500 font-medium ml-1">
+                              • Teve itens não recebidos
+                            </span>
+                          )}
                         </p>
                       </div>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -284,7 +306,7 @@ export function Recebimento() {
                     </h3>
                     <div className="space-y-1">
                       <p className="font-medium">
-                        {exp?.supplier_name || "Sem fornecedor"}
+                        {exp?.display_name?.trim() || exp?.supplier_name || "Sem fornecedor"}
                       </p>
                       {exp?.invoice_number && (
                         <p className="text-sm text-muted-foreground">

@@ -17,6 +17,7 @@ import { Link } from 'react-router-dom'
 interface ExpenseWithoutBoleto {
   id: string
   supplier_name: string | null
+  display_name: string | null
   invoice_number: string | null
   created_at: string
 }
@@ -27,6 +28,7 @@ interface ItemNaoEntregue {
   expense_id: string
   expense_item_id: string
   supplier_name: string | null
+  display_name: string | null
   invoice_number: string | null
   product_name: string
   quantity: number
@@ -49,12 +51,15 @@ export function Alertas() {
         .gt('min_quantity', 0)
       const list = (productsData ?? []) as Product[]
       setLowStockProducts(
-        list.filter((p) => p.current_quantity <= p.min_quantity)
+        list.filter(
+          (p) =>
+            p.current_quantity <= p.min_quantity && p.is_active !== false,
+        ),
       )
 
       const { data: expensesData } = await supabase
         .from('expenses')
-        .select('id, supplier_name, invoice_number, created_at')
+        .select('id, supplier_name, display_name, invoice_number, created_at')
         .eq('company_id', currentCompany.id)
         .order('created_at', { ascending: false })
       const { data: boletosData } = await supabase
@@ -81,6 +86,7 @@ export function Alertas() {
             received_at,
             expenses!inner (
               supplier_name,
+              display_name,
               invoice_number,
               company_id
             )
@@ -93,29 +99,32 @@ export function Alertas() {
         .eq('status', 'not_received')
       const notDeliveredList: ItemNaoEntregue[] = []
       for (const r of notReceivedData ?? []) {
-        const rec = r as {
+        const rec = r as unknown as {
           id: string
           recebimento_id: string
           expense_item_id: string
           recebimentos: {
             expense_id: string
             received_at: string | null
-            expenses: { supplier_name: string | null; invoice_number: string | null; company_id: string }
+            expenses: { supplier_name: string | null; display_name: string | null; invoice_number: string | null; company_id: string }
           }
           expense_items: { product_name: string; quantity: number }
         }
-        if (rec.recebimentos.expenses.company_id !== currentCompany.id) continue
+        const rb = Array.isArray(rec.recebimentos) ? rec.recebimentos[0] : rec.recebimentos
+        const exp = rb && (Array.isArray(rb.expenses) ? rb.expenses[0] : rb.expenses)
+        if (!exp || exp.company_id !== currentCompany.id) continue
         const ei = Array.isArray(rec.expense_items) ? rec.expense_items[0] : rec.expense_items
         notDeliveredList.push({
           id: rec.id,
           recebimento_id: rec.recebimento_id,
-          expense_id: rec.recebimentos.expense_id,
+          expense_id: rb.expense_id,
           expense_item_id: rec.expense_item_id,
-          supplier_name: rec.recebimentos.expenses.supplier_name,
-          invoice_number: rec.recebimentos.expenses.invoice_number,
+          supplier_name: exp.supplier_name,
+          display_name: exp.display_name,
+          invoice_number: exp.invoice_number,
           product_name: ei?.product_name ?? '—',
           quantity: ei?.quantity ?? 0,
-          received_at: rec.recebimentos.received_at,
+          received_at: rb.received_at,
         })
       }
       setItensNaoEntregues(notDeliveredList)
@@ -188,7 +197,7 @@ export function Alertas() {
                         {item.product_name} — {item.quantity} un
                       </p>
                       <p className="text-sm text-muted-foreground truncate">
-                        {item.supplier_name || 'Sem fornecedor'}
+                        {item.display_name?.trim() || item.supplier_name || 'Sem fornecedor'}
                         {item.invoice_number && ` • Nota ${item.invoice_number}`}
                       </p>
                     </div>
@@ -233,9 +242,9 @@ export function Alertas() {
                     className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">
-                        {e.supplier_name || 'Sem fornecedor'}
-                      </p>
+                        <p className="font-medium truncate">
+                          {e.display_name?.trim() || e.supplier_name || 'Sem fornecedor'}
+                        </p>
                       <p className="text-sm text-muted-foreground">
                         {e.invoice_number && `Nota ${e.invoice_number} • `}
                         {new Date(e.created_at).toLocaleDateString('pt-BR')}

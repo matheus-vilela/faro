@@ -51,9 +51,11 @@ import type {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import type { PaymentType } from "@/types/expense";
+import { Copy, FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 function formatDocForDisplay(doc: string | null): string {
   if (!doc || !doc.replace(/\D/g, "")) return "";
@@ -70,6 +72,14 @@ const STATUS_LABELS = {
   approved: "Aprovada",
   rejected: "Recusada",
 };
+
+const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
+  boleto: "Boleto",
+  pix: "PIX",
+  ted: "TED",
+};
+
+const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 function BoletoLinkedBlock({
   boleto,
@@ -125,7 +135,7 @@ export function Despesas() {
   // Sheet criar fornecedor (dentro do fluxo de despesa)
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
   const [items, setItems] = useState<ExpenseItem[]>([
-    { product_name: "", quantity: 1, unit_value: 0 },
+    { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
   ]);
 
   // Sheet nova despesa
@@ -138,6 +148,7 @@ export function Despesas() {
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(
     null,
   );
+  const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [selectedBoletoId, setSelectedBoletoId] = useState<string>("");
   const [linking, setLinking] = useState(false);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
@@ -155,6 +166,8 @@ export function Despesas() {
     { product_name: "", quantity: 1, unit_value: 0 },
   ]);
   const [editSaving, setEditSaving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const getBoletoForExpense = (expenseId: string) =>
     boletos.find((b) => b.expense_id === expenseId);
@@ -211,7 +224,7 @@ export function Despesas() {
   const addItem = () =>
     setItems((prev) => [
       ...prev,
-      { product_name: "", quantity: 1, unit_value: 0 },
+      { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
     ]);
   const removeItem = (i: number) =>
     setItems((prev) => prev.filter((_, ix) => ix !== i));
@@ -271,6 +284,8 @@ export function Despesas() {
         product_name: it.product_name,
         quantity: it.quantity,
         unit_value: it.unit_value,
+        product_id: it.product_id || null,
+        stock_added: false,
       });
     }
     await supabase.from("recebimentos").insert({
@@ -282,7 +297,7 @@ export function Despesas() {
     setSupplierDocument("");
     setSupplierName("");
     setNotes("");
-    setItems([{ product_name: "", quantity: 1, unit_value: 0 }]);
+    setItems([{ product_name: "", quantity: 1, unit_value: 0, product_id: undefined }]);
     setExpenseSheetOpen(false);
     fetchData();
   };
@@ -322,6 +337,46 @@ export function Despesas() {
       .eq("id", boletoId);
     if (error) console.error(error);
     else fetchData();
+  };
+
+  const handleDeleteExpense = async () => {
+    if (!detailExpense?.id) return;
+    setDeleting(true);
+    try {
+      const items = (detailExpense.expense_items ?? []) as Array<{
+        id?: string;
+        product_id?: string | null;
+        stock_added?: boolean;
+        quantity: number;
+      }>;
+      for (const it of items) {
+        if (it.product_id && it.stock_added) {
+          const qty = Number(it.quantity);
+          await supabase.rpc("adjust_product_stock", {
+            p_product_id: it.product_id,
+            p_delta: -qty,
+            p_type: "out",
+            p_reference_type: "expense_item",
+            p_reference_id: it.id ?? null,
+          });
+        }
+      }
+      const linkedBoleto = getBoletoForExpense(detailExpense.id);
+      if (linkedBoleto) {
+        await supabase.from("boletos").delete().eq("id", linkedBoleto.id);
+      }
+      await supabase.from("expenses").delete().eq("id", detailExpense.id);
+      setDetailExpense(null);
+      setDetailEditMode(false);
+      setDeleteDialogOpen(false);
+      setBoletoResumo(null);
+      toast.success("Despesa excluída");
+      fetchData();
+    } catch {
+      toast.error("Erro ao excluir despesa");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const formatDate = (s: string) =>
@@ -451,7 +506,6 @@ export function Despesas() {
 
     for (const it of editItems) {
       const productId = it.product_id || null;
-      const stockAdded = !!productId;
       const { data: inserted } = await supabase
         .from("expense_items")
         .insert({
@@ -460,22 +514,11 @@ export function Despesas() {
           quantity: it.quantity,
           unit_value: it.unit_value,
           product_id: productId,
-          stock_added: stockAdded,
+          stock_added: false,
         })
         .select("id")
         .single();
-      if (productId && inserted) {
-        const qty = Number(it.quantity);
-        const unitVal = Number(it.unit_value);
-        await supabase.rpc("adjust_product_stock", {
-          p_product_id: productId,
-          p_delta: qty,
-          p_type: "in",
-          p_reference_type: "expense_item",
-          p_reference_id: inserted.id,
-          p_unit_value: unitVal,
-        });
-      }
+      void inserted; // Estoque só é atualizado na confirmação do recebimento
     }
 
     const { data: updated } = await supabase
@@ -626,55 +669,92 @@ export function Despesas() {
                   <Plus className="h-4 w-4 mr-1" /> Adicionar item
                 </Button>
               </div>
-              <div className="mt-2 space-y-2">
+              <div className="mt-2 space-y-3">
                 {items.map((it, i) => (
-                  <div key={i} className="flex gap-2 items-end">
-                    <div className="flex-1">
-                      <Input
-                        placeholder="Produto"
-                        value={it.product_name}
-                        onChange={(e) =>
-                          updateItem(i, { product_name: e.target.value })
-                        }
-                      />
+                  <div key={i} className="space-y-2 rounded-lg border p-3">
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1">
+                        <Label className="text-xs">Descrição da nota</Label>
+                        <Input
+                          placeholder="Produto (como vem na nota)"
+                          value={it.product_name}
+                          onChange={(e) =>
+                            updateItem(i, { product_name: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="w-24">
+                        <Label className="text-xs">Qtd</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Qtd"
+                          value={it.quantity || ""}
+                          onChange={(e) =>
+                            updateItem(i, {
+                              quantity: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="w-28">
+                        <Label className="text-xs">Valor un.</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Valor un."
+                          value={it.unit_value || ""}
+                          onChange={(e) =>
+                            updateItem(i, {
+                              unit_value: parseFloat(e.target.value) || 0,
+                            })
+                          }
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeItem(i)}
+                        disabled={items.length === 1}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
-                    <div className="w-24">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Qtd"
-                        value={it.quantity || ""}
-                        onChange={(e) =>
+                    <div>
+                      <Label className="text-xs">Vincular ao produto (estoque)</Label>
+                      <Select
+                        value={it.product_id ?? "__none__"}
+                        onValueChange={(v) =>
                           updateItem(i, {
-                            quantity: parseFloat(e.target.value) || 0,
+                            product_id: v === "__none__" ? undefined : v,
                           })
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Não vincular" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">
+                            Não vincular
+                          </SelectItem>
+                          {products
+                            .filter((p) => p.is_active !== false)
+                            .map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                                {p.sku && ` (${p.sku})`} — Estoque: {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
+                                {p.last_unit_value != null && p.last_unit_value > 0 && ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Ao vincular, o estoque será atualizado quando o recebimento for confirmado
+                      </p>
                     </div>
-                    <div className="w-28">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Valor un."
-                        value={it.unit_value || ""}
-                        onChange={(e) =>
-                          updateItem(i, {
-                            unit_value: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeItem(i)}
-                      disabled={items.length === 1}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
                   </div>
                 ))}
               </div>
@@ -799,13 +879,13 @@ export function Despesas() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (linked) handleUnlinkBoleto(boleto!.id);
+                          if (linked) setBoletoResumo(boleto!);
                           else openLinkDialog(exp.id);
                         }}
                         className="p-2 rounded-md hover:bg-muted transition-colors shrink-0"
                         title={
                           linked
-                            ? "Boleto vinculado (clique para desvincular)"
+                            ? "Ver resumo do boleto"
                             : "Vincular boleto"
                         }
                       >
@@ -897,6 +977,150 @@ export function Despesas() {
       )}
 
       <Sheet
+        open={!!boletoResumo}
+        onOpenChange={(o) => !o && setBoletoResumo(null)}
+      >
+        <SheetContent className="sm:max-w-md">
+          {boletoResumo && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Resumo do boleto</SheetTitle>
+                <SheetDescription>
+                  Dados para pagamento
+                </SheetDescription>
+              </SheetHeader>
+              <div className="space-y-6 py-6">
+                <div>
+                  <p className="font-semibold">{boletoResumo.description}</p>
+                  <p className="text-2xl font-bold text-primary mt-1">
+                    {formatCurrency(boletoResumo.amount)}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Vencimento: {formatDate(boletoResumo.due_date)}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge variant="secondary">
+                      {PAYMENT_TYPE_LABELS[
+                        boletoResumo.payment_type ?? "boleto"
+                      ]}
+                    </Badge>
+                    <Badge
+                      variant={
+                        boletoResumo.status === "paid"
+                          ? "default"
+                          : "outline"
+                      }
+                    >
+                      {BOLETO_STATUS_LABELS[boletoResumo.status]}
+                    </Badge>
+                    {boletoResumo.provider && (
+                      <span className="text-sm text-muted-foreground">
+                        {boletoResumo.provider}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {boletoResumo.status === "pending" && (
+                  <>
+                    {(boletoResumo.payment_type ?? "boleto") === "boleto" &&
+                      boletoResumo.barcode && (
+                        <div className="rounded-lg border p-4 space-y-2">
+                          <p className="text-sm font-medium">
+                            Código de barras
+                          </p>
+                          <p className="text-sm font-mono break-all">
+                            {boletoResumo.barcode}
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(
+                                boletoResumo.barcode ?? "",
+                              );
+                              toast.success("Código copiado");
+                            }}
+                          >
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar código
+                          </Button>
+                        </div>
+                      )}
+                    {(boletoResumo.payment_type ?? "boleto") === "pix" &&
+                      boletoResumo.pix_key && (
+                        <div className="rounded-lg border p-4 space-y-2">
+                          <p className="text-sm font-medium">Chave PIX</p>
+                          <p className="text-sm font-mono break-all">
+                            {boletoResumo.pix_key}
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(
+                                boletoResumo.pix_key ?? "",
+                              );
+                              toast.success("Chave copiada");
+                            }}
+                          >
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar chave
+                          </Button>
+                        </div>
+                      )}
+                    {(boletoResumo.payment_type ?? "boleto") === "ted" &&
+                      (boletoResumo.bank_name ||
+                        boletoResumo.agency ||
+                        boletoResumo.account) && (
+                        <div className="rounded-lg border p-4 space-y-2">
+                          <p className="text-sm font-medium">
+                            Dados bancários
+                          </p>
+                          <div className="text-sm space-y-1">
+                            {boletoResumo.bank_name && (
+                              <p>Banco: {boletoResumo.bank_name}</p>
+                            )}
+                            {boletoResumo.bank_code && (
+                              <p>Código: {boletoResumo.bank_code}</p>
+                            )}
+                            {boletoResumo.agency && (
+                              <p>Agência: {boletoResumo.agency}</p>
+                            )}
+                            {boletoResumo.account && (
+                              <p>Conta: {boletoResumo.account}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                  </>
+                )}
+              </div>
+              <SheetFooter className="flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/app/boletos")}
+                >
+                  Ir para Boletos
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (boletoResumo)
+                      handleUnlinkBoleto(boletoResumo.id);
+                    setBoletoResumo(null);
+                    fetchData();
+                  }}
+                >
+                  Desvincular boleto
+                </Button>
+              </SheetFooter>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
         open={!!detailExpense}
         onOpenChange={(o) => {
           if (!o) {
@@ -914,18 +1138,42 @@ export function Despesas() {
                     {detailEditMode ? "Editar despesa" : "Dados da despesa"}
                   </SheetTitle>
                   {!detailEditMode && (
-                    <Button variant="outline" size="sm" onClick={startEdit}>
-                      <Pencil className="h-4 w-4 mr-2" />
-                      Editar
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={startEdit}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Editar
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Excluir
+                      </Button>
+                    </div>
                   )}
                 </div>
-                <SheetDescription>
-                  {detailExpense.supplier_name ||
-                    TYPE_LABELS[
-                      detailExpense.type as keyof typeof TYPE_LABELS
-                    ] ||
-                    "Sem fornecedor"}
+                <SheetDescription className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {detailExpense.supplier_name ||
+                      TYPE_LABELS[
+                        detailExpense.type as keyof typeof TYPE_LABELS
+                      ] ||
+                      "Sem fornecedor"}
+                  </span>
+                  {getBoletoForExpense(detailExpense.id) ? (
+                    <Badge
+                      variant="default"
+                      className="bg-green-600 shrink-0"
+                    >
+                      Boleto vinculado
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="shrink-0">
+                      Sem boleto vinculado
+                    </Badge>
+                  )}
                 </SheetDescription>
               </SheetHeader>
               {detailEditMode ? (
@@ -1115,17 +1363,19 @@ export function Despesas() {
                                 <SelectItem value="__none__">
                                   Não vincular
                                 </SelectItem>
-                                {products.map((p) => (
+                                {products
+                                  .filter((p) => p.is_active !== false)
+                                  .map((p) => (
                                   <SelectItem key={p.id} value={p.id}>
                                     {p.name}
                                     {p.sku && ` (${p.sku})`} — Estoque: {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
                                     {p.last_unit_value != null && p.last_unit_value > 0 && ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
                                   </SelectItem>
-                                ))}
+                                  ))}
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Ao vincular, a quantidade será somada ao estoque do produto
+                              Ao vincular, o estoque será atualizado quando o recebimento for confirmado
                             </p>
                           </div>
                         </div>
@@ -1299,7 +1549,9 @@ export function Despesas() {
                       boleto={getBoletoForExpense(detailExpense.id)!}
                       formatCurrency={formatCurrency}
                       formatDate={formatDate}
-                      onVerBoleto={() => navigate("/app/boletos")}
+                      onVerBoleto={() =>
+                        setBoletoResumo(getBoletoForExpense(detailExpense.id)!)
+                      }
                     />
                   ) : null}
                 </div>
@@ -1308,6 +1560,35 @@ export function Despesas() {
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir despesa</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir esta despesa? O recebimento e boleto
+              vinculados serão excluídos. Se o recebimento já foi confirmado, as
+              quantidades serão deduzidas do estoque.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteExpense}
+              disabled={deleting}
+            >
+              {deleting ? "Excluindo..." : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
