@@ -1,87 +1,101 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { useCompany } from '@/contexts/CompanyContext'
-import { supabase } from '@/lib/supabase'
-import type { Product } from '@/types/product'
-import { Calendar, TrendingDown, AlertTriangle, Package, FileText, PackageX, CheckCircle2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { useCompany } from "@/contexts/CompanyContext";
+import { supabase } from "@/lib/supabase";
+import type { Product } from "@/types/product";
+import {
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  FileText,
+  Package,
+  PackageX,
+  TrendingDown,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 interface ExpenseWithoutBoleto {
-  id: string
-  supplier_name: string | null
-  display_name: string | null
-  invoice_number: string | null
-  created_at: string
+  id: string;
+  supplier_name: string | null;
+  display_name: string | null;
+  invoice_number: string | null;
+  created_at: string;
 }
 
 interface ItemNaoEntregue {
-  id: string
-  recebimento_id: string
-  expense_id: string
-  expense_item_id: string
-  supplier_name: string | null
-  display_name: string | null
-  invoice_number: string | null
-  product_name: string
-  quantity: number
-  received_at: string | null
+  id: string;
+  recebimento_id: string;
+  expense_id: string;
+  expense_item_id: string;
+  supplier_name: string | null;
+  display_name: string | null;
+  invoice_number: string | null;
+  product_name: string;
+  quantity: number;
+  received_at: string | null;
 }
 
 export function Alertas() {
-  const { currentCompany } = useCompany()
-  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
-  const [expensesWithoutBoleto, setExpensesWithoutBoleto] = useState<ExpenseWithoutBoleto[]>([])
-  const [itensNaoEntregues, setItensNaoEntregues] = useState<ItemNaoEntregue[]>([])
-  const [filterItens, setFilterItens] = useState('')
-  const [filterDespesas, setFilterDespesas] = useState('')
-  const [filterEstoque, setFilterEstoque] = useState('')
+  const { currentCompany } = useCompany();
+  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
+  const [expensesWithoutBoleto, setExpensesWithoutBoleto] = useState<
+    ExpenseWithoutBoleto[]
+  >([]);
+  const [itensNaoEntregues, setItensNaoEntregues] = useState<ItemNaoEntregue[]>(
+    [],
+  );
+  const [filterItens, setFilterItens] = useState("");
+  const [filterDespesas, setFilterDespesas] = useState("");
+  const [filterEstoque, setFilterEstoque] = useState("");
 
   useEffect(() => {
     const load = async () => {
-      if (!currentCompany?.id) return
+      if (!currentCompany?.id) return;
       const { data: productsData } = await supabase
-        .from('products')
-        .select('*')
-        .eq('company_id', currentCompany.id)
-        .gt('min_quantity', 0)
-      const list = (productsData ?? []) as Product[]
+        .from("products")
+        .select("*")
+        .eq("company_id", currentCompany.id)
+        .gt("min_quantity", 0);
+      const list = (productsData ?? []) as Product[];
       setLowStockProducts(
         list.filter(
-          (p) =>
-            p.current_quantity <= p.min_quantity && p.is_active !== false,
+          (p) => p.current_quantity <= p.min_quantity && p.is_active !== false,
         ),
-      )
+      );
 
       const { data: expensesData } = await supabase
-        .from('expenses')
-        .select('id, supplier_name, display_name, invoice_number, created_at')
-        .eq('company_id', currentCompany.id)
-        .order('created_at', { ascending: false })
+        .from("expenses")
+        .select("id, supplier_name, display_name, invoice_number, created_at")
+        .eq("company_id", currentCompany.id)
+        .order("created_at", { ascending: false });
       const { data: boletosData } = await supabase
-        .from('boletos')
-        .select('expense_id')
-        .eq('company_id', currentCompany.id)
-        .not('expense_id', 'is', null)
+        .from("boletos")
+        .select("expense_id")
+        .eq("company_id", currentCompany.id)
+        .not("expense_id", "is", null);
       const linkedExpenseIds = new Set(
-        (boletosData ?? []).map((b) => b.expense_id).filter(Boolean) as string[]
-      )
+        (boletosData ?? [])
+          .map((b) => b.expense_id)
+          .filter(Boolean) as string[],
+      );
       const withoutBoleto = (expensesData ?? []).filter(
-        (e) => !linkedExpenseIds.has(e.id)
-      ) as ExpenseWithoutBoleto[]
-      setExpensesWithoutBoleto(withoutBoleto)
+        (e) => !linkedExpenseIds.has(e.id),
+      ) as ExpenseWithoutBoleto[];
+      setExpensesWithoutBoleto(withoutBoleto);
 
       const { data: notReceivedData } = await supabase
-        .from('recebimento_item_status')
-        .select(`
+        .from("recebimento_item_status")
+        .select(
+          `
           id,
           recebimento_id,
           expense_item_id,
@@ -99,25 +113,36 @@ export function Alertas() {
             product_name,
             quantity
           )
-        `)
-        .eq('status', 'not_received')
-      const notDeliveredList: ItemNaoEntregue[] = []
+        `,
+        )
+        .eq("status", "not_received");
+      const notDeliveredList: ItemNaoEntregue[] = [];
       for (const r of notReceivedData ?? []) {
         const rec = r as unknown as {
-          id: string
-          recebimento_id: string
-          expense_item_id: string
+          id: string;
+          recebimento_id: string;
+          expense_item_id: string;
           recebimentos: {
-            expense_id: string
-            received_at: string | null
-            expenses: { supplier_name: string | null; display_name: string | null; invoice_number: string | null; company_id: string }
-          }
-          expense_items: { product_name: string; quantity: number }
-        }
-        const rb = Array.isArray(rec.recebimentos) ? rec.recebimentos[0] : rec.recebimentos
-        const exp = rb && (Array.isArray(rb.expenses) ? rb.expenses[0] : rb.expenses)
-        if (!exp || exp.company_id !== currentCompany.id) continue
-        const ei = Array.isArray(rec.expense_items) ? rec.expense_items[0] : rec.expense_items
+            expense_id: string;
+            received_at: string | null;
+            expenses: {
+              supplier_name: string | null;
+              display_name: string | null;
+              invoice_number: string | null;
+              company_id: string;
+            };
+          };
+          expense_items: { product_name: string; quantity: number };
+        };
+        const rb = Array.isArray(rec.recebimentos)
+          ? rec.recebimentos[0]
+          : rec.recebimentos;
+        const exp =
+          rb && (Array.isArray(rb.expenses) ? rb.expenses[0] : rb.expenses);
+        if (!exp || exp.company_id !== currentCompany.id) continue;
+        const ei = Array.isArray(rec.expense_items)
+          ? rec.expense_items[0]
+          : rec.expense_items;
         notDeliveredList.push({
           id: rec.id,
           recebimento_id: rec.recebimento_id,
@@ -126,44 +151,60 @@ export function Alertas() {
           supplier_name: exp.supplier_name,
           display_name: exp.display_name,
           invoice_number: exp.invoice_number,
-          product_name: ei?.product_name ?? '—',
+          product_name: ei?.product_name ?? "—",
           quantity: ei?.quantity ?? 0,
           received_at: rb.received_at,
-        })
+        });
       }
-      setItensNaoEntregues(notDeliveredList)
-    }
-    load()
-  }, [currentCompany?.id])
+      setItensNaoEntregues(notDeliveredList);
+    };
+    load();
+  }, [currentCompany?.id]);
 
   const filteredItens = filterItens.trim()
     ? itensNaoEntregues.filter(
         (i) =>
-          (i.product_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
-          (i.display_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
-          (i.supplier_name ?? '').toLowerCase().includes(filterItens.toLowerCase()) ||
-          (i.invoice_number ?? '').toLowerCase().includes(filterItens.toLowerCase())
+          (i.product_name ?? "")
+            .toLowerCase()
+            .includes(filterItens.toLowerCase()) ||
+          (i.display_name ?? "")
+            .toLowerCase()
+            .includes(filterItens.toLowerCase()) ||
+          (i.supplier_name ?? "")
+            .toLowerCase()
+            .includes(filterItens.toLowerCase()) ||
+          (i.invoice_number ?? "")
+            .toLowerCase()
+            .includes(filterItens.toLowerCase()),
       )
-    : itensNaoEntregues
+    : itensNaoEntregues;
   const filteredDespesas = filterDespesas.trim()
     ? expensesWithoutBoleto.filter(
         (e) =>
-          (e.display_name ?? '').toLowerCase().includes(filterDespesas.toLowerCase()) ||
-          (e.supplier_name ?? '').toLowerCase().includes(filterDespesas.toLowerCase()) ||
-          (e.invoice_number ?? '').toLowerCase().includes(filterDespesas.toLowerCase())
+          (e.display_name ?? "")
+            .toLowerCase()
+            .includes(filterDespesas.toLowerCase()) ||
+          (e.supplier_name ?? "")
+            .toLowerCase()
+            .includes(filterDespesas.toLowerCase()) ||
+          (e.invoice_number ?? "")
+            .toLowerCase()
+            .includes(filterDespesas.toLowerCase()),
       )
-    : expensesWithoutBoleto
+    : expensesWithoutBoleto;
   const filteredLowStock = filterEstoque.trim()
     ? lowStockProducts.filter(
         (p) =>
           p.name.toLowerCase().includes(filterEstoque.toLowerCase()) ||
-          (p.sku ?? '').toLowerCase().includes(filterEstoque.toLowerCase())
+          (p.sku ?? "").toLowerCase().includes(filterEstoque.toLowerCase()),
       )
-    : lowStockProducts
+    : lowStockProducts;
 
   const totalAlertas =
-    itensNaoEntregues.length + expensesWithoutBoleto.length + lowStockProducts.length
-  const hasAnyAlerta = totalAlertas > 0
+    itensNaoEntregues.length +
+    expensesWithoutBoleto.length +
+    lowStockProducts.length;
+  const hasAnyAlerta = totalAlertas > 0;
 
   return (
     <div className="space-y-8">
@@ -176,7 +217,8 @@ export function Alertas() {
         </div>
         {hasAnyAlerta && (
           <Badge variant="secondary" className="w-fit text-base px-4 py-1.5">
-            {totalAlertas} alerta{totalAlertas !== 1 ? 's' : ''} pendente{totalAlertas !== 1 ? 's' : ''}
+            {totalAlertas} alerta{totalAlertas !== 1 ? "s" : ""} pendente
+            {totalAlertas !== 1 ? "s" : ""}
           </Badge>
         )}
       </div>
@@ -189,7 +231,8 @@ export function Alertas() {
             </div>
             <h3 className="text-lg font-semibold">Tudo em ordem</h3>
             <p className="text-muted-foreground text-center max-w-sm mt-2">
-              Não há alertas pendentes no momento. Vencimentos e margem em breve.
+              Não há alertas pendentes no momento. Vencimentos e margem em
+              breve.
             </p>
           </CardContent>
         </Card>
@@ -205,7 +248,9 @@ export function Alertas() {
                     <PackageX className="h-5 w-5 text-destructive" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg">Itens não entregues</CardTitle>
+                    <CardTitle className="text-lg">
+                      Itens não entregues
+                    </CardTitle>
                     <CardDescription className="mt-0.5">
                       Informados como não recebidos pelo operador
                     </CardDescription>
@@ -234,12 +279,22 @@ export function Alertas() {
                         {item.product_name} — {item.quantity} un
                       </p>
                       <p className="text-sm text-muted-foreground truncate">
-                        {item.display_name?.trim() || item.supplier_name || 'Sem fornecedor'}
-                        {item.invoice_number && ` • Nota ${item.invoice_number}`}
+                        {item.display_name?.trim() ||
+                          item.supplier_name ||
+                          "Sem fornecedor"}
+                        {item.invoice_number &&
+                          ` • Nota ${item.invoice_number}`}
                       </p>
                     </div>
-                    <Button asChild variant="outline" size="sm" className="shrink-0">
-                      <Link to={`/app/despesas?expense=${item.expense_id}`}>Ver</Link>
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                    >
+                      <Link to={`/app/despesas?expense=${item.expense_id}`}>
+                        Ver
+                      </Link>
                     </Button>
                   </div>
                 ))}
@@ -260,13 +315,18 @@ export function Alertas() {
                     <FileText className="h-5 w-5 text-amber-600 dark:text-amber-500" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg">Sem boleto vinculado</CardTitle>
+                    <CardTitle className="text-lg">
+                      Sem boleto vinculado
+                    </CardTitle>
                     <CardDescription className="mt-0.5">
                       Despesas sem boleto ou pagamento
                     </CardDescription>
                   </div>
                 </div>
-                <Badge variant="secondary" className="bg-amber-500/20 text-amber-700 dark:text-amber-400">
+                <Badge
+                  variant="secondary"
+                  className="bg-amber-500/20 text-amber-700 dark:text-amber-400"
+                >
                   {expensesWithoutBoleto.length}
                 </Badge>
               </div>
@@ -287,15 +347,22 @@ export function Alertas() {
                     className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
                   >
                     <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">
-                          {e.display_name?.trim() || e.supplier_name || 'Sem fornecedor'}
-                        </p>
+                      <p className="font-medium truncate">
+                        {e.display_name?.trim() ||
+                          e.supplier_name ||
+                          "Sem fornecedor"}
+                      </p>
                       <p className="text-sm text-muted-foreground">
                         {e.invoice_number && `Nota ${e.invoice_number} • `}
-                        {new Date(e.created_at).toLocaleDateString('pt-BR')}
+                        {new Date(e.created_at).toLocaleDateString("pt-BR")}
                       </p>
                     </div>
-                    <Button asChild variant="outline" size="sm" className="shrink-0">
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                    >
                       <Link to={`/app/despesas?expense=${e.id}`}>Vincular</Link>
                     </Button>
                   </div>
@@ -351,11 +418,18 @@ export function Alertas() {
                       <div className="min-w-0">
                         <p className="font-medium truncate">{p.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {Number(p.current_quantity).toLocaleString('pt-BR')} / {Number(p.min_quantity).toLocaleString('pt-BR')} {p.unit}
+                          {Number(p.current_quantity).toLocaleString("pt-BR")} /{" "}
+                          {Number(p.min_quantity).toLocaleString("pt-BR")}{" "}
+                          {p.unit}
                         </p>
                       </div>
                     </div>
-                    <Button asChild variant="outline" size="sm" className="shrink-0">
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                    >
                       <Link to="/app/produtos">Ver</Link>
                     </Button>
                   </div>
@@ -376,11 +450,13 @@ export function Alertas() {
                 Vencimentos
               </CardTitle>
               <CardDescription className="text-sm">
-                Boletos e obrigações próximas do vencimento
+                Contas a pagar e obrigações próximas do vencimento
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button disabled size="sm">Em breve</Button>
+              <Button disabled size="sm">
+                Em breve
+              </Button>
             </CardContent>
           </Card>
           <Card className="opacity-75">
@@ -394,11 +470,13 @@ export function Alertas() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button disabled size="sm">Em breve</Button>
+              <Button disabled size="sm">
+                Em breve
+              </Button>
             </CardContent>
           </Card>
         </div>
       </div>
     </div>
-  )
+  );
 }

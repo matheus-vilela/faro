@@ -60,7 +60,7 @@ const NAV_ITEMS = [
     roles: ["operador", "gestor", "owner"],
   },
   {
-    title: "Boletos",
+    title: "Contas a pagar",
     url: "/app/boletos",
     icon: FileText,
     roles: ["operador", "gestor", "owner"],
