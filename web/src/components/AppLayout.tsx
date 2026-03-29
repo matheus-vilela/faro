@@ -40,6 +40,7 @@ import {
   Package,
   PackageCheck,
   Receipt,
+  Settings2,
   Sun,
   Truck,
   Wallet,
@@ -94,6 +95,12 @@ const NAV_ITEMS = [
     url: "/app/relatorios",
     icon: BarChart3,
     roles: ["gestor", "owner"],
+  },
+  {
+    title: "Configurações",
+    url: "/app/configuracoes",
+    icon: Settings2,
+    roles: ["owner"],
   },
   {
     title: "Documentos",

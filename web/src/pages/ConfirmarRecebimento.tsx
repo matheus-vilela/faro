@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/card";
 import { supabase } from "@/lib/supabase";
 import { PackageCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 interface RecebimentoItem {
@@ -27,6 +27,9 @@ interface RecebimentoData {
   notes?: string;
   created_at?: string;
   items?: RecebimentoItem[];
+  assigned_company_member_id?: string | null;
+  assigned_member_name?: string | null;
+  viewer_can_confirm?: boolean;
 }
 
 export function ConfirmarRecebimento() {
@@ -39,40 +42,42 @@ export function ConfirmarRecebimento() {
   const [confirming, setConfirming] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!token) {
-      queueMicrotask(() => {
-        setError("Link inválido");
-        setLoading(false);
-      });
+      setError("Link inválido");
+      setLoading(false);
       return;
     }
-    const load = async () => {
-      const { data: res, error: err } = await supabase.rpc(
-        "get_recebimento_by_token",
-        {
-          p_token: token,
-        },
-      );
-      setLoading(false);
-      if (err) {
-        setError("Erro ao carregar");
-        return;
-      }
-      const obj = res as RecebimentoData & { error?: string };
-      if (obj?.error) {
-        setError(obj.error);
-        return;
-      }
-      setData(obj);
-      const initial: Record<number, ItemStatus> = {};
-      (obj.items ?? []).forEach((_, i) => {
-        initial[i] = "received";
-      });
-      setItemStatus(initial);
-    };
-    load();
+    setLoading(true);
+    const { data: res, error: err } = await supabase.rpc(
+      "get_recebimento_by_token",
+      {
+        p_token: token,
+      },
+    );
+    setLoading(false);
+    if (err) {
+      setError("Erro ao carregar");
+      return;
+    }
+    const obj = res as RecebimentoData & { error?: string };
+    if (obj?.error) {
+      setError(obj.error);
+      setData(null);
+      return;
+    }
+    setData(obj);
+    setError(null);
+    const initial: Record<number, ItemStatus> = {};
+    (obj.items ?? []).forEach((_, i) => {
+      initial[i] = "received";
+    });
+    setItemStatus(initial);
   }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleConfirm = async () => {
     if (!token || !data?.items?.length) return;
@@ -97,7 +102,7 @@ export function ConfirmarRecebimento() {
     }
     const result = res as { success?: boolean; error?: string };
     if (!result?.success) {
-      setError(result?.error ?? "Erro ao confirmar");
+      setError(result?.error ?? "Não foi possível confirmar.");
       return;
     }
     setSuccess(true);
@@ -138,7 +143,7 @@ export function ConfirmarRecebimento() {
 
   if (success || data?.status === "received") {
     const hadNotReceived = (data?.items ?? []).some(
-      (_, i) => itemStatus[i] === "not_received"
+      (_, i) => itemStatus[i] === "not_received",
     );
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
@@ -167,6 +172,8 @@ export function ConfirmarRecebimento() {
   const items = data?.items ?? [];
   const allResponded = items.every((_, i) => itemStatus[i] !== undefined);
   const hasNotReceived = items.some((_, i) => itemStatus[i] === "not_received");
+  const canConfirm = data?.viewer_can_confirm !== false;
+  const hasMemberRef = Boolean(data?.assigned_company_member_id);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
@@ -182,6 +189,19 @@ export function ConfirmarRecebimento() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {hasMemberRef && (
+            <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                Membro de referência:{" "}
+              </span>
+              {data?.assigned_member_name?.trim() || "—"}
+              <p className="mt-1 text-xs">
+                Apenas identificação no Faro; qualquer pessoa com este link pode
+                confirmar.
+              </p>
+            </div>
+          )}
+
           <p className="text-sm text-muted-foreground">
             Para cada item, informe se recebeu ou não.
             <br />
@@ -213,6 +233,7 @@ export function ConfirmarRecebimento() {
                         itemStatus[i] === "received" ? "default" : "outline"
                       }
                       size="sm"
+                      disabled={!canConfirm}
                       onClick={() =>
                         setItemStatus((prev) => ({ ...prev, [i]: "received" }))
                       }
@@ -227,6 +248,7 @@ export function ConfirmarRecebimento() {
                           : "outline"
                       }
                       size="sm"
+                      disabled={!canConfirm}
                       onClick={() =>
                         setItemStatus((prev) => ({
                           ...prev,
@@ -254,11 +276,11 @@ export function ConfirmarRecebimento() {
             className="w-full"
             size="lg"
             onClick={handleConfirm}
-            disabled={!allResponded || confirming}
+            disabled={!canConfirm || !allResponded || confirming}
           >
             {confirming ? "Confirmando..." : "Confirmar recebimento"}
           </Button>
-          {hasNotReceived && (
+          {hasNotReceived && canConfirm && (
             <p className="text-xs text-amber-600 text-center">
               O gestor será alertado sobre os itens não recebidos.
             </p>

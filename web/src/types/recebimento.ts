@@ -3,6 +3,9 @@ export interface Recebimento {
   expense_id: string
   token: string
   status: 'pending' | 'received'
+  /** Membro da empresa (cadastro) associado ao recebimento — referência ao compartilhar. */
+  assigned_company_member_id?: string | null
+  assigned_member?: { id: string; name: string } | null
   created_at: string
   received_at: string | null
   expenses?: {

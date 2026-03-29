@@ -10,6 +10,9 @@ export interface Company {
   email: string | null
   phone: string | null
   address: string | null
+  /** WhatsApp: proprietário (normalizado para validação webhook). */
+  owner_whatsapp_normalized?: string | null
+  owner_whatsapp_display?: string | null
   created_at: string
   updated_at: string
 }

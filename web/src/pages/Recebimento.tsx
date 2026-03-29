@@ -16,10 +16,27 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Pagination, PAGE_SIZE } from "@/components/Pagination";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Recebimento } from "@/types/recebimento";
+import { toast } from "sonner";
 import { Check, PackageCheck, PackageX, Share2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -29,8 +46,12 @@ interface ItemStatus {
   status: "received" | "not_received";
 }
 
+type CompanyMemberRow = { id: string; name: string };
+
 export function Recebimento() {
-  const { currentCompany } = useCompany();
+  const { currentCompany, currentRole } = useCompany();
+  const canAssignShare =
+    currentRole === "owner" || currentRole === "gestor";
   const [recebimentos, setRecebimentos] = useState<Recebimento[]>([]);
   const [recebimentosCount, setRecebimentosCount] = useState(0);
   const [recebimentosPage, setRecebimentosPage] = useState(1);
@@ -43,8 +64,20 @@ export function Recebimento() {
   );
   const [itemStatuses, setItemStatuses] = useState<ItemStatus[]>([]);
 
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<Recebimento | null>(null);
+  const [shareMemberId, setShareMemberId] = useState<string>("");
+  const [companyMembers, setCompanyMembers] = useState<CompanyMemberRow[]>(
+    [],
+  );
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [savingShare, setSavingShare] = useState(false);
+
   const fetchRecebimentos = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!currentCompany?.id) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data: expensesData } = await supabase
       .from("expenses")
@@ -97,9 +130,43 @@ export function Recebimento() {
         return;
       }
     }
-    const { data, count } = await query
+    const { data, count, error } = await query
       .range((recebimentosPage - 1) * PAGE_SIZE, recebimentosPage * PAGE_SIZE - 1);
-    setRecebimentos((data ?? []) as Recebimento[]);
+    if (error) {
+      toast.error(
+        error.message.includes("assigned_company_member")
+          ? "Atualize o banco (migration recebimento) ou recarregue em instantes."
+          : "Erro ao carregar recebimentos: " + error.message,
+      );
+      setRecebimentos([]);
+      setRecebimentosCount(0);
+      setLoading(false);
+      return;
+    }
+    let rows = (data ?? []) as Recebimento[];
+    const memberIds = [
+      ...new Set(
+        rows
+          .map((r) => r.assigned_company_member_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (memberIds.length > 0) {
+      const { data: mems } = await supabase
+        .from("company_members")
+        .select("id, name")
+        .in("id", memberIds);
+      const map = new Map(
+        (mems ?? []).map((m) => [m.id, { id: m.id, name: m.name }]),
+      );
+      rows = rows.map((r) => ({
+        ...r,
+        assigned_member: r.assigned_company_member_id
+          ? map.get(r.assigned_company_member_id) ?? null
+          : null,
+      }));
+    }
+    setRecebimentos(rows);
     setRecebimentosCount(count ?? 0);
     setLoading(false);
   }, [currentCompany, debouncedSearch, recebimentosPage]);
@@ -120,11 +187,75 @@ export function Recebimento() {
     load();
   }, [detailRecebimento?.id]);
 
-  const shareLink = async (r: Recebimento) => {
-    const url = `${window.location.origin}/confirmar-recebimento/${r.token}`;
+  const openShareDialog = (r: Recebimento) => {
+    setShareTarget(r);
+    setShareMemberId(r.assigned_company_member_id ?? "");
+    setShareDialogOpen(true);
+  };
+
+  useEffect(() => {
+    if (!shareDialogOpen || !currentCompany?.id) return;
+    let cancelled = false;
+    setLoadingMembers(true);
+    void (async () => {
+      const { data: members, error } = await supabase
+        .from("company_members")
+        .select("id, name")
+        .eq("company_id", currentCompany.id)
+        .eq("is_active", true)
+        .order("name");
+      if (cancelled) return;
+      setLoadingMembers(false);
+      if (error) {
+        toast.error("Não foi possível carregar os membros.");
+        setCompanyMembers([]);
+        return;
+      }
+      setCompanyMembers((members as CompanyMemberRow[] | null) ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shareDialogOpen, currentCompany?.id]);
+
+  const copyShareLink = async () => {
+    if (!shareTarget || !currentCompany?.id) return;
+    if (!shareMemberId) {
+      toast.error("Selecione o membro de referência para este recebimento.");
+      return;
+    }
+    setSavingShare(true);
+    const { data: res, error } = await supabase.rpc(
+      "set_recebimento_assigned_member",
+      {
+        p_recebimento_id: shareTarget.id,
+        p_company_member_id: shareMemberId,
+      },
+    );
+    setSavingShare(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    const out = res as { success?: boolean; error?: string };
+    if (!out?.success) {
+      toast.error(
+        out?.error === "Sem permissão"
+          ? "Apenas proprietário ou gestor podem vincular o membro."
+          : out?.error ?? "Não foi possível salvar o vínculo.",
+      );
+      return;
+    }
+    const url = `${window.location.origin}/confirmar-recebimento/${shareTarget.token}`;
     await navigator.clipboard.writeText(url);
-    setCopiedId(r.id);
+    setCopiedId(shareTarget.id);
     setTimeout(() => setCopiedId(null), 2000);
+    toast.success(
+      "Link copiado. Qualquer pessoa com o link pode confirmar; o membro é só referência.",
+    );
+    setShareDialogOpen(false);
+    setShareTarget(null);
+    void fetchRecebimentos();
   };
 
   const formatCurrency = (v: number) =>
@@ -147,8 +278,8 @@ export function Recebimento() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Recebimento</h1>
         <p className="text-muted-foreground">
-          Confirme o recebimento de mercadorias – compartilhe o link com o
-          operador
+          Ao compartilhar o link, você pode associar um membro da empresa ao
+          recebimento (referência). Qualquer pessoa com o link pode confirmar.
         </p>
       </div>
 
@@ -159,8 +290,9 @@ export function Recebimento() {
             Cards de recebimento
           </CardTitle>
           <CardDescription>
-            Cada despesa gera um card. Compartilhe o link para o operador
-            validar os itens ao receber.
+            Cada despesa gera um card. Use &quot;Compartilhar link&quot; para
+            vincular um membro (referência) e copiar o endereço (proprietário ou
+            gestor).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -257,6 +389,12 @@ export function Recebimento() {
                         <p className="text-sm text-muted-foreground mt-1">
                           {formatDate(r.created_at)} • {items.length} item(ns) •{" "}
                           {formatCurrency(total)}
+                          {r.assigned_company_member_id && (
+                            <span className="block sm:inline sm:ml-1 mt-0.5 sm:mt-0 text-foreground/90">
+                              • Membro (ref.):{" "}
+                              {r.assigned_member?.name?.trim() || "—"}
+                            </span>
+                          )}
                           {hasNotReceived && (
                             <span className="text-amber-600 dark:text-amber-500 font-medium ml-1">
                               • Teve itens não recebidos
@@ -269,7 +407,13 @@ export function Recebimento() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => shareLink(r)}
+                            disabled={!canAssignShare}
+                            title={
+                              !canAssignShare
+                                ? "Apenas proprietário ou gestor podem vincular um membro ao link"
+                                : undefined
+                            }
+                            onClick={() => openShareDialog(r)}
                           >
                             {copiedId === r.id ? (
                               <>
@@ -478,6 +622,79 @@ export function Recebimento() {
           })()}
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={shareDialogOpen}
+        onOpenChange={(open) => {
+          setShareDialogOpen(open);
+          if (!open) setShareTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Compartilhar link de recebimento</DialogTitle>
+            <DialogDescription>
+              Associe um membro cadastrado na empresa a este recebimento (só
+              referência para relatórios). Qualquer pessoa com o link pode
+              confirmar o recebimento.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="share-member">Membro de referência</Label>
+              <Select
+                value={shareMemberId || undefined}
+                onValueChange={setShareMemberId}
+                disabled={loadingMembers}
+              >
+                <SelectTrigger id="share-member" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      loadingMembers
+                        ? "Carregando membros…"
+                        : "Selecione um membro"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {companyMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name?.trim() || m.id.slice(0, 8) + "…"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!loadingMembers && companyMembers.length === 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-500">
+                  Não há membros cadastrados em Configurações. Cadastre membros
+                  para poder vincular ao recebimento.
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShareDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void copyShareLink()}
+              disabled={
+                savingShare ||
+                loadingMembers ||
+                companyMembers.length === 0 ||
+                !shareMemberId
+              }
+            >
+              {savingShare ? "Salvando…" : "Copiar link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

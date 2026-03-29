@@ -20,6 +20,8 @@ import { Fornecedores } from '@/pages/Fornecedores'
 import { Produtos } from '@/pages/Produtos'
 import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
 import { ConfirmarRecebimento } from '@/pages/ConfirmarRecebimento'
+import { ConfiguracoesLayout } from '@/components/ConfiguracoesLayout'
+import { ConfiguracoesUsuariosMembros } from '@/pages/ConfiguracoesUsuariosMembros'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -50,6 +52,10 @@ function AuthenticatedLayout() {
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="relatorios" element={<Relatorios />} />
+          <Route path="configuracoes" element={<ConfiguracoesLayout />}>
+            <Route index element={<Navigate to="usuarios-membros" replace />} />
+            <Route path="usuarios-membros" element={<ConfiguracoesUsuariosMembros />} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
       </Routes>
