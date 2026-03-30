@@ -206,12 +206,6 @@ export function ConfirmarRecebimento() {
     setData((prev) => (prev ? { ...prev, status: "received" } : null));
   };
 
-  const formatCurrency = (v: number) =>
-    new Intl.NumberFormat("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    }).format(v);
-
   if (loading) {
     return (
       <RecebimentoPageShell>
