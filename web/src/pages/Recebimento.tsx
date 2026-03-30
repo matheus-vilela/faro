@@ -72,6 +72,29 @@ export function Recebimento() {
   );
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [savingShare, setSavingShare] = useState(false);
+  const [openingOperadorId, setOpeningOperadorId] = useState<string | null>(
+    null,
+  );
+
+  const openOperadorShortLink = async (r: { id: string }) => {
+    setOpeningOperadorId(r.id);
+    const { data: shortSlug, error: slugErr } = await supabase.rpc(
+      "ensure_recebimento_short_slug",
+      { p_recebimento_id: r.id },
+    );
+    setOpeningOperadorId(null);
+    if (slugErr || !shortSlug) {
+      toast.error(
+        slugErr?.message ?? "Não foi possível abrir o link. Tente novamente.",
+      );
+      return;
+    }
+    window.open(
+      `${window.location.origin}/s/${shortSlug}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
 
   const fetchRecebimentos = useCallback(async () => {
     if (!currentCompany?.id) {
@@ -246,7 +269,18 @@ export function Recebimento() {
       );
       return;
     }
-    const url = `${window.location.origin}/confirmar-recebimento/${shareTarget.token}`;
+    const { data: shortSlug, error: slugErr } = await supabase.rpc(
+      "ensure_recebimento_short_slug",
+      { p_recebimento_id: shareTarget.id },
+    );
+    if (slugErr || !shortSlug) {
+      toast.error(
+        slugErr?.message ??
+          "Não foi possível gerar o link curto. Tente novamente.",
+      );
+      return;
+    }
+    const url = `${window.location.origin}/s/${shortSlug}`;
     await navigator.clipboard.writeText(url);
     setCopiedId(shareTarget.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -434,14 +468,12 @@ export function Recebimento() {
                           </Link>
                         </Button>
                         {!isReceived && (
-                          <Button asChild size="sm">
-                            <a
-                              href={`/confirmar-recebimento/${r.token}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              Abrir link do operador
-                            </a>
+                          <Button
+                            size="sm"
+                            disabled={openingOperadorId === r.id}
+                            onClick={() => void openOperadorShortLink(r)}
+                          >
+                            Abrir link do operador
                           </Button>
                         )}
                       </div>

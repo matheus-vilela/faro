@@ -14,6 +14,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  *
  * Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  * Opcional: ZAPI_WEBHOOK_SECRET
+ * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
+ * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
  */
 
 // --- Tipos (payload Z-API) -------------------------------------------------
@@ -42,6 +44,8 @@ type ZApiReceivedCallbackPayload = {
     url?: string;
     thumbnailUrl?: string;
   };
+  /** Alguns callbacks trazem texto no raiz */
+  message?: string;
   [key: string]: unknown;
 };
 
@@ -54,6 +58,9 @@ type WebhookAuthSuccess = {
   /** Linha da instância Z-API (igual para todas as empresas); só informativo. */
   connectedNormalized: string | null;
   role: "owner" | "member";
+  /** `company_members.id` quando o remetente é membro; `null` quando é só owner. */
+  companyMemberId: string | null;
+  lookupVariants: string[];
 };
 
 type WebhookAuthFailure = {
@@ -201,6 +208,28 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Logs estruturados para validar o fluxo no painel (grep `whatsapp-flow`).
+ * `flowId` correlaciona recebimento → processamento → envio Z-API.
+ */
+function flowLog(phase: string, detail: Record<string, unknown>): void {
+  console.log(
+    "[whatsapp-flow]",
+    JSON.stringify({ phase, ts: new Date().toISOString(), ...detail }),
+  );
+}
+
+function correlationIdFromPayload(
+  payload: ZApiReceivedCallbackPayload,
+): string {
+  const mid = payload.messageId;
+  if (typeof mid === "string" && mid.trim()) return mid.trim();
+  if (typeof payload.momment === "number") {
+    return `momment_${payload.momment}`;
+  }
+  return "sem_id";
+}
+
 function httpStatusForAuthFailure(auth: WebhookAuthResult): number {
   if (auth.authorized) return 200;
   switch (auth.code) {
@@ -324,7 +353,7 @@ async function authorizeIncomingMessage(
 
   const { data: memberRows, error: memErr } = await supabase
     .from("company_members")
-    .select("company_id")
+    .select("company_id, id")
     .in("phone_normalized", lookupVariants)
     .eq("is_active", true);
 
@@ -389,11 +418,14 @@ async function authorizeIncomingMessage(
 
   const companyId = [...companyIds][0];
   const isOwner = (ownerCompanies ?? []).some((c) => c.id === companyId);
+  const memberRow = (memberRows ?? []).find((r) => r.company_id === companyId);
+  const companyMemberId = isOwner ? null : (memberRow?.id ?? null);
 
   console.log(
     "[received-whatsapp-message] VALIDAÇÃO: VÁLIDA — remetente autorizado.",
     {
       companyId,
+      companyMemberId,
       papel: isOwner
         ? "proprietário (companies.owner_whatsapp_normalized)"
         : "membro ativo (company_members)",
@@ -410,7 +442,597 @@ async function authorizeIncomingMessage(
     senderNormalized: senderN,
     connectedNormalized: connectedLog,
     role: isOwner ? "owner" : "member",
+    companyMemberId,
+    lookupVariants,
   };
+}
+
+// --- Texto: lista de recebimentos + menu numérico (Z-API) ------------------
+
+const MENU_TTL_MS = 24 * 60 * 60 * 1000;
+
+function extractTextMessage(
+  payload: ZApiReceivedCallbackPayload,
+): string | null {
+  const t = payload.text?.message;
+  if (typeof t === "string" && t.trim()) return t.trim();
+  const m = payload.message;
+  if (typeof m === "string" && m.trim()) return m.trim();
+  return null;
+}
+
+function normalizeForIntent(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+function isRecebimentosListIntent(text: string): boolean {
+  const raw = text.trim();
+  if (/^\d{1,2}$/.test(raw)) return false;
+  const n = normalizeForIntent(text);
+  const keywords = [
+    "recebimento",
+    "recebimentos",
+    "lista de recebimento",
+    "lista de recebimentos",
+    "nota de recebimento",
+    "notas de recebimento",
+    "notas recebimento",
+    "minhas notas",
+    "conferir recebimento",
+    "validar recebimento",
+    "pendente",
+    "pendentes",
+  ];
+  if (keywords.some((k) => n.includes(k))) return true;
+  if (n.includes("receb") && (n.includes("nota") || n.includes("lista"))) {
+    return true;
+  }
+  return false;
+}
+
+function parseMenuOptionNumber(text: string): number | null {
+  const t = text.trim();
+  if (!/^\d{1,2}$/.test(t)) return null;
+  const n = parseInt(t, 10);
+  if (n >= 1 && n <= 20) return n;
+  return null;
+}
+
+type RecebimentoWhatsappRow = {
+  id: string;
+  token: string;
+  assigned_company_member_id: string | null;
+  expenses: {
+    supplier_name: string | null;
+    display_name: string | null;
+    invoice_number: string | null;
+    company_id: string;
+  } | null;
+};
+
+async function fetchPendingRecebimentosForWhatsapp(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  companyMemberId: string | null,
+  isOwner: boolean,
+): Promise<{ id: string; token: string; label: string }[]> {
+  const { data, error } = await supabase
+    .from("recebimentos")
+    .select(
+      `
+      id,
+      token,
+      assigned_company_member_id,
+      expenses ( supplier_name, display_name, invoice_number, company_id )
+    `,
+    )
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  if (error) {
+    console.error(
+      "[received-whatsapp-message] fetch recebimentos:",
+      error.message,
+    );
+    return [];
+  }
+
+  const rows = (data ?? []) as unknown as RecebimentoWhatsappRow[];
+  const filtered = rows.filter((r) => {
+    const exp = r.expenses;
+    if (!exp || exp.company_id !== companyId) return false;
+    if (isOwner) return true;
+    if (companyMemberId && r.assigned_company_member_id === companyMemberId) {
+      return true;
+    }
+    return false;
+  });
+
+  return filtered.slice(0, 15).map((r) => {
+    const exp = r.expenses!;
+    const supplier =
+      exp.display_name?.trim() || exp.supplier_name?.trim() || "Fornecedor";
+    const nf = exp.invoice_number?.trim();
+    const label = nf ? `${supplier} — NF ${nf}` : `${supplier} — sem NF`;
+    return { id: r.id, token: r.token, label };
+  });
+}
+
+async function saveMenuState(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  senderPhone: string,
+  recebimentoIds: string[],
+): Promise<void> {
+  await supabase
+    .from("whatsapp_recebimento_menu")
+    .delete()
+    .eq("sender_phone_normalized", senderPhone)
+    .eq("company_id", companyId);
+
+  const { error } = await supabase.from("whatsapp_recebimento_menu").insert({
+    company_id: companyId,
+    sender_phone_normalized: senderPhone,
+    recebimento_ids: recebimentoIds,
+  });
+  if (error) {
+    console.error("[received-whatsapp-message] saveMenuState:", error.message);
+  }
+}
+
+async function loadLatestMenu(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  senderPhone: string,
+): Promise<string[] | null> {
+  const { data, error } = await supabase
+    .from("whatsapp_recebimento_menu")
+    .select("recebimento_ids, created_at")
+    .eq("company_id", companyId)
+    .eq("sender_phone_normalized", senderPhone)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.recebimento_ids?.length) return null;
+  const age = Date.now() - new Date(data.created_at as string).getTime();
+  if (age > MENU_TTL_MS) return null;
+  return data.recebimento_ids as string[];
+}
+
+async function getRecebimentoTokenById(
+  supabase: ReturnType<typeof createClient>,
+  recebimentoId: string,
+  companyId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("recebimentos")
+    .select("token, expenses ( company_id )")
+    .eq("id", recebimentoId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const row = data as {
+    token: string;
+    expenses: { company_id: string } | null;
+  };
+  if (row.expenses?.company_id !== companyId) return null;
+  return row.token;
+}
+
+function randomShortSlug(len = 8): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/** Cria ou reutiliza slug em `recebimento_short_links` (service role). */
+async function ensureRecebimentoShortSlug(
+  supabase: ReturnType<typeof createClient>,
+  recebimentoId: string,
+  tokenUuid: string,
+): Promise<string | null> {
+  const { data: existing } = await supabase
+    .from("recebimento_short_links")
+    .select("slug")
+    .eq("recebimento_id", recebimentoId)
+    .maybeSingle();
+
+  const existingSlug = existing as { slug?: string } | null;
+  if (existingSlug?.slug && typeof existingSlug.slug === "string") {
+    return existingSlug.slug;
+  }
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const slug = randomShortSlug(8);
+    const { error } = await supabase.from("recebimento_short_links").insert({
+      slug,
+      recebimento_id: recebimentoId,
+      token: tokenUuid,
+    });
+    if (!error) return slug;
+    const code = (error as { code?: string }).code;
+    if (code !== "23505") {
+      console.error(
+        "[received-whatsapp-message] ensureRecebimentoShortSlug:",
+        error.message,
+      );
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Garante apenas dígitos (E.164 BR) para o campo `phone` da Z-API. */
+function normalizePhoneForZApiSend(phoneDigits: string): string {
+  return stripToDigits(phoneDigits);
+}
+
+export type SendWhatsappMessageResult =
+  | { ok: true }
+  | { ok: false; error: string; code: "zapi_not_configured" | "zapi_http" };
+
+/**
+ * Envia mensagem de texto ao WhatsApp via Z-API (`send-text`).
+ * Documentação: https://developer.z-api.io/message/send-message-text
+ *
+ * Secrets: ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN (header Client-Token)
+ */
+async function sendWhatsappMessage(
+  phoneDigits: string,
+  message: string,
+  logContext?: string,
+  flowId?: string,
+): Promise<SendWhatsappMessageResult> {
+  const phone = normalizePhoneForZApiSend(phoneDigits);
+  if (!phone) {
+    console.warn(
+      "[received-whatsapp-message] sendWhatsappMessage: telefone vazio",
+      logContext ?? "",
+    );
+    flowLog("envio_resposta", {
+      flowId: flowId ?? null,
+      context: logContext ?? "sem_contexto",
+      ok: false,
+      code: "phone_empty",
+    });
+    return { ok: false, error: "phone_empty", code: "zapi_http" };
+  }
+
+  const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
+  const instanceToken = Deno.env.get("ZAPI_INSTANCE_TOKEN");
+  const clientToken = Deno.env.get("ZAPI_CLIENT_TOKEN");
+  if (!instanceId || !instanceToken || !clientToken) {
+    console.warn(
+      "[received-whatsapp-message] Z-API não configurada (ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN)",
+      logContext ?? "",
+    );
+    flowLog("envio_resposta", {
+      flowId: flowId ?? null,
+      context: logContext ?? "sem_contexto",
+      ok: false,
+      code: "zapi_not_configured",
+    });
+    return {
+      ok: false,
+      error: "zapi_not_configured",
+      code: "zapi_not_configured",
+    };
+  }
+
+  const url = `https://api.z-api.io/instances/${instanceId}/token/${instanceToken}/send-text`;
+
+  console.log(
+    "[received-whatsapp-message] sendWhatsappMessage → Z-API",
+    logContext ? { context: logContext, flowId: flowId ?? null } : {},
+  );
+  flowLog("envio_zapi_inicio", {
+    flowId: flowId ?? null,
+    context: logContext ?? "sem_contexto",
+    phoneLen: phone.length,
+    messageLen: message.length,
+  });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Client-Token": clientToken,
+    },
+    body: JSON.stringify({ phone, message }),
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    console.error(
+      "[received-whatsapp-message] sendWhatsappMessage falhou (HTTP):",
+      res.status,
+      t,
+      logContext ?? "",
+    );
+    flowLog("envio_resposta", {
+      flowId: flowId ?? null,
+      context: logContext ?? "sem_contexto",
+      ok: false,
+      code: "zapi_http",
+      httpStatus: res.status,
+    });
+    return { ok: false, error: t, code: "zapi_http" };
+  }
+
+  console.log(
+    "[received-whatsapp-message] sendWhatsappMessage OK",
+    logContext ? { context: logContext } : {},
+  );
+  flowLog("envio_resposta", {
+    flowId: flowId ?? null,
+    context: logContext ?? "sem_contexto",
+    ok: true,
+  });
+  return { ok: true };
+}
+
+/** Monta o texto da listagem de recebimentos pendentes (menu numerado). */
+function buildRecebimentosListMessage(items: { label: string }[]): string {
+  const lines = items.map((it, i) => `${i + 1}) ${it.label}`);
+  return [
+    "*Recebimentos pendentes*",
+    "",
+    ...lines,
+    "",
+    "Responda *somente com o número* da opção (ex.: 1) para receber o link de confirmação.",
+  ].join("\n");
+}
+
+/**
+ * Envia ao remetente a listagem de recebimentos (formato menu) pela Z-API.
+ * Deve ser chamado após `saveMenuState` com os mesmos `items` (ordem = opções).
+ */
+async function sendRecebimentosListToWhatsapp(
+  phoneDigits: string,
+  items: { label: string }[],
+  flowId?: string,
+): Promise<SendWhatsappMessageResult> {
+  const body = buildRecebimentosListMessage(items);
+  return sendWhatsappMessage(
+    phoneDigits,
+    body,
+    "recebimentos_lista_menu",
+    flowId,
+  );
+}
+
+function publicAppBaseUrl(): string {
+  const u = Deno.env.get("PUBLIC_APP_URL") ?? Deno.env.get("SITE_URL") ?? "";
+  return u.replace(/\/$/, "");
+}
+
+/** Base pública com esquema (evita `https://https://...` se a env já incluir https). */
+function publicAppAbsoluteBase(): string {
+  const raw = publicAppBaseUrl();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, "");
+  return `https://${raw.replace(/\/$/, "")}`;
+}
+
+async function handleRecebimentoTextFlow(
+  payload: ZApiReceivedCallbackPayload,
+  auth: WebhookAuthSuccess,
+  supabase: ReturnType<typeof createClient>,
+): Promise<boolean> {
+  const flowId = correlationIdFromPayload(payload);
+
+  if (payload.isGroup) {
+    flowLog("processamento_recebimento", {
+      flowId,
+      companyId: auth.companyId,
+      ignorado: true,
+      motivo: "grupo",
+    });
+    return false;
+  }
+
+  const text = extractTextMessage(payload);
+  if (!text) {
+    flowLog("processamento_recebimento", {
+      flowId,
+      companyId: auth.companyId,
+      ignorado: true,
+      motivo: "sem_texto",
+    });
+    return false;
+  }
+
+  flowLog("processamento_recebimento", {
+    flowId,
+    companyId: auth.companyId,
+    role: auth.role,
+    textoLen: text.length,
+    textoPreview: text.length > 80 ? `${text.slice(0, 80)}…` : text,
+  });
+
+  const isOwner = auth.role === "owner";
+  const companyMemberId = auth.companyMemberId;
+
+  const opt = parseMenuOptionNumber(text);
+  if (opt !== null) {
+    flowLog("menu_numerico", { flowId, companyId: auth.companyId, opcao: opt });
+    const ids = await loadLatestMenu(
+      supabase,
+      auth.companyId,
+      auth.senderNormalized,
+    );
+    flowLog("menu_estado_db", {
+      flowId,
+      opcoesNoMenu: ids?.length ?? 0,
+      temEstado: !!(ids && ids.length > 0),
+    });
+    if (!ids || ids.length === 0) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        "Não encontrei um menu de recebimentos recente. Envie uma mensagem pedindo *recebimentos* ou *lista de recebimentos* para listar as opções.",
+        "recebimento_menu_sem_estado",
+        flowId,
+      );
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "menu_sem_estado",
+        handled: true,
+      });
+      return true;
+    }
+    const idx = opt - 1;
+    if (idx < 0 || idx >= ids.length) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        `Opção inválida. Responda com um número de 1 a ${ids.length}.`,
+        "recebimento_opcao_invalida",
+        flowId,
+      );
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "menu_opcao_invalida",
+        handled: true,
+      });
+      return true;
+    }
+    const rid = ids[idx];
+    const token = await getRecebimentoTokenById(supabase, rid, auth.companyId);
+    if (!token) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        "Não foi possível encontrar esse recebimento. Peça a lista novamente.",
+        "recebimento_token_nao_encontrado",
+        flowId,
+      );
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "menu_token_ausente",
+        handled: true,
+      });
+      return true;
+    }
+    const base = publicAppAbsoluteBase();
+    if (!base) {
+      console.error(
+        "[received-whatsapp-message] PUBLIC_APP_URL / SITE_URL ausente",
+      );
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        "Link indisponível no momento (configuração do servidor). Tente pelo painel do Faro.",
+        "recebimento_link_publico_ausente",
+        flowId,
+      );
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "link_publico_ausente",
+        handled: true,
+      });
+      return true;
+    }
+    const slug = await ensureRecebimentoShortSlug(supabase, rid, token);
+    const link = slug
+      ? `${base}/s/${slug}`
+      : `${base}/c/${token}`;
+    if (!slug) {
+      console.warn(
+        "[received-whatsapp-message] slug curto indisponível; usando /c/",
+        { flowId, recebimentoId: rid },
+      );
+    } else {
+      flowLog("link_curto_slug", { flowId, slug, recebimentoId: rid });
+    }
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      `Aqui está o link para confirmar o recebimento:\n\n${link}\n\nAbra no navegador para conferir os itens.`,
+      "recebimento_link_confirmacao",
+      flowId,
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "menu_link_enviado",
+      handled: true,
+      recebimentoId: rid,
+    });
+    return true;
+  }
+
+  if (!isRecebimentosListIntent(text)) {
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "nao_e_intencao_recebimentos",
+      handled: false,
+    });
+    return false;
+  }
+
+  flowLog("intencao_lista_recebimentos", { flowId, companyId: auth.companyId });
+
+  const items = await fetchPendingRecebimentosForWhatsapp(
+    supabase,
+    auth.companyId,
+    companyMemberId,
+    isOwner,
+  );
+
+  flowLog("lista_recebimentos_query", {
+    flowId,
+    pendentes: items.length,
+    isOwner,
+  });
+
+  if (items.length === 0) {
+    console.log(
+      "[received-whatsapp-message] Pedido de lista de recebimentos; nenhum pendente.",
+    );
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      isOwner
+        ? "Não há recebimentos pendentes na empresa no momento."
+        : "Não há recebimentos pendentes vinculados ao seu número no momento.",
+      "recebimento_lista_vazia",
+      flowId,
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "lista_vazia",
+      handled: true,
+    });
+    return true;
+  }
+
+  await saveMenuState(
+    supabase,
+    auth.companyId,
+    auth.senderNormalized,
+    items.map((x) => x.id),
+  );
+  flowLog("menu_persistido", {
+    flowId,
+    idsSalvos: items.length,
+  });
+
+  const sent = await sendRecebimentosListToWhatsapp(
+    auth.senderNormalized,
+    items,
+    flowId,
+  );
+  if (!sent.ok) {
+    console.error(
+      "[received-whatsapp-message] Falha ao enviar lista via Z-API",
+      sent,
+    );
+  }
+  flowLog("processamento_fim", {
+    flowId,
+    branch: "lista_menu_enviada",
+    handled: true,
+    envioOk: sent.ok,
+    code: sent.ok ? undefined : sent.code,
+  });
+  return true;
 }
 
 // --- Servidor HTTP ---------------------------------------------------------
@@ -471,10 +1093,27 @@ Deno.serve(async (req) => {
     JSON.stringify(payload, null, 2),
   );
 
+  const flowId = correlationIdFromPayload(payload);
+  const textoBruto = extractTextMessage(payload);
+  flowLog("webhook_recebido", {
+    flowId,
+    type: payload.type ?? null,
+    fromMe: payload.fromMe === true,
+    isGroup: payload.isGroup === true,
+    textoLen: textoBruto?.length ?? 0,
+    webhookAuth: Boolean(secret),
+  });
+
   const auth = await authorizeIncomingMessage(payload);
 
   if (!auth.authorized) {
     const status = httpStatusForAuthFailure(auth);
+    flowLog("webhook_autorizacao", {
+      flowId,
+      ok: false,
+      code: auth.code,
+      httpStatus: status,
+    });
     console.log(
       "[received-whatsapp-message] Resposta HTTP: não processado (validação falhou).",
       { status, code: auth.code },
@@ -490,19 +1129,45 @@ Deno.serve(async (req) => {
     );
   }
 
+  flowLog("webhook_autorizacao", {
+    flowId,
+    ok: true,
+    companyId: auth.companyId,
+    role: auth.role,
+  });
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  let recebimentoFlow = false;
+  if (supabaseUrl && serviceKey) {
+    const supabase = createClient(supabaseUrl, serviceKey);
+    recebimentoFlow = await handleRecebimentoTextFlow(payload, auth, supabase);
+  } else {
+    flowLog("webhook_processamento", {
+      flowId,
+      recebimentoFlow: false,
+      motivo: "supabase_env_ausente",
+    });
+  }
+
+  flowLog("webhook_resposta_http", {
+    flowId,
+    companyId: auth.companyId,
+    recebimentoFlow,
+    status: 200,
+  });
+
   console.log(
     "[received-whatsapp-message] Resposta HTTP: processado (validação já logada acima).",
-    { companyId: auth.companyId, role: auth.role },
+    {
+      companyId: auth.companyId,
+      role: auth.role,
+      recebimentoFlow,
+    },
   );
 
   return jsonResponse({
     success: true,
     processed: true,
-    companyId: auth.companyId,
-    role: auth.role,
-    senderNormalized: auth.senderNormalized,
-    connectedNormalized: auth.connectedNormalized,
-    messageId: payload.messageId ?? null,
-    type: payload.type ?? null,
   });
 });

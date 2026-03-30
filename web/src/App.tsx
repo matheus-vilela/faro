@@ -20,6 +20,7 @@ import { Fornecedores } from '@/pages/Fornecedores'
 import { Produtos } from '@/pages/Produtos'
 import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
 import { ConfirmarRecebimento } from '@/pages/ConfirmarRecebimento'
+import { RedirectRecebimentoSlug } from '@/pages/RedirectRecebimentoSlug'
 import { ConfiguracoesLayout } from '@/components/ConfiguracoesLayout'
 import { ConfiguracoesUsuariosMembros } from '@/pages/ConfiguracoesUsuariosMembros'
 
@@ -71,6 +72,10 @@ function AppRoutes() {
       <Route path="/register" element={<Register />} />
       <Route path="/atualizar-pagamento/:token" element={<AtualizarPagamento />} />
       <Route path="/confirmar-recebimento/:token" element={<ConfirmarRecebimento />} />
+      {/* Link curto (mesmo destino que /confirmar-recebimento/:token) */}
+      <Route path="/c/:token" element={<ConfirmarRecebimento />} />
+      {/* Slug → redirect para /c/:token */}
+      <Route path="/s/:slug" element={<RedirectRecebimentoSlug />} />
       <Route
         path="/*"
         element={
