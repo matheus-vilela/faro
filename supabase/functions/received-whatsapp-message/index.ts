@@ -19,8 +19,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
  *
- * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (ajuda),
- * *contas a pagar* (somente proprietário: vencimentos nos próximos 7 dias).
+ * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (lista de ajuda).
+ * Proprietário também vê *contas a pagar* na ajuda e pode usá-lo (7 dias).
+ * Membro ativo: *comandos* só lista *lista* e *comandos* (sem *contas a pagar*).
  * Número 1–20 após *lista* escolhe opção do último menu.
  */
 
@@ -620,16 +621,21 @@ async function buildContasAPagarWhatsappMessage(
   return `${header}${blocks.join("\n\n")}${footer}`;
 }
 
-function buildComandosWhatsappMessage(): string {
-  return [
+function buildComandosWhatsappMessage(isOwner: boolean): string {
+  const lines = [
     "*Comandos disponíveis*",
     "",
     "*lista* — mostra os recebimentos pendentes.",
     "",
     "*comandos* — mostra esta lista de comandos.",
-    "",
-    "*contas a pagar* — contas com vencimento nos próximos 7 dias (só proprietário).",
-  ].join("\n");
+  ];
+  if (isOwner) {
+    lines.push(
+      "",
+      "*contas a pagar* — contas com vencimento nos próximos 7 dias.",
+    );
+  }
+  return lines.join("\n");
 }
 
 function parseMenuOptionNumber(text: string): number | null {
@@ -1102,7 +1108,7 @@ async function handleRecebimentoTextFlow(
   if (isComandosCommand(text)) {
     await sendWhatsappMessage(
       auth.senderNormalized,
-      buildComandosWhatsappMessage(),
+      buildComandosWhatsappMessage(isOwner),
       "recebimento_comandos_ajuda",
       flowId,
     );
@@ -1118,7 +1124,7 @@ async function handleRecebimentoTextFlow(
     if (!isOwner) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "O comando *contas a pagar* só está disponível para o proprietário da empresa.",
+        "Este comando não está disponível para o seu perfil. Envie *comandos* para ver o que você pode usar.",
         "contas_a_pagar_somente_owner",
         flowId,
       );

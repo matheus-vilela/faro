@@ -173,7 +173,7 @@ function AppLayoutContent() {
                 width={128}
                 height={64}
                 aria-hidden
-                className="h-12 w-28 shrink-0 object-contain"
+                className="h-8 w-28 shrink-0 object-contain"
               />
             )}
           </Link>

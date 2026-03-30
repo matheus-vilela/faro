@@ -232,7 +232,7 @@ export function Boletos() {
         </div>
         <Button
           onClick={() => setBoletoSheetOpen(true)}
-          className="h-10 w-full shrink-0 sm:mt-0.5 sm:w-auto"
+          className="h-10 w-full shrink-0 sm:mt-0.5 sm:w-auto "
         >
           <Plus className="h-4 w-4 mr-2" />
           Nova conta
