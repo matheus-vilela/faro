@@ -2,11 +2,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
-import {
-  MonthSelector,
-  getMonthRange,
-  type MonthYear,
-} from "@/components/MonthSelector";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { Pagination, PAGE_SIZE } from "@/components/Pagination";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Badge } from "@/components/ui/badge";
@@ -616,6 +613,12 @@ export function Despesas() {
         }
       />
 
+      <ReferencePeriodCard
+        value={period}
+        onChange={setPeriod}
+        description="Lista filtrada pelo mês de cadastro da despesa"
+      />
+
       <Sheet open={expenseSheetOpen} onOpenChange={setExpenseSheetOpen}>
         <SheetContent className="overflow-y-auto sm:max-w-xl">
           <SheetHeader>
@@ -880,13 +883,10 @@ export function Despesas() {
               Clique no ícone de boleto para vincular
             </CardDescription>
           </div>
-          <div className="flex items-center gap-4">
-            <MonthSelector value={period} onChange={setPeriod} />
-            <Button onClick={() => setExpenseSheetOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Nova despesa
-            </Button>
-          </div>
+          <Button onClick={() => setExpenseSheetOpen(true)} size="sm">
+            <Plus className="h-4 w-4 mr-1" />
+            Nova despesa
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">

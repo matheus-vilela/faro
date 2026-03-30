@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CreateProductSheet } from "@/components/CreateProductSheet";
+import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +34,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
-import { AlertTriangle, Package, Plus, PowerOff } from "lucide-react";
+import { AlertTriangle, FileSpreadsheet, Package, Plus, PowerOff } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 export function Produtos() {
@@ -49,6 +50,7 @@ export function Produtos() {
   );
   const [lowStockCount, setLowStockCount] = useState(0);
   const [productSheetOpen, setProductSheetOpen] = useState(false);
+  const [importSheetOpen, setImportSheetOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [stockName, setStockName] = useState("");
   const [stockQuantity, setStockQuantity] = useState("");
@@ -187,12 +189,23 @@ export function Produtos() {
       />
 
       {currentCompany?.id && (
-        <CreateProductSheet
-          open={productSheetOpen}
-          onOpenChange={setProductSheetOpen}
-          companyId={currentCompany.id}
-          onSuccess={() => fetchProducts()}
-        />
+        <>
+          <CreateProductSheet
+            open={productSheetOpen}
+            onOpenChange={setProductSheetOpen}
+            companyId={currentCompany.id}
+            onSuccess={() => fetchProducts()}
+          />
+          <ProductImportSheet
+            open={importSheetOpen}
+            onOpenChange={setImportSheetOpen}
+            companyId={currentCompany.id}
+            onSuccess={() => {
+              void fetchProducts();
+              void fetchLowStockCount();
+            }}
+          />
+        </>
       )}
 
       <Card>
@@ -206,10 +219,21 @@ export function Produtos() {
               Vincule itens das despesas aos produtos para atualizar o estoque
             </CardDescription>
           </div>
-          <Button onClick={() => setProductSheetOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            Novo produto
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setImportSheetOpen(true)}
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-1" />
+              Importar planilha
+            </Button>
+            <Button onClick={() => setProductSheetOpen(true)} size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              Novo produto
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">

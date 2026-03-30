@@ -3,11 +3,8 @@ import {
   type CalendarDayListPayload,
 } from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
-import {
-  MonthSelector,
-  getMonthRange,
-  type MonthYear,
-} from "@/components/MonthSelector";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -239,31 +236,11 @@ export function Boletos() {
         }
       />
 
-      <div className="rounded-xl w-fit border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm dark:from-primary/15 dark:via-primary/8">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-          <div className="flex shrink-0 items-center gap-3">
-            <div
-              className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-inner ring-1 ring-primary/20"
-              aria-hidden
-            >
-              <CalendarDays className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">
-                Período de referência
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Calendário e lista usam este mês
-              </p>
-            </div>
-          </div>
-          <MonthSelector
-            value={period}
-            onChange={setPeriod}
-            className="shrink-0 [&_button]:h-10 [&_button]:w-10 [&_button]:border-primary/35 [&_button]:bg-background [&_button]:shadow-sm [&_button]:hover:bg-primary/10 [&_span]:min-w-46 [&_span]:text-base [&_span]:font-semibold sm:[&_span]:min-w-52 sm:[&_span]:text-lg"
-          />
-        </div>
-      </div>
+      <ReferencePeriodCard
+        value={period}
+        onChange={setPeriod}
+        description="Calendário e lista usam este mês"
+      />
 
       <nav
         className="flex flex-wrap gap-2 border-b border-border pb-px"

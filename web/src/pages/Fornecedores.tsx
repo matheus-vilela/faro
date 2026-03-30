@@ -1,11 +1,8 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
-import {
-  MonthSelector,
-  getMonthRange,
-  type MonthYear,
-} from "@/components/MonthSelector";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import {
@@ -317,6 +314,12 @@ export function Fornecedores() {
         description="Cadastre fornecedores e gerencie as informações de pagamento"
       />
 
+      <ReferencePeriodCard
+        value={period}
+        onChange={setPeriod}
+        description="Fornecedores cadastrados no mês selecionado"
+      />
+
       {currentCompany?.id && (
         <CreateSupplierSheet
           open={supplierSheetOpen}
@@ -335,13 +338,10 @@ export function Fornecedores() {
               atualizar
             </CardDescription>
           </div>
-          <div className="flex items-center gap-4">
-            <MonthSelector value={period} onChange={setPeriod} />
-            <Button onClick={() => setSupplierSheetOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Novo fornecedor
-            </Button>
-          </div>
+          <Button onClick={() => setSupplierSheetOpen(true)} size="sm">
+            <Plus className="h-4 w-4 mr-1" />
+            Novo fornecedor
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">
