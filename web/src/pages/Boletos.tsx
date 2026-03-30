@@ -1,3 +1,7 @@
+import {
+  BoletosCalendar,
+  type CalendarDayListPayload,
+} from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import {
   MonthSelector,
@@ -24,9 +28,17 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Boleto, PaymentType } from "@/types/expense";
-import { Copy, ExternalLink, Plus } from "lucide-react";
+import {
+  CalendarDays,
+  Copy,
+  ExternalLink,
+  LayoutList,
+  Plus,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -39,6 +51,8 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
+type BoletosTab = "calendar" | "list";
+
 export function Boletos() {
   const { currentCompany } = useCompany();
   const navigate = useNavigate();
@@ -50,6 +64,11 @@ export function Boletos() {
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
+  const [activeTab, setActiveTab] = useState<BoletosTab>("calendar");
+
+  const [calendarBoletos, setCalendarBoletos] = useState<Boleto[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [boletosCount, setBoletosCount] = useState(0);
   const [boletosPage, setBoletosPage] = useState(1);
@@ -57,7 +76,27 @@ export function Boletos() {
   const debouncedSearch = useDebounce(boletosSearch, 300);
   const [loading, setLoading] = useState(true);
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
+  const [calendarDayList, setCalendarDayList] =
+    useState<CalendarDayListPayload | null>(null);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
+
+  const fetchCalendarBoletos = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    setCalendarLoading(true);
+    const { startIso, endIso } = getCalendarGridDateRange(
+      period.month,
+      period.year,
+    );
+    const { data } = await supabase
+      .from("boletos")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .gte("due_date", startIso)
+      .lte("due_date", endIso)
+      .order("due_date", { ascending: true });
+    setCalendarBoletos((data as Boleto[]) ?? []);
+    setCalendarLoading(false);
+  }, [currentCompany?.id, period.month, period.year]);
 
   const fetchBoletos = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -94,12 +133,25 @@ export function Boletos() {
   }, [debouncedSearch, period.month, period.year]);
 
   useEffect(() => {
-    fetchBoletos();
+    void fetchCalendarBoletos();
+  }, [fetchCalendarBoletos]);
+
+  useEffect(() => {
+    void fetchBoletos();
   }, [fetchBoletos]);
 
   useEffect(() => {
     if (expenseIdFromUrl) setBoletoSheetOpen(true);
   }, [expenseIdFromUrl]);
+
+  useEffect(() => {
+    if (activeTab !== "calendar") setCalendarDayList(null);
+  }, [activeTab]);
+
+  const refreshAll = useCallback(() => {
+    void fetchCalendarBoletos();
+    void fetchBoletos();
+  }, [fetchCalendarBoletos, fetchBoletos]);
 
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("pt-BR", {
@@ -133,105 +185,208 @@ export function Boletos() {
           companyId={currentCompany.id}
           expenseId={expenseIdFromUrl}
           onSuccess={() => {
-            fetchBoletos();
+            refreshAll();
             if (expenseIdFromUrl) navigate("/app/despesas");
           }}
         />
       )}
 
       <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Contas a pagar cadastradas</CardTitle>
-            <CardDescription>
-              Clique no boleto para ver o resumo
-            </CardDescription>
+        <CardHeader className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle>
+                {activeTab === "calendar"
+                  ? "Calendário de vencimentos"
+                  : "Lista de contas"}
+              </CardTitle>
+              <CardDescription>
+                {activeTab === "calendar"
+                  ? "Visualize por dia do mês o que vence e acesse o resumo com um clique"
+                  : "Listagem detalhada com filtro e paginação"}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <MonthSelector value={period} onChange={setPeriod} />
+              <Button onClick={() => setBoletoSheetOpen(true)} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Nova conta
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <MonthSelector value={period} onChange={setPeriod} />
-            <Button onClick={() => setBoletoSheetOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Novo boleto
-            </Button>
+
+          <div
+            className="inline-flex w-full max-w-md rounded-lg border bg-muted/30 p-1"
+            role="tablist"
+            aria-label="Modo de visualização"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "calendar"}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                activeTab === "calendar"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("calendar")}
+            >
+              <CalendarDays className="h-4 w-4 shrink-0" />
+              Calendário
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "list"}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                activeTab === "list"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("list")}
+            >
+              <LayoutList className="h-4 w-4 shrink-0" />
+              Lista
+            </button>
           </div>
         </CardHeader>
+
         <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
-            <Input
-              placeholder="Filtrar por descrição ou provedor..."
-              value={boletosSearch}
-              onChange={(e) => setBoletosSearch(e.target.value)}
-              className="max-w-sm"
+          {activeTab === "calendar" ? (
+            <BoletosCalendar
+              month={period.month}
+              year={period.year}
+              boletos={calendarBoletos}
+              loading={calendarLoading}
+              onDayListOpen={setCalendarDayList}
+              onDayBoletoClick={setBoletoResumo}
+              formatCurrency={formatCurrency}
             />
-          </div>
-          {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : boletos.length === 0 ? (
-            <p className="text-muted-foreground">Nenhum boleto cadastrado</p>
           ) : (
-            <div className="space-y-2">
-              {boletos.map((b) => (
-                <div
-                  key={b.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setBoletoResumo(b)}
-                  onKeyDown={(e) => e.key === "Enter" && setBoletoResumo(b)}
-                  className="flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{b.description}</span>
-                      <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
-                        {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {STATUS_LABELS[b.status]}
-                      </span>
+            <>
+              <div className="mb-4 flex flex-wrap gap-3 items-center">
+                <Input
+                  placeholder="Filtrar por descrição ou provedor..."
+                  value={boletosSearch}
+                  onChange={(e) => setBoletosSearch(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
+              {loading ? (
+                <p className="text-muted-foreground">Carregando...</p>
+              ) : boletos.length === 0 ? (
+                <p className="text-muted-foreground">
+                  Nenhum boleto cadastrado
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {boletos.map((b) => (
+                    <div
+                      key={b.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setBoletoResumo(b)}
+                      onKeyDown={(e) => e.key === "Enter" && setBoletoResumo(b)}
+                      className="flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{b.description}</span>
+                          <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
+                            {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            {STATUS_LABELS[b.status]}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Venc. {formatDate(b.due_date)} •{" "}
+                          {formatCurrency(b.amount)}
+                          {b.provider && ` • ${b.provider}`}
+                        </p>
+                      </div>
+                      <div onClick={(e) => e.stopPropagation()}>
+                        {b.expense_id ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              navigate(`/app/despesas?expense=${b.expense_id}`)
+                            }
+                            title="Ir para despesa"
+                          >
+                            <ExternalLink className="h-5 w-5" />
+                          </Button>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">
+                            Sem despesa
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Venc. {formatDate(b.due_date)} •{" "}
-                      {formatCurrency(b.amount)}
-                      {b.provider && ` • ${b.provider}`}
-                    </p>
-                  </div>
-                  <div onClick={(e) => e.stopPropagation()}>
-                    {b.expense_id ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          navigate(`/app/despesas?expense=${b.expense_id}`)
-                        }
-                        title="Ir para despesa"
-                      >
-                        <ExternalLink className="h-5 w-5" />
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">
-                        Sem despesa
-                      </span>
-                    )}
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-          {!loading && (
-            <Pagination
-              page={boletosPage}
-              totalCount={boletosCount}
-              onPageChange={setBoletosPage}
-            />
+              )}
+              {!loading && (
+                <Pagination
+                  page={boletosPage}
+                  totalCount={boletosCount}
+                  onPageChange={setBoletosPage}
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>
 
       <Sheet
+        // modal={!boletoResumo}
+        open={!!calendarDayList}
+        onOpenChange={(o) => !o && setCalendarDayList(null)}
+      >
+        <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+            <SheetTitle className="capitalize">Contas neste dia</SheetTitle>
+            <SheetDescription className="capitalize">
+              {calendarDayList?.title}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
+            {calendarDayList?.items.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => setBoletoResumo(b)}
+                className={cn(
+                  "w-full rounded-lg border p-3 text-left text-sm transition-colors",
+                  b.status === "paid"
+                    ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
+                    : "border-amber-200/80 bg-amber-50/90 hover:bg-amber-100/90 dark:border-amber-900/50 dark:bg-amber-950/40 dark:hover:bg-amber-950/60",
+                )}
+              >
+                <span className="font-medium">{b.description}</span>
+                <div className="flex items-center justify-between">
+                  <span className="mt-1 block text-lg font-semibold tabular-nums text-primary">
+                    {formatCurrency(b.amount)}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
+                    {b.status === "paid" ? " · Pago" : " · Pendente"}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
         open={!!boletoResumo}
         onOpenChange={(o) => !o && setBoletoResumo(null)}
       >
-        <SheetContent className="sm:max-w-md">
+        <SheetContent className="z-[60] sm:max-w-md">
           {boletoResumo && (
             <>
               <SheetHeader>
