@@ -19,8 +19,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
  *
- * Comandos de texto (mensagem só com a palavra): *lista* (pendentes + menu numérico),
- * *comandos* (ajuda). Número 1–20 após *lista* escolhe opção do último menu.
+ * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (ajuda),
+ * *contas a pagar* (somente proprietário: vencimentos nos próximos 7 dias).
+ * Número 1–20 após *lista* escolhe opção do último menu.
  */
 
 // --- Tipos (payload Z-API) -------------------------------------------------
@@ -479,6 +480,135 @@ function isComandosCommand(text: string): boolean {
   return normalizeSingleCommandWord(text) === "comandos";
 }
 
+/** Frase completa (minúscula, sem acento, espaços colapsados, sem * nas pontas). */
+function normalizeCommandPhrase(text: string): string {
+  return text
+    .trim()
+    .replace(/^\*+|\*+$/g, "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isContasAPagarCommand(text: string): boolean {
+  return normalizeCommandPhrase(text) === "contas a pagar";
+}
+
+/** Data local (America/Sao_Paulo) em YYYY-MM-DD. */
+function brazilTodayIsoDate(): string {
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/Sao_Paulo",
+  });
+}
+
+function addCalendarDaysIso(isoDate: string, daysToAdd: number): string {
+  const [y, m, d] = isoDate.split("-").map((x) => parseInt(x, 10, 10));
+  const ms = Date.UTC(y, m - 1, d + daysToAdd);
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function formatDateBrFromIso(iso: string): string {
+  const [yy, mm, dd] = iso.split("-");
+  if (!yy || !mm || !dd) return iso;
+  return `${dd}/${mm}/${yy}`;
+}
+
+function formatMoneyBrl(amount: number): string {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(amount);
+}
+
+type BoletoWhatsappRow = {
+  due_date: string;
+  description: string;
+  amount: number;
+  status: string;
+};
+
+const BOLETOS_WHATSAPP_MAX_ITEMS = 45;
+
+/** Linha de um boleto: pendente 🔘; pago ☑️ com ~riscado~ (WhatsApp). */
+function formatBoletoLineWhatsapp(b: BoletoWhatsappRow): string {
+  const raw =
+    (b.description ?? "").trim().replace(/\s+/g, " ") || "(sem descrição)";
+  const desc = raw.replace(/~/g, "");
+  const money = formatMoneyBrl(Number(b.amount));
+  const core = `${desc} - ${money}`;
+  if (b.status === "paid") {
+    return `☑️ ~${core}~`;
+  }
+  return `🔘 ${core}`;
+}
+
+async function buildContasAPagarWhatsappMessage(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<string> {
+  const startIso = brazilTodayIsoDate();
+  const endIso = addCalendarDaysIso(startIso, 6);
+
+  const { data, error } = await supabase
+    .from("boletos")
+    .select("due_date, description, amount, status")
+    .eq("company_id", companyId)
+    .gte("due_date", startIso)
+    .lte("due_date", endIso)
+    .order("due_date", { ascending: true })
+    .order("amount", { ascending: true })
+    .limit(BOLETOS_WHATSAPP_MAX_ITEMS + 1);
+
+  if (error) {
+    console.error(
+      "[received-whatsapp-message] fetch boletos 7 dias:",
+      error.message,
+    );
+    return "Não foi possível carregar as contas a pagar agora. Tente de novo em instantes.";
+  }
+
+  const rows = (data ?? []) as BoletoWhatsappRow[];
+  const header = ["*Contas a pagar* — próximos 7 dias\n\n"].join("\n\n");
+
+  if (rows.length === 0) {
+    return `${header}Nenhuma conta com vencimento nesse período.`;
+  }
+
+  const truncated = rows.length > BOLETOS_WHATSAPP_MAX_ITEMS;
+  const slice = truncated ? rows.slice(0, BOLETOS_WHATSAPP_MAX_ITEMS) : rows;
+
+  const dayOrder: string[] = [];
+  const byDay = new Map<string, BoletoWhatsappRow[]>();
+  for (const r of slice) {
+    const key = String(r.due_date).slice(0, 10);
+    if (!byDay.has(key)) {
+      dayOrder.push(key);
+      byDay.set(key, []);
+    }
+    byDay.get(key)!.push(r);
+  }
+  for (const k of dayOrder) {
+    byDay.get(k)!.sort((a, b) => Number(a.amount) - Number(b.amount));
+  }
+
+  const blocks: string[] = [];
+  for (const dayIso of dayOrder) {
+    const items = byDay.get(dayIso)!;
+    const dateHeading = formatDateBrFromIso(dayIso);
+    const lines = items.map(formatBoletoLineWhatsapp);
+    blocks.push([dateHeading, ...lines].join("\n"));
+  }
+
+  const footer = truncated
+    ? `\n\n_(Mostrando as primeiras ${BOLETOS_WHATSAPP_MAX_ITEMS} contas; há mais no período.)_`
+    : "";
+
+  return `${header}${blocks.join("\n\n")}${footer}`;
+}
+
 function buildComandosWhatsappMessage(): string {
   return [
     "*Comandos disponíveis*",
@@ -486,6 +616,8 @@ function buildComandosWhatsappMessage(): string {
     "*lista* — mostra os recebimentos pendentes.",
     "",
     "*comandos* — mostra esta lista de comandos.",
+    "",
+    "*contas a pagar* — contas com vencimento nos próximos 7 dias (só proprietário).",
   ].join("\n");
 }
 
@@ -966,6 +1098,39 @@ async function handleRecebimentoTextFlow(
     flowLog("processamento_fim", {
       flowId,
       branch: "comandos_ajuda",
+      handled: true,
+    });
+    return true;
+  }
+
+  if (isContasAPagarCommand(text)) {
+    if (!isOwner) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        "O comando *contas a pagar* só está disponível para o proprietário da empresa.",
+        "contas_a_pagar_somente_owner",
+        flowId,
+      );
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "contas_a_pagar_negado_membro",
+        handled: true,
+      });
+      return true;
+    }
+    const msg = await buildContasAPagarWhatsappMessage(
+      supabase,
+      auth.companyId,
+    );
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      msg,
+      "contas_a_pagar_lista_7_dias",
+      flowId,
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "contas_a_pagar_enviado",
       handled: true,
     });
     return true;

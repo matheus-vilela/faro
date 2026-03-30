@@ -12,6 +12,14 @@ import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -34,9 +42,11 @@ import { cn } from "@/lib/utils";
 import type { Boleto, PaymentType } from "@/types/expense";
 import {
   CalendarDays,
+  CheckCircle2,
   Copy,
   ExternalLink,
   LayoutList,
+  Loader2,
   Plus,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -79,6 +89,8 @@ export function Boletos() {
   const [calendarDayList, setCalendarDayList] =
     useState<CalendarDayListPayload | null>(null);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
+  const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
 
   const fetchCalendarBoletos = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -148,6 +160,10 @@ export function Boletos() {
     if (activeTab !== "calendar") setCalendarDayList(null);
   }, [activeTab]);
 
+  useEffect(() => {
+    setMarkPaidDialogOpen(false);
+  }, [boletoResumo?.id]);
+
   const refreshAll = useCallback(() => {
     void fetchCalendarBoletos();
     void fetchBoletos();
@@ -165,6 +181,40 @@ export function Boletos() {
       style: "currency",
       currency: "BRL",
     }).format(v);
+
+  const confirmMarkBoletoAsPaid = useCallback(async () => {
+    if (!boletoResumo || !currentCompany?.id) return;
+    setMarkingPaid(true);
+    const { data, error } = await supabase
+      .from("boletos")
+      .update({
+        status: "paid",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", boletoResumo.id)
+      .eq("company_id", currentCompany.id)
+      .select()
+      .single();
+    setMarkingPaid(false);
+    if (error) {
+      toast.error(error.message ?? "Não foi possível marcar como pago.");
+      return;
+    }
+    const updated = data as Boleto;
+    setBoletoResumo(updated);
+    setCalendarDayList((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map((b) =>
+          b.id === updated.id ? { ...b, ...updated } : b,
+        ),
+      };
+    });
+    setMarkPaidDialogOpen(false);
+    refreshAll();
+    toast.success("Conta marcada como paga.");
+  }, [boletoResumo, currentCompany?.id, refreshAll]);
 
   return (
     <div className="space-y-8">
@@ -499,6 +549,15 @@ export function Boletos() {
                 )}
               </div>
               <div className="flex flex-col gap-2 pt-4">
+                {boletoResumo.status === "pending" && (
+                  <Button
+                    className="w-full"
+                    onClick={() => setMarkPaidDialogOpen(true)}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    Marcar como pago
+                  </Button>
+                )}
                 {boletoResumo.expense_id && (
                   <Button
                     variant="outline"
@@ -518,6 +577,62 @@ export function Boletos() {
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={markPaidDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && markingPaid) return;
+          setMarkPaidDialogOpen(open);
+        }}
+      >
+        <DialogContent
+          overlayClassName="z-[80]"
+          className="z-[80]"
+          onPointerDownOutside={(e) => markingPaid && e.preventDefault()}
+          onEscapeKeyDown={(e) => markingPaid && e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Marcar como pago</DialogTitle>
+            <DialogDescription>
+              Confirma que esta conta já foi quitada? Ela será marcada como paga
+              nesta empresa.
+            </DialogDescription>
+          </DialogHeader>
+          {boletoResumo && (
+            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+              <p className="font-medium">{boletoResumo.description}</p>
+              <p className="text-muted-foreground tabular-nums">
+                {formatCurrency(boletoResumo.amount)} · venc.{" "}
+                {formatDate(boletoResumo.due_date)}
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={markingPaid}
+              onClick={() => setMarkPaidDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={markingPaid}
+              onClick={() => void confirmMarkBoletoAsPaid()}
+            >
+              {markingPaid ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Salvando…
+                </>
+              ) : (
+                "Confirmar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
