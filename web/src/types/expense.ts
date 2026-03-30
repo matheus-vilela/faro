@@ -35,6 +35,14 @@ export interface Expense {
 
 export type PaymentType = 'boleto' | 'pix' | 'ted'
 
+/** Classificação da conta a pagar (fornecedores vs custo fixo do estabelecimento, etc.). */
+export type BoletoCategory =
+  | 'insumos'
+  | 'fornecedores'
+  | 'custo_fixo'
+  | 'estabelecimento'
+  | 'outros'
+
 export interface Boleto {
   id: string
   company_id: string
@@ -42,6 +50,7 @@ export interface Boleto {
   description: string
   due_date: string
   amount: number
+  category?: BoletoCategory
   payment_type?: PaymentType
   barcode: string | null
   provider: string | null

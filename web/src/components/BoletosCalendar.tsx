@@ -1,8 +1,12 @@
 import { Button } from "@/components/ui/button";
+import { BOLETO_CATEGORY_SHORT } from "@/lib/boletoCategory";
 import { buildCalendarCells } from "@/lib/boletosCalendarGrid";
 import { cn } from "@/lib/utils";
-import type { Boleto, PaymentType } from "@/types/expense";
-import { Calendar } from "lucide-react";
+import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
+
+function categoryShort(c?: BoletoCategory | null): string {
+  return BOLETO_CATEGORY_SHORT[c ?? "outros"];
+}
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -83,13 +87,6 @@ export function BoletosCalendar({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Calendar className="h-4 w-4 shrink-0" aria-hidden />
-        <span>
-          Até duas contas por dia na célula; use &quot;Ver todos&quot; para o
-          restante. Clique em uma conta para o resumo.
-        </span>
-      </div>
       <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
         <div className="min-w-[640px] p-2 sm:p-3">
           <div className="grid grid-cols-7 gap-px rounded-lg bg-border/40 p-px">
@@ -188,22 +185,21 @@ export function BoletosCalendar({
                                 "w-full rounded-md border px-1 py-1 text-left text-[10px] leading-tight transition-colors sm:text-xs",
                                 b.status === "paid"
                                   ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
-                                  : "border-amber-200/80 bg-amber-50/90 text-foreground hover:bg-amber-100/90 dark:border-amber-900/50 dark:bg-amber-950/40 dark:hover:bg-amber-950/60",
+                                  : "border-primary/25 bg-primary/10 text-foreground hover:bg-primary/15 dark:border-primary/35 dark:bg-primary/15 dark:hover:bg-primary/20",
                               )}
                             >
                               <span className="line-clamp-1 font-medium ">
                                 {b.description}
                               </span>
+
                               <div className="flex items-center justify-between">
                                 <span className="mt-0.5 block font-semibold tabular-nums text-primary">
                                   {formatCurrency(b.amount)}
                                 </span>
-                                <span className="mt-0.5 block text-[9px] text-muted-foreground sm:text-[10px]">
-                                  {
-                                    PAYMENT_TYPE_LABELS[
-                                      b.payment_type ?? "boleto"
-                                    ]
-                                  }
+                                <span className="mt-0.5 text-[9px] text-muted-foreground sm:text-[10px] flex items-center gap-1">
+                                  <span className="mt-0.5 block text-[9px] text-primary/90 sm:text-[10px]">
+                                    {categoryShort(b.category)}
+                                  </span>
                                   {b.status === "paid" ? " · Pago" : ""}
                                 </span>
                               </div>

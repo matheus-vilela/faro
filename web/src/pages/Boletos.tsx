@@ -36,10 +36,11 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { BOLETO_CATEGORY_LABELS } from "@/lib/boletoCategory";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Boleto, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
 import {
   CalendarDays,
   CheckCircle2,
@@ -60,6 +61,10 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 };
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
+
+function categoryLabel(c?: BoletoCategory | null): string {
+  return BOLETO_CATEGORY_LABELS[c ?? "outros"];
+}
 
 type BoletosTab = "calendar" | "list";
 
@@ -218,12 +223,58 @@ export function Boletos() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Contas a pagar</h1>
-        <p className="text-muted-foreground">
-          Cadastre contas a pagar e vincule às despesas
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-bold tracking-tight">Contas a pagar</h1>
+          <p className="text-muted-foreground">
+            Cadastre contas a pagar e vincule às despesas
+          </p>
+        </div>
+        <Button
+          onClick={() => setBoletoSheetOpen(true)}
+          className="h-10 w-full shrink-0 sm:mt-0.5 sm:w-auto"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Nova conta
+        </Button>
       </div>
+
+      <nav
+        className="flex flex-wrap gap-2 border-b border-border pb-px"
+        aria-label="Modo de visualização"
+        role="tablist"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "calendar"}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            activeTab === "calendar"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+          onClick={() => setActiveTab("calendar")}
+        >
+          <CalendarDays className="h-4 w-4 shrink-0" />
+          Calendário
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "list"}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            activeTab === "list"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+          onClick={() => setActiveTab("list")}
+        >
+          <LayoutList className="h-4 w-4 shrink-0" />
+          Lista
+        </button>
+      </nav>
 
       {currentCompany?.id && (
         <CreateBoletoSheet
@@ -242,64 +293,44 @@ export function Boletos() {
       )}
 
       <Card>
-        <CardHeader className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle>
-                {activeTab === "calendar"
-                  ? "Calendário de vencimentos"
-                  : "Lista de contas"}
-              </CardTitle>
-              <CardDescription>
-                {activeTab === "calendar"
-                  ? "Visualize por dia do mês o que vence e acesse o resumo com um clique"
-                  : "Listagem detalhada com filtro e paginação"}
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <MonthSelector value={period} onChange={setPeriod} />
-              <Button onClick={() => setBoletoSheetOpen(true)} size="sm">
-                <Plus className="h-4 w-4 mr-1" />
-                Nova conta
-              </Button>
-            </div>
+        <CardHeader className="flex flex-col gap-5 space-y-0">
+          <div>
+            <CardTitle>
+              {activeTab === "calendar"
+                ? "Calendário de vencimentos"
+                : "Lista de contas"}
+            </CardTitle>
+            <CardDescription>
+              {activeTab === "calendar"
+                ? "Visualize por dia do mês o que vence e acesse o resumo com um clique"
+                : "Listagem detalhada com filtro e paginação"}
+            </CardDescription>
           </div>
 
-          <div
-            className="inline-flex w-full max-w-md rounded-lg border bg-muted/30 p-1"
-            role="tablist"
-            aria-label="Modo de visualização"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "calendar"}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                activeTab === "calendar"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setActiveTab("calendar")}
-            >
-              <CalendarDays className="h-4 w-4 shrink-0" />
-              Calendário
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "list"}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                activeTab === "list"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setActiveTab("list")}
-            >
-              <LayoutList className="h-4 w-4 shrink-0" />
-              Lista
-            </button>
+          <div className="rounded-xl border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm dark:from-primary/15 dark:via-primary/8">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <div className="flex shrink-0 items-center gap-3">
+                <div
+                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-inner ring-1 ring-primary/20"
+                  aria-hidden
+                >
+                  <CalendarDays className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    Período de referência
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Calendário e lista usam este mês
+                  </p>
+                </div>
+              </div>
+              <MonthSelector
+                value={period}
+                onChange={setPeriod}
+                className="shrink-0 [&_button]:h-10 [&_button]:w-10 [&_button]:border-primary/35 [&_button]:bg-background [&_button]:shadow-sm [&_button]:hover:bg-primary/10 [&_span]:min-w-46 [&_span]:text-base [&_span]:font-semibold sm:[&_span]:min-w-52 sm:[&_span]:text-lg"
+              />
+            </div>
           </div>
         </CardHeader>
 
@@ -344,6 +375,9 @@ export function Boletos() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">{b.description}</span>
+                          <span className="text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
+                            {categoryLabel(b.category)}
+                          </span>
                           <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
                             {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
                           </span>
@@ -413,10 +447,13 @@ export function Boletos() {
                   "w-full rounded-lg border p-3 text-left text-sm transition-colors",
                   b.status === "paid"
                     ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
-                    : "border-amber-200/80 bg-amber-50/90 hover:bg-amber-100/90 dark:border-amber-900/50 dark:bg-amber-950/40 dark:hover:bg-amber-950/60",
+                    : "border-primary/25 bg-primary/10 hover:bg-primary/15 dark:border-primary/35 dark:bg-primary/15 dark:hover:bg-primary/20",
                 )}
               >
                 <span className="font-medium">{b.description}</span>
+                <span className="mt-0.5 block text-[11px] text-primary">
+                  {categoryLabel(b.category)}
+                </span>
                 <div className="flex items-center justify-between">
                   <span className="mt-1 block text-lg font-semibold tabular-nums text-primary">
                     {formatCurrency(b.amount)}
@@ -452,7 +489,10 @@ export function Boletos() {
                   <p className="text-sm text-muted-foreground mt-1">
                     Vencimento: {formatDate(boletoResumo.due_date)}
                   </p>
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                      {categoryLabel(boletoResumo.category)}
+                    </Badge>
                     <Badge variant="secondary">
                       {
                         PAYMENT_TYPE_LABELS[

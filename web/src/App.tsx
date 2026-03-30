@@ -10,11 +10,9 @@ import { Register } from '@/pages/Register'
 import { Companies } from '@/pages/Companies'
 import { AppLayout } from '@/components/AppLayout'
 import { Dashboard } from '@/pages/Dashboard'
-import { Documentos } from '@/pages/Documentos'
 import { Despesas } from '@/pages/Despesas'
 import { Recebimento } from '@/pages/Recebimento'
 import { Alertas } from '@/pages/Alertas'
-import { Relatorios } from '@/pages/Relatorios'
 import { Boletos } from '@/pages/Boletos'
 import { Fornecedores } from '@/pages/Fornecedores'
 import { Produtos } from '@/pages/Produtos'
@@ -45,14 +43,12 @@ function AuthenticatedLayout() {
         <Route path="/empresas" element={<Companies />} />
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
-          <Route path="documentos" element={<Documentos />} />
           <Route path="despesas" element={<Despesas />} />
           <Route path="boletos" element={<Boletos />} />
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="alertas" element={<Alertas />} />
-          <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />
             <Route path="usuarios-membros" element={<ConfiguracoesUsuariosMembros />} />

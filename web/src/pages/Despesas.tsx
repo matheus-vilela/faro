@@ -42,6 +42,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { BOLETO_CATEGORY_LABELS } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
@@ -98,6 +99,10 @@ function BoletoLinkedBlock({
     <div className="rounded-lg border p-4 space-y-2">
       <p className="font-medium">Boleto vinculado</p>
       <p className="text-sm text-muted-foreground">
+        <span className="text-foreground font-medium">
+          {BOLETO_CATEGORY_LABELS[boleto.category ?? "outros"]}
+        </span>
+        {" · "}
         {boleto.description} • {formatCurrency(boleto.amount)} • Venc.{" "}
         {formatDate(boleto.due_date)}
       </p>
@@ -1006,6 +1011,7 @@ export function Despesas() {
               <SelectContent>
                 {unlinkedBoletos.map((b) => (
                   <SelectItem key={b.id} value={b.id}>
+                    [{BOLETO_CATEGORY_LABELS[b.category ?? "outros"]}]{" "}
                     {b.description} - {formatCurrency(b.amount)} (venc.{" "}
                     {formatDate(b.due_date)})
                   </SelectItem>

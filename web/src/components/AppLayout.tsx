@@ -29,7 +29,6 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
-  BarChart3,
   Bell,
   Building2,
   FileText,
@@ -39,13 +38,12 @@ import {
   Moon,
   Package,
   PackageCheck,
-  Receipt,
   Settings2,
   Sun,
   Truck,
   Wallet,
 } from "lucide-react";
-import { Link, Navigate, Outlet } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 
 const NAV_ITEMS = [
   {
@@ -55,15 +53,15 @@ const NAV_ITEMS = [
     roles: ["operador", "gestor", "owner"],
   },
   {
-    title: "Despesas",
-    url: "/app/despesas",
-    icon: Wallet,
-    roles: ["operador", "gestor", "owner"],
-  },
-  {
     title: "Contas a pagar",
     url: "/app/boletos",
     icon: FileText,
+    roles: ["operador", "gestor", "owner"],
+  },
+  {
+    title: "Despesas",
+    url: "/app/despesas",
+    icon: Wallet,
     roles: ["operador", "gestor", "owner"],
   },
   {
@@ -91,24 +89,19 @@ const NAV_ITEMS = [
     roles: ["gestor", "owner"],
   },
   {
-    title: "Relatórios",
-    url: "/app/relatorios",
-    icon: BarChart3,
-    roles: ["gestor", "owner"],
-  },
-  {
     title: "Configurações",
     url: "/app/configuracoes",
     icon: Settings2,
     roles: ["owner"],
   },
-  {
-    title: "Documentos",
-    url: "/app/documentos",
-    icon: Receipt,
-    roles: ["operador", "gestor", "owner"],
-  },
 ];
+
+function isNavActive(pathname: string, url: string): boolean {
+  if (url === "/app") {
+    return pathname === "/app" || pathname === "/app/";
+  }
+  return pathname === url || pathname.startsWith(`${url}/`);
+}
 
 export function AppLayout() {
   const { currentCompany, loading } = useCompany();
@@ -139,6 +132,7 @@ function AppLayoutContent() {
   const { user, signOut } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { currentCompany, currentRole } = useCompany();
+  const location = useLocation();
 
   const navItems = currentRole
     ? NAV_ITEMS.filter((item) => item.roles.includes(currentRole))
@@ -154,12 +148,12 @@ function AppLayoutContent() {
         <SidebarHeader className="border-b px-4 py-3 flex h-16 items-center">
           <Link
             to="/app"
-            className="flex items-center justify-center gap-2 font-semibold overflow-hidden w-full min-w-0 group-data-[collapsible=icon]:justify-center"
+            className="flex min-w-0 w-full items-center justify-center gap-2 overflow-hidden font-semibold tracking-tight group-data-[collapsible=icon]:justify-center"
           >
-            <span className="text-lg shrink-0 group-data-[collapsible=icon]:hidden">
+            <span className="shrink-0 text-lg font-semibold text-primary group-data-[collapsible=icon]:hidden">
               Faro
             </span>
-            <span className="text-lg hidden group-data-[collapsible=icon]:inline">
+            <span className="hidden text-lg font-bold text-primary group-data-[collapsible=icon]:inline">
               F
             </span>
           </Link>
@@ -188,16 +182,33 @@ function AppLayoutContent() {
             )}
             <SidebarGroupContent>
               <SidebarMenu>
-                {navItems.map((item) => (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {navItems.map((item) => {
+                  const active = isNavActive(location.pathname, item.url);
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={active}
+                        tooltip={item.title}
+                        className={cn(
+                          "transition-colors",
+                          active &&
+                            "bg-primary/15 text-primary shadow-sm hover:bg-primary/20 hover:text-primary data-[active=true]:bg-primary/15 data-[active=true]:text-primary",
+                        )}
+                      >
+                        <Link to={item.url}>
+                          <item.icon
+                            className={cn(
+                              "h-4 w-4 shrink-0",
+                              active && "text-primary",
+                            )}
+                          />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

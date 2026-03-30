@@ -16,9 +16,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  BOLETO_CATEGORY_LABELS,
+  BOLETO_CATEGORY_ORDER,
+} from "@/lib/boletoCategory";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
-import type { Boleto, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
 import { FileText } from "lucide-react";
 import { useState } from "react";
 
@@ -57,6 +61,7 @@ export function CreateBoletoSheet({
   onSuccess,
 }: CreateBoletoSheetProps) {
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
+  const [category, setCategory] = useState<BoletoCategory>("outros");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [amount, setAmount] = useState("");
@@ -95,6 +100,7 @@ export function CreateBoletoSheet({
 
     const payload: Record<string, unknown> = {
       company_id: companyId,
+      category,
       description: description.trim(),
       due_date: dueDate,
       amount: parseFloat(amount),
@@ -143,6 +149,7 @@ export function CreateBoletoSheet({
     setAgency("");
     setAccount("");
     setPaymentType("boleto");
+    setCategory("outros");
     onOpenChange(false);
     onSuccess?.(boleto);
   };
@@ -179,6 +186,28 @@ export function CreateBoletoSheet({
                 <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div>
+            <Label>Categoria</Label>
+            <Select
+              value={category}
+              onValueChange={(v) => setCategory(v as BoletoCategory)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BOLETO_CATEGORY_ORDER.map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {BOLETO_CATEGORY_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Separe contas de fornecedores (insumos, NF) de custos fixos do
+              estabelecimento (energia, água, aluguel).
+            </p>
           </div>
           <div>
             <Label>Descrição</Label>

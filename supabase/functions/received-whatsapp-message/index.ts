@@ -528,17 +528,28 @@ type BoletoWhatsappRow = {
   description: string;
   amount: number;
   status: string;
+  category?: string | null;
+};
+
+const BOLETO_CATEGORY_WHATSAPP_SHORT: Record<string, string> = {
+  insumos: "Insum.",
+  fornecedores: "Fornec.",
+  custo_fixo: "Fixo",
+  estabelecimento: "Estab.",
+  outros: "Outros",
 };
 
 const BOLETOS_WHATSAPP_MAX_ITEMS = 45;
 
-/** Linha de um boleto: pendente 🔘; pago ☑️ com ~riscado~ (WhatsApp). */
+/** Linha de um boleto: pendente 🔘; pago ☑️ com ~riscado~ (WhatsApp). Inclui categoria. */
 function formatBoletoLineWhatsapp(b: BoletoWhatsappRow): string {
   const raw =
     (b.description ?? "").trim().replace(/\s+/g, " ") || "(sem descrição)";
   const desc = raw.replace(/~/g, "");
   const money = formatMoneyBrl(Number(b.amount));
-  const core = `${desc} - ${money}`;
+  const cat =
+    BOLETO_CATEGORY_WHATSAPP_SHORT[b.category ?? "outros"] ?? "Outros";
+  const core = `${desc} · ${cat} · ${money}`;
   if (b.status === "paid") {
     return `☑️ ~${core}~`;
   }
@@ -554,7 +565,7 @@ async function buildContasAPagarWhatsappMessage(
 
   const { data, error } = await supabase
     .from("boletos")
-    .select("due_date, description, amount, status")
+    .select("due_date, description, amount, status, category")
     .eq("company_id", companyId)
     .gte("due_date", startIso)
     .lte("due_date", endIso)
