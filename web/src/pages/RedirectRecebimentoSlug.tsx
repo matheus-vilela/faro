@@ -30,6 +30,7 @@ export function RedirectRecebimentoSlug() {
         setErr("Link inválido ou expirado.");
         return;
       }
+      console.log("data", data);
       setToken(String(data));
     })();
     return () => {

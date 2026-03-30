@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
@@ -16,6 +18,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  * Opcional: ZAPI_WEBHOOK_SECRET
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
+ *
+ * Comandos de texto (mensagem só com a palavra): *lista* (pendentes + menu numérico),
+ * *comandos* (ajuda). Número 1–20 após *lista* escolhe opção do último menu.
  */
 
 // --- Tipos (payload Z-API) -------------------------------------------------
@@ -461,33 +466,27 @@ function extractTextMessage(
   return null;
 }
 
-function normalizeForIntent(s: string): string {
-  return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+/** Uma única palavra, minúscula e sem acento (para comandos *lista* / *comandos*). */
+function normalizeSingleCommandWord(text: string): string {
+  return text.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 }
 
-function isRecebimentosListIntent(text: string): boolean {
-  const raw = text.trim();
-  if (/^\d{1,2}$/.test(raw)) return false;
-  const n = normalizeForIntent(text);
-  const keywords = [
-    "recebimento",
-    "recebimentos",
-    "lista de recebimento",
-    "lista de recebimentos",
-    "nota de recebimento",
-    "notas de recebimento",
-    "notas recebimento",
-    "minhas notas",
-    "conferir recebimento",
-    "validar recebimento",
-    "pendente",
-    "pendentes",
-  ];
-  if (keywords.some((k) => n.includes(k))) return true;
-  if (n.includes("receb") && (n.includes("nota") || n.includes("lista"))) {
-    return true;
-  }
-  return false;
+function isListaCommand(text: string): boolean {
+  return normalizeSingleCommandWord(text) === "lista";
+}
+
+function isComandosCommand(text: string): boolean {
+  return normalizeSingleCommandWord(text) === "comandos";
+}
+
+function buildComandosWhatsappMessage(): string {
+  return [
+    "*Comandos disponíveis*",
+    "",
+    "*lista* — mostra os recebimentos pendentes.",
+    "",
+    "*comandos* — mostra esta lista de comandos.",
+  ].join("\n");
 }
 
 function parseMenuOptionNumber(text: string): number | null {
@@ -872,7 +871,7 @@ async function handleRecebimentoTextFlow(
     if (!ids || ids.length === 0) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "Não encontrei um menu de recebimentos recente. Envie uma mensagem pedindo *recebimentos* ou *lista de recebimentos* para listar as opções.",
+        "Não encontrei um menu de recebimentos recente. Envie *lista* para ver as opções pendentes.",
         "recebimento_menu_sem_estado",
         flowId,
       );
@@ -933,9 +932,7 @@ async function handleRecebimentoTextFlow(
       return true;
     }
     const slug = await ensureRecebimentoShortSlug(supabase, rid, token);
-    const link = slug
-      ? `${base}/s/${slug}`
-      : `${base}/c/${token}`;
+    const link = slug ? `${base}/s/${slug}` : `${base}/c/${token}`;
     if (!slug) {
       console.warn(
         "[received-whatsapp-message] slug curto indisponível; usando /c/",
@@ -959,10 +956,25 @@ async function handleRecebimentoTextFlow(
     return true;
   }
 
-  if (!isRecebimentosListIntent(text)) {
+  if (isComandosCommand(text)) {
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      buildComandosWhatsappMessage(),
+      "recebimento_comandos_ajuda",
+      flowId,
+    );
     flowLog("processamento_fim", {
       flowId,
-      branch: "nao_e_intencao_recebimentos",
+      branch: "comandos_ajuda",
+      handled: true,
+    });
+    return true;
+  }
+
+  if (!isListaCommand(text)) {
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "nao_e_comando_reconhecido",
       handled: false,
     });
     return false;

@@ -29,3 +29,5 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
 
+[functions.received-whatsapp-message]
+verify_jwt = false
