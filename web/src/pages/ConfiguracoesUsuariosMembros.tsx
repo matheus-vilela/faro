@@ -310,10 +310,7 @@ export function ConfiguracoesUsuariosMembros() {
             Proprietário
           </CardTitle>
           <CardDescription>
-            Você é o proprietário desta empresa no Faro. O WhatsApp abaixo é o
-            principal para validação das mensagens recebidas (o mesmo número da
-            linha da plataforma é usado por todas as empresas; identificamos
-            você pelo seu WhatsApp).
+            Você é o proprietário desta empresa no Faro.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -323,7 +320,7 @@ export function ConfiguracoesUsuariosMembros() {
                 Nome do proprietário
               </Label>
               <div
-                className="flex min-h-11 items-center rounded-md border border-border bg-muted/40 px-3 py-2 text-sm font-medium leading-snug"
+                className="flex  items-center rounded-md border border-border bg-muted/40 px-3 py-2 text-sm font-medium leading-snug"
                 aria-live="polite"
               >
                 {loadingOwner ? (
@@ -335,8 +332,8 @@ export function ConfiguracoesUsuariosMembros() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                Igual ao nome do seu perfil no Faro. Para alterar, use os dados
-                da sua conta.
+                Igual ao nome do seu perfil no Faro. <br />
+                Para alterar, use os dados da sua conta.
               </p>
             </div>
 
@@ -361,9 +358,8 @@ export function ConfiguracoesUsuariosMembros() {
                 disabled={saving}
               />
               <p className="text-xs text-muted-foreground">
-                Digite com DDD. Ao salvar, o número é normalizado; se você não
-                informar o código do país, <strong>55</strong> (Brasil) é
-                adicionado automaticamente.
+                Digite com DDI, se você não informar o código do país,{" "}
+                <strong>55</strong> (Brasil) é adicionado automaticamente.
               </p>
             </div>
           </div>

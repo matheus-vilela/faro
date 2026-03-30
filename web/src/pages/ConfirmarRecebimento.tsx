@@ -225,7 +225,6 @@ export function ConfirmarRecebimento() {
   const hasNotReceived = items.some((_, i) => itemStatus[i] === "not_received");
   const hasPartial = items.some((_, i) => itemStatus[i] === "partial");
   const canConfirm = data?.viewer_can_confirm !== false;
-  const hasMemberRef = Boolean(data?.assigned_company_member_id);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
@@ -241,7 +240,7 @@ export function ConfirmarRecebimento() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {hasMemberRef && (
+          {/* {hasMemberRef && (
             <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">
                 Membro de referência:{" "}
@@ -252,7 +251,7 @@ export function ConfirmarRecebimento() {
                 confirmar.
               </p>
             </div>
-          )}
+          )} */}
 
           <p className="text-sm text-muted-foreground">
             Para cada item, informe se recebeu tudo, uma parte da quantidade ou
@@ -277,9 +276,11 @@ export function ConfirmarRecebimento() {
                         : ""
                   }`}
                 >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex flex-col gap-2  sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0">
-                      <span className="font-medium">{it.product_name || "—"}</span>
+                      <span className="font-medium">
+                        {it.product_name || "—"}
+                      </span>
                       <span className="text-muted-foreground ml-2 text-sm">
                         Pedido: {Number(it.quantity).toLocaleString("pt-BR")} un
                         × {formatCurrency(Number(it.unit_value))}
@@ -292,7 +293,10 @@ export function ConfirmarRecebimento() {
                         size="sm"
                         disabled={!canConfirm}
                         onClick={() =>
-                          setItemStatus((prev) => ({ ...prev, [i]: "received" }))
+                          setItemStatus((prev) => ({
+                            ...prev,
+                            [i]: "received",
+                          }))
                         }
                       >
                         Recebido
@@ -333,10 +337,12 @@ export function ConfirmarRecebimento() {
                     <div className="space-y-1.5 pt-1 border-t border-border/60">
                       <Label htmlFor={`qty-${i}`} className="text-xs">
                         Quantidade recebida (máx.{" "}
-                        {Math.max(0, Number(it.quantity) - 0.0001).toLocaleString(
-                          "pt-BR",
-                          { maximumFractionDigits: 4 },
-                        )}{" "}
+                        {Math.max(
+                          0,
+                          Number(it.quantity) - 0.0001,
+                        ).toLocaleString("pt-BR", {
+                          maximumFractionDigits: 4,
+                        })}{" "}
                         un)
                       </Label>
                       <Input

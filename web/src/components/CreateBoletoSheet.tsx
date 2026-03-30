@@ -24,7 +24,7 @@ import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
 import { FileText } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -50,6 +50,8 @@ interface CreateBoletoSheetProps {
   onOpenChange: (open: boolean) => void;
   companyId: string;
   expenseId?: string | null;
+  /** YYYY-MM-DD — preenche vencimento ao abrir (ex.: dia clicado no calendário) */
+  defaultDueDate?: string | null;
   onSuccess?: (boleto: Boleto) => void;
 }
 
@@ -58,6 +60,7 @@ export function CreateBoletoSheet({
   onOpenChange,
   companyId,
   expenseId,
+  defaultDueDate,
   onSuccess,
 }: CreateBoletoSheetProps) {
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
@@ -81,6 +84,15 @@ export function CreateBoletoSheet({
   const [agency, setAgency] = useState("");
   const [account, setAccount] = useState("");
   const [accountType, setAccountType] = useState("conta_corrente");
+
+  useEffect(() => {
+    if (!open) return;
+    if (defaultDueDate?.trim()) {
+      setDueDate(defaultDueDate.trim().slice(0, 10));
+    } else {
+      setDueDate("");
+    }
+  }, [open, defaultDueDate]);
 
   const canSubmit =
     description.trim() !== "" &&

@@ -186,6 +186,27 @@ export function Produtos() {
       <PageHeader
         title="Produtos"
         description="Cadastre produtos e controle o estoque"
+        action={
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setImportSheetOpen(true)}
+              className="h-10 w-full shrink-0 sm:w-auto"
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Importar planilha
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setProductSheetOpen(true)}
+              className="h-10 w-full shrink-0 sm:w-auto"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Novo produto
+            </Button>
+          </div>
+        }
       />
 
       {currentCompany?.id && (
@@ -209,7 +230,7 @@ export function Produtos() {
       )}
 
       <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader>
           <div>
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
@@ -218,21 +239,6 @@ export function Produtos() {
             <CardDescription>
               Vincule itens das despesas aos produtos para atualizar o estoque
             </CardDescription>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setImportSheetOpen(true)}
-            >
-              <FileSpreadsheet className="h-4 w-4 mr-1" />
-              Importar planilha
-            </Button>
-            <Button onClick={() => setProductSheetOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Novo produto
-            </Button>
           </div>
         </CardHeader>
         <CardContent>

@@ -45,6 +45,8 @@ function formatDayHeading(y: number, m: number, d: number): string {
 }
 
 export type CalendarDayListPayload = {
+  /** YYYY-MM-DD */
+  dateKey: string;
   title: string;
   items: Boleto[];
 };
@@ -107,11 +109,19 @@ export function BoletosCalendar({
               })();
               const isAdjacent = !cell.inCurrentMonth;
 
+              const dayListPayload: CalendarDayListPayload = {
+                dateKey: dateStr,
+                title: formatDayHeading(cell.year, cell.month, cell.day),
+                items: list,
+              };
+
               return (
                 <div
                   key={`${dateStr}-${i}`}
+                  role="presentation"
+                  onClick={() => onDayListOpen(dayListPayload)}
                   className={cn(
-                    "relative flex min-h-[100px] flex-col overflow-hidden border-t border-l sm:min-h-[120px]",
+                    "relative flex min-h-[100px] cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5 sm:min-h-[120px]",
                     !isAdjacent && "bg-background",
                     !isAdjacent && isWeekend && "bg-muted/20",
                     isAdjacent && "border-border bg-muted/30",
@@ -174,7 +184,10 @@ export function BoletosCalendar({
                             <button
                               key={b.id}
                               type="button"
-                              onClick={() => onDayBoletoClick(b)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDayBoletoClick(b);
+                              }}
                               className={cn(
                                 "w-full rounded-md border px-1 py-1 text-left text-[10px] leading-tight transition-colors sm:text-xs",
                                 b.status === "paid"
@@ -205,16 +218,10 @@ export function BoletosCalendar({
                               variant="outline"
                               size="sm"
                               className="h-7 shrink-0 text-[10px] font-medium sm:h-8 sm:text-xs"
-                              onClick={() =>
-                                onDayListOpen({
-                                  title: formatDayHeading(
-                                    cell.year,
-                                    cell.month,
-                                    cell.day,
-                                  ),
-                                  items: list,
-                                })
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDayListOpen(dayListPayload);
+                              }}
                             >
                               Ver todos ({list.length})
                             </Button>

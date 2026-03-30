@@ -312,6 +312,16 @@ export function Fornecedores() {
       <PageHeader
         title="Fornecedores"
         description="Cadastre fornecedores e gerencie as informações de pagamento"
+        action={
+          <Button
+            type="button"
+            onClick={() => setSupplierSheetOpen(true)}
+            className="h-10 w-full shrink-0 sm:w-auto"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Novo fornecedor
+          </Button>
+        }
       />
 
       <ReferencePeriodCard
@@ -330,7 +340,7 @@ export function Fornecedores() {
       )}
 
       <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader>
           <div>
             <CardTitle>Fornecedores cadastrados</CardTitle>
             <CardDescription>
@@ -338,10 +348,6 @@ export function Fornecedores() {
               atualizar
             </CardDescription>
           </div>
-          <Button onClick={() => setSupplierSheetOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            Novo fornecedor
-          </Button>
         </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">

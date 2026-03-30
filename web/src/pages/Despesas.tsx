@@ -611,6 +611,16 @@ export function Despesas() {
             ? "Revisar despesas registradas e vincular boletos"
             : "Registrar despesas e vincular boletos"
         }
+        action={
+          <Button
+            type="button"
+            onClick={() => setExpenseSheetOpen(true)}
+            className="h-10 w-full shrink-0 sm:w-auto"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Nova despesa
+          </Button>
+        }
       />
 
       <ReferencePeriodCard
@@ -873,7 +883,7 @@ export function Despesas() {
 
       {/* Listagem */}
       <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader>
           <div>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
@@ -883,10 +893,6 @@ export function Despesas() {
               Clique no ícone de boleto para vincular
             </CardDescription>
           </div>
-          <Button onClick={() => setExpenseSheetOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            Nova despesa
-          </Button>
         </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">
