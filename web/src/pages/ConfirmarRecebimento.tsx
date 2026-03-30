@@ -108,13 +108,11 @@ export function ConfirmarRecebimento() {
     }
     setData(obj);
     setError(null);
-    const initial: Record<number, ItemStatus> = {};
     const pq: Record<number, string> = {};
     (obj.items ?? []).forEach((it, i) => {
-      initial[i] = "received";
       pq[i] = String(Number(it.quantity));
     });
-    setItemStatus(initial);
+    setItemStatus({});
     setPartialQty(pq);
   }, [token]);
 
@@ -125,8 +123,9 @@ export function ConfirmarRecebimento() {
   const handleConfirm = async () => {
     if (!token || !data?.items?.length) return;
     const items = data.items;
+    if (!items.every((_, i) => itemStatus[i] !== undefined)) return;
     const pItems = items.map((it, i) => {
-      const st = itemStatus[i] ?? "received";
+      const st = itemStatus[i]!;
       const base: {
         expense_item_id: string;
         status: ItemStatus;
@@ -273,7 +272,12 @@ export function ConfirmarRecebimento() {
   }
 
   const items = data?.items ?? [];
-  const allResponded = items.every((_, i) => itemStatus[i] !== undefined);
+  const allResponded = items.every(
+    (_, i) =>
+      itemStatus[i] === "received" ||
+      itemStatus[i] === "partial" ||
+      itemStatus[i] === "not_received",
+  );
   const hasNotReceived = items.some((_, i) => itemStatus[i] === "not_received");
   const hasPartial = items.some((_, i) => itemStatus[i] === "partial");
   const canConfirm = data?.viewer_can_confirm !== false;
@@ -356,7 +360,7 @@ export function ConfirmarRecebimento() {
           <div className="space-y-3">
             <p className="font-medium">Itens:</p>
             {items.map((it, i) => {
-              const st = itemStatus[i] ?? "received";
+              const st = itemStatus[i];
               const isPartial = st === "partial";
               const isNot = st === "not_received";
               const maxPedido = Math.max(0, Number(it.quantity));
@@ -368,18 +372,28 @@ export function ConfirmarRecebimento() {
                       ? "border-destructive/50 bg-destructive/5"
                       : isPartial
                         ? "border-amber-500/50 bg-amber-500/5"
-                        : ""
+                        : st === "received"
+                          ? "border-border bg-muted/20"
+                          : "border-dashed border-muted-foreground/35 bg-muted/10"
                   }`}
                 >
                   <div className="flex flex-col gap-2  sm:items-start sm:justify-between">
-                    <div className="flex-1 min-w-0">
-                      <span className="font-medium">
-                        {it.product_name || "—"}
-                      </span>
-                      <span className="text-muted-foreground ml-2 text-sm">
-                        Pedido: {Number(it.quantity).toLocaleString("pt-BR")} un
-                        × {formatCurrency(Number(it.unit_value))}
-                      </span>
+                    <div className="flex-1 min-w-0 space-y-1.5 w-full ">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 flex-1 font-medium leading-snug">
+                          {it.product_name || "—"}
+                        </p>
+                        <span className="inline-flex shrink-0 items-baseline gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-2.5 py-1 shadow-sm">
+                          <span className="text-lg font-bold tabular-nums leading-none text-primary sm:text-xl">
+                            {Number(it.quantity).toLocaleString("pt-BR", {
+                              maximumFractionDigits: 4,
+                            })}
+                          </span>
+                          <span className="text-xs font-semibold text-primary/85">
+                            un
+                          </span>
+                        </span>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-2 shrink-0">
                       <Button
