@@ -125,6 +125,8 @@ export function Dashboard() {
           id,
           recebimento_id,
           expense_item_id,
+          quantity_received,
+          status,
           recebimentos!inner (
             expense_id,
             received_at,
@@ -141,7 +143,7 @@ export function Dashboard() {
           )
         `,
           )
-          .eq("status", "not_received"),
+          .in("status", ["not_received", "partial"]),
       ]);
 
     const list = (productsData ?? []) as Product[];

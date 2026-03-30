@@ -20,5 +20,9 @@ export interface Recebimento {
       unit_value: number
     }>
   }
-  recebimento_item_status?: Array<{ expense_item_id: string; status: string }>
+  recebimento_item_status?: Array<{
+    expense_item_id: string
+    status: 'received' | 'not_received' | 'partial'
+    quantity_received?: number | null
+  }>
 }

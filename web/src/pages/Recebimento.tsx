@@ -43,7 +43,8 @@ import { Link } from "react-router-dom";
 
 interface ItemStatus {
   expense_item_id: string;
-  status: "received" | "not_received";
+  status: "received" | "not_received" | "partial";
+  quantity_received?: number | null;
 }
 
 type CompanyMemberRow = { id: string; name: string };
@@ -130,7 +131,7 @@ export function Recebimento() {
             unit_value
           )
         ),
-        recebimento_item_status (expense_item_id, status)
+        recebimento_item_status (expense_item_id, status, quantity_received)
       `,
         { count: "exact" },
       )
@@ -203,7 +204,7 @@ export function Recebimento() {
     const load = async () => {
       const { data } = await supabase
         .from("recebimento_item_status")
-        .select("expense_item_id, status")
+        .select("expense_item_id, status, quantity_received")
         .eq("recebimento_id", detailRecebimento.id);
       setItemStatuses((data ?? []) as ItemStatus[]);
     };
@@ -359,13 +360,16 @@ export function Recebimento() {
                 );
                 const isReceived = r.status === "received";
                 const itemStatusesList = (r.recebimento_item_status ?? []) as ItemStatus[];
-                const hasNotReceived = isReceived && itemStatusesList.some(
-                  (s) => s.status === "not_received",
-                );
+                const hasPendingReceipt =
+                  isReceived &&
+                  itemStatusesList.some(
+                    (s) =>
+                      s.status === "not_received" || s.status === "partial",
+                  );
                 const badgeLabel = !isReceived
                   ? "Pendente"
-                  : hasNotReceived
-                    ? "Confirmado parcialmente"
+                  : hasPendingReceipt
+                    ? "Confirmado com pendências"
                     : "Confirmado";
                 return (
                   <div
@@ -411,7 +415,7 @@ export function Recebimento() {
                             variant={isReceived ? "default" : "secondary"}
                             className={
                               isReceived
-                                ? hasNotReceived
+                                ? hasPendingReceipt
                                   ? "bg-amber-600"
                                   : "bg-green-600"
                                 : ""
@@ -429,9 +433,9 @@ export function Recebimento() {
                               {r.assigned_member?.name?.trim() || "—"}
                             </span>
                           )}
-                          {hasNotReceived && (
+                          {hasPendingReceipt && (
                             <span className="text-amber-600 dark:text-amber-500 font-medium ml-1">
-                              • Teve itens não recebidos
+                              • Faltas ou recebimento parcial
                             </span>
                           )}
                         </p>
@@ -511,11 +515,14 @@ export function Recebimento() {
                 s + Number(it.quantity) * Number(it.unit_value),
               0,
             );
-            const statusByItem = new Map(
-              itemStatuses.map((s) => [s.expense_item_id, s.status]),
+            const rowByItem = new Map(
+              itemStatuses.map((s) => [s.expense_item_id, s]),
             );
             const receivedCount = itemStatuses.filter(
               (s) => s.status === "received",
+            ).length;
+            const partialCount = itemStatuses.filter(
+              (s) => s.status === "partial",
             ).length;
             const notReceivedCount = itemStatuses.filter(
               (s) => s.status === "not_received",
@@ -570,13 +577,21 @@ export function Recebimento() {
                       Report do operador
                     </h3>
                     <div className="rounded-lg border bg-muted/30 p-3 mb-3">
-                      <p className="text-sm">
+                      <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
                         <span className="text-green-600 dark:text-green-500 font-medium">
-                          {receivedCount} recebido(s)
+                          {receivedCount} completo(s)
                         </span>
+                        {partialCount > 0 && (
+                          <>
+                            <span className="text-muted-foreground">•</span>
+                            <span className="text-amber-600 font-medium">
+                              {partialCount} parcial(is)
+                            </span>
+                          </>
+                        )}
                         {notReceivedCount > 0 && (
                           <>
-                            {" • "}
+                            <span className="text-muted-foreground">•</span>
                             <span className="text-destructive font-medium">
                               {notReceivedCount} não recebido(s)
                             </span>
@@ -586,50 +601,88 @@ export function Recebimento() {
                     </div>
                     <div className="space-y-2">
                       {items.map((it) => {
-                        const status =
-                          statusByItem.get(it.id) ?? "received";
+                        const row = rowByItem.get(it.id);
+                        const status = row?.status ?? "received";
                         const isNotReceived =
                           status === "not_received";
+                        const isPartial = status === "partial";
+                        const ordered = Number(it.quantity);
+                        const qRec =
+                          row?.quantity_received != null
+                            ? Number(row.quantity_received)
+                            : status === "received"
+                              ? ordered
+                              : 0;
+                        const missing = Math.max(0, ordered - qRec);
 
                         return (
                           <div
                             key={it.id}
-                            className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${
+                            className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${
                               isNotReceived
                                 ? "border-destructive/50 bg-destructive/5"
-                                : "bg-muted/20"
+                                : isPartial
+                                  ? "border-amber-500/40 bg-amber-500/5"
+                                  : "bg-muted/20"
                             }`}
                           >
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="flex items-start gap-2 min-w-0 flex-1">
                               {isNotReceived ? (
-                                <PackageX className="h-4 w-4 text-destructive shrink-0" />
+                                <PackageX className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                              ) : isPartial ? (
+                                <PackageCheck className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                               ) : (
-                                <PackageCheck className="h-4 w-4 text-green-600 dark:text-green-500 shrink-0" />
+                                <PackageCheck className="h-4 w-4 text-green-600 dark:text-green-500 shrink-0 mt-0.5" />
                               )}
                               <div className="min-w-0">
                                 <p className="font-medium truncate">
                                   {it.product_name || "—"}
                                 </p>
                                 <p className="text-sm text-muted-foreground">
-                                  {Number(it.quantity).toLocaleString("pt-BR")}{" "}
-                                  un ×{" "}
+                                  Pedido:{" "}
+                                  {ordered.toLocaleString("pt-BR")} un ×{" "}
                                   {formatCurrency(Number(it.unit_value))}
                                 </p>
+                                {isPartial && (
+                                  <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                                    Recebido {qRec.toLocaleString("pt-BR")} un
+                                    {missing > 0 && (
+                                      <>
+                                        {" "}
+                                        — faltam{" "}
+                                        {missing.toLocaleString("pt-BR")} un
+                                      </>
+                                    )}
+                                  </p>
+                                )}
+                                {isNotReceived && (
+                                  <p className="text-sm text-destructive mt-1">
+                                    Faltam {ordered.toLocaleString("pt-BR")} un
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <Badge
                               variant={
-                                isNotReceived ? "destructive" : "secondary"
+                                isNotReceived
+                                  ? "destructive"
+                                  : isPartial
+                                    ? "secondary"
+                                    : "secondary"
                               }
                               className={
                                 isNotReceived
                                   ? ""
-                                  : "bg-green-600/20 text-green-700 dark:text-green-400"
+                                  : isPartial
+                                    ? "bg-amber-600/20 text-amber-800 dark:text-amber-300 shrink-0"
+                                    : "bg-green-600/20 text-green-700 dark:text-green-400 shrink-0"
                               }
                             >
                               {isNotReceived
                                 ? "Não recebido"
-                                : "Recebido"}
+                                : isPartial
+                                  ? "Parcial"
+                                  : "Recebido"}
                             </Badge>
                           </div>
                         );

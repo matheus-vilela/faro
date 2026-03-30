@@ -2,19 +2,13 @@ import { Button } from "@/components/ui/button";
 import { BOLETO_CATEGORY_SHORT } from "@/lib/boletoCategory";
 import { buildCalendarCells } from "@/lib/boletosCalendarGrid";
 import { cn } from "@/lib/utils";
-import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoCategory } from "@/types/expense";
 
 function categoryShort(c?: BoletoCategory | null): string {
   return BOLETO_CATEGORY_SHORT[c ?? "outros"];
 }
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-
-const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
-  boleto: "Boleto",
-  pix: "PIX",
-  ted: "TED",
-};
 
 function groupByDueDate(boletos: Boleto[]): Map<string, Boleto[]> {
   const m = new Map<string, Boleto[]>();

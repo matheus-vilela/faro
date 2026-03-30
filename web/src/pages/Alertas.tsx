@@ -40,7 +40,12 @@ interface ItemNaoEntregue {
   display_name: string | null;
   invoice_number: string | null;
   product_name: string;
-  quantity: number;
+  /** Quantidade pedida na nota */
+  quantity_ordered: number;
+  /** Quantidade efetivamente recebida (0 se não recebeu) */
+  quantity_received: number;
+  /** Faltante = pedido − recebido */
+  quantity_missing: number;
   received_at: string | null;
 }
 
@@ -99,6 +104,8 @@ export function Alertas() {
           id,
           recebimento_id,
           expense_item_id,
+          quantity_received,
+          status,
           recebimentos!inner (
             expense_id,
             received_at,
@@ -115,13 +122,14 @@ export function Alertas() {
           )
         `,
         )
-        .eq("status", "not_received");
+        .in("status", ["not_received", "partial"]);
       const notDeliveredList: ItemNaoEntregue[] = [];
       for (const r of notReceivedData ?? []) {
         const rec = r as unknown as {
           id: string;
           recebimento_id: string;
           expense_item_id: string;
+          quantity_received: number | null;
           recebimentos: {
             expense_id: string;
             received_at: string | null;
@@ -143,6 +151,11 @@ export function Alertas() {
         const ei = Array.isArray(rec.expense_items)
           ? rec.expense_items[0]
           : rec.expense_items;
+        const ordered = Number(ei?.quantity ?? 0);
+        const qRec =
+          rec.quantity_received != null ? Number(rec.quantity_received) : 0;
+        const missing = Math.max(0, ordered - qRec);
+        if (missing <= 0) continue;
         notDeliveredList.push({
           id: rec.id,
           recebimento_id: rec.recebimento_id,
@@ -152,7 +165,9 @@ export function Alertas() {
           display_name: exp.display_name,
           invoice_number: exp.invoice_number,
           product_name: ei?.product_name ?? "—",
-          quantity: ei?.quantity ?? 0,
+          quantity_ordered: ordered,
+          quantity_received: qRec,
+          quantity_missing: missing,
           received_at: rb.received_at,
         });
       }
@@ -249,10 +264,11 @@ export function Alertas() {
                   </div>
                   <div>
                     <CardTitle className="text-lg">
-                      Itens não entregues
+                      Faltas no recebimento
                     </CardTitle>
                     <CardDescription className="mt-0.5">
-                      Informados como não recebidos pelo operador
+                      Itens não recebidos ou quantidade menor que o pedido
+                      (parcial)
                     </CardDescription>
                   </div>
                 </div>
@@ -276,7 +292,22 @@ export function Alertas() {
                   >
                     <div className="min-w-0 flex-1">
                       <p className="font-medium truncate">
-                        {item.product_name} — {item.quantity} un
+                        {item.product_name}
+                        {item.quantity_missing > 0 && (
+                          <span className="text-destructive">
+                            {" "}
+                            — faltam {item.quantity_missing.toLocaleString("pt-BR")}{" "}
+                            un
+                            {item.quantity_received > 0 && (
+                              <span className="text-muted-foreground font-normal">
+                                {" "}
+                                (pedido {item.quantity_ordered.toLocaleString("pt-BR")}{" "}
+                                un, recebido{" "}
+                                {item.quantity_received.toLocaleString("pt-BR")} un)
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </p>
                       <p className="text-sm text-muted-foreground truncate">
                         {item.display_name?.trim() ||
