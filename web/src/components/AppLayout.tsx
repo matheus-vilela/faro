@@ -13,7 +13,6 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -133,29 +132,50 @@ function AppLayoutContent() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { currentCompany, currentRole } = useCompany();
   const location = useLocation();
+  const { state } = useSidebar();
 
   const navItems = currentRole
     ? NAV_ITEMS.filter((item) => item.roles.includes(currentRole))
     : NAV_ITEMS;
-  const { state } = useSidebar();
-  const isCollapsed = state === "collapsed";
-
   const initials = user?.email?.split("@")[0].slice(0, 2).toUpperCase() ?? "U";
 
   return (
     <>
       <Sidebar collapsible="icon">
-        <SidebarHeader className="border-b px-4 py-3 flex h-16 items-center">
+        <SidebarHeader className="flex h-16 items-center border-b px-2 py-4">
           <Link
             to="/app"
-            className="flex min-w-0 w-full items-center justify-center gap-2 overflow-hidden font-semibold tracking-tight group-data-[collapsible=icon]:justify-center"
+            aria-label="Faro — início"
+            className="flex min-w-0 w-full items-center justify-center gap-2.5 overflow-hidden font-semibold tracking-tight group-data-[collapsible=icon]:justify-center  rounded-md"
           >
-            <span className="shrink-0 text-lg font-semibold text-primary group-data-[collapsible=icon]:hidden">
-              Faro
-            </span>
-            <span className="hidden text-lg font-bold text-primary group-data-[collapsible=icon]:inline">
-              F
-            </span>
+            {state === "collapsed" ? (
+              <img
+                src="/src/assets/logos/favicon.png"
+                alt=""
+                width={48}
+                height={48}
+                aria-hidden
+                className="h-12 w-16 shrink-0 object-contain"
+              />
+            ) : resolvedTheme === "dark" ? (
+              <img
+                src="/src/assets/logos/faro_logo_darkmode_transp.png"
+                alt=""
+                width={128}
+                height={64}
+                aria-hidden
+                className="h-12 w-28 shrink-0 object-contain"
+              />
+            ) : (
+              <img
+                src="/src/assets/logos/faro_logo_light_transparent.png"
+                alt=""
+                width={128}
+                height={64}
+                aria-hidden
+                className="h-12 w-28 shrink-0 object-contain"
+              />
+            )}
           </Link>
           {/* {currentCompany && (
             <p className="text-xs text-muted-foreground mt-1 truncate">
@@ -165,22 +185,7 @@ function AppLayoutContent() {
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            {/* <SidebarGroupLabel>Menu</SidebarGroupLabel> */}
-            {!isCollapsed && (
-              <SidebarGroupLabel className="whitespace-nowrap">
-                {" "}
-              </SidebarGroupLabel>
-            )}
-            {isCollapsed && (
-              <span
-                className={cn(
-                  "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-                )}
-              >
-                {" "}
-              </span>
-            )}
-            <SidebarGroupContent>
+            <SidebarGroupContent className="mt-2">
               <SidebarMenu>
                 {navItems.map((item) => {
                   const active = isNavActive(location.pathname, item.url);
@@ -296,7 +301,7 @@ function AppLayoutContent() {
             </DropdownMenu>
           </div>
         </header>
-        <main className="flex-1 p-6">
+        <main className="flex-1 py-4 px-4 sm:px-8">
           <Outlet />
         </main>
       </SidebarInset>

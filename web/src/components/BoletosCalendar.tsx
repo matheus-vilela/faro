@@ -86,9 +86,9 @@ export function BoletosCalendar({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="">
       <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
-        <div className="min-w-[640px] p-2 sm:p-3">
+        <div className="min-w-[640px] ">
           <div className="grid grid-cols-7 gap-px rounded-lg bg-border/40 p-px">
             {WEEKDAYS.map((w) => (
               <div

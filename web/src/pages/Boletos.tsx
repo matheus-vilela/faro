@@ -12,6 +12,13 @@ import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -19,13 +26,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -222,10 +222,10 @@ export function Boletos() {
   }, [boletoResumo, currentCompany?.id, refreshAll]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
         <div className="min-w-0">
-          <h1 className="text-3xl font-bold tracking-tight">Contas a pagar</h1>
+          <h1 className="text-xl font-bold tracking-tight">Contas a pagar</h1>
           <p className="text-muted-foreground">
             Cadastre contas a pagar e vincule às despesas
           </p>
@@ -237,6 +237,32 @@ export function Boletos() {
           <Plus className="h-4 w-4 mr-2" />
           Nova conta
         </Button>
+      </div>
+
+      <div className="rounded-xl w-fit border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm dark:from-primary/15 dark:via-primary/8">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <div className="flex shrink-0 items-center gap-3">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-inner ring-1 ring-primary/20"
+              aria-hidden
+            >
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">
+                Período de referência
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Calendário e lista usam este mês
+              </p>
+            </div>
+          </div>
+          <MonthSelector
+            value={period}
+            onChange={setPeriod}
+            className="shrink-0 [&_button]:h-10 [&_button]:w-10 [&_button]:border-primary/35 [&_button]:bg-background [&_button]:shadow-sm [&_button]:hover:bg-primary/10 [&_span]:min-w-46 [&_span]:text-base [&_span]:font-semibold sm:[&_span]:min-w-52 sm:[&_span]:text-lg"
+          />
+        </div>
       </div>
 
       <nav
@@ -306,32 +332,6 @@ export function Boletos() {
                 : "Listagem detalhada com filtro e paginação"}
             </CardDescription>
           </div>
-
-          <div className="rounded-xl border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm dark:from-primary/15 dark:via-primary/8">
-            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-              <div className="flex shrink-0 items-center gap-3">
-                <div
-                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-inner ring-1 ring-primary/20"
-                  aria-hidden
-                >
-                  <CalendarDays className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">
-                    Período de referência
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Calendário e lista usam este mês
-                  </p>
-                </div>
-              </div>
-              <MonthSelector
-                value={period}
-                onChange={setPeriod}
-                className="shrink-0 [&_button]:h-10 [&_button]:w-10 [&_button]:border-primary/35 [&_button]:bg-background [&_button]:shadow-sm [&_button]:hover:bg-primary/10 [&_span]:min-w-46 [&_span]:text-base [&_span]:font-semibold sm:[&_span]:min-w-52 sm:[&_span]:text-lg"
-              />
-            </div>
-          </div>
         </CardHeader>
 
         <CardContent>
@@ -370,44 +370,41 @@ export function Boletos() {
                       tabIndex={0}
                       onClick={() => setBoletoResumo(b)}
                       onKeyDown={(e) => e.key === "Enter" && setBoletoResumo(b)}
-                      className="flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                      className="flex flex-col gap-3 rounded-lg border p-4 cursor-pointer transition-colors hover:bg-muted/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium">{b.description}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium leading-snug">
+                          {b.description}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           <span className="text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
                             {categoryLabel(b.category)}
                           </span>
                           <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
                             {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
                           </span>
-                          <span className="text-sm text-muted-foreground">
+                          <span className="text-xs text-muted-foreground">
                             {STATUS_LABELS[b.status]}
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Venc. {formatDate(b.due_date)} •{" "}
-                          {formatCurrency(b.amount)}
-                          {b.provider && ` • ${b.provider}`}
-                        </p>
+                        {b.provider ? (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            {b.provider}
+                          </p>
+                        ) : null}
                       </div>
-                      <div onClick={(e) => e.stopPropagation()}>
-                        {b.expense_id ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              navigate(`/app/despesas?expense=${b.expense_id}`)
-                            }
-                            title="Ir para despesa"
-                          >
-                            <ExternalLink className="h-5 w-5" />
-                          </Button>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">
-                            Sem despesa
-                          </span>
-                        )}
+                      <div className="flex shrink-0 flex-row items-end justify-between border-t border-border pt-3 sm:flex-col sm:items-end sm:justify-start sm:border-t-0 sm:pt-0 sm:text-right">
+                        <div className="flex  items-center justify-end gap-1">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Vencimento:
+                          </p>
+                          <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
+                            {formatDate(b.due_date)}
+                          </p>
+                        </div>
+                        <p className="text-md font-bold tabular-nums text-primary sm:text-lg">
+                          {formatCurrency(b.amount)}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -451,15 +448,15 @@ export function Boletos() {
                 )}
               >
                 <span className="font-medium">{b.description}</span>
-                <span className="mt-0.5 block text-[11px] text-primary">
-                  {categoryLabel(b.category)}
-                </span>
                 <div className="flex items-center justify-between">
                   <span className="mt-1 block text-lg font-semibold tabular-nums text-primary">
                     {formatCurrency(b.amount)}
                   </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
+                  <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    {/* {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]} */}
+                    <span className="mt-0.5 block text-[11px] text-primary">
+                      {categoryLabel(b.category)}
+                    </span>
                     {b.status === "paid" ? " · Pago" : " · Pendente"}
                   </span>
                 </div>
@@ -490,7 +487,10 @@ export function Boletos() {
                     Vencimento: {formatDate(boletoResumo.due_date)}
                   </p>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                    <Badge
+                      variant="outline"
+                      className="border-primary/30 bg-primary/10 text-primary"
+                    >
                       {categoryLabel(boletoResumo.category)}
                     </Badge>
                     <Badge variant="secondary">

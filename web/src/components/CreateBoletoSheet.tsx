@@ -169,46 +169,49 @@ export function CreateBoletoSheet({
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          <div>
-            <Label>Tipo</Label>
-            <Select
-              value={paymentType}
-              onValueChange={(v) => setPaymentType(v as PaymentType)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="boleto">
-                  {PAYMENT_TYPE_LABELS.boleto}
-                </SelectItem>
-                <SelectItem value="pix">{PAYMENT_TYPE_LABELS.pix}</SelectItem>
-                <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Categoria</Label>
-            <Select
-              value={category}
-              onValueChange={(v) => setCategory(v as BoletoCategory)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BOLETO_CATEGORY_ORDER.map((key) => (
-                  <SelectItem key={key} value={key}>
-                    {BOLETO_CATEGORY_LABELS[key]}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Tipo</Label>
+              <Select
+                value={paymentType}
+                onValueChange={(v) => setPaymentType(v as PaymentType)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="boleto">
+                    {PAYMENT_TYPE_LABELS.boleto}
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1.5">
-              Separe contas de fornecedores (insumos, NF) de custos fixos do
-              estabelecimento (energia, água, aluguel).
-            </p>
+                  <SelectItem value="pix">{PAYMENT_TYPE_LABELS.pix}</SelectItem>
+                  <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Categoria</Label>
+              <Select
+                value={category}
+                onValueChange={(v) => setCategory(v as BoletoCategory)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BOLETO_CATEGORY_ORDER.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {BOLETO_CATEGORY_LABELS[key]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* <p className="text-xs text-muted-foreground mt-1.5">
+                Separe contas de fornecedores (insumos, NF) de custos fixos do
+                estabelecimento (energia, água, aluguel).
+              </p> */}
+            </div>
           </div>
+
           <div>
             <Label>Descrição</Label>
             <Input
@@ -240,23 +243,13 @@ export function CreateBoletoSheet({
           </div>
 
           {paymentType === "boleto" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label>Código de barras</Label>
-                <Input
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  placeholder="Opcional"
-                />
-              </div>
-              <div>
-                <Label>Fornecedor / Banco</Label>
-                <Input
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  placeholder="Opcional"
-                />
-              </div>
+            <div>
+              <Label>Código de barras</Label>
+              <Input
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                placeholder="Opcional"
+              />
             </div>
           )}
 
