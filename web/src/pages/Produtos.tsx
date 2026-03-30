@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { CreateProductSheet } from "@/components/CreateProductSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -178,13 +180,11 @@ export function Produtos() {
   };
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Produtos</h1>
-        <p className="text-muted-foreground">
-          Cadastre produtos e controle o estoque
-        </p>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Produtos"
+        description="Cadastre produtos e controle o estoque"
+      />
 
       {currentCompany?.id && (
         <CreateProductSheet
@@ -411,6 +411,6 @@ export function Produtos() {
           </CardHeader>
         </Card>
       )}
-    </div>
+    </PageShell>
   );
 }

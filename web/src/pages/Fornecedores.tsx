@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import {
   MonthSelector,
@@ -309,13 +311,11 @@ export function Fornecedores() {
   };
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Fornecedores</h1>
-        <p className="text-muted-foreground">
-          Cadastre fornecedores e gerencie as informações de pagamento
-        </p>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Fornecedores"
+        description="Cadastre fornecedores e gerencie as informações de pagamento"
+      />
 
       {currentCompany?.id && (
         <CreateSupplierSheet
@@ -768,6 +768,6 @@ export function Fornecedores() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

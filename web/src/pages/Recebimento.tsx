@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -309,14 +311,12 @@ export function Recebimento() {
     });
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Recebimento</h1>
-        <p className="text-muted-foreground">
-          Ao compartilhar o link, você pode associar um membro da empresa ao
-          recebimento (referência). Qualquer pessoa com o link pode confirmar.
-        </p>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        icon={PackageCheck}
+        title="Recebimento"
+        description="Ao compartilhar o link, você pode associar um membro da empresa ao recebimento (referência). Qualquer pessoa com o link pode confirmar."
+      />
 
       <Card>
         <CardHeader>
@@ -780,6 +780,6 @@ export function Recebimento() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

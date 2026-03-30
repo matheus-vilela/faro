@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -295,16 +297,11 @@ export function ConfiguracoesUsuariosMembros() {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Usuários e membros
-        </h2>
-        <p className="text-muted-foreground text-sm max-w-2xl">
-          Dados do proprietário com acesso ao sistema e membros que interagem
-          apenas pelo WhatsApp (sem login no Faro).
-        </p>
-      </div>
+    <PageShell className="space-y-8 pb-0">
+      <PageHeader
+        title="Usuários e membros"
+        description="Dados do proprietário com acesso ao sistema e membros que interagem apenas pelo WhatsApp (sem login no Faro)."
+      />
 
       <Card className="shadow-sm border-primary/15">
         <CardHeader className="space-y-1">
@@ -548,6 +545,6 @@ export function ConfiguracoesUsuariosMembros() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

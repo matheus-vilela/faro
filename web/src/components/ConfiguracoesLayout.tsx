@@ -1,3 +1,5 @@
+import { PageHeader } from '@/components/PageHeader'
+import { PageShell } from '@/components/PageShell'
 import { cn } from '@/lib/utils'
 import { canOwnerAccess } from '@/lib/roles'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -41,16 +43,12 @@ export function ConfiguracoesLayout() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 pb-10">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Settings2 className="h-8 w-8 shrink-0 text-primary" />
-          Configurações
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Centralize ajustes da empresa, integrações e permissões.
-        </p>
-      </header>
+    <PageShell narrow className="space-y-8">
+      <PageHeader
+        icon={Settings2}
+        title="Configurações"
+        description="Centralize ajustes da empresa, integrações e permissões."
+      />
 
       <nav
         className="flex flex-wrap gap-2 border-b border-border pb-px"
@@ -77,6 +75,6 @@ export function ConfiguracoesLayout() {
       </nav>
 
       <Outlet />
-    </div>
+    </PageShell>
   )
 }

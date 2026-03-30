@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { Company } from '@/contexts/CompanyContext'
 import { ROLE_LABELS } from '@/lib/roles'
+import { PageHeader } from '@/components/PageHeader'
+import { PageShell } from '@/components/PageShell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -111,13 +113,12 @@ export function Companies() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Selecione ou crie uma empresa</h1>
-          <p className="text-muted-foreground mt-1">
-            Você pode participar de várias empresas
-          </p>
-        </div>
+      <PageShell className="max-w-2xl space-y-6 pb-0">
+        <PageHeader
+          className="flex-col items-center text-center sm:flex-col sm:items-center"
+          title="Selecione ou crie uma empresa"
+          description="Você pode participar de várias empresas"
+        />
 
         {!showCreate ? (
           <>
@@ -152,7 +153,7 @@ export function Companies() {
             </div>
           </>
         ) : null}
-      </div>
+      </PageShell>
 
       <Sheet open={showCreate} onOpenChange={(open) => {
         setShowCreate(open)

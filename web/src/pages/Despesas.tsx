@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import {
@@ -604,17 +606,15 @@ export function Despesas() {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Despesas</h1>
-          <p className="text-muted-foreground">
-            {isGestor
-              ? "Revisar despesas registradas e vincular boletos"
-              : "Registrar despesas e vincular boletos"}
-          </p>
-        </div>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Despesas"
+        description={
+          isGestor
+            ? "Revisar despesas registradas e vincular boletos"
+            : "Registrar despesas e vincular boletos"
+        }
+      />
 
       <Sheet open={expenseSheetOpen} onOpenChange={setExpenseSheetOpen}>
         <SheetContent className="overflow-y-auto sm:max-w-xl">
@@ -1760,6 +1760,6 @@ export function Despesas() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

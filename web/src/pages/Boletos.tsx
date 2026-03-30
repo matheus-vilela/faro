@@ -8,6 +8,8 @@ import {
   getMonthRange,
   type MonthYear,
 } from "@/components/MonthSelector";
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -222,22 +224,20 @@ export function Boletos() {
   }, [boletoResumo, currentCompany?.id, refreshAll]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight">Contas a pagar</h1>
-          <p className="text-muted-foreground">
-            Cadastre contas a pagar e vincule às despesas
-          </p>
-        </div>
-        <Button
-          onClick={() => setBoletoSheetOpen(true)}
-          className="h-10 w-full shrink-0 sm:mt-0.5 sm:w-auto "
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Nova conta
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Contas a pagar"
+        description="Cadastre contas a pagar e vincule às despesas"
+        action={
+          <Button
+            onClick={() => setBoletoSheetOpen(true)}
+            className="h-10 w-full shrink-0 sm:w-auto"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Nova conta
+          </Button>
+        }
+      />
 
       <div className="rounded-xl w-fit border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm dark:from-primary/15 dark:via-primary/8">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
@@ -317,35 +317,28 @@ export function Boletos() {
           }}
         />
       )}
+      {activeTab === "calendar" ? (
+        <BoletosCalendar
+          month={period.month}
+          year={period.year}
+          boletos={calendarBoletos}
+          loading={calendarLoading}
+          onDayListOpen={setCalendarDayList}
+          onDayBoletoClick={setBoletoResumo}
+          formatCurrency={formatCurrency}
+        />
+      ) : (
+        <Card>
+          <CardHeader className="flex flex-col gap-5 space-y-0">
+            <div>
+              <CardTitle>Lista de contas</CardTitle>
+              <CardDescription>
+                Listagem detalhada com filtro e paginação
+              </CardDescription>
+            </div>
+          </CardHeader>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-5 space-y-0">
-          <div>
-            <CardTitle>
-              {activeTab === "calendar"
-                ? "Calendário de vencimentos"
-                : "Lista de contas"}
-            </CardTitle>
-            <CardDescription>
-              {activeTab === "calendar"
-                ? "Visualize por dia do mês o que vence e acesse o resumo com um clique"
-                : "Listagem detalhada com filtro e paginação"}
-            </CardDescription>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          {activeTab === "calendar" ? (
-            <BoletosCalendar
-              month={period.month}
-              year={period.year}
-              boletos={calendarBoletos}
-              loading={calendarLoading}
-              onDayListOpen={setCalendarDayList}
-              onDayBoletoClick={setBoletoResumo}
-              formatCurrency={formatCurrency}
-            />
-          ) : (
+          <CardContent>
             <>
               <div className="mb-4 flex flex-wrap gap-3 items-center">
                 <Input
@@ -418,9 +411,9 @@ export function Boletos() {
                 />
               )}
             </>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Sheet
         // modal={!boletoResumo}
@@ -673,6 +666,6 @@ export function Boletos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

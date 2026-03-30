@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -241,13 +243,11 @@ export function Dashboard() {
     alertSummary.notReceived;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Bem-vindo ao Faro{currentCompany ? ` — ${currentCompany.name}` : ""}
-        </p>
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Dashboard"
+        description={`Bem-vindo ao Faro${currentCompany ? ` — ${currentCompany.name}` : ""}`}
+      />
 
       <div
         className={`grid gap-4 ${canSeeAlerts ? "md:grid-cols-2" : "md:max-w-xl"}`}
@@ -375,7 +375,7 @@ export function Dashboard() {
           </Card>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

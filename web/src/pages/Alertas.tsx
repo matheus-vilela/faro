@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -222,21 +224,19 @@ export function Alertas() {
   const hasAnyAlerta = totalAlertas > 0;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Alertas</h1>
-          <p className="text-muted-foreground mt-1">
-            Vencimentos, estoque e acompanhamento de recebimentos
-          </p>
-        </div>
-        {hasAnyAlerta && (
-          <Badge variant="secondary" className="w-fit text-base px-4 py-1.5">
-            {totalAlertas} alerta{totalAlertas !== 1 ? "s" : ""} pendente
-            {totalAlertas !== 1 ? "s" : ""}
-          </Badge>
-        )}
-      </div>
+    <PageShell className="space-y-8">
+      <PageHeader
+        title="Alertas"
+        description="Vencimentos, estoque e acompanhamento de recebimentos"
+        action={
+          hasAnyAlerta ? (
+            <Badge variant="secondary" className="w-fit text-base px-4 py-1.5">
+              {totalAlertas} alerta{totalAlertas !== 1 ? "s" : ""} pendente
+              {totalAlertas !== 1 ? "s" : ""}
+            </Badge>
+          ) : undefined
+        }
+      />
 
       {!hasAnyAlerta && (
         <Card className="border-dashed">
@@ -508,6 +508,6 @@ export function Alertas() {
           </Card>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
