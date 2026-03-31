@@ -530,6 +530,8 @@ type BoletoWhatsappRow = {
   amount: number;
   status: string;
   category?: string | null;
+  company_category_id?: string | null;
+  company_categories?: { name: string } | { name: string }[] | null;
 };
 
 const BOLETO_CATEGORY_WHATSAPP_SHORT: Record<string, string> = {
@@ -543,13 +545,24 @@ const BOLETO_CATEGORY_WHATSAPP_SHORT: Record<string, string> = {
 const BOLETOS_WHATSAPP_MAX_ITEMS = 45;
 
 /** Linha de um boleto: pendente 🔘; pago ☑️ com ~riscado~ (WhatsApp). Inclui categoria. */
+function whatsappCategoryShortFromRow(b: BoletoWhatsappRow): string {
+  const rel = b.company_categories;
+  const row = Array.isArray(rel) ? rel[0] : rel;
+  const name = row && typeof row === "object" && "name" in row
+    ? String((row as { name: string }).name).trim()
+    : "";
+  if (name) {
+    return name.length > 10 ? `${name.slice(0, 9)}…` : name;
+  }
+  return BOLETO_CATEGORY_WHATSAPP_SHORT[b.category ?? "outros"] ?? "Outros";
+}
+
 function formatBoletoLineWhatsapp(b: BoletoWhatsappRow): string {
   const raw =
     (b.description ?? "").trim().replace(/\s+/g, " ") || "(sem descrição)";
   const desc = raw.replace(/~/g, "");
   const money = formatMoneyBrl(Number(b.amount));
-  const cat =
-    BOLETO_CATEGORY_WHATSAPP_SHORT[b.category ?? "outros"] ?? "Outros";
+  const cat = whatsappCategoryShortFromRow(b);
   const core = `${desc} · ${cat} · ${money}`;
   if (b.status === "paid") {
     return `☑️ ~${core}~`;
@@ -566,7 +579,9 @@ async function buildContasAPagarWhatsappMessage(
 
   const { data, error } = await supabase
     .from("boletos")
-    .select("due_date, description, amount, status, category")
+    .select(
+      "due_date, description, amount, status, category, company_category_id, company_categories ( name )",
+    )
     .eq("company_id", companyId)
     .gte("due_date", startIso)
     .lte("due_date", endIso)

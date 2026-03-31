@@ -1,12 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { BOLETO_CATEGORY_SHORT } from "@/lib/boletoCategory";
 import { buildCalendarCells } from "@/lib/boletosCalendarGrid";
 import { cn } from "@/lib/utils";
-import type { Boleto, BoletoCategory } from "@/types/expense";
-
-function categoryShort(c?: BoletoCategory | null): string {
-  return BOLETO_CATEGORY_SHORT[c ?? "outros"];
-}
+import type { Boleto } from "@/types/expense";
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -59,6 +54,7 @@ interface BoletosCalendarProps {
   onDayListOpen: (payload: CalendarDayListPayload) => void;
   onDayBoletoClick: (b: Boleto) => void;
   formatCurrency: (v: number) => string;
+  categoryShort: (b: Boleto) => string;
 }
 
 export function BoletosCalendar({
@@ -69,6 +65,7 @@ export function BoletosCalendar({
   onDayListOpen,
   onDayBoletoClick,
   formatCurrency,
+  categoryShort,
 }: BoletosCalendarProps) {
   const byDay = groupByDueDate(boletos);
   const cells = buildCalendarCells(year, month);
@@ -205,7 +202,7 @@ export function BoletosCalendar({
                                 </span>
                                 <span className="mt-0.5 text-[9px] text-muted-foreground sm:text-[10px] flex items-center gap-1">
                                   <span className="mt-0.5 block text-[9px] text-primary/90 sm:text-[10px]">
-                                    {categoryShort(b.category)}
+                                    {categoryShort(b)}
                                   </span>
                                   {b.status === "paid" ? " · Pago" : ""}
                                 </span>

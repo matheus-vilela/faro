@@ -1,3 +1,4 @@
+import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,15 +17,28 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  BOLETO_CATEGORY_LABELS,
-  BOLETO_CATEGORY_ORDER,
-} from "@/lib/boletoCategory";
+import { isSelectableDespesaLeaf } from "@/lib/companyCategoryLabels";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
-import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
+import type { CompanyCategory } from "@/types/category";
+import type { Boleto, PaymentType } from "@/types/expense";
 import { FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+function pickDefaultCategoryId(list: CompanyCategory[]): string {
+  const leaves = list.filter(isSelectableDespesaLeaf);
+  const outras = leaves.find(
+    (c) => c.name.trim().toLowerCase() === "outras - variáveis",
+  );
+  if (outras) return outras.id;
+  const sorted = [...leaves].sort((a, b) => {
+    const ao = a.ordem ?? a.sort_order ?? 0;
+    const bo = b.ordem ?? b.sort_order ?? 0;
+    if (ao !== bo) return ao - bo;
+    return a.name.localeCompare(b.name, "pt-BR");
+  });
+  return sorted[0]?.id ?? "";
+}
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -64,7 +78,11 @@ export function CreateBoletoSheet({
   onSuccess,
 }: CreateBoletoSheetProps) {
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
-  const [category, setCategory] = useState<BoletoCategory>("outros");
+  const [companyCategories, setCompanyCategories] = useState<
+    CompanyCategory[]
+  >([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [companyCategoryId, setCompanyCategoryId] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [amount, setAmount] = useState("");
@@ -94,7 +112,42 @@ export function CreateBoletoSheet({
     }
   }, [open, defaultDueDate]);
 
+  const loadCategories = useCallback(
+    async (opts?: { selectDefault?: boolean }) => {
+      if (!companyId) return;
+      setCategoriesLoading(true);
+      const { data, error } = await supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("natureza", "DESPESA")
+        .eq("ativo", true)
+        .order("ordem", { ascending: true })
+        .order("name", { ascending: true });
+      setCategoriesLoading(false);
+      if (error) {
+        console.error(error);
+        setCompanyCategories([]);
+        if (opts?.selectDefault) setCompanyCategoryId("");
+        return;
+      }
+      const list = (data ?? []) as CompanyCategory[];
+      setCompanyCategories(list);
+      if (opts?.selectDefault) {
+        setCompanyCategoryId(pickDefaultCategoryId(list));
+      }
+    },
+    [companyId],
+  );
+
+  useEffect(() => {
+    if (!open || !companyId) return;
+    void loadCategories({ selectDefault: true });
+  }, [open, companyId, loadCategories]);
+
   const canSubmit =
+    companyCategoryId.trim() !== "" &&
+    !categoriesLoading &&
     description.trim() !== "" &&
     dueDate.trim() !== "" &&
     parseFloat(amount) > 0 &&
@@ -112,7 +165,8 @@ export function CreateBoletoSheet({
 
     const payload: Record<string, unknown> = {
       company_id: companyId,
-      category,
+      company_category_id: companyCategoryId,
+      category: null,
       description: description.trim(),
       due_date: dueDate,
       amount: parseFloat(amount),
@@ -161,7 +215,7 @@ export function CreateBoletoSheet({
     setAgency("");
     setAccount("");
     setPaymentType("boleto");
-    setCategory("outros");
+    setCompanyCategoryId(pickDefaultCategoryId(companyCategories));
     onOpenChange(false);
     onSuccess?.(boleto);
   };
@@ -181,7 +235,7 @@ export function CreateBoletoSheet({
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4">
             <div>
               <Label>Tipo</Label>
               <Select
@@ -202,25 +256,17 @@ export function CreateBoletoSheet({
             </div>
             <div>
               <Label>Categoria</Label>
-              <Select
-                value={category}
-                onValueChange={(v) => setCategory(v as BoletoCategory)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BOLETO_CATEGORY_ORDER.map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {BOLETO_CATEGORY_LABELS[key]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {/* <p className="text-xs text-muted-foreground mt-1.5">
-                Separe contas de fornecedores (insumos, NF) de custos fixos do
-                estabelecimento (energia, água, aluguel).
-              </p> */}
+              <BoletoCategoryPicker
+                companyId={companyId}
+                value={companyCategoryId}
+                onValueChange={setCompanyCategoryId}
+                categories={companyCategories}
+                loading={categoriesLoading}
+                onReload={() => loadCategories({ selectDefault: false })}
+              />
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Busque, escolha ou crie uma categoria sem sair desta tela.
+              </p>
             </div>
           </div>
 

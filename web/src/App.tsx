@@ -21,6 +21,7 @@ import { ConfirmarRecebimento } from '@/pages/ConfirmarRecebimento'
 import { RedirectRecebimentoSlug } from '@/pages/RedirectRecebimentoSlug'
 import { ConfiguracoesLayout } from '@/components/ConfiguracoesLayout'
 import { ConfiguracoesUsuariosMembros } from '@/pages/ConfiguracoesUsuariosMembros'
+import { ConfiguracoesCategorias } from '@/pages/ConfiguracoesCategorias'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -52,6 +53,7 @@ function AuthenticatedLayout() {
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />
             <Route path="usuarios-membros" element={<ConfiguracoesUsuariosMembros />} />
+            <Route path="categorias" element={<ConfiguracoesCategorias />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
