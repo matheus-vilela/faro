@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
-import { buildChildrenMap, categoryPathLabel, NATUREZA_LABEL, TIPO_LABEL } from "@/lib/companyCategoryLabels";
+import { buildChildrenMap, categoryPathLabel, TIPO_LABEL } from "@/lib/companyCategoryLabels";
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -248,18 +248,6 @@ export function ConfiguracoesCategorias() {
     await load();
   };
 
-  const archive = async (row: CompanyCategory) => {
-    if (!currentCompany?.id || !isOwner) return;
-    const { error } = await supabase
-      .from("company_categories")
-      .update({ ativo: false })
-      .eq("id", row.id)
-      .eq("company_id", currentCompany.id);
-    if (error) return toast.error(error.message);
-    toast.success("Categoria arquivada.");
-    await load();
-  };
-
   const remove = async (row: CompanyCategory) => {
     if (!currentCompany?.id || !isOwner) return;
     const { error } = await supabase
@@ -276,56 +264,94 @@ export function ConfiguracoesCategorias() {
     await load();
   };
 
-  const renderNode = (node: CompanyCategory, depth: number) => {
+  const renderNode = (node: CompanyCategory, depth: number, isLastOfParent = true) => {
     const children = childrenMap.get(node.id) ?? [];
-    const isOpen = expanded[node.id] ?? true;
+    const isOpen = expanded[node.id] === true;
     return (
-      <div key={node.id}>
+      <div className="min-w-0">
         <div
           className={cn(
-            "flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60",
-            selectedId === node.id && "bg-muted",
-            node.ativo === false && "opacity-60",
+            "flex min-w-0 items-stretch",
+            depth === 0 && "rounded-md",
           )}
-          style={{ marginLeft: depth * 14 }}
         >
-          {children.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((s) => ({ ...s, [node.id]: !isOpen }))}
-              className="rounded p-0.5 hover:bg-muted"
-            >
-              {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </button>
-          ) : (
-            <span className="w-5" />
-          )}
-          <button
-            type="button"
-            className="min-w-0 flex-1 text-left"
-            onClick={() => openEdit(node)}
-          >
-            <p className="truncate text-sm font-medium">{node.name}</p>
-          </button>
-          <Badge variant="outline" className="text-[10px]">{NATUREZA_LABEL[node.natureza]}</Badge>
-          <Badge variant="secondary" className="text-[10px]">{TIPO_LABEL[node.tipo]}</Badge>
-          {node.padrao_sistema ? <Badge className="text-[10px]">Padrão</Badge> : null}
-          {node.ativo === false ? <Badge variant="destructive" className="text-[10px]">Inativa</Badge> : null}
-          {isOwner ? (
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="outline" onClick={() => openCreateChild(node)}>
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => archive(node)}>
-                Arquivar
-              </Button>
-              <Button size="sm" variant="outline" className="text-destructive" onClick={() => remove(node)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+          {depth > 0 ? (
+            <div className="relative w-5 shrink-0 self-stretch">
+              {isLastOfParent ? (
+                <span
+                  className="pointer-events-none absolute left-2 top-0 h-1/2 w-3 rounded-bl-[3px] border-border border-l border-b"
+                  aria-hidden
+                />
+              ) : (
+                <span
+                  className="pointer-events-none absolute left-2 top-1/2 h-px w-3 -translate-y-1/2 bg-border"
+                  aria-hidden
+                />
+              )}
             </div>
           ) : null}
+          <div
+            className={cn(
+              "relative flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60",
+              selectedId === node.id && "bg-muted",
+              node.ativo === false && "opacity-60",
+            )}
+          >
+            {children.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((s) => ({ ...s, [node.id]: !isOpen }))}
+                className="relative z-[1] shrink-0 rounded p-0.5 hover:bg-muted"
+                aria-expanded={isOpen}
+                aria-label={isOpen ? "Recolher subcategorias" : "Expandir subcategorias"}
+              >
+                {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </button>
+            ) : (
+              <span className="relative z-[1] w-5 shrink-0" />
+            )}
+            <button
+              type="button"
+              className="relative z-[1] min-w-0 flex-1 text-left"
+              onClick={() => openEdit(node)}
+            >
+              <p className="truncate text-sm font-medium">{node.name}</p>
+            </button>
+            {node.ativo === false ? (
+              <Badge variant="destructive" className="shrink-0 text-[10px]">
+                Inativa
+              </Badge>
+            ) : null}
+            {isOwner ? (
+              <div className="relative z-[1] flex shrink-0 items-center gap-1">
+                <Button size="sm" variant="outline" onClick={() => openCreateChild(node)}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="outline" className="text-destructive" onClick={() => remove(node)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : null}
+          </div>
         </div>
-        {isOpen ? children.map((c) => renderNode(c, depth + 1)) : null}
+        {isOpen && children.length > 0 ? (
+          <div className="relative ml-2 mt-1">
+            {children.map((c, i) => {
+              const isLastChild = i === children.length - 1;
+              return (
+                <div key={c.id} className="relative">
+                  {!isLastChild ? (
+                    <span
+                      className="pointer-events-none absolute left-2 top-0 bottom-0 w-px bg-border"
+                      aria-hidden
+                    />
+                  ) : null}
+                  {renderNode(c, depth + 1, isLastChild)}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -359,7 +385,11 @@ export function ConfiguracoesCategorias() {
             ) : rootsReceitas.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhuma categoria de receita cadastrada.</p>
             ) : (
-              <div className="space-y-1">{rootsReceitas.map((r) => renderNode(r, 0))}</div>
+              <div className="space-y-1">
+                {rootsReceitas.map((r) => (
+                  <div key={r.id}>{renderNode(r, 0)}</div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -378,7 +408,11 @@ export function ConfiguracoesCategorias() {
             ) : rootsDespesas.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhuma categoria de despesa cadastrada.</p>
             ) : (
-              <div className="space-y-1">{rootsDespesas.map((r) => renderNode(r, 0))}</div>
+              <div className="space-y-1">
+                {rootsDespesas.map((r) => (
+                  <div key={r.id}>{renderNode(r, 0)}</div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -460,7 +494,26 @@ export function ConfiguracoesCategorias() {
                 <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">
                   Esta categoria será criada como categoria principal.
                 </div>
-              ) : (
+              ) : null}
+              {formKind === "subcategoria" && formParentId !== "ROOT" ? (
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <p className="px-0.5 text-xs font-semibold text-foreground">
+                    {categoryPathLabel(formParentId, byId)}
+                  </p>
+                  <div className="relative mt-2 ml-2 pl-4 before:absolute before:left-1 before:top-0 before:bottom-0 before:w-px before:bg-border">
+                    <div className="relative flex items-center gap-2 py-1.5">
+                      <span
+                        className="pointer-events-none absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border"
+                        aria-hidden
+                      />
+                      <p className="min-w-0 truncate text-sm text-muted-foreground">
+                        {formName.trim() || "Nome da nova subcategoria"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {formKind !== "principal" ? (
                 <Popover open={parentPickerOpen} onOpenChange={setParentPickerOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -480,7 +533,11 @@ export function ConfiguracoesCategorias() {
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0" align="start">
+                  <PopoverContent
+                    className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
+                    align="start"
+                    onWheel={(e) => e.stopPropagation()}
+                  >
                     <div className="border-b p-2">
                       <div className="relative">
                         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -493,7 +550,10 @@ export function ConfiguracoesCategorias() {
                         />
                       </div>
                     </div>
-                    <div className="max-h-[240px] overflow-y-auto p-1">
+                    <div
+                      className="max-h-[240px] overflow-y-auto overscroll-contain p-1"
+                      onWheel={(e) => e.stopPropagation()}
+                    >
                       {canSelectPrincipalAsParent ? (
                         <button
                           type="button"
@@ -542,7 +602,7 @@ export function ConfiguracoesCategorias() {
                     </div>
                   </PopoverContent>
                 </Popover>
-              )}
+              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -560,12 +620,20 @@ export function ConfiguracoesCategorias() {
             </div>
           </div>
 
-          <SheetFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => { resetForm(); setSheetOpen(false); }} disabled={saving}>
-              Cancelar
+          <SheetFooter className="gap-2">
+            <Button onClick={save} disabled={saving || !isOwner} className="w-full">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? "Salvar" : "Criar"}
             </Button>
-            <Button onClick={save} disabled={saving || !isOwner}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (editing ? "Salvar" : "Criar")}
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                resetForm();
+                setSheetOpen(false);
+              }}
+              disabled={saving}
+            >
+              Cancelar
             </Button>
           </SheetFooter>
         </SheetContent>

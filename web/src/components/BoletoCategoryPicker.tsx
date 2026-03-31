@@ -206,7 +206,7 @@ export function BoletoCategoryPicker({
       .sort((a, b) => a.parentLabel.localeCompare(b.parentLabel, "pt-BR"));
   }, [filtered]);
 
-  const selectedLabel = value ? categoryPathLabel(value, byId) : "";
+  const selectedLabel = value ? byId.get(value)?.name ?? "" : "";
   const triggerDisabled = Boolean(disabled) || loading;
 
   const openCreate = () => {
@@ -293,8 +293,9 @@ export function BoletoCategoryPicker({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="z-[100] w-[min(100vw-2rem,420px)] min-w-[240px] max-w-[420px] p-0"
+          className="z-[100] w-[var(--radix-popover-trigger-width)] min-w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
           align="start"
+          onWheel={(e) => e.stopPropagation()}
         >
           <div className="flex flex-col gap-2 border-b p-2">
             <div className="relative">
@@ -319,7 +320,10 @@ export function BoletoCategoryPicker({
               Nova subcategoria (despesa)
             </Button>
           </div>
-          <div className="max-h-[min(240px,40vh)] overflow-y-auto p-1">
+          <div
+            className="max-h-[min(240px,40vh)] overflow-y-auto overscroll-contain p-1"
+            onWheel={(e) => e.stopPropagation()}
+          >
             {filtered.length === 0 ? (
               <p className="px-2 py-6 text-center text-sm text-muted-foreground">
                 {options.length === 0
@@ -409,7 +413,11 @@ export function BoletoCategoryPicker({
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="z-[130] w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0" align="start">
+                <PopoverContent
+                  className="z-[130] w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
+                  align="start"
+                  onWheel={(e) => e.stopPropagation()}
+                >
                   <div className="border-b p-2">
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -421,7 +429,10 @@ export function BoletoCategoryPicker({
                       />
                     </div>
                   </div>
-                  <div className="max-h-[240px] overflow-y-auto p-1">
+                  <div
+                    className="max-h-[240px] overflow-y-auto overscroll-contain p-1"
+                    onWheel={(e) => e.stopPropagation()}
+                  >
                     {parentGrouped.length === 0 ? (
                       <p className="px-2 py-6 text-center text-sm text-muted-foreground">
                         Nenhum resultado.
