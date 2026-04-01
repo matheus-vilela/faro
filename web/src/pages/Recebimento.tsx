@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,15 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Pagination, PAGE_SIZE } from "@/components/Pagination";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -34,14 +27,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Recebimento } from "@/types/recebimento";
-import { toast } from "sonner";
 import { Check, PackageCheck, PackageX, Share2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 interface ItemStatus {
   expense_item_id: string;
@@ -53,8 +53,7 @@ type CompanyMemberRow = { id: string; name: string };
 
 export function Recebimento() {
   const { currentCompany, currentRole } = useCompany();
-  const canAssignShare =
-    currentRole === "owner" || currentRole === "gestor";
+  const canAssignShare = currentRole === "owner" || currentRole === "gestor";
   const [recebimentos, setRecebimentos] = useState<Recebimento[]>([]);
   const [recebimentosCount, setRecebimentosCount] = useState(0);
   const [recebimentosPage, setRecebimentosPage] = useState(1);
@@ -62,17 +61,14 @@ export function Recebimento() {
   const debouncedSearch = useDebounce(recebimentosSearch, 300);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [detailRecebimento, setDetailRecebimento] = useState<Recebimento | null>(
-    null,
-  );
+  const [detailRecebimento, setDetailRecebimento] =
+    useState<Recebimento | null>(null);
   const [itemStatuses, setItemStatuses] = useState<ItemStatus[]>([]);
 
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<Recebimento | null>(null);
   const [shareMemberId, setShareMemberId] = useState<string>("");
-  const [companyMembers, setCompanyMembers] = useState<CompanyMemberRow[]>(
-    [],
-  );
+  const [companyMembers, setCompanyMembers] = useState<CompanyMemberRow[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [savingShare, setSavingShare] = useState(false);
   const [openingOperadorId, setOpeningOperadorId] = useState<string | null>(
@@ -145,7 +141,9 @@ export function Recebimento() {
         .from("expenses")
         .select("id")
         .eq("company_id", currentCompany.id)
-        .or(`supplier_name.ilike.${term},display_name.ilike.${term},invoice_number.ilike.${term}`);
+        .or(
+          `supplier_name.ilike.${term},display_name.ilike.${term},invoice_number.ilike.${term}`,
+        );
       const filteredIds = (expFilter ?? []).map((e) => e.id);
       if (filteredIds.length > 0) {
         query = query.in("expense_id", filteredIds);
@@ -156,8 +154,10 @@ export function Recebimento() {
         return;
       }
     }
-    const { data, count, error } = await query
-      .range((recebimentosPage - 1) * PAGE_SIZE, recebimentosPage * PAGE_SIZE - 1);
+    const { data, count, error } = await query.range(
+      (recebimentosPage - 1) * PAGE_SIZE,
+      recebimentosPage * PAGE_SIZE - 1,
+    );
     if (error) {
       toast.error(
         error.message.includes("assigned_company_member")
@@ -188,7 +188,7 @@ export function Recebimento() {
       rows = rows.map((r) => ({
         ...r,
         assigned_member: r.assigned_company_member_id
-          ? map.get(r.assigned_company_member_id) ?? null
+          ? (map.get(r.assigned_company_member_id) ?? null)
           : null,
       }));
     }
@@ -222,7 +222,7 @@ export function Recebimento() {
   useEffect(() => {
     if (!shareDialogOpen || !currentCompany?.id) return;
     let cancelled = false;
-    setLoadingMembers(true);
+    queueMicrotask(() => setLoadingMembers(true));
     void (async () => {
       const { data: members, error } = await supabase
         .from("company_members")
@@ -268,7 +268,7 @@ export function Recebimento() {
       toast.error(
         out?.error === "Sem permissão"
           ? "Apenas proprietário ou gestor podem vincular o membro."
-          : out?.error ?? "Não foi possível salvar o vínculo.",
+          : (out?.error ?? "Não foi possível salvar o vínculo."),
       );
       return;
     }
@@ -311,7 +311,7 @@ export function Recebimento() {
     });
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-8" narrow>
       <PageHeader
         icon={PackageCheck}
         title="Recebimento"
@@ -359,7 +359,8 @@ export function Recebimento() {
                   0,
                 );
                 const isReceived = r.status === "received";
-                const itemStatusesList = (r.recebimento_item_status ?? []) as ItemStatus[];
+                const itemStatusesList = (r.recebimento_item_status ??
+                  []) as ItemStatus[];
                 const hasPendingReceipt =
                   isReceived &&
                   itemStatusesList.some(
@@ -404,7 +405,9 @@ export function Recebimento() {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">
-                            {exp?.display_name?.trim() || exp?.supplier_name || "Sem fornecedor"}
+                            {exp?.display_name?.trim() ||
+                              exp?.supplier_name ||
+                              "Sem fornecedor"}
                           </span>
                           {exp?.invoice_number && (
                             <span className="text-sm text-muted-foreground">
@@ -440,7 +443,10 @@ export function Recebimento() {
                           )}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {!isReceived && (
                           <Button
                             variant="outline"
@@ -507,204 +513,205 @@ export function Recebimento() {
         }}
       >
         <SheetContent side="right" className="sm:max-w-md overflow-y-auto">
-          {detailRecebimento && (() => {
-            const exp = detailRecebimento.expenses as Recebimento["expenses"];
-            const items = exp?.expense_items ?? [];
-            const total = items.reduce(
-              (s, it) =>
-                s + Number(it.quantity) * Number(it.unit_value),
-              0,
-            );
-            const rowByItem = new Map(
-              itemStatuses.map((s) => [s.expense_item_id, s]),
-            );
-            const receivedCount = itemStatuses.filter(
-              (s) => s.status === "received",
-            ).length;
-            const partialCount = itemStatuses.filter(
-              (s) => s.status === "partial",
-            ).length;
-            const notReceivedCount = itemStatuses.filter(
-              (s) => s.status === "not_received",
-            ).length;
+          {detailRecebimento &&
+            (() => {
+              const exp = detailRecebimento.expenses as Recebimento["expenses"];
+              const items = exp?.expense_items ?? [];
+              const total = items.reduce(
+                (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+                0,
+              );
+              const rowByItem = new Map(
+                itemStatuses.map((s) => [s.expense_item_id, s]),
+              );
+              const receivedCount = itemStatuses.filter(
+                (s) => s.status === "received",
+              ).length;
+              const partialCount = itemStatuses.filter(
+                (s) => s.status === "partial",
+              ).length;
+              const notReceivedCount = itemStatuses.filter(
+                (s) => s.status === "not_received",
+              ).length;
 
-            return (
-              <>
-                <SheetHeader>
-                  <SheetTitle>Resumo do recebimento</SheetTitle>
-                  <SheetDescription>
-                    Dados da despesa e report do operador
-                  </SheetDescription>
-                </SheetHeader>
-                <div className="space-y-6 py-4">
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground mb-2">
-                      Despesa
-                    </h3>
-                    <div className="space-y-1">
-                      <p className="font-medium">
-                        {exp?.display_name?.trim() || exp?.supplier_name || "Sem fornecedor"}
-                      </p>
-                      {exp?.invoice_number && (
-                        <p className="text-sm text-muted-foreground">
-                          Nota {exp.invoice_number}
+              return (
+                <>
+                  <SheetHeader>
+                    <SheetTitle>Resumo do recebimento</SheetTitle>
+                    <SheetDescription>
+                      Dados da despesa e report do operador
+                    </SheetDescription>
+                  </SheetHeader>
+                  <div className="space-y-6 py-4">
+                    <div>
+                      <h3 className="font-medium text-sm text-muted-foreground mb-2">
+                        Despesa
+                      </h3>
+                      <div className="space-y-1">
+                        <p className="font-medium">
+                          {exp?.display_name?.trim() ||
+                            exp?.supplier_name ||
+                            "Sem fornecedor"}
                         </p>
-                      )}
-                      {exp?.notes && (
+                        {exp?.invoice_number && (
+                          <p className="text-sm text-muted-foreground">
+                            Nota {exp.invoice_number}
+                          </p>
+                        )}
+                        {exp?.notes && (
+                          <p className="text-sm text-muted-foreground">
+                            {exp.notes}
+                          </p>
+                        )}
                         <p className="text-sm text-muted-foreground">
-                          {exp.notes}
+                          {formatDate(detailRecebimento.created_at)} •{" "}
+                          {formatCurrency(total)}
                         </p>
-                      )}
-                      <p className="text-sm text-muted-foreground">
-                        {formatDate(detailRecebimento.created_at)} •{" "}
-                        {formatCurrency(total)}
-                      </p>
-                      {(detailRecebimento as { received_at?: string | null })
-                        .received_at && (
-                        <p className="text-sm text-green-600 dark:text-green-500">
-                          Confirmado em{" "}
-                          {formatDate(
-                            (detailRecebimento as { received_at?: string })
-                              .received_at!,
+                        {(detailRecebimento as { received_at?: string | null })
+                          .received_at && (
+                          <p className="text-sm text-green-600 dark:text-green-500">
+                            Confirmado em{" "}
+                            {formatDate(
+                              (detailRecebimento as { received_at?: string })
+                                .received_at!,
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="font-medium text-sm text-muted-foreground mb-2">
+                        Report do operador
+                      </h3>
+                      <div className="rounded-lg border bg-muted/30 p-3 mb-3">
+                        <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
+                          <span className="text-green-600 dark:text-green-500 font-medium">
+                            {receivedCount} completo(s)
+                          </span>
+                          {partialCount > 0 && (
+                            <>
+                              <span className="text-muted-foreground">•</span>
+                              <span className="text-amber-600 font-medium">
+                                {partialCount} parcial(is)
+                              </span>
+                            </>
+                          )}
+                          {notReceivedCount > 0 && (
+                            <>
+                              <span className="text-muted-foreground">•</span>
+                              <span className="text-destructive font-medium">
+                                {notReceivedCount} não recebido(s)
+                              </span>
+                            </>
                           )}
                         </p>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                      <div className="space-y-2">
+                        {items.map((it) => {
+                          const row = rowByItem.get(it.id);
+                          const status = row?.status ?? "received";
+                          const isNotReceived = status === "not_received";
+                          const isPartial = status === "partial";
+                          const ordered = Number(it.quantity);
+                          const qRec =
+                            row?.quantity_received != null
+                              ? Number(row.quantity_received)
+                              : status === "received"
+                                ? ordered
+                                : 0;
+                          const missing = Math.max(0, ordered - qRec);
 
-                  <div>
-                    <h3 className="font-medium text-sm text-muted-foreground mb-2">
-                      Report do operador
-                    </h3>
-                    <div className="rounded-lg border bg-muted/30 p-3 mb-3">
-                      <p className="text-sm flex flex-wrap gap-x-1 gap-y-0.5">
-                        <span className="text-green-600 dark:text-green-500 font-medium">
-                          {receivedCount} completo(s)
-                        </span>
-                        {partialCount > 0 && (
-                          <>
-                            <span className="text-muted-foreground">•</span>
-                            <span className="text-amber-600 font-medium">
-                              {partialCount} parcial(is)
-                            </span>
-                          </>
-                        )}
-                        {notReceivedCount > 0 && (
-                          <>
-                            <span className="text-muted-foreground">•</span>
-                            <span className="text-destructive font-medium">
-                              {notReceivedCount} não recebido(s)
-                            </span>
-                          </>
-                        )}
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      {items.map((it) => {
-                        const row = rowByItem.get(it.id);
-                        const status = row?.status ?? "received";
-                        const isNotReceived =
-                          status === "not_received";
-                        const isPartial = status === "partial";
-                        const ordered = Number(it.quantity);
-                        const qRec =
-                          row?.quantity_received != null
-                            ? Number(row.quantity_received)
-                            : status === "received"
-                              ? ordered
-                              : 0;
-                        const missing = Math.max(0, ordered - qRec);
-
-                        return (
-                          <div
-                            key={it.id}
-                            className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${
-                              isNotReceived
-                                ? "border-destructive/50 bg-destructive/5"
-                                : isPartial
-                                  ? "border-amber-500/40 bg-amber-500/5"
-                                  : "bg-muted/20"
-                            }`}
-                          >
-                            <div className="flex items-start gap-2 min-w-0 flex-1">
-                              {isNotReceived ? (
-                                <PackageX className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                              ) : isPartial ? (
-                                <PackageCheck className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                              ) : (
-                                <PackageCheck className="h-4 w-4 text-green-600 dark:text-green-500 shrink-0 mt-0.5" />
-                              )}
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">
-                                  {it.product_name || "—"}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  Pedido:{" "}
-                                  {ordered.toLocaleString("pt-BR")} un ×{" "}
-                                  {formatCurrency(Number(it.unit_value))}
-                                </p>
-                                {isPartial && (
-                                  <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-                                    Recebido {qRec.toLocaleString("pt-BR")} un
-                                    {missing > 0 && (
-                                      <>
-                                        {" "}
-                                        — faltam{" "}
-                                        {missing.toLocaleString("pt-BR")} un
-                                      </>
-                                    )}
-                                  </p>
-                                )}
-                                {isNotReceived && (
-                                  <p className="text-sm text-destructive mt-1">
-                                    Faltam {ordered.toLocaleString("pt-BR")} un
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <Badge
-                              variant={
+                          return (
+                            <div
+                              key={it.id}
+                              className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${
                                 isNotReceived
-                                  ? "destructive"
+                                  ? "border-destructive/50 bg-destructive/5"
                                   : isPartial
-                                    ? "secondary"
-                                    : "secondary"
-                              }
-                              className={
-                                isNotReceived
-                                  ? ""
-                                  : isPartial
-                                    ? "bg-amber-600/20 text-amber-800 dark:text-amber-300 shrink-0"
-                                    : "bg-green-600/20 text-green-700 dark:text-green-400 shrink-0"
-                              }
+                                    ? "border-amber-500/40 bg-amber-500/5"
+                                    : "bg-muted/20"
+                              }`}
                             >
-                              {isNotReceived
-                                ? "Não recebido"
-                                : isPartial
-                                  ? "Parcial"
-                                  : "Recebido"}
-                            </Badge>
-                          </div>
-                        );
-                      })}
+                              <div className="flex items-start gap-2 min-w-0 flex-1">
+                                {isNotReceived ? (
+                                  <PackageX className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                                ) : isPartial ? (
+                                  <PackageCheck className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                                ) : (
+                                  <PackageCheck className="h-4 w-4 text-green-600 dark:text-green-500 shrink-0 mt-0.5" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="font-medium truncate">
+                                    {it.product_name || "—"}
+                                  </p>
+                                  <p className="text-sm text-muted-foreground">
+                                    Pedido: {ordered.toLocaleString("pt-BR")} un
+                                    × {formatCurrency(Number(it.unit_value))}
+                                  </p>
+                                  {isPartial && (
+                                    <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                                      Recebido {qRec.toLocaleString("pt-BR")} un
+                                      {missing > 0 && (
+                                        <>
+                                          {" "}
+                                          — faltam{" "}
+                                          {missing.toLocaleString("pt-BR")} un
+                                        </>
+                                      )}
+                                    </p>
+                                  )}
+                                  {isNotReceived && (
+                                    <p className="text-sm text-destructive mt-1">
+                                      Faltam {ordered.toLocaleString("pt-BR")}{" "}
+                                      un
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <Badge
+                                variant={
+                                  isNotReceived
+                                    ? "destructive"
+                                    : isPartial
+                                      ? "secondary"
+                                      : "secondary"
+                                }
+                                className={
+                                  isNotReceived
+                                    ? ""
+                                    : isPartial
+                                      ? "bg-amber-600/20 text-amber-800 dark:text-amber-300 shrink-0"
+                                      : "bg-green-600/20 text-green-700 dark:text-green-400 shrink-0"
+                                }
+                              >
+                                {isNotReceived
+                                  ? "Não recebido"
+                                  : isPartial
+                                    ? "Parcial"
+                                    : "Recebido"}
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
 
-                  <Button asChild variant="outline" className="w-full">
-                    <Link
-                      to={`/app/despesas?expense=${detailRecebimento.expense_id}`}
-                      onClick={() => {
-                setDetailRecebimento(null);
-                setItemStatuses([]);
-              }}
-                    >
-                      Ver despesa completa
-                    </Link>
-                  </Button>
-                </div>
-              </>
-            );
-          })()}
+                    <Button asChild variant="outline" className="w-full">
+                      <Link
+                        to={`/app/despesas?expense=${detailRecebimento.expense_id}`}
+                        onClick={() => {
+                          setDetailRecebimento(null);
+                          setItemStatuses([]);
+                        }}
+                      >
+                        Ver despesa completa
+                      </Link>
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
         </SheetContent>
       </Sheet>
 

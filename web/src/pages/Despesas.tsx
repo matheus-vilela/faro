@@ -1,11 +1,10 @@
-import { PageHeader } from "@/components/PageHeader";
-import { PageShell } from "@/components/PageShell";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
-import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
-import { Pagination, PAGE_SIZE } from "@/components/Pagination";
-import { useDebounce } from "@/hooks/useDebounce";
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +40,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDebounce } from "@/hooks/useDebounce";
 import { BOLETO_CATEGORY_LABELS } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
@@ -50,10 +50,10 @@ import type {
   Expense,
   ExpenseItem,
   ExpenseType,
+  PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import type { PaymentType } from "@/types/expense";
 import { Copy, FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -215,8 +215,10 @@ export function Despesas() {
         `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term}`,
       );
     }
-    const { data: ex, count } = await exQuery
-      .range((expensesPage - 1) * PAGE_SIZE, expensesPage * PAGE_SIZE - 1);
+    const { data: ex, count } = await exQuery.range(
+      (expensesPage - 1) * PAGE_SIZE,
+      expensesPage * PAGE_SIZE - 1,
+    );
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
@@ -237,7 +239,13 @@ export function Despesas() {
     setSuppliers((sup as Supplier[]) ?? []);
     setProducts((prod as Product[]) ?? []);
     setLoading(false);
-  }, [currentCompany, period.month, period.year, debouncedSearch, expensesPage]);
+  }, [
+    currentCompany,
+    period.month,
+    period.year,
+    debouncedSearch,
+    expensesPage,
+  ]);
 
   useEffect(() => {
     setExpensesPage(1);
@@ -330,7 +338,9 @@ export function Despesas() {
     setSupplierDocument("");
     setSupplierName("");
     setNotes("");
-    setItems([{ product_name: "", quantity: 1, unit_value: 0, product_id: undefined }]);
+    setItems([
+      { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
+    ]);
     setExpenseSheetOpen(false);
     fetchData();
   };
@@ -401,7 +411,9 @@ export function Despesas() {
     if (detailExpense?.id) {
       const { data } = await supabase
         .from("expenses")
-        .select("*, expense_items (*, products (id, name, current_quantity, min_quantity))")
+        .select(
+          "*, expense_items (*, products (id, name, current_quantity, min_quantity))",
+        )
         .eq("id", detailExpense.id)
         .single();
       if (data) setDetailExpense(data as Expense);
@@ -593,7 +605,9 @@ export function Despesas() {
 
     const { data: updated } = await supabase
       .from("expenses")
-      .select("*, expense_items (*, products (id, name, current_quantity, min_quantity))")
+      .select(
+        "*, expense_items (*, products (id, name, current_quantity, min_quantity))",
+      )
       .eq("id", detailExpense.id)
       .single();
     setDetailExpense(updated as Expense);
@@ -603,7 +617,7 @@ export function Despesas() {
   };
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-8 pb-0 " narrow>
       <PageHeader
         title="Despesas"
         description={
@@ -808,7 +822,9 @@ export function Despesas() {
                       </Button>
                     </div>
                     <div>
-                      <Label className="text-xs">Vincular ao produto (estoque)</Label>
+                      <Label className="text-xs">
+                        Vincular ao produto (estoque)
+                      </Label>
                       <Select
                         value={it.product_id ?? "__none__"}
                         onValueChange={(v) =>
@@ -821,22 +837,27 @@ export function Despesas() {
                           <SelectValue placeholder="Não vincular" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__none__">
-                            Não vincular
-                          </SelectItem>
+                          <SelectItem value="__none__">Não vincular</SelectItem>
                           {products
                             .filter((p) => p.is_active !== false)
                             .map((p) => (
                               <SelectItem key={p.id} value={p.id}>
                                 {p.name}
-                                {p.sku && ` (${p.sku})`} — Estoque: {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
-                                {p.last_unit_value != null && p.last_unit_value > 0 && ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
+                                {p.sku && ` (${p.sku})`} — Estoque:{" "}
+                                {Number(p.current_quantity).toLocaleString(
+                                  "pt-BR",
+                                )}{" "}
+                                {p.unit}
+                                {p.last_unit_value != null &&
+                                  p.last_unit_value > 0 &&
+                                  ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
                               </SelectItem>
                             ))}
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Ao vincular, o estoque será atualizado quando o recebimento for confirmado
+                        Ao vincular, o estoque será atualizado quando o
+                        recebimento for confirmado
                       </p>
                     </div>
                   </div>
@@ -969,9 +990,7 @@ export function Despesas() {
                         }}
                         className="p-2 rounded-md hover:bg-muted transition-colors shrink-0"
                         title={
-                          linked
-                            ? "Ver resumo do boleto"
-                            : "Vincular boleto"
+                          linked ? "Ver resumo do boleto" : "Vincular boleto"
                         }
                       >
                         <FileText
@@ -1078,9 +1097,7 @@ export function Despesas() {
             <>
               <SheetHeader>
                 <SheetTitle>Resumo do boleto</SheetTitle>
-                <SheetDescription>
-                  Dados para pagamento
-                </SheetDescription>
+                <SheetDescription>Dados para pagamento</SheetDescription>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div>
@@ -1093,15 +1110,15 @@ export function Despesas() {
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <Badge variant="secondary">
-                      {PAYMENT_TYPE_LABELS[
-                        boletoResumo.payment_type ?? "boleto"
-                      ]}
+                      {
+                        PAYMENT_TYPE_LABELS[
+                          boletoResumo.payment_type ?? "boleto"
+                        ]
+                      }
                     </Badge>
                     <Badge
                       variant={
-                        boletoResumo.status === "paid"
-                          ? "default"
-                          : "outline"
+                        boletoResumo.status === "paid" ? "default" : "outline"
                       }
                     >
                       {BOLETO_STATUS_LABELS[boletoResumo.status]}
@@ -1167,9 +1184,7 @@ export function Despesas() {
                         boletoResumo.agency ||
                         boletoResumo.account) && (
                         <div className="rounded-lg border p-4 space-y-2">
-                          <p className="text-sm font-medium">
-                            Dados bancários
-                          </p>
+                          <p className="text-sm font-medium">Dados bancários</p>
                           <div className="text-sm space-y-1">
                             {boletoResumo.bank_name && (
                               <p>Banco: {boletoResumo.bank_name}</p>
@@ -1199,8 +1214,7 @@ export function Despesas() {
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    if (boletoResumo)
-                      handleUnlinkBoleto(boletoResumo.id);
+                    if (boletoResumo) handleUnlinkBoleto(boletoResumo.id);
                     setBoletoResumo(null);
                     fetchData();
                   }}
@@ -1256,10 +1270,7 @@ export function Despesas() {
                       "Sem fornecedor"}
                   </span>
                   {getBoletoForExpense(detailExpense.id) ? (
-                    <Badge
-                      variant="default"
-                      className="bg-green-600 shrink-0"
-                    >
+                    <Badge variant="default" className="bg-green-600 shrink-0">
                       Boleto vinculado
                     </Badge>
                   ) : (
@@ -1385,10 +1396,15 @@ export function Despesas() {
                     </div>
                     <div className="mt-2 space-y-3">
                       {editItems.map((it, i) => (
-                        <div key={i} className="space-y-2 rounded-lg border p-3">
+                        <div
+                          key={i}
+                          className="space-y-2 rounded-lg border p-3"
+                        >
                           <div className="flex gap-2 items-end">
                             <div className="flex-1">
-                              <Label className="text-xs">Descrição da nota</Label>
+                              <Label className="text-xs">
+                                Descrição da nota
+                              </Label>
                               <Input
                                 placeholder="Produto (como vem na nota)"
                                 value={it.product_name}
@@ -1440,7 +1456,9 @@ export function Despesas() {
                             </Button>
                           </div>
                           <div>
-                            <Label className="text-xs">Vincular ao produto (estoque)</Label>
+                            <Label className="text-xs">
+                              Vincular ao produto (estoque)
+                            </Label>
                             <Select
                               value={it.product_id ?? "__none__"}
                               onValueChange={(v) =>
@@ -1459,16 +1477,23 @@ export function Despesas() {
                                 {products
                                   .filter((p) => p.is_active !== false)
                                   .map((p) => (
-                                  <SelectItem key={p.id} value={p.id}>
-                                    {p.name}
-                                    {p.sku && ` (${p.sku})`} — Estoque: {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
-                                    {p.last_unit_value != null && p.last_unit_value > 0 && ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
-                                  </SelectItem>
+                                    <SelectItem key={p.id} value={p.id}>
+                                      {p.name}
+                                      {p.sku && ` (${p.sku})`} — Estoque:{" "}
+                                      {Number(
+                                        p.current_quantity,
+                                      ).toLocaleString("pt-BR")}{" "}
+                                      {p.unit}
+                                      {p.last_unit_value != null &&
+                                        p.last_unit_value > 0 &&
+                                        ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
+                                    </SelectItem>
                                   ))}
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Ao vincular, o estoque será atualizado quando o recebimento for confirmado
+                              Ao vincular, o estoque será atualizado quando o
+                              recebimento for confirmado
                             </p>
                           </div>
                         </div>
@@ -1672,9 +1697,9 @@ export function Despesas() {
           <DialogHeader>
             <DialogTitle>Excluir despesa</DialogTitle>
             <DialogDescription>
-              Tem certeza que deseja excluir esta despesa? O recebimento e boleto
-              vinculados serão excluídos. Se o recebimento já foi confirmado, as
-              quantidades serão deduzidas do estoque.
+              Tem certeza que deseja excluir esta despesa? O recebimento e
+              boleto vinculados serão excluídos. Se o recebimento já foi
+              confirmado, as quantidades serão deduzidas do estoque.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1711,8 +1736,8 @@ export function Despesas() {
               <SheetHeader>
                 <SheetTitle>Vincular ao produto</SheetTitle>
                 <SheetDescription>
-                  Vincule este item da nota a um produto do estoque. O estoque será
-                  atualizado quando o recebimento for confirmado.
+                  Vincule este item da nota a um produto do estoque. O estoque
+                  será atualizado quando o recebimento for confirmado.
                 </SheetDescription>
               </SheetHeader>
               <div className="space-y-4 py-6">

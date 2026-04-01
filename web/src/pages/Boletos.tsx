@@ -4,10 +4,10 @@ import {
 } from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
-import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -414,12 +414,11 @@ export function Boletos() {
             </SheetDescription>
           </SheetHeader>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
-            {calendarDayList &&
-              calendarDayList.items.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma conta com vencimento neste dia.
-                </p>
-              )}
+            {calendarDayList && calendarDayList.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma conta com vencimento neste dia.
+              </p>
+            )}
             {calendarDayList?.items.map((b) => (
               <button
                 key={b.id}

@@ -117,7 +117,7 @@ export function ConfirmarRecebimento() {
   }, [token]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => load());
   }, [load]);
 
   const handleConfirm = async () => {

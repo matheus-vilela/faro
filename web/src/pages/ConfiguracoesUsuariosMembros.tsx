@@ -49,6 +49,7 @@ function mapSupabaseError(message: string): string {
 
 export function ConfiguracoesUsuariosMembros() {
   const { currentCompany, currentRole, refetchCompanies } = useCompany();
+  const companyId = currentCompany?.id;
   const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
 
   const [ownerNameDisplay, setOwnerNameDisplay] = useState("");
@@ -73,12 +74,12 @@ export function ConfiguracoesUsuariosMembros() {
   );
 
   const loadOwner = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!companyId) return;
     setLoadingOwner(true);
     const { data: uc, error: ucErr } = await supabase
       .from("user_companies")
       .select("user_id")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("role", "owner")
       .maybeSingle();
 
@@ -96,15 +97,15 @@ export function ConfiguracoesUsuariosMembros() {
 
     setOwnerNameDisplay(profile?.full_name?.trim() ?? "");
     setLoadingOwner(false);
-  }, [currentCompany?.id]);
+  }, [companyId]);
 
   const loadMembers = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!companyId) return;
     setLoadingMembers(true);
     const { data, error } = await supabase
       .from("company_members")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -114,20 +115,22 @@ export function ConfiguracoesUsuariosMembros() {
       setMembers((data ?? []) as CompanyMember[]);
     }
     setLoadingMembers(false);
-  }, [currentCompany?.id]);
+  }, [companyId]);
 
   useEffect(() => {
-    loadOwner();
+    queueMicrotask(() => loadOwner());
   }, [loadOwner]);
 
   useEffect(() => {
-    loadMembers();
+    queueMicrotask(() => loadMembers());
   }, [loadMembers]);
 
   useEffect(() => {
     if (!currentCompany) return;
-    const ownerNorm = currentCompany.owner_whatsapp_normalized;
-    setOwnerPhoneDigits(ownerNorm ?? "");
+    queueMicrotask(() => {
+      const ownerNorm = currentCompany.owner_whatsapp_normalized;
+      setOwnerPhoneDigits(ownerNorm ?? "");
+    });
   }, [currentCompany]);
 
   const saveOwnerPhone = async () => {

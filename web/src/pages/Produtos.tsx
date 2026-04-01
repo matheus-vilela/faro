@@ -1,6 +1,7 @@
+import { CreateProductSheet } from "@/components/CreateProductSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { CreateProductSheet } from "@/components/CreateProductSheet";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,14 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,13 +21,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Pagination, PAGE_SIZE } from "@/components/Pagination";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
-import { AlertTriangle, FileSpreadsheet, Package, Plus, PowerOff } from "lucide-react";
+import {
+  AlertTriangle,
+  FileSpreadsheet,
+  Package,
+  Plus,
+  PowerOff,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 export function Produtos() {
@@ -45,9 +51,9 @@ export function Produtos() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
-  const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">(
-    "active",
-  );
+  const [filterActive, setFilterActive] = useState<
+    "all" | "active" | "inactive"
+  >("active");
   const [lowStockCount, setLowStockCount] = useState(0);
   const [productSheetOpen, setProductSheetOpen] = useState(false);
   const [importSheetOpen, setImportSheetOpen] = useState(false);
@@ -75,8 +81,10 @@ export function Produtos() {
     } else if (filterActive === "inactive") {
       query = query.eq("is_active", false);
     }
-    const { data, count } = await query
-      .range((productsPage - 1) * PAGE_SIZE, productsPage * PAGE_SIZE - 1);
+    const { data, count } = await query.range(
+      (productsPage - 1) * PAGE_SIZE,
+      productsPage * PAGE_SIZE - 1,
+    );
     setProducts((data as Product[]) ?? []);
     setProductsCount(count ?? 0);
     setLoading(false);
@@ -97,7 +105,7 @@ export function Produtos() {
   }, [currentCompany?.id]);
 
   useEffect(() => {
-    setProductsPage(1);
+    queueMicrotask(() => setProductsPage(1));
   }, [debouncedSearch, filterActive]);
 
   useEffect(() => {
@@ -182,7 +190,7 @@ export function Produtos() {
   };
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Produtos"
         description="Cadastre produtos e controle o estoque"
@@ -314,11 +322,14 @@ export function Produtos() {
                               {p.unit}
                             </span>
                           )}
-                          {p.last_unit_value != null && p.last_unit_value > 0 && (
-                            <span className="ml-2">
-                              • Último: {formatCurrency(Number(p.last_unit_value))}/{p.unit}
-                            </span>
-                          )}
+                          {p.last_unit_value != null &&
+                            p.last_unit_value > 0 && (
+                              <span className="ml-2">
+                                • Último:{" "}
+                                {formatCurrency(Number(p.last_unit_value))}/
+                                {p.unit}
+                              </span>
+                            )}
                         </p>
                         {isLowStock && (
                           <Badge variant="destructive" className="gap-1">
@@ -378,9 +389,15 @@ export function Produtos() {
                   />
                   <p className="text-xs text-muted-foreground mt-1">
                     Unidade: {stockProduct.unit}
-                    {stockProduct.last_unit_value != null && stockProduct.last_unit_value > 0 && (
-                      <> • Último pago: {formatCurrency(Number(stockProduct.last_unit_value))}/{stockProduct.unit}</>
-                    )}
+                    {stockProduct.last_unit_value != null &&
+                      stockProduct.last_unit_value > 0 && (
+                        <>
+                          {" "}
+                          • Último pago:{" "}
+                          {formatCurrency(Number(stockProduct.last_unit_value))}
+                          /{stockProduct.unit}
+                        </>
+                      )}
                   </p>
                 </div>
                 <div>
@@ -402,7 +419,8 @@ export function Produtos() {
                   <div>
                     <Label className="text-base">Status</Label>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      {stockIsActive ? "Ativo" : "Inativo"} — itens inativos não aparecem ao vincular em despesas
+                      {stockIsActive ? "Ativo" : "Inativo"} — itens inativos não
+                      aparecem ao vincular em despesas
                     </p>
                   </div>
                   <Switch

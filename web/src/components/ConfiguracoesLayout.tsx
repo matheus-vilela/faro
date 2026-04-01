@@ -1,28 +1,28 @@
-import { PageHeader } from '@/components/PageHeader'
-import { PageShell } from '@/components/PageShell'
-import { cn } from '@/lib/utils'
-import { canOwnerAccess } from '@/lib/roles'
-import { useCompany } from '@/contexts/CompanyContext'
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
-import { Settings2, Users } from 'lucide-react'
-import { NavLink, Outlet } from 'react-router-dom'
+} from "@/components/ui/card";
+import { useCompany } from "@/contexts/CompanyContext";
+import { canOwnerAccess } from "@/lib/roles";
+import { cn } from "@/lib/utils";
+import { Settings2, Users } from "lucide-react";
+import { NavLink, Outlet } from "react-router-dom";
 
 const SUB_LINKS = [
   {
-    to: '/app/configuracoes/usuarios-membros',
-    label: 'Usuários e membros',
+    to: "/app/configuracoes/usuarios-membros",
+    label: "Usuários e membros",
     icon: Users,
   },
-] as const
+] as const;
 
 export function ConfiguracoesLayout() {
-  const { currentRole } = useCompany()
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false
+  const { currentRole } = useCompany();
+  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
 
   if (!isOwner) {
     return (
@@ -39,13 +39,13 @@ export function ConfiguracoesLayout() {
           </CardHeader>
         </Card>
       </div>
-    )
+    );
   }
 
   return (
     <PageShell narrow className="space-y-8">
       <PageHeader
-        icon={Settings2}
+        // icon={Settings2}
         title="Configurações"
         description="Centralize ajustes da empresa, integrações e permissões."
       />
@@ -61,10 +61,10 @@ export function ConfiguracoesLayout() {
             end
             className={({ isActive }) =>
               cn(
-                'inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors',
+                "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
                 isActive
-                  ? 'border-border bg-background text-foreground shadow-sm'
-                  : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  ? "border-border bg-background text-foreground shadow-sm"
+                  : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
               )
             }
           >
@@ -76,5 +76,5 @@ export function ConfiguracoesLayout() {
 
       <Outlet />
     </PageShell>
-  )
+  );
 }

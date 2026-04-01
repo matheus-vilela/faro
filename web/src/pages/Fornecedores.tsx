@@ -1,9 +1,9 @@
+import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
-import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -308,7 +308,7 @@ export function Fornecedores() {
   };
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Fornecedores"
         description="Cadastre fornecedores e gerencie as informações de pagamento"
