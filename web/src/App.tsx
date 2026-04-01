@@ -22,6 +22,7 @@ import { RedirectRecebimentoSlug } from '@/pages/RedirectRecebimentoSlug'
 import { ConfiguracoesLayout } from '@/components/ConfiguracoesLayout'
 import { ConfiguracoesUsuariosMembros } from '@/pages/ConfiguracoesUsuariosMembros'
 import { ConfiguracoesCategorias } from '@/pages/ConfiguracoesCategorias'
+import { Dre } from '@/pages/Dre'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -54,6 +55,7 @@ function AuthenticatedLayout() {
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="alertas" element={<Alertas />} />
+          <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />
             <Route path="usuarios-membros" element={<ConfiguracoesUsuariosMembros />} />

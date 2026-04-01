@@ -14,7 +14,12 @@ import { buildChildrenMap, categoryPathLabel, TIPO_LABEL } from "@/lib/companyCa
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { CompanyCategory, NaturezaCategoria, TipoCategoria } from "@/types/category";
+import type {
+  CompanyCategory,
+  NaturezaCategoria,
+  PapelReceitaDre,
+  TipoCategoria,
+} from "@/types/category";
 import { Check, ChevronDown, ChevronRight, ChevronsUpDown, FolderTree, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -44,6 +49,8 @@ export function ConfiguracoesCategorias() {
   const [formOrdem, setFormOrdem] = useState("0");
   const [formAtivo, setFormAtivo] = useState(true);
   const [formDre, setFormDre] = useState(true);
+  /** BRUTA = vendas brutas; DEDUCAO = deduções (apenas RECEITA OPERACIONAL). */
+  const [formPapelReceitaDre, setFormPapelReceitaDre] = useState<PapelReceitaDre>("BRUTA");
   const [editing, setEditing] = useState<CompanyCategory | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [formKind, setFormKind] = useState<"principal" | "subcategoria" | "edicao">("principal");
@@ -158,6 +165,7 @@ export function ConfiguracoesCategorias() {
     setFormOrdem("0");
     setFormAtivo(true);
     setFormDre(true);
+    setFormPapelReceitaDre("BRUTA");
   };
 
   const openCreateRoot = () => {
@@ -177,6 +185,13 @@ export function ConfiguracoesCategorias() {
     setFormOrdem("0");
     setFormAtivo(true);
     setFormDre(true);
+    setFormPapelReceitaDre(
+      parent.natureza === "RECEITA" && parent.tipo === "OPERACIONAL"
+        ? parent.papel_receita_dre === "DEDUCAO"
+          ? "DEDUCAO"
+          : "BRUTA"
+        : "BRUTA",
+    );
     setSheetOpen(true);
   };
 
@@ -191,6 +206,7 @@ export function ConfiguracoesCategorias() {
     setFormOrdem(String(row.ordem ?? row.sort_order ?? 0));
     setFormAtivo(row.ativo !== false);
     setFormDre(row.incluir_no_dre !== false);
+    setFormPapelReceitaDre(row.papel_receita_dre === "DEDUCAO" ? "DEDUCAO" : "BRUTA");
     setSheetOpen(true);
   };
 
@@ -215,6 +231,13 @@ export function ConfiguracoesCategorias() {
       return;
     }
     const ordem = Number.parseInt(formOrdem, 10);
+    const papelReceitaDrePayload =
+      formNatureza === "RECEITA" && formTipo === "OPERACIONAL"
+        ? formPapelReceitaDre === "DEDUCAO"
+          ? "DEDUCAO"
+          : null
+        : null;
+
     const payload = {
       company_id: currentCompany.id,
       name,
@@ -226,6 +249,7 @@ export function ConfiguracoesCategorias() {
       ativo: formAtivo,
       incluir_no_dre: formDre,
       padrao_sistema: editing?.padrao_sistema ?? false,
+      papel_receita_dre: papelReceitaDrePayload,
     };
     setSaving(true);
     if (editing) {
@@ -618,6 +642,28 @@ export function ConfiguracoesCategorias() {
               <Label>Incluir no DRE</Label>
               <Switch checked={formDre} onCheckedChange={setFormDre} disabled={saving} />
             </div>
+            {formNatureza === "RECEITA" && formTipo === "OPERACIONAL" ? (
+              <div className="space-y-2">
+                <Label>Papel na DRE (receita operacional)</Label>
+                <Select
+                  value={formPapelReceitaDre}
+                  onValueChange={(v) => setFormPapelReceitaDre(v as PapelReceitaDre)}
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BRUTA">Vendas brutas (padrão)</SelectItem>
+                    <SelectItem value="DEDUCAO">Dedução da receita (contra-receita)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Use deduções para descontos, devoluções e impostos incidentes sobre vendas que
+                  reduzem a receita bruta.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <SheetFooter className="gap-2">
