@@ -36,11 +36,15 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { BOLETO_CATEGORY_LABELS } from "@/lib/boletoCategory";
+import {
+  formatBoletoCategoryLabel,
+  formatBoletoCategoryShort,
+} from "@/lib/boletoCategory";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Boleto, BoletoCategory, PaymentType } from "@/types/expense";
+import type { CompanyCategory } from "@/types/category";
+import type { Boleto, PaymentType } from "@/types/expense";
 import {
   CalendarDays,
   CheckCircle2,
@@ -50,7 +54,7 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -61,10 +65,6 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 };
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
-
-function categoryLabel(c?: BoletoCategory | null): string {
-  return BOLETO_CATEGORY_LABELS[c ?? "outros"];
-}
 
 type BoletosTab = "calendar" | "list";
 
@@ -99,6 +99,40 @@ export function Boletos() {
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
+  const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
+    [],
+  );
+
+  const categoriesById = useMemo(
+    () => new Map(companyCategories.map((c) => [c.id, c])),
+    [companyCategories],
+  );
+
+  const boletoCategoryLabel = useCallback(
+    (b: Boleto) => formatBoletoCategoryLabel(b, categoriesById),
+    [categoriesById],
+  );
+
+  const boletoCategoryShort = useCallback(
+    (b: Boleto) => formatBoletoCategoryShort(b, categoriesById),
+    [categoriesById],
+  );
+
+  useEffect(() => {
+    if (!currentCompany?.id) {
+      setCompanyCategories([]);
+      return;
+    }
+    void supabase
+      .from("company_categories")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true })
+      .then(({ data }) => {
+        setCompanyCategories((data as CompanyCategory[]) ?? []);
+      });
+  }, [currentCompany?.id]);
 
   const fetchCalendarBoletos = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -312,6 +346,7 @@ export function Boletos() {
           onDayListOpen={setCalendarDayList}
           onDayBoletoClick={setBoletoResumo}
           formatCurrency={formatCurrency}
+          categoryShort={boletoCategoryShort}
         />
       ) : (
         <Card>
@@ -357,7 +392,7 @@ export function Boletos() {
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <span className="text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
-                            {categoryLabel(b.category)}
+                            {boletoCategoryLabel(b)}
                           </span>
                           <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
                             {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
@@ -439,7 +474,7 @@ export function Boletos() {
                   <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                     {/* {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]} */}
                     <span className="mt-0.5 block text-[11px] text-primary">
-                      {categoryLabel(b.category)}
+                      {boletoCategoryLabel(b)}
                     </span>
                     {b.status === "paid" ? " · Pago" : " · Pendente"}
                   </span>
@@ -490,7 +525,7 @@ export function Boletos() {
                       variant="outline"
                       className="border-primary/30 bg-primary/10 text-primary"
                     >
-                      {categoryLabel(boletoResumo.category)}
+                      {boletoCategoryLabel(boletoResumo)}
                     </Badge>
                     <Badge variant="secondary">
                       {

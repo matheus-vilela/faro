@@ -41,10 +41,11 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { BOLETO_CATEGORY_LABELS } from "@/lib/boletoCategory";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
+import type { CompanyCategory } from "@/types/category";
 import type {
   Boleto,
   Expense,
@@ -55,7 +56,7 @@ import type {
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
 import { Copy, FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -85,11 +86,13 @@ const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 function BoletoLinkedBlock({
   boleto,
+  categoriesById,
   formatCurrency,
   formatDate,
   onVerBoleto,
 }: {
   boleto: Boleto;
+  categoriesById: Map<string, CompanyCategory>;
   formatCurrency: (v: number) => string;
   formatDate: (s: string) => string;
   onVerBoleto: () => void;
@@ -99,7 +102,7 @@ function BoletoLinkedBlock({
       <p className="font-medium">Boleto vinculado</p>
       <p className="text-sm text-muted-foreground">
         <span className="text-foreground font-medium">
-          {BOLETO_CATEGORY_LABELS[boleto.category ?? "outros"]}
+          {formatBoletoCategoryLabel(boleto, categoriesById)}
         </span>
         {" · "}
         {boleto.description} • {formatCurrency(boleto.amount)} • Venc.{" "}
@@ -130,6 +133,9 @@ export function Despesas() {
   const [expensesSearch, setExpensesSearch] = useState("");
   const debouncedSearch = useDebounce(expensesSearch, 300);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
+  const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
+    [],
+  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -191,6 +197,11 @@ export function Despesas() {
   const getBoletoForExpense = (expenseId: string) =>
     boletos.find((b) => b.expense_id === expenseId);
 
+  const categoriesById = useMemo(
+    () => new Map(companyCategories.map((c) => [c.id, c])),
+    [companyCategories],
+  );
+
   const fetchData = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
@@ -223,6 +234,13 @@ export function Despesas() {
       .from("boletos")
       .select("*")
       .eq("company_id", currentCompany.id);
+    const { data: catRows } = await supabase
+      .from("company_categories")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     const { data: sup } = await supabase
       .from("suppliers")
       .select("*")
@@ -1036,7 +1054,7 @@ export function Despesas() {
               <SelectContent>
                 {unlinkedBoletos.map((b) => (
                   <SelectItem key={b.id} value={b.id}>
-                    [{BOLETO_CATEGORY_LABELS[b.category ?? "outros"]}]{" "}
+                    [{formatBoletoCategoryLabel(b, categoriesById)}]{" "}
                     {b.description} - {formatCurrency(b.amount)} (venc.{" "}
                     {formatDate(b.due_date)})
                   </SelectItem>
@@ -1678,6 +1696,7 @@ export function Despesas() {
                   {getBoletoForExpense(detailExpense.id) ? (
                     <BoletoLinkedBlock
                       boleto={getBoletoForExpense(detailExpense.id)!}
+                      categoriesById={categoriesById}
                       formatCurrency={formatCurrency}
                       formatDate={formatDate}
                       onVerBoleto={() =>

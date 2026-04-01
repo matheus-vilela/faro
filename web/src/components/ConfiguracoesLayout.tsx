@@ -9,7 +9,7 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { canOwnerAccess } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { Settings2, Users } from "lucide-react";
+import { FolderTree, Settings2, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const SUB_LINKS = [
@@ -17,6 +17,11 @@ const SUB_LINKS = [
     to: "/app/configuracoes/usuarios-membros",
     label: "Usuários e membros",
     icon: Users,
+  },
+  {
+    to: "/app/configuracoes/categorias",
+    label: "Categorias",
+    icon: FolderTree,
   },
 ] as const;
 

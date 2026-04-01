@@ -50,7 +50,10 @@ export interface Boleto {
   description: string
   due_date: string
   amount: number
-  category?: BoletoCategory
+  /** Legado (enum fixo); preferir company_category_id. */
+  category?: BoletoCategory | null
+  /** Categoria ou subcategoria personalizada (company_categories). */
+  company_category_id?: string | null
   payment_type?: PaymentType
   barcode: string | null
   provider: string | null
