@@ -8,6 +8,9 @@ export type TipoCategoria =
   | "IMPOSTOS"
   | "INVESTIMENTOS_FINANCIAMENTOS"
 
+/** Somente receita operacional na DRE: vendas brutas vs. deduções (contra-receita). */
+export type PapelReceitaDre = "BRUTA" | "DEDUCAO"
+
 export interface CompanyCategory {
   id: string
   company_id: string
@@ -22,4 +25,5 @@ export interface CompanyCategory {
   ativo?: boolean
   padrao_sistema?: boolean
   incluir_no_dre?: boolean
+  papel_receita_dre?: PapelReceitaDre | null
 }

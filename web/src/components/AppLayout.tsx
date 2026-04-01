@@ -28,6 +28,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
+  BarChart3,
   Bell,
   Building2,
   FileText,
@@ -85,6 +86,12 @@ const NAV_ITEMS = [
     title: "Alertas",
     url: "/app/alertas",
     icon: Bell,
+    roles: ["gestor", "owner"],
+  },
+  {
+    title: "DRE",
+    url: "/app/dre",
+    icon: BarChart3,
     roles: ["gestor", "owner"],
   },
   {
