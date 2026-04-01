@@ -46,12 +46,13 @@ import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
-import type {
-  Boleto,
-  Expense,
-  ExpenseItem,
-  ExpenseType,
-  PaymentType,
+import {
+  isBoletoPayable,
+  type Boleto,
+  type Expense,
+  type ExpenseItem,
+  type ExpenseType,
+  type PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
@@ -233,7 +234,8 @@ export function Despesas() {
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
-      .eq("company_id", currentCompany.id);
+      .eq("company_id", currentCompany.id)
+      .eq("flow_type", "payable");
     const { data: catRows } = await supabase
       .from("company_categories")
       .select("*")
@@ -363,7 +365,9 @@ export function Despesas() {
     fetchData();
   };
 
-  const unlinkedBoletos = boletos.filter((b) => !b.expense_id);
+  const unlinkedBoletos = boletos.filter(
+    (b) => !b.expense_id && isBoletoPayable(b),
+  );
 
   const openLinkDialog = (expenseId: string) => {
     setSelectedExpenseId(expenseId);
@@ -640,8 +644,8 @@ export function Despesas() {
         title="Despesas"
         description={
           isGestor
-            ? "Revisar despesas registradas e vincular boletos"
-            : "Registrar despesas e vincular boletos"
+            ? "Revisar despesas registradas e vincular contas a pagar"
+            : "Registrar despesas e vincular contas a pagar"
         }
         action={
           <Button
@@ -1038,8 +1042,8 @@ export function Despesas() {
           <DialogHeader>
             <DialogTitle>Vincular boleto à despesa</DialogTitle>
             <DialogDescription>
-              Selecione um boleto para vincular ou cadastre um novo na página de
-              Boletos.
+              Selecione uma conta a pagar para vincular ou cadastre uma nova no
+              Fluxo de Caixa.
             </DialogDescription>
           </DialogHeader>
           <div>
@@ -1063,7 +1067,7 @@ export function Despesas() {
             </Select>
             {unlinkedBoletos.length === 0 && (
               <p className="text-sm text-muted-foreground mt-2">
-                Não há boletos disponíveis. Cadastre em Boletos.
+                Não há contas a pagar disponíveis. Cadastre no Fluxo de Caixa.
               </p>
             )}
           </div>
@@ -1077,7 +1081,7 @@ export function Despesas() {
                   setBoletoSheetOpen(true);
                 } else {
                   setLinkDialogOpen(false);
-                  navigate("/app/boletos");
+                  navigate("/app/fluxo-de-caixa");
                 }
               }}
             >
@@ -1225,9 +1229,9 @@ export function Despesas() {
               <SheetFooter className="flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/app/boletos")}
+                  onClick={() => navigate("/app/fluxo-de-caixa")}
                 >
-                  Ir para Boletos
+                  Ir para Fluxo de Caixa
                 </Button>
                 <Button
                   variant="destructive"

@@ -88,6 +88,7 @@ export function Alertas() {
         .from("boletos")
         .select("expense_id")
         .eq("company_id", currentCompany.id)
+        .eq("flow_type", "payable")
         .not("expense_id", "is", null);
       const linkedExpenseIds = new Set(
         (boletosData ?? [])

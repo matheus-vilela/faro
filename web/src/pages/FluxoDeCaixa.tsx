@@ -36,23 +36,22 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import {
-  formatBoletoCategoryLabel,
-  formatBoletoCategoryShort,
-} from "@/lib/boletoCategory";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, PaymentType } from "@/types/expense";
+import { isBoletoPayable } from "@/types/expense";
 import {
   CalendarDays,
   CheckCircle2,
   Copy,
   ExternalLink,
-  LayoutList,
   Loader2,
   Plus,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -66,10 +65,11 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
-type BoletosTab = "calendar" | "list";
+type FluxoTab = "calendar" | "payable" | "receivable";
 
-export function Boletos() {
+export function FluxoDeCaixa() {
   const { currentCompany } = useCompany();
+  const companyId = currentCompany?.id;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const expenseIdFromUrl = searchParams.get("expense");
@@ -79,17 +79,25 @@ export function Boletos() {
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
-  const [activeTab, setActiveTab] = useState<BoletosTab>("calendar");
+  const [activeTab, setActiveTab] = useState<FluxoTab>("calendar");
 
   const [calendarBoletos, setCalendarBoletos] = useState<Boleto[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
 
-  const [boletos, setBoletos] = useState<Boleto[]>([]);
-  const [boletosCount, setBoletosCount] = useState(0);
-  const [boletosPage, setBoletosPage] = useState(1);
-  const [boletosSearch, setBoletosSearch] = useState("");
-  const debouncedSearch = useDebounce(boletosSearch, 300);
-  const [loading, setLoading] = useState(true);
+  const [boletosPayable, setBoletosPayable] = useState<Boleto[]>([]);
+  const [boletosPayableCount, setBoletosPayableCount] = useState(0);
+  const [boletosPagePayable, setBoletosPagePayable] = useState(1);
+  const [boletosSearchPayable, setBoletosSearchPayable] = useState("");
+  const debouncedSearchPayable = useDebounce(boletosSearchPayable, 300);
+  const [loadingPayable, setLoadingPayable] = useState(true);
+
+  const [boletosReceivable, setBoletosReceivable] = useState<Boleto[]>([]);
+  const [boletosReceivableCount, setBoletosReceivableCount] = useState(0);
+  const [boletosPageReceivable, setBoletosPageReceivable] = useState(1);
+  const [boletosSearchReceivable, setBoletosSearchReceivable] = useState("");
+  const debouncedSearchReceivable = useDebounce(boletosSearchReceivable, 300);
+  const [loadingReceivable, setLoadingReceivable] = useState(true);
+
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
   const [createBoletoDefaultDueDate, setCreateBoletoDefaultDueDate] = useState<
     string | undefined
@@ -113,29 +121,24 @@ export function Boletos() {
     [categoriesById],
   );
 
-  const boletoCategoryShort = useCallback(
-    (b: Boleto) => formatBoletoCategoryShort(b, categoriesById),
-    [categoriesById],
-  );
-
   useEffect(() => {
-    if (!currentCompany?.id) {
-      setCompanyCategories([]);
+    if (!companyId) {
+      queueMicrotask(() => setCompanyCategories([]));
       return;
     }
     void supabase
       .from("company_categories")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true })
       .then(({ data }) => {
         setCompanyCategories((data as CompanyCategory[]) ?? []);
       });
-  }, [currentCompany?.id]);
+  }, [companyId]);
 
   const fetchCalendarBoletos = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!companyId) return;
     setCalendarLoading(true);
     const { startIso, endIso } = getCalendarGridDateRange(
       period.month,
@@ -144,72 +147,114 @@ export function Boletos() {
     const { data } = await supabase
       .from("boletos")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .gte("due_date", startIso)
       .lte("due_date", endIso)
       .order("due_date", { ascending: true });
     setCalendarBoletos((data as Boleto[]) ?? []);
     setCalendarLoading(false);
-  }, [currentCompany?.id, period.month, period.year]);
+  }, [companyId, period.month, period.year]);
 
-  const fetchBoletos = useCallback(async () => {
-    if (!currentCompany?.id) return;
-    setLoading(true);
+  const fetchBoletosPayable = useCallback(async () => {
+    if (!companyId) return;
+    setLoadingPayable(true);
     const { start, end } = getMonthRange(period.month, period.year);
     let query = supabase
       .from("boletos")
       .select("*", { count: "exact" })
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
+      .eq("flow_type", "payable")
       .gte("due_date", start.slice(0, 10))
       .lte("due_date", end.slice(0, 10))
       .order("due_date", { ascending: true });
-    if (debouncedSearch.trim()) {
-      const term = `%${debouncedSearch.trim()}%`;
+    if (debouncedSearchPayable.trim()) {
+      const term = `%${debouncedSearchPayable.trim()}%`;
       query = query.or(`description.ilike.${term},provider.ilike.${term}`);
     }
     const { data, count } = await query.range(
-      (boletosPage - 1) * PAGE_SIZE,
-      boletosPage * PAGE_SIZE - 1,
+      (boletosPagePayable - 1) * PAGE_SIZE,
+      boletosPagePayable * PAGE_SIZE - 1,
     );
-    setBoletos((data as Boleto[]) ?? []);
-    setBoletosCount(count ?? 0);
-    setLoading(false);
+    setBoletosPayable((data as Boleto[]) ?? []);
+    setBoletosPayableCount(count ?? 0);
+    setLoadingPayable(false);
   }, [
-    currentCompany?.id,
+    companyId,
     period.month,
     period.year,
-    debouncedSearch,
-    boletosPage,
+    debouncedSearchPayable,
+    boletosPagePayable,
+  ]);
+
+  const fetchBoletosReceivable = useCallback(async () => {
+    if (!companyId) return;
+    setLoadingReceivable(true);
+    const { start, end } = getMonthRange(period.month, period.year);
+    let query = supabase
+      .from("boletos")
+      .select("*", { count: "exact" })
+      .eq("company_id", companyId)
+      .eq("flow_type", "receivable")
+      .gte("due_date", start.slice(0, 10))
+      .lte("due_date", end.slice(0, 10))
+      .order("due_date", { ascending: true });
+    if (debouncedSearchReceivable.trim()) {
+      const term = `%${debouncedSearchReceivable.trim()}%`;
+      query = query.or(`description.ilike.${term},provider.ilike.${term}`);
+    }
+    const { data, count } = await query.range(
+      (boletosPageReceivable - 1) * PAGE_SIZE,
+      boletosPageReceivable * PAGE_SIZE - 1,
+    );
+    setBoletosReceivable((data as Boleto[]) ?? []);
+    setBoletosReceivableCount(count ?? 0);
+    setLoadingReceivable(false);
+  }, [
+    companyId,
+    period.month,
+    period.year,
+    debouncedSearchReceivable,
+    boletosPageReceivable,
   ]);
 
   useEffect(() => {
-    setBoletosPage(1);
-  }, [debouncedSearch, period.month, period.year]);
+    queueMicrotask(() => setBoletosPagePayable(1));
+  }, [debouncedSearchPayable, period.month, period.year]);
 
   useEffect(() => {
-    void fetchCalendarBoletos();
+    queueMicrotask(() => setBoletosPageReceivable(1));
+  }, [debouncedSearchReceivable, period.month, period.year]);
+
+  useEffect(() => {
+    queueMicrotask(() => void fetchCalendarBoletos());
   }, [fetchCalendarBoletos]);
 
   useEffect(() => {
-    void fetchBoletos();
-  }, [fetchBoletos]);
+    queueMicrotask(() => void fetchBoletosPayable());
+  }, [fetchBoletosPayable]);
 
   useEffect(() => {
-    if (expenseIdFromUrl) setBoletoSheetOpen(true);
+    queueMicrotask(() => void fetchBoletosReceivable());
+  }, [fetchBoletosReceivable]);
+
+  useEffect(() => {
+    if (expenseIdFromUrl) queueMicrotask(() => setBoletoSheetOpen(true));
   }, [expenseIdFromUrl]);
 
   useEffect(() => {
-    if (activeTab !== "calendar") setCalendarDayList(null);
+    if (activeTab !== "calendar")
+      queueMicrotask(() => setCalendarDayList(null));
   }, [activeTab]);
 
   useEffect(() => {
-    setMarkPaidDialogOpen(false);
+    queueMicrotask(() => setMarkPaidDialogOpen(false));
   }, [boletoResumo?.id]);
 
   const refreshAll = useCallback(() => {
     void fetchCalendarBoletos();
-    void fetchBoletos();
-  }, [fetchCalendarBoletos, fetchBoletos]);
+    void fetchBoletosPayable();
+    void fetchBoletosReceivable();
+  }, [fetchCalendarBoletos, fetchBoletosPayable, fetchBoletosReceivable]);
 
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("pt-BR", {
@@ -225,7 +270,7 @@ export function Boletos() {
     }).format(v);
 
   const confirmMarkBoletoAsPaid = useCallback(async () => {
-    if (!boletoResumo || !currentCompany?.id) return;
+    if (!boletoResumo || !companyId) return;
     setMarkingPaid(true);
     const { data, error } = await supabase
       .from("boletos")
@@ -234,12 +279,12 @@ export function Boletos() {
         updated_at: new Date().toISOString(),
       })
       .eq("id", boletoResumo.id)
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .select()
       .single();
     setMarkingPaid(false);
     if (error) {
-      toast.error(error.message ?? "Não foi possível marcar como pago.");
+      toast.error(error.message ?? "Não foi possível atualizar o status.");
       return;
     }
     const updated = data as Boleto;
@@ -255,14 +300,80 @@ export function Boletos() {
     });
     setMarkPaidDialogOpen(false);
     refreshAll();
-    toast.success("Conta marcada como paga.");
-  }, [boletoResumo, currentCompany?.id, refreshAll]);
+    toast.success(
+      isBoletoPayable(updated)
+        ? "Conta marcada como paga."
+        : "Conta marcada como recebida.",
+    );
+  }, [boletoResumo, companyId, refreshAll]);
+
+  const renderListCard = (b: Boleto) => {
+    const payable = isBoletoPayable(b);
+    return (
+      <div
+        key={b.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => setBoletoResumo(b)}
+        onKeyDown={(e) => e.key === "Enter" && setBoletoResumo(b)}
+        className="flex flex-col gap-3 rounded-lg border p-4 cursor-pointer transition-colors hover:bg-muted/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="font-medium leading-snug">{b.description}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "text-xs font-medium rounded-md border px-2 py-0.5",
+                payable
+                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                  : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+              )}
+            >
+              {payable ? "Conta a pagar" : "Conta a receber"}
+            </span>
+            <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
+              {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {STATUS_LABELS[b.status]}
+            </span>
+          </div>
+          <span className="mt-2 inline-block text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
+            {boletoCategoryLabel(b)}
+          </span>
+          {b.provider ? (
+            <p className="mt-2 text-sm text-muted-foreground">{b.provider}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 flex-row items-end justify-between border-t border-border pt-3 sm:flex-col sm:items-end sm:justify-start sm:border-t-0 sm:pt-0 sm:text-right">
+          <div className="flex  items-center justify-end gap-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Vencimento:
+            </p>
+            <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
+              {formatDate(b.due_date)}
+            </p>
+          </div>
+          <p
+            className={cn(
+              "text-md font-bold tabular-nums sm:text-lg",
+              payable
+                ? "text-destructive"
+                : "text-emerald-600 dark:text-emerald-400",
+            )}
+          >
+            {formatCurrency(b.amount)}
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <PageShell>
       <PageHeader
-        title="Contas a pagar"
-        description="Cadastre contas a pagar e vincule às despesas"
+        title="Fluxo de Caixa"
+        description="Contas a pagar e a receber com calendário e listas por tipo"
         action={
           <Button
             onClick={() => {
@@ -272,7 +383,7 @@ export function Boletos() {
             className="h-10 w-full shrink-0 sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Nova conta
+            Adicionar nova conta
           </Button>
         }
       />
@@ -280,7 +391,7 @@ export function Boletos() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Calendário e lista usam este mês"
+        description="Calendário e listas usam este mês"
       />
 
       <nav
@@ -306,17 +417,32 @@ export function Boletos() {
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === "list"}
+          aria-selected={activeTab === "payable"}
           className={cn(
             "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
-            activeTab === "list"
+            activeTab === "payable"
               ? "border-border bg-background text-foreground shadow-sm"
               : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
           )}
-          onClick={() => setActiveTab("list")}
+          onClick={() => setActiveTab("payable")}
         >
-          <LayoutList className="h-4 w-4 shrink-0" />
-          Lista
+          <TrendingDown className="h-4 w-4 shrink-0 text-destructive" />
+          Contas a Pagar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "receivable"}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            activeTab === "receivable"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+          onClick={() => setActiveTab("receivable")}
+        >
+          <TrendingUp className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          Contas a Receber
         </button>
       </nav>
 
@@ -344,17 +470,15 @@ export function Boletos() {
           boletos={calendarBoletos}
           loading={calendarLoading}
           onDayListOpen={setCalendarDayList}
-          onDayBoletoClick={setBoletoResumo}
           formatCurrency={formatCurrency}
-          categoryShort={boletoCategoryShort}
         />
-      ) : (
+      ) : activeTab === "payable" ? (
         <Card>
           <CardHeader className="flex flex-col gap-5 space-y-0">
             <div>
-              <CardTitle>Lista de contas</CardTitle>
+              <CardTitle>Contas a Pagar</CardTitle>
               <CardDescription>
-                Listagem detalhada com filtro e paginação
+                Saídas previstas no mês selecionado (categorias de despesa)
               </CardDescription>
             </div>
           </CardHeader>
@@ -363,72 +487,70 @@ export function Boletos() {
             <>
               <div className="mb-4 flex flex-wrap gap-3 items-center">
                 <Input
-                  placeholder="Filtrar por descrição ou provedor..."
-                  value={boletosSearch}
-                  onChange={(e) => setBoletosSearch(e.target.value)}
+                  placeholder="Filtrar por descrição ou beneficiário..."
+                  value={boletosSearchPayable}
+                  onChange={(e) => setBoletosSearchPayable(e.target.value)}
                   className="max-w-sm"
                 />
               </div>
-              {loading ? (
+              {loadingPayable ? (
                 <p className="text-muted-foreground">Carregando...</p>
-              ) : boletos.length === 0 ? (
+              ) : boletosPayable.length === 0 ? (
                 <p className="text-muted-foreground">
-                  Nenhum boleto cadastrado
+                  Nenhuma conta a pagar neste mês
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {boletos.map((b) => (
-                    <div
-                      key={b.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setBoletoResumo(b)}
-                      onKeyDown={(e) => e.key === "Enter" && setBoletoResumo(b)}
-                      className="flex flex-col gap-3 rounded-lg border p-4 cursor-pointer transition-colors hover:bg-muted/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium leading-snug">
-                          {b.description}
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
-                            {boletoCategoryLabel(b)}
-                          </span>
-                          <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
-                            {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {STATUS_LABELS[b.status]}
-                          </span>
-                        </div>
-                        {b.provider ? (
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            {b.provider}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="flex shrink-0 flex-row items-end justify-between border-t border-border pt-3 sm:flex-col sm:items-end sm:justify-start sm:border-t-0 sm:pt-0 sm:text-right">
-                        <div className="flex  items-center justify-end gap-1">
-                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Vencimento:
-                          </p>
-                          <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
-                            {formatDate(b.due_date)}
-                          </p>
-                        </div>
-                        <p className="text-md font-bold tabular-nums text-primary sm:text-lg">
-                          {formatCurrency(b.amount)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                  {boletosPayable.map((b) => renderListCard(b))}
                 </div>
               )}
-              {!loading && (
+              {!loadingPayable && (
                 <Pagination
-                  page={boletosPage}
-                  totalCount={boletosCount}
-                  onPageChange={setBoletosPage}
+                  page={boletosPagePayable}
+                  totalCount={boletosPayableCount}
+                  onPageChange={setBoletosPagePayable}
+                />
+              )}
+            </>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader className="flex flex-col gap-5 space-y-0">
+            <div>
+              <CardTitle>Contas a Receber</CardTitle>
+              <CardDescription>
+                Entradas previstas no mês selecionado (categorias de receita)
+              </CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <>
+              <div className="mb-4 flex flex-wrap gap-3 items-center">
+                <Input
+                  placeholder="Filtrar por descrição ou origem..."
+                  value={boletosSearchReceivable}
+                  onChange={(e) => setBoletosSearchReceivable(e.target.value)}
+                  className="max-w-sm"
+                />
+              </div>
+              {loadingReceivable ? (
+                <p className="text-muted-foreground">Carregando...</p>
+              ) : boletosReceivable.length === 0 ? (
+                <p className="text-muted-foreground">
+                  Nenhuma conta a receber neste mês
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {boletosReceivable.map((b) => renderListCard(b))}
+                </div>
+              )}
+              {!loadingReceivable && (
+                <Pagination
+                  page={boletosPageReceivable}
+                  totalCount={boletosReceivableCount}
+                  onPageChange={setBoletosPageReceivable}
                 />
               )}
             </>
@@ -437,13 +559,14 @@ export function Boletos() {
       )}
 
       <Sheet
-        // modal={!boletoResumo}
         open={!!calendarDayList}
         onOpenChange={(o) => !o && setCalendarDayList(null)}
       >
         <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
           <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
-            <SheetTitle className="capitalize">Contas neste dia</SheetTitle>
+            <SheetTitle className="capitalize">
+              Lançamentos neste dia
+            </SheetTitle>
             <SheetDescription className="capitalize">
               {calendarDayList?.title}
             </SheetDescription>
@@ -451,36 +574,55 @@ export function Boletos() {
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
             {calendarDayList && calendarDayList.items.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Nenhuma conta com vencimento neste dia.
+                Nenhum lançamento com vencimento neste dia.
               </p>
             )}
-            {calendarDayList?.items.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => setBoletoResumo(b)}
-                className={cn(
-                  "w-full rounded-lg border p-3 text-left text-sm transition-colors",
-                  b.status === "paid"
-                    ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
-                    : "border-primary/25 bg-primary/10 hover:bg-primary/15 dark:border-primary/35 dark:bg-primary/15 dark:hover:bg-primary/20",
-                )}
-              >
-                <span className="font-medium">{b.description}</span>
-                <div className="flex items-center justify-between">
-                  <span className="mt-1 block text-lg font-semibold tabular-nums text-primary">
-                    {formatCurrency(b.amount)}
-                  </span>
-                  <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    {/* {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]} */}
-                    <span className="mt-0.5 block text-[11px] text-primary">
-                      {boletoCategoryLabel(b)}
+            {calendarDayList?.items.map((b) => {
+              const payable = isBoletoPayable(b);
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setBoletoResumo(b)}
+                  className={cn(
+                    "w-full rounded-lg border p-3 text-left text-sm transition-colors",
+                    b.status === "paid"
+                      ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
+                      : payable
+                        ? "border-destructive/25 bg-destructive/10 hover:bg-destructive/15 dark:border-destructive/35"
+                        : "border-emerald-600/25 bg-emerald-600/10 hover:bg-emerald-600/15 dark:border-emerald-500/35",
+                  )}
+                >
+                  <span className="font-medium">{b.description}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={cn(
+                        "mt-1 block text-lg font-semibold tabular-nums",
+                        payable
+                          ? "text-destructive"
+                          : "text-emerald-600 dark:text-emerald-400",
+                      )}
+                    >
+                      {formatCurrency(b.amount)}
                     </span>
-                    {b.status === "paid" ? " · Pago" : " · Pendente"}
-                  </span>
-                </div>
-              </button>
-            ))}
+                    <span className="mt-1 flex flex-col items-end gap-0.5 text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          "font-medium",
+                          payable ? "text-destructive" : "text-emerald-600",
+                        )}
+                      >
+                        {payable ? "Pagar" : "Receber"}
+                      </span>
+                      <span className="block text-[11px]">
+                        {boletoCategoryLabel(b)}
+                        {b.status === "paid" ? " · Quitado" : " · Pendente"}
+                      </span>
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
           <SheetFooter className="shrink-0 border-t px-6 py-4">
             <Button
@@ -494,7 +636,7 @@ export function Boletos() {
               }}
             >
               <Plus className="h-4 w-4 mr-2" />
-              Nova conta neste dia
+              Adicionar conta neste dia
             </Button>
           </SheetFooter>
         </SheetContent>
@@ -508,13 +650,24 @@ export function Boletos() {
           {boletoResumo && (
             <>
               <SheetHeader>
-                <SheetTitle>Resumo do boleto</SheetTitle>
-                <SheetDescription>Dados para pagamento</SheetDescription>
+                <SheetTitle>Resumo da conta</SheetTitle>
+                <SheetDescription>
+                  {isBoletoPayable(boletoResumo)
+                    ? "Dados para pagamento"
+                    : "Dados do recebimento"}
+                </SheetDescription>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div>
                   <p className="font-semibold">{boletoResumo.description}</p>
-                  <p className="text-2xl font-bold text-primary mt-1">
+                  <p
+                    className={cn(
+                      "text-2xl font-bold mt-1",
+                      isBoletoPayable(boletoResumo)
+                        ? "text-destructive"
+                        : "text-emerald-600 dark:text-emerald-400",
+                    )}
+                  >
                     {formatCurrency(boletoResumo.amount)}
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -523,9 +676,15 @@ export function Boletos() {
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     <Badge
                       variant="outline"
-                      className="border-primary/30 bg-primary/10 text-primary"
+                      className={
+                        isBoletoPayable(boletoResumo)
+                          ? "border-destructive/30 bg-destructive/10 text-destructive"
+                          : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+                      }
                     >
-                      {boletoCategoryLabel(boletoResumo)}
+                      {isBoletoPayable(boletoResumo)
+                        ? "Conta a pagar"
+                        : "Conta a receber"}
                     </Badge>
                     <Badge variant="secondary">
                       {
@@ -547,6 +706,9 @@ export function Boletos() {
                       </span>
                     )}
                   </div>
+                  <Badge variant="outline" className="mt-2">
+                    {boletoCategoryLabel(boletoResumo)}
+                  </Badge>
                 </div>
 
                 {boletoResumo.status === "pending" && (
@@ -629,7 +791,9 @@ export function Boletos() {
                     onClick={() => setMarkPaidDialogOpen(true)}
                   >
                     <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Marcar como pago
+                    {isBoletoPayable(boletoResumo)
+                      ? "Marcar como pago"
+                      : "Marcar como recebido"}
                   </Button>
                 )}
                 {boletoResumo.expense_id && (
@@ -666,10 +830,15 @@ export function Boletos() {
           onEscapeKeyDown={(e) => markingPaid && e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>Marcar como pago</DialogTitle>
+            <DialogTitle>
+              {boletoResumo && isBoletoPayable(boletoResumo)
+                ? "Marcar como pago"
+                : "Marcar como recebido"}
+            </DialogTitle>
             <DialogDescription>
-              Confirma que esta conta já foi quitada? Ela será marcada como paga
-              nesta empresa.
+              {boletoResumo && isBoletoPayable(boletoResumo)
+                ? "Confirma que esta conta já foi quitada? Ela será marcada como paga nesta empresa."
+                : "Confirma que este valor já foi recebido? O lançamento será marcado como quitado nesta empresa."}
             </DialogDescription>
           </DialogHeader>
           {boletoResumo && (

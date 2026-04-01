@@ -17,11 +17,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { isSelectableDespesaLeaf } from "@/lib/companyCategoryLabels";
+import {
+  buildChildrenMap,
+  isLeafCategory,
+  isSelectableDespesaLeaf,
+  isSelectableReceitaLeaf,
+} from "@/lib/companyCategoryLabels";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
-import type { Boleto, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -38,6 +44,31 @@ function pickDefaultCategoryId(list: CompanyCategory[]): string {
     return a.name.localeCompare(b.name, "pt-BR");
   });
   return sorted[0]?.id ?? "";
+}
+
+function pickDefaultReceitaCategoryId(list: CompanyCategory[]): string {
+  const childrenMap = buildChildrenMap(list);
+  const leaves = list.filter(
+    (c) =>
+      isSelectableReceitaLeaf(c) && isLeafCategory(c.id, childrenMap),
+  );
+  const outras = leaves.find((c) =>
+    c.name.trim().toLowerCase().includes("outras receitas"),
+  );
+  if (outras) return outras.id;
+  const sorted = [...leaves].sort((a, b) => {
+    const ao = a.ordem ?? a.sort_order ?? 0;
+    const bo = b.ordem ?? b.sort_order ?? 0;
+    if (ao !== bo) return ao - bo;
+    return a.name.localeCompare(b.name, "pt-BR");
+  });
+  return sorted[0]?.id ?? "";
+}
+
+function pickDefaultForFlow(list: CompanyCategory[], flow: BoletoFlowType) {
+  return flow === "receivable"
+    ? pickDefaultReceitaCategoryId(list)
+    : pickDefaultCategoryId(list);
 }
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
@@ -77,6 +108,7 @@ export function CreateBoletoSheet({
   defaultDueDate,
   onSuccess,
 }: CreateBoletoSheetProps) {
+  const [accountFlow, setAccountFlow] = useState<BoletoFlowType>("payable");
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
   const [companyCategories, setCompanyCategories] = useState<
     CompanyCategory[]
@@ -112,15 +144,19 @@ export function CreateBoletoSheet({
     }
   }, [open, defaultDueDate]);
 
+  const effectiveFlow: BoletoFlowType = expenseId ? "payable" : accountFlow;
+  const categoryNatureza = effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
+
   const loadCategories = useCallback(
     async (opts?: { selectDefault?: boolean }) => {
       if (!companyId) return;
+      const natureza = expenseId ? "DESPESA" : accountFlow === "payable" ? "DESPESA" : "RECEITA";
       setCategoriesLoading(true);
       const { data, error } = await supabase
         .from("company_categories")
         .select("*")
         .eq("company_id", companyId)
-        .eq("natureza", "DESPESA")
+        .eq("natureza", natureza)
         .eq("ativo", true)
         .order("ordem", { ascending: true })
         .order("name", { ascending: true });
@@ -134,10 +170,11 @@ export function CreateBoletoSheet({
       const list = (data ?? []) as CompanyCategory[];
       setCompanyCategories(list);
       if (opts?.selectDefault) {
-        setCompanyCategoryId(pickDefaultCategoryId(list));
+        const flow = expenseId ? "payable" : accountFlow;
+        setCompanyCategoryId(pickDefaultForFlow(list, flow));
       }
     },
-    [companyId],
+    [companyId, expenseId, accountFlow],
   );
 
   useEffect(() => {
@@ -172,6 +209,7 @@ export function CreateBoletoSheet({
       amount: parseFloat(amount),
       payment_type: paymentType,
       status: "pending",
+      flow_type: expenseId ? "payable" : accountFlow,
     };
     if (expenseId) payload.expense_id = expenseId;
 
@@ -215,7 +253,8 @@ export function CreateBoletoSheet({
     setAgency("");
     setAccount("");
     setPaymentType("boleto");
-    setCompanyCategoryId(pickDefaultCategoryId(companyCategories));
+    setAccountFlow("payable");
+    setCompanyCategoryId("");
     onOpenChange(false);
     onSuccess?.(boleto);
   };
@@ -226,18 +265,69 @@ export function CreateBoletoSheet({
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            Novo pagamento
+            {expenseId
+              ? "Novo pagamento"
+              : effectiveFlow === "receivable"
+                ? "Nova conta a receber"
+                : "Nova conta a pagar"}
           </SheetTitle>
           <SheetDescription>
             {expenseId
               ? "Cadastre boleto, PIX ou TED para vincular à despesa"
-              : "Cadastre boleto, PIX ou TED para vincular posteriormente"}
+              : effectiveFlow === "receivable"
+                ? "Registre valores a receber (entrada no fluxo de caixa)"
+                : "Registre contas a pagar (saída no fluxo de caixa)"}
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="grid gap-4">
+            {!expenseId && (
+              <div className="space-y-2">
+                <Label>Tipo de conta</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountFlow("payable");
+                      setCompanyCategoryId("");
+                    }}
+                    disabled={loading}
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                      accountFlow === "payable"
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border hover:bg-muted/60",
+                    )}
+                  >
+                    <p className="font-medium">Conta a pagar</p>
+                    <p className="text-xs text-muted-foreground">
+                      Saídas e obrigações a quitar (categorias de despesa)
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountFlow("receivable");
+                      setCompanyCategoryId("");
+                    }}
+                    disabled={loading}
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                      accountFlow === "receivable"
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border hover:bg-muted/60",
+                    )}
+                  >
+                    <p className="font-medium">Conta a receber</p>
+                    <p className="text-xs text-muted-foreground">
+                      Entradas previstas no fluxo de caixa
+                    </p>
+                  </button>
+                </div>
+              </div>
+            )}
             <div>
-              <Label>Tipo</Label>
+              <Label>Forma de pagamento</Label>
               <Select
                 value={paymentType}
                 onValueChange={(v) => setPaymentType(v as PaymentType)}
@@ -262,6 +352,7 @@ export function CreateBoletoSheet({
                 onValueChange={setCompanyCategoryId}
                 categories={companyCategories}
                 loading={categoriesLoading}
+                categoryNatureza={categoryNatureza}
                 onReload={() => loadCategories({ selectDefault: false })}
               />
               <p className="text-xs text-muted-foreground mt-1.5">

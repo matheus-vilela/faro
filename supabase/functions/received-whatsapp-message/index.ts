@@ -583,6 +583,7 @@ async function buildContasAPagarWhatsappMessage(
       "due_date, description, amount, status, category, company_category_id, company_categories ( name )",
     )
     .eq("company_id", companyId)
+    .eq("flow_type", "payable")
     .gte("due_date", startIso)
     .lte("due_date", endIso)
     .order("due_date", { ascending: true })
