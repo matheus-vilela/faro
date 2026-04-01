@@ -213,11 +213,20 @@ export function ConfiguracoesCategorias() {
   const validTipos = formNatureza === "RECEITA" ? TIPOS_RECEITA : TIPOS_DESPESA;
   const canSelectPrincipalAsParent =
     formKind === "principal" || (formKind === "edicao" && editing?.parent_id === null);
+  const selectedParent = formParentId !== "ROOT" ? byId.get(formParentId) : null;
   useEffect(() => {
     if (!validTipos.includes(formTipo)) {
       setFormTipo(validTipos[0]);
     }
   }, [formNatureza, formTipo, validTipos]);
+  useEffect(() => {
+    if (formKind !== "subcategoria" || formParentId === "ROOT") return;
+    const parent = byId.get(formParentId);
+    if (!parent) return;
+    if (formTipo !== parent.tipo) {
+      setFormTipo(parent.tipo);
+    }
+  }, [formKind, formParentId, formTipo, byId]);
 
   const save = async () => {
     if (!currentCompany?.id || !isOwner) return;
@@ -229,6 +238,17 @@ export function ConfiguracoesCategorias() {
     if (formKind === "subcategoria" && formParentId === "ROOT") {
       toast.error("Subcategoria deve estar vinculada a uma categoria principal ou outra subcategoria.");
       return;
+    }
+    if (formKind === "subcategoria") {
+      const parent = byId.get(formParentId);
+      if (!parent) {
+        toast.error("Selecione uma categoria pai válida.");
+        return;
+      }
+      if (formTipo !== parent.tipo) {
+        toast.error("Subcategoria deve herdar o tipo da categoria pai.");
+        return;
+      }
     }
     const ordem = Number.parseInt(formOrdem, 10);
     const papelReceitaDrePayload =
@@ -467,7 +487,10 @@ export function ConfiguracoesCategorias() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setFormNatureza("RECEITA")}
+                    onClick={() => {
+                      setFormNatureza("RECEITA");
+                      setFormParentId("ROOT");
+                    }}
                     disabled={saving}
                     className={cn(
                       "rounded-md border px-3 py-2 text-left text-sm transition-colors",
@@ -481,7 +504,10 @@ export function ConfiguracoesCategorias() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormNatureza("DESPESA")}
+                    onClick={() => {
+                      setFormNatureza("DESPESA");
+                      setFormParentId("ROOT");
+                    }}
                     disabled={saving}
                     className={cn(
                       "rounded-md border px-3 py-2 text-left text-sm transition-colors",
@@ -500,7 +526,7 @@ export function ConfiguracoesCategorias() {
                 <Select
                   value={formTipo}
                   onValueChange={(v) => setFormTipo(v as TipoCategoria)}
-                  disabled={saving}
+                  disabled={saving || (formKind === "subcategoria" && !!selectedParent)}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -519,24 +545,6 @@ export function ConfiguracoesCategorias() {
                   Esta categoria será criada como categoria principal.
                 </div>
               ) : null}
-              {formKind === "subcategoria" && formParentId !== "ROOT" ? (
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <p className="px-0.5 text-xs font-semibold text-foreground">
-                    {categoryPathLabel(formParentId, byId)}
-                  </p>
-                  <div className="relative mt-2 ml-2 pl-4 before:absolute before:left-1 before:top-0 before:bottom-0 before:w-px before:bg-border">
-                    <div className="relative flex items-center gap-2 py-1.5">
-                      <span
-                        className="pointer-events-none absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border"
-                        aria-hidden
-                      />
-                      <p className="min-w-0 truncate text-sm text-muted-foreground">
-                        {formName.trim() || "Nome da nova subcategoria"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
               {formKind !== "principal" ? (
                 <Popover open={parentPickerOpen} onOpenChange={setParentPickerOpen}>
                   <PopoverTrigger asChild>
@@ -549,9 +557,9 @@ export function ConfiguracoesCategorias() {
                     >
                       <span className="truncate text-left">
                         {formParentId === "ROOT"
-                          ? "Categoria principal"
+                          ? "Selecione uma categoria"
                           : formParentId
-                            ? categoryPathLabel(formParentId, byId)
+                            ? byId.get(formParentId)?.name ?? "Selecione"
                             : "Selecione"}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -607,6 +615,7 @@ export function ConfiguracoesCategorias() {
                                 type="button"
                                 onClick={() => {
                                   setFormParentId(opt.id);
+                                  setFormTipo(opt.tipo);
                                   setParentPickerOpen(false);
                                   setParentSearch("");
                                 }}

@@ -13,7 +13,7 @@ export type DreValueTone = "receita" | "deducao" | "despesa" | "resultado" | "mu
 
 const TONE: Record<DreValueTone, string> = {
   receita: "text-emerald-600 dark:text-emerald-400",
-  deducao: "text-amber-700 dark:text-amber-400",
+  deducao: "text-orange-600 dark:text-orange-400",
   despesa: "text-rose-700 dark:text-rose-400",
   resultado: "text-foreground font-semibold",
   muted: "text-muted-foreground",
@@ -125,7 +125,7 @@ export function DreHighlightBlock({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-baseline justify-between gap-2 rounded-lg border-l-4 border-primary bg-primary/5 px-3 py-2.5 sm:gap-3 sm:px-4",
+        "flex min-w-0 items-baseline justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 sm:gap-3 sm:px-4",
         className,
       )}
     >

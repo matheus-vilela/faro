@@ -197,26 +197,6 @@ export function BoletosCalendar({
                       ) : (
                         <>
                           <div className="flex w-full flex-col gap-1">
-                            {payable > 0 && (
-                              <div
-                                className={cn(
-                                  "flex w-full min-w-0 overflow-hidden rounded-md border border-destructive/20 bg-destructive/[0.06] shadow-[inset_3px_0_0_0] shadow-destructive/70 dark:bg-destructive/10 dark:shadow-destructive/80",
-                                  isAdjacent && "opacity-85",
-                                )}
-                              >
-                                <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
-                                  <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[7px]">
-                                    Valores a Pagar
-                                  </span>
-                                  <p
-                                    className="text-right text-[9px] font-semibold tabular-nums leading-none text-destructive sm:text-[10px]"
-                                    title="Contas a pagar"
-                                  >
-                                    − {formatCurrency(payable)}
-                                  </p>
-                                </div>
-                              </div>
-                            )}
                             {receivable > 0 && (
                               <div
                                 className={cn(
@@ -233,6 +213,26 @@ export function BoletosCalendar({
                                     title="Contas a receber"
                                   >
                                     + {formatCurrency(receivable)}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                            {payable > 0 && (
+                              <div
+                                className={cn(
+                                  "flex w-full min-w-0 overflow-hidden rounded-md border border-destructive/20 bg-destructive/[0.06] shadow-[inset_3px_0_0_0] shadow-destructive/70 dark:bg-destructive/10 dark:shadow-destructive/80",
+                                  isAdjacent && "opacity-85",
+                                )}
+                              >
+                                <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                                  <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[7px]">
+                                    Valores a Pagar
+                                  </span>
+                                  <p
+                                    className="text-right text-[9px] font-semibold tabular-nums leading-none text-destructive sm:text-[10px]"
+                                    title="Contas a pagar"
+                                  >
+                                    − {formatCurrency(payable)}
                                   </p>
                                 </div>
                               </div>

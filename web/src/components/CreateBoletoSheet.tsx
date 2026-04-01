@@ -30,6 +30,7 @@ import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 function pickDefaultCategoryId(list: CompanyCategory[]): string {
   const leaves = list.filter(isSelectableDespesaLeaf);
@@ -145,6 +146,7 @@ export function CreateBoletoSheet({
   }, [open, defaultDueDate]);
 
   const effectiveFlow: BoletoFlowType = expenseId ? "payable" : accountFlow;
+  const requiresPaymentDetails = effectiveFlow === "payable";
   const categoryNatureza = effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
 
   const loadCategories = useCallback(
@@ -188,7 +190,8 @@ export function CreateBoletoSheet({
     description.trim() !== "" &&
     dueDate.trim() !== "" &&
     parseFloat(amount) > 0 &&
-    (paymentType === "boleto" ||
+    (!requiresPaymentDetails ||
+      paymentType === "boleto" ||
       (paymentType === "pix" && pixKey.trim() !== "") ||
       (paymentType === "ted" &&
         bankName.trim() !== "" &&
@@ -207,28 +210,41 @@ export function CreateBoletoSheet({
       description: description.trim(),
       due_date: dueDate,
       amount: parseFloat(amount),
-      payment_type: paymentType,
       status: "pending",
       flow_type: expenseId ? "payable" : accountFlow,
     };
     if (expenseId) payload.expense_id = expenseId;
 
-    if (paymentType === "boleto") {
-      payload.barcode = barcode.trim() || null;
-      payload.provider = provider.trim() || null;
-    } else if (paymentType === "pix") {
-      payload.pix_key_type = pixKeyType;
-      payload.pix_key =
-        (pixKeyType === "cpf" || pixKeyType === "cnpj"
-          ? pixKey.replace(/\D/g, "")
-          : pixKey.trim()) || null;
+    if (requiresPaymentDetails) {
+      payload.payment_type = paymentType;
+      if (paymentType === "boleto") {
+        payload.barcode = barcode.trim() || null;
+        payload.provider = provider.trim() || null;
+      } else if (paymentType === "pix") {
+        payload.pix_key_type = pixKeyType;
+        payload.pix_key =
+          (pixKeyType === "cpf" || pixKeyType === "cnpj"
+            ? pixKey.replace(/\D/g, "")
+            : pixKey.trim()) || null;
+      } else {
+        payload.bank_name = bankName.trim() || null;
+        payload.bank_code = bankCode.trim() || null;
+        payload.agency = agency.trim() || null;
+        payload.account = account.trim() || null;
+        payload.account_type = accountType;
+        payload.provider = provider.trim() || null;
+      }
     } else {
-      payload.bank_name = bankName.trim() || null;
-      payload.bank_code = bankCode.trim() || null;
-      payload.agency = agency.trim() || null;
-      payload.account = account.trim() || null;
-      payload.account_type = accountType;
-      payload.provider = provider.trim() || null;
+      payload.payment_type = "boleto";
+      payload.barcode = null;
+      payload.provider = null;
+      payload.pix_key_type = null;
+      payload.pix_key = null;
+      payload.bank_name = null;
+      payload.bank_code = null;
+      payload.agency = null;
+      payload.account = null;
+      payload.account_type = null;
     }
 
     const { data, error } = await supabase
@@ -239,6 +255,7 @@ export function CreateBoletoSheet({
     setLoading(false);
     if (error) {
       console.error(error);
+      toast.error(error.message ?? "Não foi possível cadastrar a conta.");
       return;
     }
     const boleto = data as Boleto;
@@ -256,6 +273,7 @@ export function CreateBoletoSheet({
     setAccountFlow("payable");
     setCompanyCategoryId("");
     onOpenChange(false);
+    toast.success("Conta cadastrada com sucesso.");
     onSuccess?.(boleto);
   };
 
@@ -326,24 +344,26 @@ export function CreateBoletoSheet({
                 </div>
               </div>
             )}
-            <div>
-              <Label>Forma de pagamento</Label>
-              <Select
-                value={paymentType}
-                onValueChange={(v) => setPaymentType(v as PaymentType)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="boleto">
-                    {PAYMENT_TYPE_LABELS.boleto}
-                  </SelectItem>
-                  <SelectItem value="pix">{PAYMENT_TYPE_LABELS.pix}</SelectItem>
-                  <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {requiresPaymentDetails && (
+              <div>
+                <Label>Forma de pagamento</Label>
+                <Select
+                  value={paymentType}
+                  onValueChange={(v) => setPaymentType(v as PaymentType)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="boleto">
+                      {PAYMENT_TYPE_LABELS.boleto}
+                    </SelectItem>
+                    <SelectItem value="pix">{PAYMENT_TYPE_LABELS.pix}</SelectItem>
+                    <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label>Categoria</Label>
               <BoletoCategoryPicker
@@ -391,7 +411,7 @@ export function CreateBoletoSheet({
             </div>
           </div>
 
-          {paymentType === "boleto" && (
+          {requiresPaymentDetails && paymentType === "boleto" && (
             <div>
               <Label>Código de barras</Label>
               <Input
@@ -402,7 +422,7 @@ export function CreateBoletoSheet({
             </div>
           )}
 
-          {paymentType === "pix" && (
+          {requiresPaymentDetails && paymentType === "pix" && (
             <div className="space-y-4 rounded-lg border p-4">
               <Label>Chave PIX</Label>
               <div className="flex gap-4 ">
@@ -449,7 +469,7 @@ export function CreateBoletoSheet({
             </div>
           )}
 
-          {paymentType === "ted" && (
+          {requiresPaymentDetails && paymentType === "ted" && (
             <div className="space-y-4 rounded-lg border p-4">
               <Label>Dados bancários</Label>
               <div className="grid gap-4 sm:grid-cols-2">

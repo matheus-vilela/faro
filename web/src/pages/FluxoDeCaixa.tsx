@@ -309,6 +309,12 @@ export function FluxoDeCaixa() {
 
   const renderListCard = (b: Boleto) => {
     const payable = isBoletoPayable(b);
+    const statusLabel =
+      b.status === "pending"
+        ? "Pendente"
+        : payable
+          ? "Pago"
+          : "Recebido";
     return (
       <div
         key={b.id}
@@ -319,28 +325,31 @@ export function FluxoDeCaixa() {
         className="flex flex-col gap-3 rounded-lg border p-4 cursor-pointer transition-colors hover:bg-muted/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
       >
         <div className="min-w-0 flex-1">
-          <p className="font-medium leading-snug">{b.description}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium leading-snug">{b.description}</p>
             <span
               className={cn(
-                "text-xs font-medium rounded-md border px-2 py-0.5",
-                payable
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                  : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+                "text-xs font-semibold rounded-full px-2.5 py-0.5",
+                b.status === "pending"
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                  : payable
+                    ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                    : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
               )}
             >
-              {payable ? "Conta a pagar" : "Conta a receber"}
-            </span>
-            <span className="text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
-              {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {STATUS_LABELS[b.status]}
+              {statusLabel}
             </span>
           </div>
-          <span className="mt-2 inline-block text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
-            {boletoCategoryLabel(b)}
-          </span>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {payable && (
+              <span className="inline-block text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
+                {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
+              </span>
+            )}
+            <span className="inline-block text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
+              {boletoCategoryLabel(b)}
+            </span>
+          </div>
           {b.provider ? (
             <p className="mt-2 text-sm text-muted-foreground">{b.provider}</p>
           ) : null}
@@ -368,6 +377,73 @@ export function FluxoDeCaixa() {
       </div>
     );
   };
+
+  const renderCalendarDayCompactCard = (b: Boleto) => {
+    const payable = isBoletoPayable(b);
+    const statusLabel =
+      b.status === "pending" ? "Pendente" : payable ? "Pago" : "Recebido";
+
+    return (
+      <button
+        key={b.id}
+        type="button"
+        onClick={() => setBoletoResumo(b)}
+        className={cn(
+          "w-full rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
+          payable
+            ? "border-destructive/30 dark:border-destructive/35"
+            : "border-emerald-600/30 dark:border-emerald-500/35",
+          "flex flex-col gap-1.5 sm:gap-2",
+        )}
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="text-sm font-medium leading-snug">{b.description}</p>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                b.status === "pending"
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                  : payable
+                    ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                    : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
+              )}
+            >
+              {statusLabel}
+            </span>
+          </div>
+          {b.provider ? (
+            <p className="mt-1.5 truncate text-xs text-muted-foreground">
+              {b.provider}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="uppercase tracking-wide">Venc.:</span>
+            <span className="font-medium text-foreground">
+              {formatDate(b.due_date)}
+            </span>
+          </div>
+          <p
+            className={cn(
+              "text-base font-bold tabular-nums",
+              payable
+                ? "text-destructive"
+                : "text-emerald-600 dark:text-emerald-400",
+            )}
+          >
+            {formatCurrency(b.amount)}
+          </p>
+        </div>
+      </button>
+    );
+  };
+
+  const calendarDayReceivableItems =
+    calendarDayList?.items.filter((b) => !isBoletoPayable(b)) ?? [];
+  const calendarDayPayableItems =
+    calendarDayList?.items.filter((b) => isBoletoPayable(b)) ?? [];
 
   return (
     <PageShell>
@@ -577,52 +653,30 @@ export function FluxoDeCaixa() {
                 Nenhum lançamento com vencimento neste dia.
               </p>
             )}
-            {calendarDayList?.items.map((b) => {
-              const payable = isBoletoPayable(b);
-              return (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => setBoletoResumo(b)}
-                  className={cn(
-                    "w-full rounded-lg border p-3 text-left text-sm transition-colors",
-                    b.status === "paid"
-                      ? "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/60"
-                      : payable
-                        ? "border-destructive/25 bg-destructive/10 hover:bg-destructive/15 dark:border-destructive/35"
-                        : "border-emerald-600/25 bg-emerald-600/10 hover:bg-emerald-600/15 dark:border-emerald-500/35",
+            {calendarDayReceivableItems.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Contas a Receber
+                </h4>
+                <div className="space-y-2">
+                  {calendarDayReceivableItems.map((b) =>
+                    renderCalendarDayCompactCard(b),
                   )}
-                >
-                  <span className="font-medium">{b.description}</span>
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "mt-1 block text-lg font-semibold tabular-nums",
-                        payable
-                          ? "text-destructive"
-                          : "text-emerald-600 dark:text-emerald-400",
-                      )}
-                    >
-                      {formatCurrency(b.amount)}
-                    </span>
-                    <span className="mt-1 flex flex-col items-end gap-0.5 text-xs text-muted-foreground">
-                      <span
-                        className={cn(
-                          "font-medium",
-                          payable ? "text-destructive" : "text-emerald-600",
-                        )}
-                      >
-                        {payable ? "Pagar" : "Receber"}
-                      </span>
-                      <span className="block text-[11px]">
-                        {boletoCategoryLabel(b)}
-                        {b.status === "paid" ? " · Quitado" : " · Pendente"}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                </div>
+              </section>
+            )}
+            {calendarDayPayableItems.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Contas a Pagar
+                </h4>
+                <div className="space-y-2">
+                  {calendarDayPayableItems.map((b) =>
+                    renderCalendarDayCompactCard(b),
+                  )}
+                </div>
+              </section>
+            )}
           </div>
           <SheetFooter className="shrink-0 border-t px-6 py-4">
             <Button
@@ -686,13 +740,15 @@ export function FluxoDeCaixa() {
                         ? "Conta a pagar"
                         : "Conta a receber"}
                     </Badge>
-                    <Badge variant="secondary">
-                      {
-                        PAYMENT_TYPE_LABELS[
-                          boletoResumo.payment_type ?? "boleto"
-                        ]
-                      }
-                    </Badge>
+                    {isBoletoPayable(boletoResumo) && (
+                      <Badge variant="secondary">
+                        {
+                          PAYMENT_TYPE_LABELS[
+                            boletoResumo.payment_type ?? "boleto"
+                          ]
+                        }
+                      </Badge>
+                    )}
                     <Badge
                       variant={
                         boletoResumo.status === "paid" ? "default" : "outline"

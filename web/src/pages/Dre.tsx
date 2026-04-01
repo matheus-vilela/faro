@@ -30,8 +30,10 @@ export function Dre() {
     year: now.getFullYear(),
   });
 
-  const { loading, error, categories, categoryTotals, computed, periodLabel } =
-    useDreReport(currentCompany?.id, period);
+  const { loading, error, categories, categoryTotals, computed } = useDreReport(
+    currentCompany?.id,
+    period,
+  );
 
   const trees = useMemo(() => {
     if (!categories.length || !computed) return null;
@@ -62,12 +64,6 @@ export function Dre() {
 
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <MonthSelector value={period} onChange={setPeriod} />
-        <p className="text-xs text-muted-foreground max-w-md">
-          Linhas calculadas a partir dos boletos com vencimento em {periodLabel}. Inclui
-          pendentes e pagos. Regras de mapeamento:{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">web/src/lib/dre/dreMapping.ts</code>
-          .
-        </p>
       </div>
 
       {error ? (
@@ -87,9 +83,9 @@ export function Dre() {
       !loading ? (
         <div
           role="status"
-          className="mb-6 flex gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm"
+          className="mb-6 flex gap-3 rounded-lg border border-orange-300/70 bg-orange-50/70 px-4 py-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10"
         >
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-300" />
           <div>
             <p className="font-medium text-foreground">Atenção</p>
             <div className="text-muted-foreground">
@@ -201,12 +197,12 @@ export function Dre() {
               <Collapsible defaultOpen={false} className="group/fin">
                 <CollapsibleTrigger
                   className={cn(
-                    "flex w-full min-w-0 items-baseline justify-between gap-2 rounded-md py-2.5 text-left text-sm sm:text-base outline-none sm:gap-3",
+                    "flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md py-2.5 text-left text-sm sm:text-base outline-none",
                     "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
                   )}
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-2 font-medium">
-                    <span className="w-7 shrink-0 whitespace-nowrap font-mono text-[11px] leading-none text-muted-foreground sm:w-6 sm:text-xs">
+                  <span className="flex min-w-0 flex-1 items-center gap-3 font-medium">
+                    <span className="w-8 shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
                       (+/−)
                     </span>
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
