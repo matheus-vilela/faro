@@ -2,6 +2,9 @@ export type ExpenseType = 'nota_fiscal' | 'romaneio' | 'recibo'
 export type ExpenseStatus = 'pending' | 'approved' | 'rejected'
 export type BoletoStatus = 'pending' | 'paid'
 
+/** Conta a pagar (saída) ou a receber (entrada) no fluxo de caixa. */
+export type BoletoFlowType = 'payable' | 'receivable'
+
 export interface ExpenseItem {
   id?: string
   product_id?: string | null
@@ -47,6 +50,8 @@ export interface Boleto {
   id: string
   company_id: string
   expense_id: string | null
+  /** Conta a pagar (padrão legado) ou a receber. */
+  flow_type?: BoletoFlowType
   description: string
   due_date: string
   amount: number
@@ -67,4 +72,8 @@ export interface Boleto {
   status: BoletoStatus
   created_at: string
   updated_at: string
+}
+
+export function isBoletoPayable(b: Pick<Boleto, 'flow_type'>): boolean {
+  return b.flow_type !== 'receivable'
 }

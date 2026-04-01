@@ -74,6 +74,7 @@ export function Dashboard() {
       .from("boletos")
       .select("id, description, due_date, amount, status")
       .eq("company_id", currentCompany.id)
+      .eq("flow_type", "payable")
       .in("due_date", [todayStr, tomorrowStr])
       .eq("status", "pending")
       .order("due_date", { ascending: true })
@@ -119,6 +120,7 @@ export function Dashboard() {
           .from("boletos")
           .select("expense_id")
           .eq("company_id", companyId)
+          .eq("flow_type", "payable")
           .not("expense_id", "is", null),
         supabase
           .from("recebimento_item_status")
@@ -267,7 +269,7 @@ export function Dashboard() {
                 </div>
               </div>
               <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/app/boletos">
+                <Link to="/app/fluxo-de-caixa">
                   Ver tudo
                   <ArrowRight className="ml-1 h-4 w-4" />
                 </Link>

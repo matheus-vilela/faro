@@ -19,6 +19,7 @@ import {
   categoryPathLabel,
   isLeafCategory,
   isSelectableDespesaLeaf,
+  isSelectableReceitaLeaf,
   NATUREZA_LABEL,
   TIPO_LABEL,
 } from "@/lib/companyCategoryLabels";
@@ -40,6 +41,7 @@ function normalizeSearch(s: string): string {
 function buildLeafOptions(
   categories: CompanyCategory[],
   byId: Map<string, CompanyCategory>,
+  isSelectableLeaf: (c: CompanyCategory) => boolean,
 ): {
   id: string;
   leafLabel: string;
@@ -49,7 +51,7 @@ function buildLeafOptions(
 }[] {
   const childrenMap = buildChildrenMap(categories);
   const leaves = categories.filter(
-    (c) => isSelectableDespesaLeaf(c) && isLeafCategory(c.id, childrenMap),
+    (c) => isSelectableLeaf(c) && isLeafCategory(c.id, childrenMap),
   );
   leaves.sort((a, b) => {
     if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
@@ -81,6 +83,7 @@ export function BoletoCategoryPicker({
   loading,
   onReload,
   disabled,
+  categoryNatureza = "DESPESA",
 }: {
   companyId: string;
   value: string;
@@ -89,7 +92,13 @@ export function BoletoCategoryPicker({
   loading: boolean;
   onReload: () => void | Promise<void>;
   disabled?: boolean;
+  /** Natureza das categorias listadas e criadas neste picker. */
+  categoryNatureza?: "DESPESA" | "RECEITA";
 }) {
+  const isSelectableLeaf =
+    categoryNatureza === "RECEITA"
+      ? isSelectableReceitaLeaf
+      : isSelectableDespesaLeaf;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -106,7 +115,7 @@ export function BoletoCategoryPicker({
 
   const parentOptions = useMemo(() => {
     const list = categories.filter(
-      (c) => c.natureza === "DESPESA" && c.ativo !== false,
+      (c) => c.natureza === categoryNatureza && c.ativo !== false,
     );
     list.sort((a, b) =>
       categoryPathLabel(a.id, byId).localeCompare(
@@ -115,7 +124,7 @@ export function BoletoCategoryPicker({
       ),
     );
     return list;
-  }, [categories, byId]);
+  }, [categories, byId, categoryNatureza]);
 
   const tipoParent = useMemo(
     () => new Map(parentOptions.map((p) => [p.id, p.tipo])),
@@ -161,8 +170,8 @@ export function BoletoCategoryPicker({
   }, [parentOptions, newParentId]);
 
   const options = useMemo(
-    () => buildLeafOptions(categories, byId),
-    [categories, byId],
+    () => buildLeafOptions(categories, byId, isSelectableLeaf),
+    [categories, byId, isSelectableLeaf],
   );
 
   const filtered = useMemo(() => {
@@ -212,7 +221,9 @@ export function BoletoCategoryPicker({
   const openCreate = () => {
     if (parentOptions.length === 0) {
       toast.error(
-        "Não há categorias de despesa ativas disponíveis.",
+        categoryNatureza === "RECEITA"
+          ? "Não há categorias de receita ativas disponíveis."
+          : "Não há categorias de despesa ativas disponíveis.",
       );
       return;
     }
@@ -232,7 +243,8 @@ export function BoletoCategoryPicker({
       return;
     }
     setCreating(true);
-    const inheritedTipo = (tipoParent.get(newParentId) ?? "VARIAVEL") as TipoCategoria;
+    const inheritedTipo = (tipoParent.get(newParentId) ??
+      (categoryNatureza === "RECEITA" ? "OPERACIONAL" : "VARIAVEL")) as TipoCategoria;
     const { data, error } = await supabase
       .from("company_categories")
       .insert({
@@ -241,7 +253,7 @@ export function BoletoCategoryPicker({
         name,
         sort_order: 0,
         ordem: 0,
-        natureza: "DESPESA",
+        natureza: categoryNatureza,
         tipo: inheritedTipo,
         padrao_sistema: false,
         incluir_no_dre: true,
@@ -254,7 +266,11 @@ export function BoletoCategoryPicker({
       toast.error(error.message);
       return;
     }
-    toast.success("Categoria de despesa criada.");
+    toast.success(
+      categoryNatureza === "RECEITA"
+        ? "Categoria de receita criada."
+        : "Categoria de despesa criada.",
+    );
     await onReload();
     onValueChange((data as CompanyCategory).id);
     setCreateOpen(false);
@@ -287,7 +303,10 @@ export function BoletoCategoryPicker({
             <span className="truncate text-left">
               {loading
                 ? "Carregando…"
-                : selectedLabel || "Selecione uma categoria de despesa"}
+                : selectedLabel ||
+                  (categoryNatureza === "RECEITA"
+                    ? "Selecione uma categoria de receita"
+                    : "Selecione uma categoria de despesa")}
             </span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
@@ -317,7 +336,8 @@ export function BoletoCategoryPicker({
               disabled={parentOptions.length === 0}
             >
               <Plus className="h-4 w-4 shrink-0" />
-              Nova subcategoria (despesa)
+              Nova subcategoria (
+              {categoryNatureza === "RECEITA" ? "receita" : "despesa"})
             </Button>
           </div>
           <div
@@ -378,7 +398,10 @@ export function BoletoCategoryPicker({
           showCloseButton
         >
           <DialogHeader>
-            <DialogTitle>Nova categoria de despesa</DialogTitle>
+            <DialogTitle>
+              Nova categoria de{" "}
+              {categoryNatureza === "RECEITA" ? "receita" : "despesa"}
+            </DialogTitle>
             <DialogDescription>
               A categoria será criada como subcategoria da categoria pai escolhida.
             </DialogDescription>

@@ -52,8 +52,8 @@ const NAV_ITEMS = [
     roles: ["operador", "gestor", "owner"],
   },
   {
-    title: "Contas a pagar",
-    url: "/app/boletos",
+    title: "Fluxo de Caixa",
+    url: "/app/fluxo-de-caixa",
     icon: FileText,
     roles: ["operador", "gestor", "owner"],
   },

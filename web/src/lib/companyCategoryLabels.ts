@@ -54,6 +54,12 @@ export function isSelectableDespesaLeaf(c: CompanyCategory): boolean {
   return natureza === "DESPESA" && ativa;
 }
 
+export function isSelectableReceitaLeaf(c: CompanyCategory): boolean {
+  const natureza = c.natureza ?? "DESPESA";
+  const ativa = c.ativo !== false;
+  return natureza === "RECEITA" && ativa;
+}
+
 export function tipoBadge(c: CompanyCategory): string {
   return TIPO_LABEL[c.tipo] ?? "—";
 }

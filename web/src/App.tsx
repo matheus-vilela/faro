@@ -13,7 +13,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Despesas } from '@/pages/Despesas'
 import { Recebimento } from '@/pages/Recebimento'
 import { Alertas } from '@/pages/Alertas'
-import { Boletos } from '@/pages/Boletos'
+import { FluxoDeCaixa } from '@/pages/FluxoDeCaixa'
 import { Fornecedores } from '@/pages/Fornecedores'
 import { Produtos } from '@/pages/Produtos'
 import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
@@ -45,7 +45,11 @@ function AuthenticatedLayout() {
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="despesas" element={<Despesas />} />
-          <Route path="boletos" element={<Boletos />} />
+          <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
+          <Route
+            path="boletos"
+            element={<Navigate to="/app/fluxo-de-caixa" replace />}
+          />
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
