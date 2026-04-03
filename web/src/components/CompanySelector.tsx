@@ -1,21 +1,4 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
-import { maskCpfCnpj } from '@/lib/masks'
-import { useAuth } from '@/contexts/AuthContext'
-import { useCompany } from '@/contexts/CompanyContext'
-import type { Company } from '@/contexts/CompanyContext'
-import { ROLE_LABELS } from '@/lib/roles'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -23,83 +6,101 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Building2, ChevronDown, Plus } from 'lucide-react'
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Company } from "@/contexts/CompanyContext";
+import { useCompany } from "@/contexts/CompanyContext";
+import { maskCpfCnpj } from "@/lib/masks";
+import { ROLE_LABELS } from "@/lib/roles";
+import { supabase } from "@/lib/supabase";
+import { Building2, ChevronDown, Plus } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export function CompanySelector() {
-  const navigate = useNavigate()
-  const { user } = useAuth()
-  const { userCompanies, currentCompany, setCurrentCompany, refetchCompanies } = useCompany()
-  const [createOpen, setCreateOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [document, setDocument] = useState('')
-  const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { userCompanies, currentCompany, setCurrentCompany, refetchCompanies } =
+    useCompany();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [document, setDocument] = useState("");
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSelectCompany = (company: Company) => {
-    setCurrentCompany(company)
-  }
+    setCurrentCompany(company);
+  };
 
   const handleCreateCompany = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user) return
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    if (!user) return;
+    setLoading(true);
+    setError(null);
     try {
-      const companyId = crypto.randomUUID()
-      const { error: companyError } = await supabase
-        .from('companies')
+      const companyId = crypto.randomUUID();
+      const { error: companyError } = await supabase.from("companies").insert({
+        id: companyId,
+        name,
+        document: (document || "").replace(/\D/g, "") || null,
+        email: email || null,
+      });
+
+      if (companyError) throw companyError;
+
+      const { error: linkError } = await supabase
+        .from("user_companies")
         .insert({
-          id: companyId,
-          name,
-          document: (document || '').replace(/\D/g, '') || null,
-          email: email || null,
-        })
+          user_id: user.id,
+          company_id: companyId,
+          role: "owner",
+        });
 
-      if (companyError) throw companyError
-
-      const { error: linkError } = await supabase.from('user_companies').insert({
-        user_id: user.id,
-        company_id: companyId,
-        role: 'owner',
-      })
-
-      if (linkError) throw linkError
+      if (linkError) throw linkError;
 
       const company = {
         id: companyId,
         name,
-        document: (document || '').replace(/\D/g, '') || null,
+        document: (document || "").replace(/\D/g, "") || null,
         email: email || null,
         phone: null,
         address: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      } as Company
+      } as Company;
 
-      await refetchCompanies()
-      setCurrentCompany(company)
-      setCreateOpen(false)
-      setName('')
-      setDocument('')
-      setEmail('')
+      await refetchCompanies();
+      setCurrentCompany(company);
+      setCreateOpen(false);
+      setName("");
+      setDocument("");
+      setEmail("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erro ao criar empresa')
+      setError(err instanceof Error ? err.message : "Erro ao criar empresa");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const openCreateDialog = () => {
-    setError(null)
-    setName('')
-    setDocument('')
-    setEmail('')
-    setCreateOpen(true)
-  }
+    setError(null);
+    setName("");
+    setDocument("");
+    setEmail("");
+    setCreateOpen(true);
+  };
 
-  if (!currentCompany) return null
+  if (!currentCompany) return null;
 
   return (
     <>
@@ -110,10 +111,12 @@ export function CompanySelector() {
             size="icon"
             title={currentCompany.name}
             aria-label={`Empresa: ${currentCompany.name}`}
-            className="h-9 w-9 shrink-0 md:h-auto md:min-w-[180px] md:w-auto md:justify-between md:px-4 md:py-2 [&>svg]:shrink-0"
+            className="h-9 w-9 shrink-0  md:min-w-[180px] md:w-auto md:justify-between md:px-4 md:py-2 [&>svg]:shrink-0"
           >
             <Building2 className="h-4 w-4" />
-            <span className="hidden truncate md:inline">{currentCompany.name}</span>
+            <span className="hidden truncate md:inline">
+              {currentCompany.name}
+            </span>
             <ChevronDown className="hidden h-4 w-4 opacity-50 md:block" />
           </Button>
         </DropdownMenuTrigger>
@@ -125,10 +128,16 @@ export function CompanySelector() {
             >
               <Building2 className="mr-2 h-4 w-4" />
               <div className="flex flex-col">
-                <span className={company.id === currentCompany?.id ? 'font-medium' : ''}>
+                <span
+                  className={
+                    company.id === currentCompany?.id ? "font-medium" : ""
+                  }
+                >
                   {company.name}
                 </span>
-                <span className="text-xs text-muted-foreground">{ROLE_LABELS[role]}</span>
+                <span className="text-xs text-muted-foreground">
+                  {ROLE_LABELS[role]}
+                </span>
               </div>
             </DropdownMenuItem>
           ))}
@@ -138,7 +147,7 @@ export function CompanySelector() {
             Nova empresa
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => navigate('/empresas')}>
+          <DropdownMenuItem onClick={() => navigate("/empresas")}>
             Gerenciar empresas
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -198,12 +207,12 @@ export function CompanySelector() {
                 Cancelar
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Criando...' : 'Criar empresa'}
+                {loading ? "Criando..." : "Criar empresa"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
     </>
-  )
+  );
 }

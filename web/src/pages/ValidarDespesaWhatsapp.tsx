@@ -10,29 +10,38 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ProductSelectPopover } from "@/components/whatsapp/ProductSelectPopover";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabasePublic } from "@/lib/supabasePublic";
+import { cn } from "@/lib/utils";
 import {
-  type ExtractedDocumentResult,
-  type ExtractedExpenseItem,
-  type ExtractedExpenseItemWithMatch,
   WHATSAPP_PRODUCT_AUTO_LINK_MIN,
   formatDecimalPtBrInput,
   parseDecimalPtBrInput,
   recalcLineTotal,
   sanitizeDecimalPtBrTyping,
-  scaleItemsToTotal,
   sumItems,
+  type ExtractedDocumentResult,
+  type ExtractedExpenseItem,
+  type ExtractedExpenseItemWithMatch,
 } from "@/lib/whatsappExtractedExpense";
-import { Building2, FileText, Package, Receipt, Wallet } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  Building2,
+  FileText,
+  Package,
+  Plus,
+  Receipt,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 
 function formatBrl(amount: number): string {
@@ -82,8 +91,8 @@ function coerceExtracted(raw: unknown): ExtractedDocumentResult {
       typeof o._requiresProductConfirmation === "boolean"
         ? o._requiresProductConfirmation
         : undefined,
-    documentKind: (o.documentKind as ExtractedDocumentResult["documentKind"]) ??
-      null,
+    documentKind:
+      (o.documentKind as ExtractedDocumentResult["documentKind"]) ?? null,
     supplierName: (o.supplierName as string) ?? null,
     supplierDocument: (o.supplierDocument as string) ?? null,
     invoiceNumber: (o.invoiceNumber as string) ?? null,
@@ -104,7 +113,8 @@ function coerceExtracted(raw: unknown): ExtractedDocumentResult {
           (r.productId as string | undefined) ??
           (r.product_id as string | undefined) ??
           null,
-        productMatch: r.productMatch as ExtractedExpenseItemWithMatch["productMatch"],
+        productMatch:
+          r.productMatch as ExtractedExpenseItemWithMatch["productMatch"],
       };
       return recalcLineTotal(it) as ExtractedExpenseItemWithMatch;
     }),
@@ -115,6 +125,8 @@ type LineBinding = {
   productId: string | null;
   createNew: boolean;
   newName: string;
+  /** Nome no catálogo quando há produto vinculado (exibição no seletor). */
+  catalogProductName: string | null;
 };
 
 /** Sem vínculo automático: abre cadastro rápido com o nome da nota (usuário pode trocar para um produto da lista). */
@@ -122,10 +134,17 @@ function initLineBindings(ex: ExtractedDocumentResult): LineBinding[] {
   return ex.items.map((it) => {
     const m = it.productMatch;
     const pid = it.productId ?? m?.resolvedProductId ?? null;
+    let catalogProductName: string | null = null;
+    if (pid && m?.suggestedProductName) {
+      if (pid === m.resolvedProductId || pid === m.suggestedProductId) {
+        catalogProductName = m.suggestedProductName;
+      }
+    }
     return {
       productId: pid,
       createNew: !pid,
       newName: it.productName ?? "",
+      catalogProductName,
     };
   });
 }
@@ -163,8 +182,7 @@ function buildPayloadForFinalize(
       };
       if (b?.createNew) {
         row.createProduct = true;
-        row.newProductName =
-          (b.newName || it.productName).trim() || "Produto";
+        row.newProductName = (b.newName || it.productName).trim() || "Produto";
       } else if (b?.productId) {
         row.productId = b.productId;
       }
@@ -183,11 +201,13 @@ export function ValidarDespesaWhatsapp() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [lineBindings, setLineBindings] = useState<LineBinding[]>([]);
   /** Texto livre nos inputs de qtd/valor (permite apagar antes de digitar de novo). */
   const [qtyInputs, setQtyInputs] = useState<string[]>([]);
   const [unitInputs, setUnitInputs] = useState<string[]>([]);
+  /** IDs estáveis por linha (React key + scroll/destaque). */
+  const [itemRowIds, setItemRowIds] = useState<string[]>([]);
+  const [flashRowId, setFlashRowId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -221,16 +241,37 @@ export function ValidarDespesaWhatsapp() {
     }
     const coerced = coerceExtracted(obj.extracted_json);
     setExtracted(coerced);
-    const { data: plist } = await supabasePublic.rpc(
-      "list_products_for_whatsapp_draft",
-      { p_token: token },
-    );
-    const list = Array.isArray(plist) ? plist : [];
-    setProducts(list);
-    setLineBindings(initLineBindings(coerced));
+    const baseBindings = initLineBindings(coerced);
+    const idsMissingLabel = [
+      ...new Set(
+        baseBindings
+          .filter((b) => b.productId && !b.catalogProductName)
+          .map((b) => b.productId as string),
+      ),
+    ];
+    if (idsMissingLabel.length > 0) {
+      const { data: labelRows } = await supabasePublic.rpc(
+        "resolve_whatsapp_draft_product_labels",
+        { p_token: token, p_ids: idsMissingLabel },
+      );
+      const rows = Array.isArray(labelRows) ? labelRows : [];
+      const map = new Map(
+        rows.map((r: { id: string; name: string }) => [r.id, r.name]),
+      );
+      setLineBindings(
+        baseBindings.map((b) =>
+          b.productId && !b.catalogProductName && map.has(b.productId)
+            ? { ...b, catalogProductName: map.get(b.productId)! }
+            : b,
+        ),
+      );
+    } else {
+      setLineBindings(baseBindings);
+    }
     const str = lineItemInputStringsFromItems(coerced.items);
     setQtyInputs(str.qty);
     setUnitInputs(str.unit);
+    setItemRowIds(coerced.items.map(() => crypto.randomUUID()));
     setExpiresAt(obj.expires_at ?? null);
     setError(null);
   }, [token]);
@@ -238,6 +279,35 @@ export function ValidarDespesaWhatsapp() {
   useEffect(() => {
     queueMicrotask(() => load());
   }, [load]);
+
+  useEffect(() => {
+    if (!extracted) return;
+    setItemRowIds((prev) => {
+      const n = extracted.items.length;
+      if (prev.length === n) return prev;
+      if (prev.length > n) return prev.slice(0, n);
+      const next = [...prev];
+      while (next.length < n) next.push(crypto.randomUUID());
+      return next;
+    });
+  }, [extracted?.items.length]);
+
+  useLayoutEffect(() => {
+    if (!flashRowId) return;
+    const el = document.getElementById(`draft-line-${flashRowId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusT = window.setTimeout(() => {
+      const focusable = el?.querySelector<HTMLElement>(
+        'input:not([type="hidden"]), [role="combobox"]',
+      );
+      focusable?.focus({ preventScroll: true });
+    }, 450);
+    const clearFlash = window.setTimeout(() => setFlashRowId(null), 5000);
+    return () => {
+      window.clearTimeout(focusT);
+      window.clearTimeout(clearFlash);
+    };
+  }, [flashRowId]);
 
   const updateItem = (i: number, patch: Partial<ExtractedExpenseItem>) => {
     setExtracted((prev) => {
@@ -263,13 +333,75 @@ export function ValidarDespesaWhatsapp() {
   const diverge =
     Math.abs(Math.round(totalNota * 100) - Math.round(soma * 100)) > 2;
 
-  const handleScaleToTotal = () => {
-    if (!extracted || totalNota <= 0) return;
-    const scaled = scaleItemsToTotal(extracted.items, totalNota);
-    setExtracted({ ...extracted, items: scaled as typeof extracted.items });
-    const str = lineItemInputStringsFromItems(scaled);
-    setQtyInputs(str.qty);
-    setUnitInputs(str.unit);
+  const insertItemAt = useCallback((atIndex: number | "append") => {
+    const newId = crypto.randomUUID();
+    setFlashRowId(newId);
+
+    const blank: ExtractedExpenseItemWithMatch = {
+      productName: "",
+      quantity: 1,
+      unitValue: 0,
+      lineTotal: 0,
+      productId: null,
+      productMatch: undefined,
+    };
+    const line = recalcLineTotal(blank) as ExtractedExpenseItemWithMatch;
+    const binding: LineBinding = {
+      productId: null,
+      createNew: true,
+      newName: "",
+      catalogProductName: null,
+    };
+
+    const resolveIdx = (len: number) =>
+      atIndex === "append" ? len : Math.max(0, Math.min(atIndex, len));
+
+    setExtracted((prev) => {
+      if (!prev) return prev;
+      const idx = resolveIdx(prev.items.length);
+      const items = [...prev.items];
+      items.splice(idx, 0, line);
+      return { ...prev, items };
+    });
+    setLineBindings((prev) => {
+      const idx = resolveIdx(prev.length);
+      const next = [...prev];
+      next.splice(idx, 0, binding);
+      return next;
+    });
+    setQtyInputs((prev) => {
+      const idx = resolveIdx(prev.length);
+      const next = [...prev];
+      next.splice(idx, 0, formatDecimalPtBrInput(1, 4));
+      return next;
+    });
+    setUnitInputs((prev) => {
+      const idx = resolveIdx(prev.length);
+      const next = [...prev];
+      next.splice(idx, 0, formatDecimalPtBrInput(0, 4));
+      return next;
+    });
+    setItemRowIds((prev) => {
+      const idx = resolveIdx(prev.length);
+      const next = [...prev];
+      next.splice(idx, 0, newId);
+      return next;
+    });
+  }, []);
+
+  const addItemAtEnd = useCallback(() => {
+    insertItemAt("append");
+  }, [insertItemAt]);
+
+  const removeItem = (index: number) => {
+    setExtracted((prev) => {
+      if (!prev || prev.items.length <= 1) return prev;
+      return { ...prev, items: prev.items.filter((_, j) => j !== index) };
+    });
+    setLineBindings((prev) => prev.filter((_, j) => j !== index));
+    setQtyInputs((prev) => prev.filter((_, j) => j !== index));
+    setUnitInputs((prev) => prev.filter((_, j) => j !== index));
+    setItemRowIds((prev) => prev.filter((_, j) => j !== index));
   };
 
   const handleSave = async () => {
@@ -501,26 +633,56 @@ export function ValidarDespesaWhatsapp() {
           {diverge && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
               Total da nota ({formatBrl(totalNota)}) e soma dos itens (
-              {formatBrl(soma)}) ainda divergem. Corrija os itens ou use o
-              botão abaixo para ajustar proporcionalmente.
+              {formatBrl(soma)}) ainda divergem. Ajuste quantidades, valores ou
+              inclua/remova itens até bater com o total.
             </div>
           )}
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Itens</h3>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-sm font-semibold">Itens</h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full shrink-0 sm:w-auto"
+                onClick={addItemAtEnd}
+              >
+                <Plus className="mr-1.5 h-4 w-4" aria-hidden />
+                Adicionar item ao fim
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               O vínculo automático só ocorre com similaridade ≥{" "}
               {Math.round(WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100)}% ao nome de um
               produto já cadastrado (ou aprendido antes). Abaixo desse critério,
               use o cadastro rápido com o nome da nota ou escolha um produto na
-              lista — o Faro memoriza o vínculo para a próxima compra.
+              lista — o Faro memoriza o vínculo para a próxima compra. Use{" "}
+              <strong>Inserir item aqui</strong> entre duas linhas para manter a
+              mesma ordem da nota.
             </p>
-            <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 py-1">
+                <div className="h-px min-w-0 flex-1 bg-border" aria-hidden />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => insertItemAt(0)}
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden />
+                  Inserir no início
+                </Button>
+                <div className="h-px min-w-0 flex-1 bg-border" aria-hidden />
+              </div>
               {extracted.items.map((it, i) => {
+                const rowId = itemRowIds[i] ?? `fallback-${i}`;
                 const binding = lineBindings[i] ?? {
                   productId: null,
                   createNew: false,
                   newName: it.productName ?? "",
+                  catalogProductName: null,
                 };
                 const m = it.productMatch;
                 const selectVal = binding.createNew
@@ -529,217 +691,270 @@ export function ValidarDespesaWhatsapp() {
                     ? binding.productId
                     : "__none__";
                 return (
-                  <div
-                    key={i}
-                    className="rounded-lg border border-border p-3 space-y-3"
-                  >
-                    <div className="flex gap-2">
-                      <Package
-                        className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label className="text-xs">Descrição na nota</Label>
-                        <Input
-                          value={it.productName}
-                          onChange={(e) =>
-                            updateItem(i, { productName: e.target.value })
+                  <Fragment key={rowId}>
+                    <div
+                      id={`draft-line-${rowId}`}
+                      className={cn(
+                        "rounded-lg border border-border p-3 space-y-3 transition-shadow duration-500",
+                        flashRowId === rowId &&
+                          "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Item {i + 1}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeItem(i)}
+                          disabled={extracted.items.length <= 1}
+                          title={
+                            extracted.items.length <= 1
+                              ? "É necessário pelo menos um item"
+                              : "Remover item"
                           }
+                          aria-label="Remover item"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Package
+                          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                          aria-hidden
                         />
-                        {m?.needsConfirmation &&
-                          (m.suggestedScore ?? 0) <
-                            WHATSAPP_PRODUCT_AUTO_LINK_MIN && (
-                            <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
-                              Nenhum produto do cadastro atingiu{" "}
-                              {Math.round(WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100)}
-                              % de similaridade com este texto. Use{" "}
-                              <strong>Criar produto novo</strong> (nome já
-                              preenchido; edite se quiser) ou selecione um item
-                              na lista.
-                            </p>
-                          )}
-                        <div className="space-y-1">
-                          <Label className="text-xs">Produto no Faro</Label>
-                          <Select
-                            value={selectVal}
-                            onValueChange={(v) => {
-                              setLineBindings((prev) => {
-                                const next = [...prev];
-                                while (next.length <= i) {
-                                  next.push({
-                                    productId: null,
-                                    createNew: false,
-                                    newName: "",
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <Label className="text-xs">Descrição na nota</Label>
+                          <Input
+                            value={it.productName}
+                            onChange={(e) =>
+                              updateItem(i, { productName: e.target.value })
+                            }
+                          />
+                          {m?.needsConfirmation &&
+                            (m.suggestedScore ?? 0) <
+                              WHATSAPP_PRODUCT_AUTO_LINK_MIN && (
+                              <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
+                                Nenhum produto do cadastro atingiu{" "}
+                                {Math.round(
+                                  WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100,
+                                )}
+                                % de similaridade com este texto. Use{" "}
+                                <strong>Criar produto novo</strong> (nome já
+                                preenchido; edite se quiser) ou selecione um
+                                item na lista.
+                              </p>
+                            )}
+                          <div className="space-y-1">
+                            <Label className="text-xs">Produto no Faro</Label>
+                            {token ? (
+                              <ProductSelectPopover
+                                token={token}
+                                selectVal={selectVal}
+                                catalogProductName={binding.catalogProductName}
+                                onPick={(r) => {
+                                  setLineBindings((prev) => {
+                                    const next = [...prev];
+                                    while (next.length <= i) {
+                                      next.push({
+                                        productId: null,
+                                        createNew: false,
+                                        newName: "",
+                                        catalogProductName: null,
+                                      });
+                                    }
+                                    if (r.kind === "new") {
+                                      next[i] = {
+                                        ...next[i],
+                                        createNew: true,
+                                        productId: null,
+                                        catalogProductName: null,
+                                        newName:
+                                          next[i]?.newName ||
+                                          it.productName ||
+                                          "",
+                                      };
+                                    } else if (r.kind === "none") {
+                                      next[i] = {
+                                        ...next[i],
+                                        createNew: false,
+                                        productId: null,
+                                        catalogProductName: null,
+                                      };
+                                    } else {
+                                      next[i] = {
+                                        ...next[i],
+                                        createNew: false,
+                                        productId: r.productId,
+                                        catalogProductName: r.productName,
+                                      };
+                                    }
+                                    return next;
                                   });
+                                }}
+                              />
+                            ) : null}
+                          </div>
+                          {binding.createNew && (
+                            <div className="space-y-1 pt-1">
+                              <Label className="text-xs">
+                                Nome do produto a cadastrar
+                              </Label>
+                              <Input
+                                value={binding.newName}
+                                onChange={(e) =>
+                                  setLineBindings((prev) => {
+                                    const next = [...prev];
+                                    while (next.length <= i) {
+                                      next.push({
+                                        productId: null,
+                                        createNew: true,
+                                        newName: "",
+                                        catalogProductName: null,
+                                      });
+                                    }
+                                    next[i] = {
+                                      ...next[i],
+                                      newName: e.target.value,
+                                      createNew: true,
+                                    };
+                                    return next;
+                                  })
                                 }
-                                if (v === "__new__") {
-                                  next[i] = {
-                                    ...next[i],
-                                    createNew: true,
-                                    productId: null,
-                                    newName:
-                                      next[i]?.newName || it.productName || "",
-                                  };
-                                } else if (v === "__none__") {
-                                  next[i] = {
-                                    ...next[i],
-                                    createNew: false,
-                                    productId: null,
-                                  };
-                                } else {
-                                  next[i] = {
-                                    ...next[i],
-                                    createNew: false,
-                                    productId: v,
-                                  };
-                                }
+                                placeholder="Ex.: Leite integral 1L"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Será criado um produto na sua base com estoque
+                                inicial zero; você pode editar depois no Faro.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <div>
+                          <Label className="text-xs">Qtd</Label>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            autoComplete="off"
+                            value={
+                              qtyInputs[i] !== undefined
+                                ? qtyInputs[i]
+                                : formatDecimalPtBrInput(it.quantity, 4)
+                            }
+                            onChange={(e) => {
+                              const raw = sanitizeDecimalPtBrTyping(
+                                e.target.value,
+                              );
+                              setQtyInputs((prev) => {
+                                const next = [...prev];
+                                next[i] = raw;
                                 return next;
                               });
-                            }}
-                          >
-                            <SelectTrigger className="w-full max-w-full">
-                              <SelectValue placeholder="Selecione o produto" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__new__">
-                                + Criar produto novo
-                              </SelectItem>
-                              {products.map((p) => (
-                                <SelectItem key={p.id} value={p.id}>
-                                  {p.name}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value="__none__">
-                                — Escolher depois (obrigatório antes de salvar)
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {binding.createNew && (
-                          <div className="space-y-1 pt-1">
-                            <Label className="text-xs">
-                              Nome do produto a cadastrar
-                            </Label>
-                            <Input
-                              value={binding.newName}
-                              onChange={(e) =>
-                                setLineBindings((prev) => {
-                                  const next = [...prev];
-                                  while (next.length <= i) {
-                                    next.push({
-                                      productId: null,
-                                      createNew: true,
-                                      newName: "",
-                                    });
-                                  }
-                                  next[i] = {
-                                    ...next[i],
-                                    newName: e.target.value,
-                                    createNew: true,
-                                  };
-                                  return next;
-                                })
+                              const p = parseDecimalPtBrInput(raw);
+                              if (p !== null && p > 0) {
+                                updateItem(i, { quantity: p });
                               }
-                              placeholder="Ex.: Leite integral 1L"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              Será criado um produto na sua base com estoque
-                              inicial zero; você pode editar depois no Faro.
-                            </p>
-                          </div>
-                        )}
+                            }}
+                            onBlur={(e) => {
+                              const raw = sanitizeDecimalPtBrTyping(
+                                e.target.value,
+                              );
+                              const p = parseDecimalPtBrInput(raw);
+                              const cur = extracted.items[i];
+                              setQtyInputs((prev) => {
+                                const next = [...prev];
+                                next[i] =
+                                  p !== null && p > 0
+                                    ? formatDecimalPtBrInput(p, 4)
+                                    : formatDecimalPtBrInput(cur.quantity, 4);
+                                return next;
+                              });
+                              if (p !== null && p > 0) {
+                                updateItem(i, { quantity: p });
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Valor unit.</Label>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0,00"
+                            autoComplete="off"
+                            value={
+                              unitInputs[i] !== undefined
+                                ? unitInputs[i]
+                                : formatDecimalPtBrInput(it.unitValue, 4)
+                            }
+                            onChange={(e) => {
+                              const raw = sanitizeDecimalPtBrTyping(
+                                e.target.value,
+                              );
+                              setUnitInputs((prev) => {
+                                const next = [...prev];
+                                next[i] = raw;
+                                return next;
+                              });
+                              const p = parseDecimalPtBrInput(raw);
+                              if (p !== null && p > 0) {
+                                updateItem(i, { unitValue: p });
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const raw = sanitizeDecimalPtBrTyping(
+                                e.target.value,
+                              );
+                              const p = parseDecimalPtBrInput(raw);
+                              const cur = extracted.items[i];
+                              setUnitInputs((prev) => {
+                                const next = [...prev];
+                                next[i] =
+                                  p !== null && p > 0
+                                    ? formatDecimalPtBrInput(p, 4)
+                                    : formatDecimalPtBrInput(cur.unitValue, 4);
+                                return next;
+                              });
+                              if (p !== null && p > 0) {
+                                updateItem(i, { unitValue: p });
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-2 sm:col-span-2 flex items-end text-sm text-muted-foreground">
+                          Subtotal: {formatBrl(it.lineTotal)}
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <div>
-                        <Label className="text-xs">Qtd</Label>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          autoComplete="off"
-                          value={
-                            qtyInputs[i] !== undefined
-                              ? qtyInputs[i]
-                              : formatDecimalPtBrInput(it.quantity, 4)
-                          }
-                          onChange={(e) => {
-                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
-                            setQtyInputs((prev) => {
-                              const next = [...prev];
-                              next[i] = raw;
-                              return next;
-                            });
-                            const p = parseDecimalPtBrInput(raw);
-                            if (p !== null && p > 0) {
-                              updateItem(i, { quantity: p });
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
-                            const p = parseDecimalPtBrInput(raw);
-                            const cur = extracted.items[i];
-                            setQtyInputs((prev) => {
-                              const next = [...prev];
-                              next[i] =
-                                p !== null && p > 0
-                                  ? formatDecimalPtBrInput(p, 4)
-                                  : formatDecimalPtBrInput(cur.quantity, 4);
-                              return next;
-                            });
-                            if (p !== null && p > 0) {
-                              updateItem(i, { quantity: p });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Valor unit.</Label>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0,00"
-                          autoComplete="off"
-                          value={
-                            unitInputs[i] !== undefined
-                              ? unitInputs[i]
-                              : formatDecimalPtBrInput(it.unitValue, 4)
-                          }
-                          onChange={(e) => {
-                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
-                            setUnitInputs((prev) => {
-                              const next = [...prev];
-                              next[i] = raw;
-                              return next;
-                            });
-                            const p = parseDecimalPtBrInput(raw);
-                            if (p !== null && p > 0) {
-                              updateItem(i, { unitValue: p });
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
-                            const p = parseDecimalPtBrInput(raw);
-                            const cur = extracted.items[i];
-                            setUnitInputs((prev) => {
-                              const next = [...prev];
-                              next[i] =
-                                p !== null && p > 0
-                                  ? formatDecimalPtBrInput(p, 4)
-                                  : formatDecimalPtBrInput(cur.unitValue, 4);
-                              return next;
-                            });
-                            if (p !== null && p > 0) {
-                              updateItem(i, { unitValue: p });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className="col-span-2 sm:col-span-2 flex items-end text-sm text-muted-foreground">
-                        Subtotal: {formatBrl(it.lineTotal)}
-                      </div>
+                    <div className="flex items-center gap-2 py-1">
+                      <div
+                        className="h-px min-w-0 flex-1 bg-border"
+                        aria-hidden
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 max-w-[min(100%,18rem)] shrink gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => insertItemAt(i + 1)}
+                      >
+                        <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        <span className="truncate">
+                          Inserir após o item {i + 1}
+                        </span>
+                      </Button>
+                      <div
+                        className="h-px min-w-0 flex-1 bg-border"
+                        aria-hidden
+                      />
                     </div>
-                  </div>
+                  </Fragment>
                 );
               })}
             </div>
@@ -752,14 +967,6 @@ export function ValidarDespesaWhatsapp() {
           )}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleScaleToTotal}
-              disabled={!extracted.totalAmount || extracted.totalAmount <= 0}
-            >
-              Ajustar itens ao total da nota
-            </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
               {saving ? "Salvando…" : "Salvar despesa"}
             </Button>

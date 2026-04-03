@@ -64,7 +64,30 @@ Regras:
 - totalAmount é o total geral impresso no documento (ou soma explícita se só houver itens).
 - Em cupom fiscal eletrônico (NFC-e), o número da nota geralmente aparece próximo ao rótulo "NFC-e"; extraia esse número em invoiceNumber e a série em invoiceSeries se visível.
 - supplierDocument: use sempre string (CNPJ/CPF com ou sem máscara). Se o JSON numérico for usado para CNPJ, pode perder zeros à esquerda — prefira string.
-- Se não tiver certeza que é documento de compra, validDocument = false.`;
+- Se não tiver certeza que é documento de compra, validDocument = false.
+
+TABELAS, ROMANEIOS E DOCUMENTOS COM COLUNAS ALINHADAS (crítico):
+- Muitos documentos são tabelas: colunas como código, descrição do produto, quantidade, valor unitário, valor total da linha, etc. Leia SEMPRE no sentido natural de leitura: da esquerda para a direita em cada linha, e de cima para baixo entre linhas.
+- Cada linha de produto é uma unidade: productName, quantity, unitValue e lineTotal devem vir TODOS da MESMA linha visual do documento. É proibido associar o nome de um produto da linha i com quantidade ou valores da linha j.
+- Antes de preencher um item, alinhe mentalmente as colunas (trace verticalmente): o valor unitário e o total pertencem à mesma linha que a descrição à esquerda na mesma faixa horizontal.
+- Não pule linhas que sejam claramente itens de mercadoria (mesmo que a leitura OCR seja difícil); tente extrair todas as linhas de produto visíveis. Não omita linhas intermediárias. Só não duplique se for obviamente a mesma linha repetida por erro de impressão.
+- Cabeçalhos, totais gerais, rodapés e linhas só com separadores não entram em "items".
+- Após montar cada item, verifique coerência: lineTotal deve bater com quantity × unitValue (aceite pequenas diferenças de arredondamento, ex. centavos). Se o documento mostrar total explícito na linha, use-o em lineTotal e ajuste unitValue ou quantity de forma consistente com o texto daquela linha.
+- Ordene "items" na mesma ordem em que as linhas aparecem no documento (de cima para baixo).`;
+
+/** Instrução extra para imagens: reforça leitura linha a linha (tabelas/romaneios). */
+const USER_PROMPT_IMAGE = `Esta imagem pode ser um documento com tabela ou colunas alinhadas (ex.: romaneio, nota, pedido).
+
+Extraia um único objeto JSON conforme o sistema. Regras essenciais:
+1) Percorra o bloco de itens LINHA POR LINHA, do topo ao rodapé. Para cada linha de produto, copie descrição, quantidades e valores que pertencem à MESMA linha — nunca misture células de linhas diferentes.
+2) Se houver várias colunas numéricas, identifique qual é quantidade, qual é valor unitário e qual é total da linha usando o cabeçalho da tabela ou o padrão do documento; mantenha a correspondência dentro da linha.
+3) Inclua todas as linhas de item que conseguir ler; não descarte linhas no meio da lista por achar que são iguais sem verificar.
+4) Se a imagem não for um documento fiscal/compra legível, use validDocument: false e invalidReason em português.`;
+
+/** Instrução extra para PDF (mesmo problema de alinhamento em tabelas). */
+const USER_PROMPT_PDF = `Analise este arquivo PDF (nota fiscal, cupom, romaneio ou recibo de compra). Responda apenas com um json válido (um único objeto) conforme as instruções do sistema. Se não for documento de compra legível, marque validDocument false.
+
+Para a lista de itens: em tabelas e romaneios, extraia linha por linha — descrição, quantidade e valores da mesma linha física; não una dados de linhas diferentes; inclua todas as linhas de produto visíveis na ordem de cima para baixo.`;
 
 function strOrNull(v: unknown): string | null {
   if (v === null || v === undefined) return null;
@@ -233,9 +256,6 @@ async function extractDocumentFromPdfUrl(
     if (!up.ok) return up;
     fileId = up.fileId;
 
-    const userPrompt =
-      "Analise este arquivo PDF (nota fiscal, cupom, romaneio ou recibo de compra). Responda apenas com um json válido (um único objeto) conforme as instruções do sistema. Se não for documento de compra legível, marque validDocument false.";
-
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -250,7 +270,7 @@ async function extractDocumentFromPdfUrl(
             role: "user",
             content: [
               { type: "input_file", file_id: fileId },
-              { type: "input_text", text: userPrompt },
+              { type: "input_text", text: USER_PROMPT_PDF },
             ],
           },
         ],
@@ -337,7 +357,12 @@ export async function extractDocumentWithOpenAI(params: {
   documentUrl?: string;
 }): Promise<{ ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }> {
   const { apiKey, mode } = params;
-  const model = Deno.env.get("OPENAI_EXPENSE_MODEL") ?? "gpt-4o-mini";
+  const baseModel = Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4o-mini";
+  /** Romaneios/tabelas: opcionalmente use gpt-4o (OPENAI_EXPENSE_VISION_MODEL) para melhor alinhamento linha a linha. */
+  const model =
+    mode === "image"
+      ? (Deno.env.get("OPENAI_EXPENSE_VISION_MODEL")?.trim() ?? baseModel)
+      : baseModel;
 
   if (mode === "pdf") {
     const url = params.documentUrl?.trim();
@@ -360,7 +385,7 @@ export async function extractDocumentWithOpenAI(params: {
     if (!url) return { ok: false, error: "URL da imagem ausente." };
     userContent.push({
       type: "text",
-      text: "Analise esta imagem e extraia os dados conforme o sistema. Se a imagem não for um documento fiscal legível, marque validDocument false.",
+      text: USER_PROMPT_IMAGE,
     });
     userContent.push({ type: "image_url", image_url: { url } });
   } else {
