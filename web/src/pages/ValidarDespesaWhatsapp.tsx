@@ -750,11 +750,8 @@ export function ValidarDespesaWhatsapp() {
                             (m.suggestedScore ?? 0) <
                               WHATSAPP_PRODUCT_AUTO_LINK_MIN && (
                               <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
-                                Nenhum produto do cadastro atingiu{" "}
-                                {Math.round(
-                                  WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100,
-                                )}
-                                % de similaridade com este texto. Use{" "}
+                                Nenhum produto do cadastro atingiu similaridade
+                                com este texto. Use{" "}
                                 <strong>Criar produto novo</strong> (nome já
                                 preenchido; edite se quiser) ou selecione um
                                 item na lista.
