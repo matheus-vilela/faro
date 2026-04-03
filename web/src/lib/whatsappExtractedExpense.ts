@@ -7,9 +7,28 @@ export type ExtractedExpenseItem = {
   lineTotal: number
 }
 
+/** Metadados de vínculo com catálogo (edge / rascunho WhatsApp). */
+export type ItemProductMatch = {
+  resolvedProductId?: string | null
+  /** Só preenchido se similaridade ≥ 95% (caso contrário prefira cadastro novo). */
+  suggestedProductId?: string | null
+  suggestedProductName?: string | null
+  suggestedScore?: number
+  needsConfirmation?: boolean
+}
+
+/** Mesmo limiar da edge: vínculo automático por texto só ≥ 95%. */
+export const WHATSAPP_PRODUCT_AUTO_LINK_MIN = 0.95
+
+export type ExtractedExpenseItemWithMatch = ExtractedExpenseItem & {
+  productId?: string | null
+  productMatch?: ItemProductMatch
+}
+
 export type ExtractedDocumentResult = {
   validDocument: boolean
   invalidReason?: string
+  _requiresProductConfirmation?: boolean
   documentKind:
     | 'nota_fiscal'
     | 'cupom_fiscal'
@@ -22,7 +41,7 @@ export type ExtractedDocumentResult = {
   invoiceNumber: string | null
   invoiceSeries: string | null
   totalAmount: number | null
-  items: ExtractedExpenseItem[]
+  items: ExtractedExpenseItemWithMatch[]
   notes: string | null
 }
 
@@ -54,8 +73,37 @@ export function scaleItemsToTotal(
 }
 
 export function recalcLineTotal(it: ExtractedExpenseItem): ExtractedExpenseItem {
-  const q = Math.max(0.0001, Number(it.quantity))
+  const q = Number(it.quantity)
   const uv = Number(it.unitValue)
+  if (!Number.isFinite(q) || !Number.isFinite(uv) || q <= 0 || uv <= 0) {
+    return { ...it, lineTotal: 0 }
+  }
   const line = Math.round(q * uv * 100) / 100
   return { ...it, lineTotal: line }
+}
+
+/** Formata número para exibição em input (pt-BR). */
+export function formatDecimalPtBrInput(n: number, maxFrac = 4): string {
+  if (!Number.isFinite(n)) return ''
+  return new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFrac,
+  }).format(n)
+}
+
+/**
+ * Interpreta texto digitado (pt-BR: vírgula decimal, ponto opcional).
+ * Retorna null se vazio ou inválido.
+ */
+export function parseDecimalPtBrInput(s: string): number | null {
+  const t = s.trim().replace(/\s/g, '')
+  if (t === '') return null
+  const normalized = t.replace(/\./g, '').replace(',', '.')
+  const n = parseFloat(normalized)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Filtra teclas durante digitação de valor monetário/decimal. */
+export function sanitizeDecimalPtBrTyping(raw: string): string {
+  return raw.replace(/[^\d.,]/g, '')
 }

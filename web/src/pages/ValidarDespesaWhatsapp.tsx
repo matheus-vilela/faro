@@ -10,16 +10,28 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabasePublic } from "@/lib/supabasePublic";
 import {
   type ExtractedDocumentResult,
   type ExtractedExpenseItem,
+  type ExtractedExpenseItemWithMatch,
+  WHATSAPP_PRODUCT_AUTO_LINK_MIN,
+  formatDecimalPtBrInput,
+  parseDecimalPtBrInput,
   recalcLineTotal,
+  sanitizeDecimalPtBrTyping,
   scaleItemsToTotal,
   sumItems,
 } from "@/lib/whatsappExtractedExpense";
-import { Building2, FileText, Receipt, Wallet } from "lucide-react";
+import { Building2, FileText, Package, Receipt, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -66,6 +78,10 @@ function coerceExtracted(raw: unknown): ExtractedDocumentResult {
   const itemsRaw = Array.isArray(o.items) ? o.items : [];
   return {
     validDocument: true,
+    _requiresProductConfirmation:
+      typeof o._requiresProductConfirmation === "boolean"
+        ? o._requiresProductConfirmation
+        : undefined,
     documentKind: (o.documentKind as ExtractedDocumentResult["documentKind"]) ??
       null,
     supplierName: (o.supplierName as string) ?? null,
@@ -79,13 +95,80 @@ function coerceExtracted(raw: unknown): ExtractedDocumentResult {
     notes: (o.notes as string) ?? null,
     items: itemsRaw.map((row) => {
       const r = row as Record<string, unknown>;
-      const it: ExtractedExpenseItem = {
+      const it: ExtractedExpenseItemWithMatch = {
         productName: String(r.productName ?? ""),
         quantity: Number(r.quantity ?? 0),
         unitValue: Number(r.unitValue ?? 0),
         lineTotal: Number(r.lineTotal ?? 0),
+        productId:
+          (r.productId as string | undefined) ??
+          (r.product_id as string | undefined) ??
+          null,
+        productMatch: r.productMatch as ExtractedExpenseItemWithMatch["productMatch"],
       };
-      return recalcLineTotal(it);
+      return recalcLineTotal(it) as ExtractedExpenseItemWithMatch;
+    }),
+  };
+}
+
+type LineBinding = {
+  productId: string | null;
+  createNew: boolean;
+  newName: string;
+};
+
+/** Sem vínculo automático: abre cadastro rápido com o nome da nota (usuário pode trocar para um produto da lista). */
+function initLineBindings(ex: ExtractedDocumentResult): LineBinding[] {
+  return ex.items.map((it) => {
+    const m = it.productMatch;
+    const pid = it.productId ?? m?.resolvedProductId ?? null;
+    return {
+      productId: pid,
+      createNew: !pid,
+      newName: it.productName ?? "",
+    };
+  });
+}
+
+function lineItemInputStringsFromItems(items: ExtractedExpenseItem[]): {
+  qty: string[];
+  unit: string[];
+} {
+  return {
+    qty: items.map((it) => formatDecimalPtBrInput(it.quantity, 4)),
+    unit: items.map((it) => formatDecimalPtBrInput(it.unitValue, 4)),
+  };
+}
+
+function buildPayloadForFinalize(
+  extracted: ExtractedDocumentResult,
+  bindings: LineBinding[],
+): Record<string, unknown> {
+  return {
+    validDocument: extracted.validDocument,
+    documentKind: extracted.documentKind,
+    supplierName: extracted.supplierName,
+    supplierDocument: extracted.supplierDocument,
+    invoiceNumber: extracted.invoiceNumber,
+    invoiceSeries: extracted.invoiceSeries,
+    totalAmount: extracted.totalAmount,
+    notes: extracted.notes,
+    items: extracted.items.map((it, i) => {
+      const b = bindings[i];
+      const row: Record<string, unknown> = {
+        productName: it.productName,
+        quantity: it.quantity,
+        unitValue: it.unitValue,
+        lineTotal: it.lineTotal,
+      };
+      if (b?.createNew) {
+        row.createProduct = true;
+        row.newProductName =
+          (b.newName || it.productName).trim() || "Produto";
+      } else if (b?.productId) {
+        row.productId = b.productId;
+      }
+      return row;
     }),
   };
 }
@@ -100,6 +183,11 @@ export function ValidarDespesaWhatsapp() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [lineBindings, setLineBindings] = useState<LineBinding[]>([]);
+  /** Texto livre nos inputs de qtd/valor (permite apagar antes de digitar de novo). */
+  const [qtyInputs, setQtyInputs] = useState<string[]>([]);
+  const [unitInputs, setUnitInputs] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -131,7 +219,18 @@ export function ValidarDespesaWhatsapp() {
       setError("Dados inválidos");
       return;
     }
-    setExtracted(coerceExtracted(obj.extracted_json));
+    const coerced = coerceExtracted(obj.extracted_json);
+    setExtracted(coerced);
+    const { data: plist } = await supabasePublic.rpc(
+      "list_products_for_whatsapp_draft",
+      { p_token: token },
+    );
+    const list = Array.isArray(plist) ? plist : [];
+    setProducts(list);
+    setLineBindings(initLineBindings(coerced));
+    const str = lineItemInputStringsFromItems(coerced.items);
+    setQtyInputs(str.qty);
+    setUnitInputs(str.unit);
     setExpiresAt(obj.expires_at ?? null);
     setError(null);
   }, [token]);
@@ -148,6 +247,15 @@ export function ValidarDespesaWhatsapp() {
       items[i] = recalcLineTotal(next as ExtractedExpenseItem);
       return { ...prev, items };
     });
+    if (patch.productName !== undefined) {
+      setLineBindings((prev) => {
+        const next = [...prev];
+        if (next[i]) {
+          next[i] = { ...next[i], newName: String(patch.productName ?? "") };
+        }
+        return next;
+      });
+    }
   };
 
   const totalNota = extracted?.totalAmount ?? 0;
@@ -158,7 +266,10 @@ export function ValidarDespesaWhatsapp() {
   const handleScaleToTotal = () => {
     if (!extracted || totalNota <= 0) return;
     const scaled = scaleItemsToTotal(extracted.items, totalNota);
-    setExtracted({ ...extracted, items: scaled });
+    setExtracted({ ...extracted, items: scaled as typeof extracted.items });
+    const str = lineItemInputStringsFromItems(scaled);
+    setQtyInputs(str.qty);
+    setUnitInputs(str.unit);
   };
 
   const handleSave = async () => {
@@ -171,13 +282,44 @@ export function ValidarDespesaWhatsapp() {
       setError("Informe o total da nota.");
       return;
     }
+    for (let i = 0; i < extracted.items.length; i++) {
+      const b = lineBindings[i];
+      const label = extracted.items[i]?.productName ?? `Item ${i + 1}`;
+      if (!b) {
+        setError(`Confirme o produto da linha: ${label}`);
+        return;
+      }
+      if (!b.createNew && !b.productId) {
+        setError(
+          `Vincule "${label}" a um produto do cadastro ou crie um produto novo.`,
+        );
+        return;
+      }
+      if (b.createNew && !(b.newName || label).trim()) {
+        setError(`Informe o nome do produto novo na linha: ${label}`);
+        return;
+      }
+    }
+    for (let i = 0; i < extracted.items.length; i++) {
+      const it = extracted.items[i];
+      const label = it.productName?.trim() || `Item ${i + 1}`;
+      if (!Number.isFinite(it.quantity) || it.quantity <= 0) {
+        setError(`Informe quantidade maior que zero em "${label}".`);
+        return;
+      }
+      if (!Number.isFinite(it.unitValue) || it.unitValue <= 0) {
+        setError(`Informe valor unitário maior que zero em "${label}".`);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
+    const payload = buildPayloadForFinalize(extracted, lineBindings);
     const { data: res, error: err } = await supabasePublic.rpc(
       "finalize_whatsapp_expense_draft",
       {
         p_token: token,
-        p_extracted_json: extracted,
+        p_extracted_json: payload,
       },
     );
     setSaving(false);
@@ -366,54 +508,240 @@ export function ValidarDespesaWhatsapp() {
 
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Itens</h3>
+            <p className="text-xs text-muted-foreground">
+              O vínculo automático só ocorre com similaridade ≥{" "}
+              {Math.round(WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100)}% ao nome de um
+              produto já cadastrado (ou aprendido antes). Abaixo desse critério,
+              use o cadastro rápido com o nome da nota ou escolha um produto na
+              lista — o Faro memoriza o vínculo para a próxima compra.
+            </p>
             <div className="space-y-4">
-              {extracted.items.map((it, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-border p-3 space-y-2"
-                >
-                  <Label className="text-xs">Produto</Label>
-                  <Input
-                    value={it.productName}
-                    onChange={(e) =>
-                      updateItem(i, { productName: e.target.value })
-                    }
-                  />
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <div>
-                      <Label className="text-xs">Qtd</Label>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={String(it.quantity)}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(",", ".").trim();
-                          const n = parseFloat(raw);
-                          if (Number.isFinite(n)) updateItem(i, { quantity: n });
-                        }}
+              {extracted.items.map((it, i) => {
+                const binding = lineBindings[i] ?? {
+                  productId: null,
+                  createNew: false,
+                  newName: it.productName ?? "",
+                };
+                const m = it.productMatch;
+                const selectVal = binding.createNew
+                  ? "__new__"
+                  : binding.productId
+                    ? binding.productId
+                    : "__none__";
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-border p-3 space-y-3"
+                  >
+                    <div className="flex gap-2">
+                      <Package
+                        className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                        aria-hidden
                       />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Valor unit.</Label>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={String(it.unitValue)}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(",", ".").trim();
-                          const n = parseFloat(raw);
-                          if (Number.isFinite(n)) {
-                            updateItem(i, { unitValue: n });
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Label className="text-xs">Descrição na nota</Label>
+                        <Input
+                          value={it.productName}
+                          onChange={(e) =>
+                            updateItem(i, { productName: e.target.value })
                           }
-                        }}
-                      />
+                        />
+                        {m?.needsConfirmation &&
+                          (m.suggestedScore ?? 0) <
+                            WHATSAPP_PRODUCT_AUTO_LINK_MIN && (
+                            <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
+                              Nenhum produto do cadastro atingiu{" "}
+                              {Math.round(WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100)}
+                              % de similaridade com este texto. Use{" "}
+                              <strong>Criar produto novo</strong> (nome já
+                              preenchido; edite se quiser) ou selecione um item
+                              na lista.
+                            </p>
+                          )}
+                        <div className="space-y-1">
+                          <Label className="text-xs">Produto no Faro</Label>
+                          <Select
+                            value={selectVal}
+                            onValueChange={(v) => {
+                              setLineBindings((prev) => {
+                                const next = [...prev];
+                                while (next.length <= i) {
+                                  next.push({
+                                    productId: null,
+                                    createNew: false,
+                                    newName: "",
+                                  });
+                                }
+                                if (v === "__new__") {
+                                  next[i] = {
+                                    ...next[i],
+                                    createNew: true,
+                                    productId: null,
+                                    newName:
+                                      next[i]?.newName || it.productName || "",
+                                  };
+                                } else if (v === "__none__") {
+                                  next[i] = {
+                                    ...next[i],
+                                    createNew: false,
+                                    productId: null,
+                                  };
+                                } else {
+                                  next[i] = {
+                                    ...next[i],
+                                    createNew: false,
+                                    productId: v,
+                                  };
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="w-full max-w-full">
+                              <SelectValue placeholder="Selecione o produto" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__new__">
+                                + Criar produto novo
+                              </SelectItem>
+                              {products.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="__none__">
+                                — Escolher depois (obrigatório antes de salvar)
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {binding.createNew && (
+                          <div className="space-y-1 pt-1">
+                            <Label className="text-xs">
+                              Nome do produto a cadastrar
+                            </Label>
+                            <Input
+                              value={binding.newName}
+                              onChange={(e) =>
+                                setLineBindings((prev) => {
+                                  const next = [...prev];
+                                  while (next.length <= i) {
+                                    next.push({
+                                      productId: null,
+                                      createNew: true,
+                                      newName: "",
+                                    });
+                                  }
+                                  next[i] = {
+                                    ...next[i],
+                                    newName: e.target.value,
+                                    createNew: true,
+                                  };
+                                  return next;
+                                })
+                              }
+                              placeholder="Ex.: Leite integral 1L"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Será criado um produto na sua base com estoque
+                              inicial zero; você pode editar depois no Faro.
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="col-span-2 sm:col-span-2 flex items-end text-sm text-muted-foreground">
-                      Subtotal: {formatBrl(it.lineTotal)}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div>
+                        <Label className="text-xs">Qtd</Label>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0"
+                          autoComplete="off"
+                          value={
+                            qtyInputs[i] !== undefined
+                              ? qtyInputs[i]
+                              : formatDecimalPtBrInput(it.quantity, 4)
+                          }
+                          onChange={(e) => {
+                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
+                            setQtyInputs((prev) => {
+                              const next = [...prev];
+                              next[i] = raw;
+                              return next;
+                            });
+                            const p = parseDecimalPtBrInput(raw);
+                            if (p !== null && p > 0) {
+                              updateItem(i, { quantity: p });
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
+                            const p = parseDecimalPtBrInput(raw);
+                            const cur = extracted.items[i];
+                            setQtyInputs((prev) => {
+                              const next = [...prev];
+                              next[i] =
+                                p !== null && p > 0
+                                  ? formatDecimalPtBrInput(p, 4)
+                                  : formatDecimalPtBrInput(cur.quantity, 4);
+                              return next;
+                            });
+                            if (p !== null && p > 0) {
+                              updateItem(i, { quantity: p });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Valor unit.</Label>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0,00"
+                          autoComplete="off"
+                          value={
+                            unitInputs[i] !== undefined
+                              ? unitInputs[i]
+                              : formatDecimalPtBrInput(it.unitValue, 4)
+                          }
+                          onChange={(e) => {
+                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
+                            setUnitInputs((prev) => {
+                              const next = [...prev];
+                              next[i] = raw;
+                              return next;
+                            });
+                            const p = parseDecimalPtBrInput(raw);
+                            if (p !== null && p > 0) {
+                              updateItem(i, { unitValue: p });
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const raw = sanitizeDecimalPtBrTyping(e.target.value);
+                            const p = parseDecimalPtBrInput(raw);
+                            const cur = extracted.items[i];
+                            setUnitInputs((prev) => {
+                              const next = [...prev];
+                              next[i] =
+                                p !== null && p > 0
+                                  ? formatDecimalPtBrInput(p, 4)
+                                  : formatDecimalPtBrInput(cur.unitValue, 4);
+                              return next;
+                            });
+                            if (p !== null && p > 0) {
+                              updateItem(i, { unitValue: p });
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-2 flex items-end text-sm text-muted-foreground">
+                        Subtotal: {formatBrl(it.lineTotal)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

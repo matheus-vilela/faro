@@ -8,6 +8,11 @@ import {
   sumItems,
   totalsMatch,
 } from "./openaiExpense.ts";
+import {
+  type ItemWithProductMatch,
+  resolveProductMatches,
+  upsertProductInvoiceAlias,
+} from "./productMatch.ts";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -214,7 +219,7 @@ async function insertExpense(
   supabase: Supabase,
   companyId: string,
   extracted: ExtractedDocumentResult,
-  items: ExtractedExpenseItem[],
+  items: ItemWithProductMatch[],
 ): Promise<string | null> {
   const type = mapDocumentKindToExpenseType(extracted.documentKind);
   const taxIdDigits = extractTaxIdDigits(extracted);
@@ -263,14 +268,25 @@ async function insertExpense(
   for (const it of items) {
     const q = Math.max(0.0001, Number(it.quantity));
     const uv = Math.round(Number(it.unitValue) * 10000) / 10000;
-    const { error: ei } = await supabase.from("expense_items").insert({
+    const row: Record<string, unknown> = {
       expense_id: expenseId,
       product_name: (it.productName ?? "").trim() || "Item",
       quantity: q,
       unit_value: uv,
-    });
+    };
+    if (it.productId) {
+      row.product_id = it.productId;
+    }
+    const { error: ei } = await supabase.from("expense_items").insert(row);
     if (ei) {
       console.error("[whatsappExpenseFlow] insert item:", ei.message);
+    } else if (it.productId) {
+      await upsertProductInvoiceAlias(
+        supabase,
+        companyId,
+        (it.productName ?? "").trim() || "Item",
+        it.productId,
+      );
     }
   }
   return expenseId;
@@ -316,8 +332,10 @@ export async function tryHandleExpenseDraftReply(
   }
 
   const cmd = normalizeDraftCommand(text);
-  const extracted = draft.extracted_json as ExtractedDocumentResult;
-  const items = extracted.items ?? [];
+  const extracted = draft.extracted_json as ExtractedDocumentResult & {
+    _requiresProductConfirmation?: boolean;
+  };
+  const items = (extracted.items ?? []) as ItemWithProductMatch[];
   const totalDoc = Number(extracted.totalAmount ?? 0);
   const sum = sumItems(items);
 
@@ -341,6 +359,18 @@ export async function tryHandleExpenseDraftReply(
       senderNormalized,
       "Ok, cancelamos a inclusão dessa despesa. Envie outra foto ou texto quando quiser.",
       "despesa_whatsapp_cancelada",
+      flowId,
+    );
+    return true;
+  }
+
+  if (extracted._requiresProductConfirmation) {
+    const linkRem = formatDraftShortLink(draft.access_token);
+    const linkBlock = linkRem ? `\n\n🔗 Conferir no app: ${linkRem}` : "";
+    await sendWhatsapp(
+      senderNormalized,
+      `Confirme o vínculo dos itens com seus produtos no link antes de registrar a despesa.${linkBlock}`,
+      "despesa_whatsapp_produtos_pendentes",
       flowId,
     );
     return true;
@@ -401,6 +431,10 @@ export async function tryHandleExpenseDraftReply(
 }
 
 const MIN_TEXT_LEN = 40;
+
+type DraftPayload = ExtractedDocumentResult & {
+  _requiresProductConfirmation?: boolean;
+};
 
 function extractImageUrl(payload: Record<string, unknown>): string | null {
   const img = payload.image as Record<string, unknown> | undefined;
@@ -555,33 +589,75 @@ export async function tryHandleIncomingExpenseDocument(
     return true;
   }
 
-  const sum = sumItems(items);
+  const matchResult = await resolveProductMatches(
+    supabase,
+    auth.companyId,
+    items,
+  );
+  const sum = sumItems(matchResult.items);
 
   if (totalsMatch(totalDoc, sum)) {
-    const id = await insertExpense(supabase, auth.companyId, data, items);
-    if (id) {
-      await sendWhatsapp(
-        auth.senderNormalized,
-        `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
-        "despesa_whatsapp_ok",
-        flowId,
+    if (!matchResult.requiresProductConfirmation) {
+      const id = await insertExpense(
+        supabase,
+        auth.companyId,
+        data,
+        matchResult.items,
       );
-    } else {
-      await sendWhatsapp(
-        auth.senderNormalized,
-        "Extraí os dados, mas não consegui salvar. Tente pelo app.",
-        "despesa_whatsapp_erro_insert",
-        flowId,
-      );
+      if (id) {
+        await sendWhatsapp(
+          auth.senderNormalized,
+          `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
+          "despesa_whatsapp_ok",
+          flowId,
+        );
+      } else {
+        await sendWhatsapp(
+          auth.senderNormalized,
+          "Extraí os dados, mas não consegui salvar. Tente pelo app.",
+          "despesa_whatsapp_erro_insert",
+          flowId,
+        );
+      }
+      return true;
     }
+
+    const extractedPayload: DraftPayload = {
+      ...data,
+      items: matchResult.items,
+      _requiresProductConfirmation: true,
+    };
+    const accessToken = await saveDraft(
+      supabase,
+      auth.companyId,
+      auth.senderNormalized,
+      extractedPayload,
+      sum,
+      totalDoc,
+    );
+    const shortLink = formatDraftShortLink(accessToken);
+    const linkBlock = shortLink
+      ? `\n\n🔗 Conferir produtos: ${shortLink}`
+      : "";
+    await sendWhatsapp(
+      auth.senderNormalized,
+      `Reconheci a nota (${formatMoneyBrl(totalDoc)}). Confirme o vínculo dos itens com seus produtos cadastrados no link.${linkBlock}`,
+      "despesa_whatsapp_produtos_pendentes",
+      flowId,
+    );
     return true;
   }
 
+  const extractedWithProducts: DraftPayload = {
+    ...data,
+    items: matchResult.items,
+    _requiresProductConfirmation: matchResult.requiresProductConfirmation,
+  };
   const accessToken = await saveDraft(
     supabase,
     auth.companyId,
     auth.senderNormalized,
-    data,
+    extractedWithProducts,
     sum,
     totalDoc,
   );
@@ -590,10 +666,13 @@ export async function tryHandleIncomingExpenseDocument(
   const linkBlock = shortLink
     ? `\n\n🔗 Conferir e corrigir no app: ${shortLink}`
     : "";
+  const prodHint = matchResult.requiresProductConfirmation
+    ? " Há itens para vincular a produtos."
+    : "";
 
   await sendWhatsapp(
     auth.senderNormalized,
-    `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens* (${formatMoneyBrl(sum)}).${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
+    `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens* (${formatMoneyBrl(sum)}).${prodHint}${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
     "despesa_whatsapp_divergencia",
     flowId,
   );
