@@ -1,7 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   type ExtractedDocumentResult,
-  type ExtractedExpenseItem,
   extractDocumentWithOpenAI,
   mapDocumentKindToExpenseType,
   scaleItemsToTotal,
@@ -140,7 +139,7 @@ export async function saveDraft(
   supabase: Supabase,
   companyId: string,
   senderNormalized: string,
-  extracted: ExtractedDocumentResult,
+  extracted: ExtractedDocumentResult & Record<string, unknown>,
   sumItemsVal: number,
   totalDoc: number,
 ): Promise<string | null> {
@@ -289,7 +288,163 @@ async function insertExpense(
       );
     }
   }
+  const { error: recErr } = await supabase
+    .from("recebimentos")
+    .insert({ expense_id: expenseId });
+  if (recErr) {
+    console.error("[whatsappExpenseFlow] insert recebimento:", recErr.message);
+  }
   return expenseId;
+}
+
+type DraftPayload = ExtractedDocumentResult & {
+  _requiresProductConfirmation?: boolean;
+  _pendingQuoteConfirmation?: boolean;
+  /** Preserva requiresProductConfirmation enquanto aguarda sim/não do orçamento */
+  _pendingQuoteMatchRequiresProductConfirmation?: boolean;
+};
+
+/**
+ * Após match de produtos: orçamento (pergunta), divergência total×itens, ou grava despesa.
+ */
+async function processMatchedExpenseFlow(
+  supabase: Supabase,
+  companyId: string,
+  senderNormalized: string,
+  data: ExtractedDocumentResult,
+  matchResult: {
+    items: ItemWithProductMatch[];
+    requiresProductConfirmation: boolean;
+  },
+  sendWhatsapp: (
+    phone: string,
+    message: string,
+    ctx: string,
+    flowId?: string,
+  ) => Promise<unknown>,
+  flowId: string,
+  opts?: { quoteUserConfirmed?: boolean },
+): Promise<void> {
+  const matchItems = matchResult.items;
+  let working: ExtractedDocumentResult = { ...data };
+  if (opts?.quoteUserConfirmed) {
+    working = {
+      ...working,
+      likelyNotEffectivePurchase: false,
+      likelyNotPurchaseReason: null,
+      notes:
+        [working.notes, "Confirmado no WhatsApp: lançar como despesa apesar de orçamento/proposta."]
+          .filter(Boolean)
+          .join(" — ") ||
+        "Confirmado no WhatsApp: lançar como despesa apesar de orçamento/proposta.",
+    };
+  }
+
+  if (working.likelyNotEffectivePurchase) {
+    const sum = sumItems(matchItems);
+    const totalDoc = Number(working.totalAmount ?? 0);
+    const pending: DraftPayload = {
+      ...working,
+      items: matchItems,
+      _pendingQuoteConfirmation: true,
+      _pendingQuoteMatchRequiresProductConfirmation:
+        matchResult.requiresProductConfirmation,
+    };
+    await saveDraft(
+      supabase,
+      companyId,
+      senderNormalized,
+      pending as ExtractedDocumentResult & Record<string, unknown>,
+      sum,
+      totalDoc,
+    );
+    const reason = (working.likelyNotPurchaseReason ?? "").trim() ||
+      "O documento parece ser orçamento, proposta ou não indica compra concluída.";
+    await sendWhatsapp(
+      senderNormalized,
+      `⚠️ ${reason}\n\nDeseja *lançar mesmo assim* como despesa no Faro?\n\nResponda *sim* para registrar ou *não* para cancelar.`,
+      "despesa_whatsapp_confirmar_orcamento",
+      flowId,
+    );
+    return;
+  }
+
+  const sum = sumItems(matchItems);
+  const totalDoc = Number(working.totalAmount ?? 0);
+
+  if (totalsMatch(totalDoc, sum)) {
+    if (!matchResult.requiresProductConfirmation) {
+      const id = await insertExpense(supabase, companyId, working, matchItems);
+      if (id) {
+        await sendWhatsapp(
+          senderNormalized,
+          `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
+          "despesa_whatsapp_ok",
+          flowId,
+        );
+      } else {
+        await sendWhatsapp(
+          senderNormalized,
+          "Extraí os dados, mas não consegui salvar. Tente pelo app.",
+          "despesa_whatsapp_erro_insert",
+          flowId,
+        );
+      }
+      return;
+    }
+
+    const extractedPayload: DraftPayload = {
+      ...working,
+      items: matchItems,
+      _requiresProductConfirmation: true,
+    };
+    const accessToken = await saveDraft(
+      supabase,
+      companyId,
+      senderNormalized,
+      extractedPayload as ExtractedDocumentResult & Record<string, unknown>,
+      sum,
+      totalDoc,
+    );
+    const shortLink = formatDraftShortLink(accessToken);
+    const linkBlock = shortLink ? `\n\n🔗 Conferir produtos: ${shortLink}` : "";
+    await sendWhatsapp(
+      senderNormalized,
+      `Reconheci a nota (${formatMoneyBrl(totalDoc)}).\n\nAlguns itens não foram reconhecidos e vinculados automaticamente com os seus produtos.\n\n Confirme o vínculo dos itens no link.${linkBlock}`,
+      "despesa_whatsapp_produtos_pendentes",
+      flowId,
+    );
+    return;
+  }
+
+  const extractedWithProducts: DraftPayload = {
+    ...working,
+    items: matchItems,
+    _requiresProductConfirmation: matchResult.requiresProductConfirmation,
+  };
+  const accessToken = await saveDraft(
+    supabase,
+    companyId,
+    senderNormalized,
+    extractedWithProducts as ExtractedDocumentResult & Record<string, unknown>,
+    sum,
+    totalDoc,
+  );
+
+  const shortLink = formatDraftShortLink(accessToken);
+  const linkBlock = shortLink
+    ? `\n\n🔗 Conferir e corrigir no app: ${shortLink}`
+    : "";
+  const prodHint = matchResult.requiresProductConfirmation
+    ? " Há itens para vincular a produtos."
+    : "";
+
+  await sendWhatsapp(
+    senderNormalized,
+    `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens* (${formatMoneyBrl(sum)}).${prodHint}${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
+    "despesa_whatsapp_divergencia",
+    flowId,
+  );
 }
 
 /** Usuário voltou aos comandos de recebimento — descarta rascunho e deixa o fluxo de lista/menu. */
@@ -332,9 +487,73 @@ export async function tryHandleExpenseDraftReply(
   }
 
   const cmd = normalizeDraftCommand(text);
-  const extracted = draft.extracted_json as ExtractedDocumentResult & {
-    _requiresProductConfirmation?: boolean;
-  };
+  const extracted = draft.extracted_json as DraftPayload;
+
+  if (extracted._pendingQuoteConfirmation) {
+    const cancelQ =
+      cmd === "cancelar" ||
+      cmd === "nao" ||
+      cmd === "não" ||
+      cmd === "3";
+    const yes =
+      cmd === "sim" ||
+      cmd === "si" ||
+      cmd === "s" ||
+      cmd === "confirmo" ||
+      cmd === "quero" ||
+      cmd === "ok";
+    if (cancelQ) {
+      await deleteDraft(supabase, draft.id);
+      await sendWhatsapp(
+        senderNormalized,
+        "Ok, não registrei a despesa. Envie outra nota quando quiser.",
+        "despesa_whatsapp_cancelada_orcamento",
+        flowId,
+      );
+      return true;
+    }
+    if (yes) {
+      await deleteDraft(supabase, draft.id);
+      const items = (extracted.items ?? []) as ItemWithProductMatch[];
+      const baseData: ExtractedDocumentResult = {
+        validDocument: extracted.validDocument,
+        invalidReason: extracted.invalidReason,
+        documentKind: extracted.documentKind,
+        supplierName: extracted.supplierName,
+        supplierDocument: extracted.supplierDocument,
+        invoiceNumber: extracted.invoiceNumber,
+        invoiceSeries: extracted.invoiceSeries,
+        totalAmount: extracted.totalAmount,
+        items: extracted.items,
+        notes: extracted.notes,
+        likelyNotEffectivePurchase: extracted.likelyNotEffectivePurchase,
+        likelyNotPurchaseReason: extracted.likelyNotPurchaseReason,
+      };
+      await processMatchedExpenseFlow(
+        supabase,
+        companyId,
+        senderNormalized,
+        baseData,
+        {
+          items,
+          requiresProductConfirmation:
+            extracted._pendingQuoteMatchRequiresProductConfirmation ?? false,
+        },
+        sendWhatsapp,
+        flowId,
+        { quoteUserConfirmed: true },
+      );
+      return true;
+    }
+    await sendWhatsapp(
+      senderNormalized,
+      "Responda *sim* para lançar como despesa ou *não* (ou *cancelar*) para desistir.",
+      "despesa_whatsapp_lembrete_orcamento",
+      flowId,
+    );
+    return true;
+  }
+
   const items = (extracted.items ?? []) as ItemWithProductMatch[];
   const totalDoc = Number(extracted.totalAmount ?? 0);
   const sum = sumItems(items);
@@ -369,7 +588,7 @@ export async function tryHandleExpenseDraftReply(
     const linkBlock = linkRem ? `\n\n🔗 Conferir no app: ${linkRem}` : "";
     await sendWhatsapp(
       senderNormalized,
-      `Confirme o vínculo dos itens com seus produtos no link antes de registrar a despesa.${linkBlock}`,
+      `Alguns itens não foram reconhecidos automaticamente na lista de produtos.\n\nConfirme o vínculo dos itens com seus produtos no link antes de registrar a despesa.${linkBlock}`,
       "despesa_whatsapp_produtos_pendentes",
       flowId,
     );
@@ -432,10 +651,6 @@ export async function tryHandleExpenseDraftReply(
 
 const MIN_TEXT_LEN = 40;
 
-type DraftPayload = ExtractedDocumentResult & {
-  _requiresProductConfirmation?: boolean;
-};
-
 function extractImageUrl(payload: Record<string, unknown>): string | null {
   const img = payload.image as Record<string, unknown> | undefined;
   if (img && typeof img.imageUrl === "string" && img.imageUrl.trim()) {
@@ -447,8 +662,30 @@ function extractImageUrl(payload: Record<string, unknown>): string | null {
   return null;
 }
 
+/** PDF enviado como documento (Z-API: document.documentUrl, mime application/pdf). */
+function extractPdfDocumentUrl(payload: Record<string, unknown>): string | null {
+  const doc = payload.document as Record<string, unknown> | undefined;
+  if (!doc) return null;
+  const u =
+    (typeof doc.documentUrl === "string" && doc.documentUrl.trim()) ||
+    (typeof doc.url === "string" && doc.url.trim()) ||
+    "";
+  if (!u) return null;
+  const mime = String(doc.mimeType ?? "").toLowerCase();
+  const name = String(doc.fileName ?? doc.title ?? "").toLowerCase();
+  const looksPdf =
+    mime.includes("pdf") ||
+    name.endsWith(".pdf") ||
+    /\.pdf(\?|#|$)/i.test(u);
+  if (!looksPdf) return null;
+  return u;
+}
+
 export function hasImageInPayload(payload: Record<string, unknown>): boolean {
-  return extractImageUrl(payload) !== null;
+  return (
+    extractImageUrl(payload) !== null ||
+    extractPdfDocumentUrl(payload) !== null
+  );
 }
 
 /**
@@ -477,7 +714,7 @@ async function tryClaimInboundMessageId(
   return true;
 }
 
-/** Processa imagem ou texto longo (não comando). */
+/** Processa imagem, PDF ou texto longo (não comando). */
 export async function tryHandleIncomingExpenseDocument(
   supabase: Supabase,
   payload: Record<string, unknown>,
@@ -497,9 +734,10 @@ export async function tryHandleIncomingExpenseDocument(
   }
 
   const imageUrl = extractImageUrl(payload);
+  const pdfUrl = extractPdfDocumentUrl(payload);
   const text = extractTextMessage(payload as never);
 
-  if (!imageUrl && (!text || text.length < MIN_TEXT_LEN)) {
+  if (!imageUrl && !pdfUrl && (!text || text.length < MIN_TEXT_LEN)) {
     return false;
   }
 
@@ -507,6 +745,7 @@ export async function tryHandleIncomingExpenseDocument(
   const tLow = (text ?? "").trim().toLowerCase();
   if (
     !imageUrl &&
+    !pdfUrl &&
     (tLow === "lista" ||
       tLow === "comandos" ||
       tLow === "contas a pagar" ||
@@ -535,6 +774,13 @@ export async function tryHandleIncomingExpenseDocument(
       "despesa_whatsapp_processando",
       flowId,
     );
+  } else if (pdfUrl) {
+    await sendWhatsapp(
+      auth.senderNormalized,
+      "Recebi seu PDF. Estou lendo o documento — aguarde um instante.",
+      "despesa_whatsapp_processando_pdf",
+      flowId,
+    );
   }
 
   let result: Awaited<ReturnType<typeof extractDocumentWithOpenAI>>;
@@ -543,6 +789,12 @@ export async function tryHandleIncomingExpenseDocument(
       apiKey,
       mode: "image",
       imageUrl,
+    });
+  } else if (pdfUrl) {
+    result = await extractDocumentWithOpenAI({
+      apiKey,
+      mode: "pdf",
+      documentUrl: pdfUrl,
     });
   } else {
     result = await extractDocumentWithOpenAI({
@@ -570,7 +822,7 @@ export async function tryHandleIncomingExpenseDocument(
       "Não identifiquei um documento de compra legível.";
     await sendWhatsapp(
       auth.senderNormalized,
-      `${reason}\n\nSe for foto: envie com mais luz, enquadre o papel inteiro e evite reflexo. Se for texto, descreva fornecedor, itens e valores com clareza.`,
+      `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, confira se é a nota completa. Se for texto, descreva fornecedor, itens e valores com clareza.`,
       "despesa_whatsapp_invalida",
       flowId,
     );
@@ -582,7 +834,7 @@ export async function tryHandleIncomingExpenseDocument(
   if (items.length === 0 || totalDoc <= 0) {
     await sendWhatsapp(
       auth.senderNormalized,
-      "Identifiquei o documento, mas faltam itens ou total. Tente outra foto ou complete o texto.",
+      "Identifiquei o documento, mas faltam itens ou total. Envie outra foto/PDF ou complete o texto.",
       "despesa_whatsapp_incompleto",
       flowId,
     );
@@ -594,86 +846,13 @@ export async function tryHandleIncomingExpenseDocument(
     auth.companyId,
     items,
   );
-  const sum = sumItems(matchResult.items);
-
-  if (totalsMatch(totalDoc, sum)) {
-    if (!matchResult.requiresProductConfirmation) {
-      const id = await insertExpense(
-        supabase,
-        auth.companyId,
-        data,
-        matchResult.items,
-      );
-      if (id) {
-        await sendWhatsapp(
-          auth.senderNormalized,
-          `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
-          "despesa_whatsapp_ok",
-          flowId,
-        );
-      } else {
-        await sendWhatsapp(
-          auth.senderNormalized,
-          "Extraí os dados, mas não consegui salvar. Tente pelo app.",
-          "despesa_whatsapp_erro_insert",
-          flowId,
-        );
-      }
-      return true;
-    }
-
-    const extractedPayload: DraftPayload = {
-      ...data,
-      items: matchResult.items,
-      _requiresProductConfirmation: true,
-    };
-    const accessToken = await saveDraft(
-      supabase,
-      auth.companyId,
-      auth.senderNormalized,
-      extractedPayload,
-      sum,
-      totalDoc,
-    );
-    const shortLink = formatDraftShortLink(accessToken);
-    const linkBlock = shortLink
-      ? `\n\n🔗 Conferir produtos: ${shortLink}`
-      : "";
-    await sendWhatsapp(
-      auth.senderNormalized,
-      `Reconheci a nota (${formatMoneyBrl(totalDoc)}). Confirme o vínculo dos itens com seus produtos cadastrados no link.${linkBlock}`,
-      "despesa_whatsapp_produtos_pendentes",
-      flowId,
-    );
-    return true;
-  }
-
-  const extractedWithProducts: DraftPayload = {
-    ...data,
-    items: matchResult.items,
-    _requiresProductConfirmation: matchResult.requiresProductConfirmation,
-  };
-  const accessToken = await saveDraft(
+  await processMatchedExpenseFlow(
     supabase,
     auth.companyId,
     auth.senderNormalized,
-    extractedWithProducts,
-    sum,
-    totalDoc,
-  );
-
-  const shortLink = formatDraftShortLink(accessToken);
-  const linkBlock = shortLink
-    ? `\n\n🔗 Conferir e corrigir no app: ${shortLink}`
-    : "";
-  const prodHint = matchResult.requiresProductConfirmation
-    ? " Há itens para vincular a produtos."
-    : "";
-
-  await sendWhatsapp(
-    auth.senderNormalized,
-    `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens* (${formatMoneyBrl(sum)}).${prodHint}${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
-    "despesa_whatsapp_divergencia",
+    data,
+    matchResult,
+    sendWhatsapp,
     flowId,
   );
   return true;

@@ -43,6 +43,9 @@ export type ExtractedDocumentResult = {
   totalAmount: number | null
   items: ExtractedExpenseItemWithMatch[]
   notes: string | null
+  /** Preenchido pela IA na edge; fluxo web pode ignorar. */
+  likelyNotEffectivePurchase?: boolean
+  likelyNotPurchaseReason?: string | null
 }
 
 export function sumItems(items: ExtractedExpenseItem[]): number {

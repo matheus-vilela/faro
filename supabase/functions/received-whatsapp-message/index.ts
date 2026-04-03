@@ -23,7 +23,8 @@ import {
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
  *   — recebimentos (/c/, /s/) e rascunho de despesa WhatsApp (/w/:token)
- * Opcional (despesa por foto/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
+ * Opcional (despesa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
+ *   PDF: OPENAI_EXPENSE_PDF_MODEL (default gpt-4o) + Responses API; download de mídia Z-API usa o mesmo ZAPI_CLIENT_TOKEN.
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
  * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (lista de ajuda).
@@ -65,6 +66,15 @@ type ZApiReceivedCallbackPayload = {
     imageUrl?: string;
     url?: string;
     mimeType?: string;
+    thumbnailUrl?: string;
+  };
+  /** Documento (ex.: PDF da NFC-e) — Z-API: documentUrl, fileName, mimeType */
+  document?: {
+    documentUrl?: string;
+    url?: string;
+    mimeType?: string;
+    fileName?: string;
+    title?: string;
     thumbnailUrl?: string;
   };
   [key: string]: unknown;
