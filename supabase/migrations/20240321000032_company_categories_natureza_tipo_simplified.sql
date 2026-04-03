@@ -43,9 +43,13 @@ ALTER TABLE public.company_categories
   ALTER COLUMN tipo SET NOT NULL;
 
 ALTER TABLE public.company_categories
+  DROP CONSTRAINT IF EXISTS company_categories_natureza_check;
+ALTER TABLE public.company_categories
   ADD CONSTRAINT company_categories_natureza_check
   CHECK (natureza IN ('RECEITA', 'DESPESA'));
 
+ALTER TABLE public.company_categories
+  DROP CONSTRAINT IF EXISTS company_categories_tipo_check;
 ALTER TABLE public.company_categories
   ADD CONSTRAINT company_categories_tipo_check
   CHECK (
@@ -60,6 +64,8 @@ ALTER TABLE public.company_categories
     )
   );
 
+ALTER TABLE public.company_categories
+  DROP CONSTRAINT IF EXISTS company_categories_natureza_tipo_combo_check;
 ALTER TABLE public.company_categories
   ADD CONSTRAINT company_categories_natureza_tipo_combo_check
   CHECK (

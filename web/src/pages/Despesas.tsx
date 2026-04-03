@@ -145,6 +145,7 @@ export function Despesas() {
   const [type, setType] = useState<ExpenseType>("nota_fiscal");
   const [supplierId, setSupplierId] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceSeries, setInvoiceSeries] = useState("");
   const [supplierDocument, setSupplierDocument] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [notes, setNotes] = useState("");
@@ -173,6 +174,7 @@ export function Despesas() {
   const [editType, setEditType] = useState<ExpenseType>("nota_fiscal");
   const [editSupplierId, setEditSupplierId] = useState("");
   const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
+  const [editInvoiceSeries, setEditInvoiceSeries] = useState("");
   const [editSupplierDocument, setEditSupplierDocument] = useState("");
   const [editSupplierName, setEditSupplierName] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -324,6 +326,8 @@ export function Despesas() {
         type,
         supplier_id: supplierId || null,
         invoice_number: type === "nota_fiscal" ? invoiceNumber : null,
+        invoice_series:
+          type === "nota_fiscal" ? invoiceSeries.trim() || null : null,
         supplier_document:
           ((selectedSupplier?.document ?? supplierDocument) || "").replace(
             /\D/g,
@@ -355,6 +359,7 @@ export function Despesas() {
     setType("nota_fiscal");
     setSupplierId("");
     setInvoiceNumber("");
+    setInvoiceSeries("");
     setSupplierDocument("");
     setSupplierName("");
     setNotes("");
@@ -501,6 +506,7 @@ export function Despesas() {
     setEditType(detailExpense.type as ExpenseType);
     setEditSupplierId(detailExpense.supplier_id ?? "");
     setEditInvoiceNumber(detailExpense.invoice_number ?? "");
+    setEditInvoiceSeries(detailExpense.invoice_series ?? "");
     setEditSupplierDocument(detailExpense.supplier_document ?? "");
     setEditSupplierName(detailExpense.supplier_name ?? "");
     setEditNotes(detailExpense.notes ?? "");
@@ -566,6 +572,8 @@ export function Despesas() {
         type: editType,
         supplier_id: editSupplierId || null,
         invoice_number: editType === "nota_fiscal" ? editInvoiceNumber : null,
+        invoice_series:
+          editType === "nota_fiscal" ? editInvoiceSeries.trim() || null : null,
         supplier_document:
           ((selectedSupplier?.document ?? editSupplierDocument) || "")
             .replace(/\D/g, "")
@@ -767,13 +775,23 @@ export function Despesas() {
             </div>
 
             {type === "nota_fiscal" && (
-              <div>
-                <Label>Nº da nota</Label>
-                <Input
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="Ex: 12345"
-                />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Nº da nota / NFC-e</Label>
+                  <Input
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="Ex: 12345"
+                  />
+                </div>
+                <div>
+                  <Label>Série</Label>
+                  <Input
+                    value={invoiceSeries}
+                    onChange={(e) => setInvoiceSeries(e.target.value)}
+                    placeholder="Ex: 1"
+                  />
+                </div>
               </div>
             )}
 
@@ -1373,13 +1391,25 @@ export function Despesas() {
                     )}
                   </div>
                   {editType === "nota_fiscal" && (
-                    <div>
-                      <Label>Nº da nota</Label>
-                      <Input
-                        value={editInvoiceNumber}
-                        onChange={(e) => setEditInvoiceNumber(e.target.value)}
-                        placeholder="Ex: 12345"
-                      />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label>Nº da nota / NFC-e</Label>
+                        <Input
+                          value={editInvoiceNumber}
+                          onChange={(e) => setEditInvoiceNumber(e.target.value)}
+                          placeholder="Ex: 12345"
+                        />
+                      </div>
+                      <div>
+                        <Label>Série</Label>
+                        <Input
+                          value={editInvoiceSeries}
+                          onChange={(e) =>
+                            setEditInvoiceSeries(e.target.value)
+                          }
+                          placeholder="Ex: 1"
+                        />
+                      </div>
                     </div>
                   )}
                   {isGestor && (
@@ -1581,6 +1611,13 @@ export function Despesas() {
                       <div>
                         <span className="text-muted-foreground">Nº nota:</span>{" "}
                         {detailExpense.invoice_number}
+                        {detailExpense.invoice_series ? (
+                          <>
+                            {" "}
+                            <span className="text-muted-foreground">· série:</span>{" "}
+                            {detailExpense.invoice_series}
+                          </>
+                        ) : null}
                       </div>
                     )}
                     <div>

@@ -22,6 +22,8 @@ export interface Expense {
   type: ExpenseType
   supplier_id: string | null
   invoice_number: string | null
+  /** Série fiscal (NF-e / NFC-e) */
+  invoice_series?: string | null
   supplier_document: string | null
   supplier_name: string | null
   is_recurring?: boolean

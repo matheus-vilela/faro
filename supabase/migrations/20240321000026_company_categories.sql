@@ -64,6 +64,7 @@ CREATE TRIGGER tr_company_categories_updated_at
 
 ALTER TABLE public.company_categories ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their company categories" ON public.company_categories;
 CREATE POLICY "Users can manage their company categories"
   ON public.company_categories FOR ALL
   USING (

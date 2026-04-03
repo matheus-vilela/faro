@@ -2,6 +2,10 @@
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  tryHandleExpenseDraftReply,
+  tryHandleIncomingExpenseDocument,
+} from "./whatsappExpenseFlow.ts";
 
 /**
  * Webhook Z-API "Ao receber" — fluxo completo neste arquivo.
@@ -18,6 +22,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  * Opcional: ZAPI_WEBHOOK_SECRET
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
+ *   — recebimentos (/c/, /s/) e rascunho de despesa WhatsApp (/w/:token)
+ * Opcional (despesa por foto/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
+ * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
  * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (lista de ajuda).
  * Proprietário também vê *contas a pagar* na ajuda e pode usá-lo (7 dias).
@@ -53,6 +60,13 @@ type ZApiReceivedCallbackPayload = {
   };
   /** Alguns callbacks trazem texto no raiz */
   message?: string;
+  /** Foto (nota, cupom, etc.) — Z-API expõe URL temporária */
+  image?: {
+    imageUrl?: string;
+    url?: string;
+    mimeType?: string;
+    thumbnailUrl?: string;
+  };
   [key: string]: unknown;
 };
 
@@ -651,6 +665,10 @@ function buildComandosWhatsappMessage(isOwner: boolean): string {
       "*contas a pagar* — contas com vencimento nos próximos 7 dias.",
     );
   }
+  lines.push(
+    "",
+    "Você também pode *enviar uma foto* de nota, cupom ou recibo, ou colar um texto longo com os dados da compra, para registrar uma despesa (quando o serviço estiver ativo no servidor).",
+  );
   return lines.join("\n");
 }
 
@@ -1349,9 +1367,45 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   let recebimentoFlow = false;
+  let expenseDraftHandled = false;
   if (supabaseUrl && serviceKey) {
     const supabase = createClient(supabaseUrl, serviceKey);
+    const textoDraft = extractTextMessage(payload);
+    if (textoDraft) {
+      expenseDraftHandled = await tryHandleExpenseDraftReply(
+        supabase,
+        textoDraft,
+        auth.companyId,
+        auth.senderNormalized,
+        sendWhatsappMessage,
+        flowId,
+      );
+    }
+    if (expenseDraftHandled) {
+      flowLog("webhook_processamento", {
+        flowId,
+        branch: "despesa_whatsapp_rascunho_respondido",
+        companyId: auth.companyId,
+      });
+      return jsonResponse({
+        success: true,
+        processed: true,
+      });
+    }
     recebimentoFlow = await handleRecebimentoTextFlow(payload, auth, supabase);
+    if (!recebimentoFlow && payload.isGroup !== true) {
+      await tryHandleIncomingExpenseDocument(
+        supabase,
+        payload as Record<string, unknown>,
+        {
+          companyId: auth.companyId,
+          senderNormalized: auth.senderNormalized,
+        },
+        extractTextMessage,
+        sendWhatsappMessage,
+        flowId,
+      );
+    }
   } else {
     flowLog("webhook_processamento", {
       flowId,
@@ -1364,6 +1418,7 @@ Deno.serve(async (req) => {
     flowId,
     companyId: auth.companyId,
     recebimentoFlow,
+    expenseDraftHandled,
     status: 200,
   });
 
@@ -1373,6 +1428,7 @@ Deno.serve(async (req) => {
       companyId: auth.companyId,
       role: auth.role,
       recebimentoFlow,
+      expenseDraftHandled,
     },
   );
 

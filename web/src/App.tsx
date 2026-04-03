@@ -1,41 +1,44 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider, useAuth } from '@/contexts/AuthContext'
-import { CompanyProvider } from '@/contexts/CompanyContext'
-import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
-import { Toaster } from 'sonner'
-import { TooltipProvider } from '@/components/ui/tooltip'
-import { Landing } from '@/pages/Landing'
-import { Login } from '@/pages/Login'
-import { Register } from '@/pages/Register'
-import { Companies } from '@/pages/Companies'
-import { AppLayout } from '@/components/AppLayout'
-import { Dashboard } from '@/pages/Dashboard'
-import { Despesas } from '@/pages/Despesas'
-import { Recebimento } from '@/pages/Recebimento'
-import { Alertas } from '@/pages/Alertas'
-import { FluxoDeCaixa } from '@/pages/FluxoDeCaixa'
-import { Fornecedores } from '@/pages/Fornecedores'
-import { Produtos } from '@/pages/Produtos'
-import { AtualizarPagamento } from '@/pages/AtualizarPagamento'
-import { ConfirmarRecebimento } from '@/pages/ConfirmarRecebimento'
-import { RedirectRecebimentoSlug } from '@/pages/RedirectRecebimentoSlug'
-import { ConfiguracoesLayout } from '@/components/ConfiguracoesLayout'
-import { ConfiguracoesUsuariosMembros } from '@/pages/ConfiguracoesUsuariosMembros'
-import { ConfiguracoesCategorias } from '@/pages/ConfiguracoesCategorias'
-import { Dre } from '@/pages/Dre'
+import { AppLayout } from "@/components/AppLayout";
+import { ConfiguracoesLayout } from "@/components/ConfiguracoesLayout";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { CompanyProvider } from "@/contexts/CompanyContext";
+import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { Alertas } from "@/pages/Alertas";
+import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
+import { Companies } from "@/pages/Companies";
+import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
+import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
+import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
+import { Dashboard } from "@/pages/Dashboard";
+import { Despesas } from "@/pages/Despesas";
+import { Dre } from "@/pages/Dre";
+import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
+import { Fornecedores } from "@/pages/Fornecedores";
+import { Landing } from "@/pages/Landing";
+import { Login } from "@/pages/Login";
+import { Produtos } from "@/pages/Produtos";
+import { Recebimento } from "@/pages/Recebimento";
+import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
+import { Register } from "@/pages/Register";
+import { ValidarDespesaWhatsapp } from "@/pages/ValidarDespesaWhatsapp";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading } = useAuth();
   if (loading) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-sm font-medium text-muted-foreground">Carregando...</p>
+        <p className="text-sm font-medium text-muted-foreground">
+          Carregando...
+        </p>
       </div>
-    )
+    );
   }
-  if (!user) return <Navigate to="/login" replace />
-  return <>{children}</>
+  if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
 }
 
 function AuthenticatedLayout() {
@@ -58,14 +61,17 @@ function AuthenticatedLayout() {
           <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />
-            <Route path="usuarios-membros" element={<ConfiguracoesUsuariosMembros />} />
+            <Route
+              path="usuarios-membros"
+              element={<ConfiguracoesUsuariosMembros />}
+            />
             <Route path="categorias" element={<ConfiguracoesCategorias />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
       </Routes>
     </CompanyProvider>
-  )
+  );
 }
 
 function AppRoutes() {
@@ -74,12 +80,20 @@ function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      <Route path="/atualizar-pagamento/:token" element={<AtualizarPagamento />} />
-      <Route path="/confirmar-recebimento/:token" element={<ConfirmarRecebimento />} />
+      <Route
+        path="/atualizar-pagamento/:token"
+        element={<AtualizarPagamento />}
+      />
+      <Route
+        path="/confirmar-recebimento/:token"
+        element={<ConfirmarRecebimento />}
+      />
       {/* Link curto (mesmo destino que /confirmar-recebimento/:token) */}
       <Route path="/c/:token" element={<ConfirmarRecebimento />} />
       {/* Slug → redirect para /c/:token */}
       <Route path="/s/:slug" element={<RedirectRecebimentoSlug />} />
+      {/* Rascunho de despesa (WhatsApp): público, token no URL; não usar ProtectedRoute */}
+      <Route path="/w/:token" element={<ValidarDespesaWhatsapp />} />
       <Route
         path="/*"
         element={
@@ -90,27 +104,28 @@ function AppRoutes() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
-  )
+  );
 }
 
 function ThemeAwareToaster() {
-  const { resolvedTheme } = useTheme()
+  const { resolvedTheme } = useTheme();
   return (
     <Toaster
       theme={resolvedTheme}
-      position="bottom-right"
+      position="top-right"
       closeButton
       richColors
       offset="1.5rem"
       toastOptions={{
         style: {
-          borderRadius: '0.75rem',
-          boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
-          border: '1px solid hsl(var(--border))',
+          borderRadius: "0.75rem",
+          boxShadow:
+            "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+          border: "1px solid hsl(var(--border))",
         },
       }}
     />
-  )
+  );
 }
 
 export default function App() {
@@ -125,5 +140,5 @@ export default function App() {
         </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>
-  )
+  );
 }

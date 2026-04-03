@@ -1,9 +1,7 @@
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
-import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -67,11 +65,6 @@ const PIX_TYPES = [
 
 export function Fornecedores() {
   const { currentCompany } = useCompany();
-  const now = new Date();
-  const [period, setPeriod] = useState<MonthYear>({
-    month: now.getMonth() + 1,
-    year: now.getFullYear(),
-  });
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [suppliersCount, setSuppliersCount] = useState(0);
   const [suppliersPage, setSuppliersPage] = useState(1);
@@ -112,7 +105,6 @@ export function Fornecedores() {
   const fetchSuppliers = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
-    const { start, end } = getMonthRange(period.month, period.year);
     let query = supabase
       .from("suppliers")
       .select(
@@ -123,8 +115,6 @@ export function Fornecedores() {
         { count: "exact" },
       )
       .eq("company_id", currentCompany.id)
-      .gte("created_at", start)
-      .lte("created_at", end)
       .order("name");
     if (debouncedSearch.trim()) {
       const term = `%${debouncedSearch.trim()}%`;
@@ -145,17 +135,11 @@ export function Fornecedores() {
     setSuppliers(list as Supplier[]);
     setSuppliersCount(count ?? 0);
     setLoading(false);
-  }, [
-    currentCompany,
-    period.month,
-    period.year,
-    debouncedSearch,
-    suppliersPage,
-  ]);
+  }, [currentCompany, debouncedSearch, suppliersPage]);
 
   useEffect(() => {
     queueMicrotask(() => setSuppliersPage(1));
-  }, [debouncedSearch, period.month, period.year]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchSuppliers());
@@ -322,12 +306,6 @@ export function Fornecedores() {
             Novo fornecedor
           </Button>
         }
-      />
-
-      <ReferencePeriodCard
-        value={period}
-        onChange={setPeriod}
-        description="Fornecedores cadastrados no mês selecionado"
       />
 
       {currentCompany?.id && (
