@@ -104,7 +104,8 @@ export function Recebimento() {
     const { data: expensesData } = await supabase
       .from("expenses")
       .select("id")
-      .eq("company_id", currentCompany.id);
+      .eq("company_id", currentCompany.id)
+      .or("expense_source.neq.whatsapp,status.eq.approved");
     const expenseIds = (expensesData ?? []).map((e) => e.id);
     if (expenseIds.length === 0) {
       setRecebimentos([]);
@@ -141,6 +142,7 @@ export function Recebimento() {
         .from("expenses")
         .select("id")
         .eq("company_id", currentCompany.id)
+        .in("id", expenseIds)
         .or(
           `supplier_name.ilike.${term},display_name.ilike.${term},invoice_number.ilike.${term}`,
         );

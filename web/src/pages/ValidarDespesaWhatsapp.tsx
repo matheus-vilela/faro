@@ -527,9 +527,9 @@ export function ValidarDespesaWhatsapp() {
               Despesa registrada
             </CardTitle>
             <CardDescription>
-              Os itens foram salvos. Este link de correção foi invalidado e não
-              pode ser aberto de novo. Acesse o Faro (com login) para revisar e
-              aprovar a despesa.
+              Os itens foram salvos. O <strong>proprietário</strong> da empresa
+              precisa aprovar esta despesa no Faro antes dela valer para
+              recebimento e alertas. Este link de correção foi invalidado.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

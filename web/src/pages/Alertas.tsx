@@ -81,7 +81,9 @@ export function Alertas() {
 
       const { data: expensesData } = await supabase
         .from("expenses")
-        .select("id, supplier_name, display_name, invoice_number, created_at")
+        .select(
+          "id, supplier_name, display_name, invoice_number, created_at, expense_source, status",
+        )
         .eq("company_id", currentCompany.id)
         .order("created_at", { ascending: false });
       const { data: boletosData } = await supabase
@@ -95,9 +97,20 @@ export function Alertas() {
           .map((b) => b.expense_id)
           .filter(Boolean) as string[],
       );
-      const withoutBoleto = (expensesData ?? []).filter(
-        (e) => !linkedExpenseIds.has(e.id),
-      ) as ExpenseWithoutBoleto[];
+      const withoutBoleto = (expensesData ?? []).filter((e) => {
+        const row = e as {
+          id: string;
+          expense_source?: string | null;
+          status?: string | null;
+        };
+        if (
+          row.expense_source === "whatsapp" &&
+          row.status === "pending"
+        ) {
+          return false;
+        }
+        return !linkedExpenseIds.has(row.id);
+      }) as ExpenseWithoutBoleto[];
       setExpensesWithoutBoleto(withoutBoleto);
 
       const { data: notReceivedData } = await supabase

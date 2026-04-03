@@ -312,6 +312,7 @@ async function insertExpense(
         (extracted.supplierName ?? "").trim() || "Fornecedor (WhatsApp)",
       supplier_document: supplierDocumentRow,
       status: "pending",
+      expense_source: "whatsapp",
       notes:
         [extracted.notes, "Importado via WhatsApp"]
           .filter(Boolean)
@@ -350,12 +351,7 @@ async function insertExpense(
       );
     }
   }
-  const { error: recErr } = await supabase
-    .from("recebimentos")
-    .insert({ expense_id: expenseId });
-  if (recErr) {
-    console.error("[whatsappExpenseFlow] insert recebimento:", recErr.message);
-  }
+  // Recebimento: criado no app após approve_whatsapp_expense_as_owner.
   return expenseId;
 }
 

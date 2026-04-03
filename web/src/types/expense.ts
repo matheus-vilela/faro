@@ -15,11 +15,16 @@ export interface ExpenseItem {
   products?: { id: string; name: string; current_quantity: number; min_quantity: number } | null
 }
 
+/** Origem do lançamento; `whatsapp` aguarda aprovação do proprietário antes do recebimento. */
+export type ExpenseSource = 'manual' | 'whatsapp'
+
 export interface Expense {
   id: string
   company_id: string
   created_by: string | null
   type: ExpenseType
+  /** manual (app) ou whatsapp — ver fluxo de aprovação */
+  expense_source?: ExpenseSource
   supplier_id: string | null
   invoice_number: string | null
   /** Série fiscal (NF-e / NFC-e) */

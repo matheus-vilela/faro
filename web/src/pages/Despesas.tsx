@@ -1,5 +1,7 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
+import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -39,9 +41,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
@@ -56,7 +58,7 @@ import {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { Copy, FileText, Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import { Copy, FileText, Plus, Trash2, Wallet } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -85,37 +87,6 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 
 const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
-function BoletoLinkedBlock({
-  boleto,
-  categoriesById,
-  formatCurrency,
-  formatDate,
-  onVerBoleto,
-}: {
-  boleto: Boleto;
-  categoriesById: Map<string, CompanyCategory>;
-  formatCurrency: (v: number) => string;
-  formatDate: (s: string) => string;
-  onVerBoleto: () => void;
-}) {
-  return (
-    <div className="rounded-lg border p-4 space-y-2">
-      <p className="font-medium">Boleto vinculado</p>
-      <p className="text-sm text-muted-foreground">
-        <span className="text-foreground font-medium">
-          {formatBoletoCategoryLabel(boleto, categoriesById)}
-        </span>
-        {" · "}
-        {boleto.description} • {formatCurrency(boleto.amount)} • Venc.{" "}
-        {formatDate(boleto.due_date)}
-      </p>
-      <Button variant="outline" size="sm" onClick={onVerBoleto}>
-        Ver boleto
-      </Button>
-    </div>
-  );
-}
-
 export function Despesas() {
   const { currentCompany, currentRole } = useCompany();
   const navigate = useNavigate();
@@ -133,6 +104,8 @@ export function Despesas() {
   const [expensesPage, setExpensesPage] = useState(1);
   const [expensesSearch, setExpensesSearch] = useState("");
   const debouncedSearch = useDebounce(expensesSearch, 300);
+  /** Somente despesas WhatsApp com status pendente (aguardando aprovação do proprietário). */
+  const [onlyPendingApproval, setOnlyPendingApproval] = useState(false);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
@@ -169,33 +142,7 @@ export function Despesas() {
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [selectedBoletoId, setSelectedBoletoId] = useState<string>("");
   const [linking, setLinking] = useState(false);
-  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
-  const [detailEditMode, setDetailEditMode] = useState(false);
-  const [editType, setEditType] = useState<ExpenseType>("nota_fiscal");
-  const [editSupplierId, setEditSupplierId] = useState("");
-  const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
-  const [editInvoiceSeries, setEditInvoiceSeries] = useState("");
-  const [editSupplierDocument, setEditSupplierDocument] = useState("");
-  const [editSupplierName, setEditSupplierName] = useState("");
-  const [editNotes, setEditNotes] = useState("");
-  const [editStatus, setEditStatus] = useState<
-    "pending" | "approved" | "rejected"
-  >("pending");
-  const [editItems, setEditItems] = useState<ExpenseItem[]>([
-    { product_name: "", quantity: 1, unit_value: 0 },
-  ]);
-  const [editSaving, setEditSaving] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [linkItemSheetOpen, setLinkItemSheetOpen] = useState(false);
-  const [linkItem, setLinkItem] = useState<{
-    id: string;
-    product_name: string;
-    quantity: number;
-    unit_value: number;
-  } | null>(null);
-  const [linkProductId, setLinkProductId] = useState<string>("");
-  const [linkSaving, setLinkSaving] = useState(false);
+  const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
 
   const getBoletoForExpense = (expenseId: string) =>
     boletos.find((b) => b.expense_id === expenseId);
@@ -223,6 +170,11 @@ export function Despesas() {
       .gte("created_at", start)
       .lte("created_at", end)
       .order("created_at", { ascending: false });
+    if (onlyPendingApproval) {
+      exQuery = exQuery
+        .eq("expense_source", "whatsapp")
+        .eq("status", "pending");
+    }
     if (debouncedSearch.trim()) {
       const term = `%${debouncedSearch.trim()}%`;
       exQuery = exQuery.or(
@@ -267,15 +219,22 @@ export function Despesas() {
     period.year,
     debouncedSearch,
     expensesPage,
+    onlyPendingApproval,
   ]);
 
   useEffect(() => {
     setExpensesPage(1);
-  }, [debouncedSearch, period.month, period.year]);
+  }, [debouncedSearch, period.month, period.year, onlyPendingApproval]);
 
   useEffect(() => {
     queueMicrotask(() => fetchData());
   }, [fetchData]);
+
+  useEffect(() => {
+    if (highlightExpenseId) {
+      queueMicrotask(() => setDetailExpenseId(highlightExpenseId));
+    }
+  }, [highlightExpenseId]);
 
   useEffect(() => {
     if (highlightExpenseId && !loading && expenses.length) {
@@ -336,6 +295,7 @@ export function Despesas() {
         supplier_name: (selectedSupplier?.name ?? supplierName) || null,
         notes: notes || null,
         status: "pending",
+        expense_source: "manual",
       })
       .select("id")
       .single();
@@ -409,85 +369,6 @@ export function Despesas() {
     else fetchData();
   };
 
-  const openLinkItemSheet = (it: {
-    id: string;
-    product_name: string;
-    quantity: number;
-    unit_value: number;
-  }) => {
-    setLinkItem(it);
-    setLinkProductId("");
-    setLinkItemSheetOpen(true);
-  };
-
-  const handleLinkItemSave = async () => {
-    if (!linkItem?.id || !linkProductId) return;
-    setLinkSaving(true);
-    const { error } = await supabase
-      .from("expense_items")
-      .update({ product_id: linkProductId, stock_added: false })
-      .eq("id", linkItem.id);
-    setLinkSaving(false);
-    if (error) {
-      toast.error("Erro ao vincular");
-      return;
-    }
-    toast.success("Produto vinculado");
-    setLinkItemSheetOpen(false);
-    setLinkItem(null);
-    if (detailExpense?.id) {
-      const { data } = await supabase
-        .from("expenses")
-        .select(
-          "*, expense_items (*, products (id, name, current_quantity, min_quantity))",
-        )
-        .eq("id", detailExpense.id)
-        .single();
-      if (data) setDetailExpense(data as Expense);
-    }
-    fetchData();
-  };
-
-  const handleDeleteExpense = async () => {
-    if (!detailExpense?.id) return;
-    setDeleting(true);
-    try {
-      const items = (detailExpense.expense_items ?? []) as Array<{
-        id?: string;
-        product_id?: string | null;
-        stock_added?: boolean;
-        quantity: number;
-      }>;
-      for (const it of items) {
-        if (it.product_id && it.stock_added) {
-          const qty = Number(it.quantity);
-          await supabase.rpc("adjust_product_stock", {
-            p_product_id: it.product_id,
-            p_delta: -qty,
-            p_type: "out",
-            p_reference_type: "expense_item",
-            p_reference_id: it.id ?? null,
-          });
-        }
-      }
-      const linkedBoleto = getBoletoForExpense(detailExpense.id);
-      if (linkedBoleto) {
-        await supabase.from("boletos").delete().eq("id", linkedBoleto.id);
-      }
-      await supabase.from("expenses").delete().eq("id", detailExpense.id);
-      setDetailExpense(null);
-      setDetailEditMode(false);
-      setDeleteDialogOpen(false);
-      setBoletoResumo(null);
-      toast.success("Despesa excluída");
-      fetchData();
-    } catch {
-      toast.error("Erro ao excluir despesa");
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("pt-BR", {
       day: "2-digit",
@@ -500,151 +381,6 @@ export function Despesas() {
       style: "currency",
       currency: "BRL",
     }).format(v);
-
-  const startEdit = () => {
-    if (!detailExpense) return;
-    setEditType(detailExpense.type as ExpenseType);
-    setEditSupplierId(detailExpense.supplier_id ?? "");
-    setEditInvoiceNumber(detailExpense.invoice_number ?? "");
-    setEditInvoiceSeries(detailExpense.invoice_series ?? "");
-    setEditSupplierDocument(detailExpense.supplier_document ?? "");
-    setEditSupplierName(detailExpense.supplier_name ?? "");
-    setEditNotes(detailExpense.notes ?? "");
-    setEditStatus(detailExpense.status);
-    setEditItems(
-      (detailExpense.expense_items?.length ?? 0) > 0
-        ? detailExpense.expense_items!.map((it) => ({
-            id: it.id,
-            product_id: it.product_id ?? undefined,
-            stock_added: it.stock_added ?? false,
-            product_name: it.product_name ?? "",
-            quantity: Number(it.quantity),
-            unit_value: Number(it.unit_value),
-          }))
-        : [{ product_name: "", quantity: 1, unit_value: 0 }],
-    );
-    setDetailEditMode(true);
-  };
-
-  const cancelEdit = () => {
-    setDetailEditMode(false);
-  };
-
-  const editAddItem = () =>
-    setEditItems((prev) => [
-      ...prev,
-      { product_name: "", quantity: 1, unit_value: 0 },
-    ]);
-  const editRemoveItem = (i: number) =>
-    setEditItems((prev) =>
-      prev.length > 1 ? prev.filter((_, ix) => ix !== i) : prev,
-    );
-  const editUpdateItem = (i: number, f: Partial<ExpenseItem>) =>
-    setEditItems((prev) =>
-      prev.map((it, ix) => (ix === i ? { ...it, ...f } : it)),
-    );
-
-  const editTotalItems = editItems.reduce(
-    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
-    0,
-  );
-
-  const canEditSubmit =
-    editItems.every(
-      (it) =>
-        it.product_name.trim() !== "" &&
-        Number(it.quantity) > 0 &&
-        Number(it.unit_value) >= 0,
-    ) &&
-    (editSupplierId !== "" || editSupplierName.trim() !== "") &&
-    (editType !== "nota_fiscal" || editInvoiceNumber.trim() !== "");
-
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detailExpense?.id || !currentCompany?.id || !canEditSubmit) return;
-    setEditSaving(true);
-    const selectedSupplier = editSupplierId
-      ? suppliers.find((s) => s.id === editSupplierId)
-      : null;
-    const { error: expErr } = await supabase
-      .from("expenses")
-      .update({
-        type: editType,
-        supplier_id: editSupplierId || null,
-        invoice_number: editType === "nota_fiscal" ? editInvoiceNumber : null,
-        invoice_series:
-          editType === "nota_fiscal" ? editInvoiceSeries.trim() || null : null,
-        supplier_document:
-          ((selectedSupplier?.document ?? editSupplierDocument) || "")
-            .replace(/\D/g, "")
-            .trim() || null,
-        supplier_name:
-          ((selectedSupplier?.name ?? editSupplierName) || "").trim() || null,
-        notes: editNotes || null,
-        status: editStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", detailExpense.id);
-    if (expErr) {
-      console.error(expErr);
-      setEditSaving(false);
-      return;
-    }
-
-    const oldItems = (detailExpense.expense_items ?? []) as Array<{
-      id?: string;
-      product_id?: string | null;
-      stock_added?: boolean;
-      quantity: number;
-    }>;
-
-    for (const it of oldItems) {
-      if (it.product_id && it.stock_added) {
-        const qty = Number(it.quantity);
-        await supabase.rpc("adjust_product_stock", {
-          p_product_id: it.product_id,
-          p_delta: -qty,
-          p_type: "out",
-          p_reference_type: "expense_item",
-          p_reference_id: it.id ?? null,
-        });
-      }
-    }
-
-    await supabase
-      .from("expense_items")
-      .delete()
-      .eq("expense_id", detailExpense.id);
-
-    for (const it of editItems) {
-      const productId = it.product_id || null;
-      const { data: inserted } = await supabase
-        .from("expense_items")
-        .insert({
-          expense_id: detailExpense.id,
-          product_name: it.product_name,
-          quantity: it.quantity,
-          unit_value: it.unit_value,
-          product_id: productId,
-          stock_added: false,
-        })
-        .select("id")
-        .single();
-      void inserted; // Estoque só é atualizado na confirmação do recebimento
-    }
-
-    const { data: updated } = await supabase
-      .from("expenses")
-      .select(
-        "*, expense_items (*, products (id, name, current_quantity, min_quantity))",
-      )
-      .eq("id", detailExpense.id)
-      .single();
-    setDetailExpense(updated as Expense);
-    setDetailEditMode(false);
-    setEditSaving(false);
-    fetchData();
-  };
 
   return (
     <PageShell className="space-y-8 pb-0 " narrow>
@@ -951,23 +687,42 @@ export function Despesas() {
               Todas as despesas
             </CardTitle>
             <CardDescription>
-              Clique no ícone de boleto para vincular
+              {onlyPendingApproval
+                ? "Somente importações pelo WhatsApp pendentes de aprovação do proprietário."
+                : "Clique no ícone de boleto para vincular"}
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
+          <div className="mb-4 flex flex-wrap gap-4 items-center justify-between">
             <Input
               placeholder="Filtrar por fornecedor ou nota..."
               value={expensesSearch}
               onChange={(e) => setExpensesSearch(e.target.value)}
               className="max-w-sm"
             />
+            <div className="flex items-center gap-2 shrink-0">
+              <Switch
+                id="filter-pending-approval"
+                checked={onlyPendingApproval}
+                onCheckedChange={setOnlyPendingApproval}
+              />
+              <Label
+                htmlFor="filter-pending-approval"
+                className="text-sm font-normal cursor-pointer leading-snug"
+              >
+                Aguardando aprovação
+              </Label>
+            </div>
           </div>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : expenses.length === 0 ? (
-            <p className="text-muted-foreground">Nenhuma despesa cadastrada</p>
+            <p className="text-muted-foreground">
+              {onlyPendingApproval
+                ? "Nenhuma despesa aguardando aprovação do proprietário."
+                : "Nenhuma despesa cadastrada"}
+            </p>
           ) : (
             <div className="space-y-2">
               {expenses.map((exp) => {
@@ -980,19 +735,30 @@ export function Despesas() {
                     id={exp.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => setDetailExpense(exp)}
+                    onClick={() => setDetailExpenseId(exp.id)}
                     onKeyDown={(e) =>
-                      e.key === "Enter" && setDetailExpense(exp)
+                      e.key === "Enter" && setDetailExpenseId(exp.id)
                     }
                     className={`flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors cursor-pointer hover:bg-muted/50 ${
                       isHighlight ? "ring-2 ring-primary" : ""
                     }`}
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium">
-                        {exp.supplier_name ||
-                          TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS] ||
-                          "Sem fornecedor"}
+                      <p className="font-medium flex flex-wrap items-center gap-2">
+                        <span>
+                          {exp.supplier_name ||
+                            TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS] ||
+                            "Sem fornecedor"}
+                        </span>
+                        {exp.expense_source === "whatsapp" &&
+                          exp.status === "pending" && (
+                            <Badge
+                              variant="outline"
+                              className="text-xs font-normal"
+                            >
+                              WhatsApp · aguardando dono
+                            </Badge>
+                          )}
                       </p>
                       {exp.supplier_document && (
                         <p className="text-sm text-muted-foreground mt-0.5">
@@ -1267,590 +1033,17 @@ export function Despesas() {
         </SheetContent>
       </Sheet>
 
-      <Sheet
-        open={!!detailExpense}
-        onOpenChange={(o) => {
-          if (!o) {
-            setDetailExpense(null);
-            setDetailEditMode(false);
+      <ExpenseDetailSheet
+        expenseId={detailExpenseId}
+        onClose={() => {
+          setDetailExpenseId(null);
+          if (highlightExpenseId) {
+            navigate("/app/despesas", { replace: true });
           }
         }}
-      >
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
-          {detailExpense && (
-            <>
-              <SheetHeader>
-                <div className="flex items-center justify-between pr-8">
-                  <SheetTitle>
-                    {detailEditMode ? "Editar despesa" : "Dados da despesa"}
-                  </SheetTitle>
-                  {!detailEditMode && (
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={startEdit}>
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Editar
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setDeleteDialogOpen(true)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Excluir
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                <SheetDescription className="flex flex-wrap items-center gap-2">
-                  <span>
-                    {detailExpense.supplier_name ||
-                      TYPE_LABELS[
-                        detailExpense.type as keyof typeof TYPE_LABELS
-                      ] ||
-                      "Sem fornecedor"}
-                  </span>
-                  {getBoletoForExpense(detailExpense.id) ? (
-                    <Badge variant="default" className="bg-green-600 shrink-0">
-                      Boleto vinculado
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="shrink-0">
-                      Sem boleto vinculado
-                    </Badge>
-                  )}
-                </SheetDescription>
-              </SheetHeader>
-              {detailEditMode ? (
-                <form onSubmit={handleUpdate} className="space-y-6 py-6">
-                  <div>
-                    <Label>Tipo</Label>
-                    <Select
-                      value={editType}
-                      onValueChange={(v) => setEditType(v as ExpenseType)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nota_fiscal">Nota fiscal</SelectItem>
-                        <SelectItem value="romaneio">Romaneio</SelectItem>
-                        <SelectItem value="recibo">Recibo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Fornecedor</Label>
-                    <Select
-                      value={editSupplierId}
-                      onValueChange={(v) => {
-                        setEditSupplierId(v);
-                        const s = suppliers.find((x) => x.id === v);
-                        if (s) {
-                          setEditSupplierName(s.name);
-                          setEditSupplierDocument(s.document ?? "");
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecione o fornecedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.name}
-                            {s.document ? ` — ${s.document}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {!editSupplierId && (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <div>
-                          <Label className="text-xs">Nome (manual)</Label>
-                          <Input
-                            value={editSupplierName}
-                            onChange={(e) =>
-                              setEditSupplierName(e.target.value)
-                            }
-                            placeholder="Ou informe manualmente"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">CNPJ/CPF (manual)</Label>
-                          <Input
-                            value={editSupplierDocument}
-                            onChange={(e) =>
-                              setEditSupplierDocument(
-                                maskCpfCnpj(e.target.value),
-                              )
-                            }
-                            placeholder="000.000.000-00"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {editType === "nota_fiscal" && (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <Label>Nº da nota / NFC-e</Label>
-                        <Input
-                          value={editInvoiceNumber}
-                          onChange={(e) => setEditInvoiceNumber(e.target.value)}
-                          placeholder="Ex: 12345"
-                        />
-                      </div>
-                      <div>
-                        <Label>Série</Label>
-                        <Input
-                          value={editInvoiceSeries}
-                          onChange={(e) =>
-                            setEditInvoiceSeries(e.target.value)
-                          }
-                          placeholder="Ex: 1"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {isGestor && (
-                    <div>
-                      <Label>Status</Label>
-                      <Select
-                        value={editStatus}
-                        onValueChange={(v) =>
-                          setEditStatus(
-                            v as "pending" | "approved" | "rejected",
-                          )
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">Pendente</SelectItem>
-                          <SelectItem value="approved">Aprovada</SelectItem>
-                          <SelectItem value="rejected">Recusada</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <Label>Itens</Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={editAddItem}
-                      >
-                        <Plus className="h-4 w-4 mr-1" /> Adicionar
-                      </Button>
-                    </div>
-                    <div className="mt-2 space-y-3">
-                      {editItems.map((it, i) => (
-                        <div
-                          key={i}
-                          className="space-y-2 rounded-lg border p-3"
-                        >
-                          <div className="flex gap-2 items-end">
-                            <div className="flex-1">
-                              <Label className="text-xs">
-                                Descrição da nota
-                              </Label>
-                              <Input
-                                placeholder="Produto (como vem na nota)"
-                                value={it.product_name}
-                                onChange={(e) =>
-                                  editUpdateItem(i, {
-                                    product_name: e.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="w-24">
-                              <Label className="text-xs">Qtd</Label>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                placeholder="Qtd"
-                                value={it.quantity || ""}
-                                onChange={(e) =>
-                                  editUpdateItem(i, {
-                                    quantity: parseFloat(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="w-28">
-                              <Label className="text-xs">Valor un.</Label>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                placeholder="Valor un."
-                                value={it.unit_value || ""}
-                                onChange={(e) =>
-                                  editUpdateItem(i, {
-                                    unit_value: parseFloat(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => editRemoveItem(i)}
-                              disabled={editItems.length === 1}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                          <div>
-                            <Label className="text-xs">
-                              Vincular ao produto (estoque)
-                            </Label>
-                            <Select
-                              value={it.product_id ?? "__none__"}
-                              onValueChange={(v) =>
-                                editUpdateItem(i, {
-                                  product_id: v === "__none__" ? undefined : v,
-                                })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Não vincular" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">
-                                  Não vincular
-                                </SelectItem>
-                                {products
-                                  .filter((p) => p.is_active !== false)
-                                  .map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.name}
-                                      {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                                      {Number(
-                                        p.current_quantity,
-                                      ).toLocaleString("pt-BR")}{" "}
-                                      {p.unit}
-                                      {p.last_unit_value != null &&
-                                        p.last_unit_value > 0 &&
-                                        ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Ao vincular, o estoque será atualizado quando o
-                              recebimento for confirmado
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Total: {formatCurrency(editTotalItems)}
-                    </p>
-                  </div>
-                  <div>
-                    <Label>Observações</Label>
-                    <Input
-                      value={editNotes}
-                      onChange={(e) => setEditNotes(e.target.value)}
-                      placeholder="Opcional"
-                    />
-                  </div>
-                  <SheetFooter>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={cancelEdit}
-                      disabled={editSaving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={!canEditSubmit || editSaving}
-                    >
-                      {editSaving ? "Salvando..." : "Salvar"}
-                    </Button>
-                  </SheetFooter>
-                </form>
-              ) : (
-                <div className="space-y-6 py-6">
-                  <div className="grid gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Tipo:</span>{" "}
-                      {detailExpense.type === "nota_fiscal"
-                        ? "Nota fiscal"
-                        : TYPE_LABELS[
-                            detailExpense.type as keyof typeof TYPE_LABELS
-                          ]}
-                    </div>
-                    {detailExpense.supplier_name && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Fornecedor:
-                        </span>{" "}
-                        {detailExpense.supplier_name}
-                      </div>
-                    )}
-                    {detailExpense.supplier_document && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Documento:
-                        </span>{" "}
-                        {formatDocForDisplay(detailExpense.supplier_document)}
-                      </div>
-                    )}
-                    {detailExpense.invoice_number && (
-                      <div>
-                        <span className="text-muted-foreground">Nº nota:</span>{" "}
-                        {detailExpense.invoice_number}
-                        {detailExpense.invoice_series ? (
-                          <>
-                            {" "}
-                            <span className="text-muted-foreground">· série:</span>{" "}
-                            {detailExpense.invoice_series}
-                          </>
-                        ) : null}
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-muted-foreground">Status:</span>{" "}
-                      <Badge
-                        variant={
-                          detailExpense.status === "approved"
-                            ? "default"
-                            : detailExpense.status === "rejected"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {STATUS_LABELS[detailExpense.status]}
-                      </Badge>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Criada em:</span>{" "}
-                      {formatDate(detailExpense.created_at)}
-                    </div>
-                    {detailExpense.notes && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Observações:
-                        </span>{" "}
-                        {detailExpense.notes}
-                      </div>
-                    )}
-                  </div>
+        onRefresh={fetchData}
+      />
 
-                  {(detailExpense.expense_items?.length ?? 0) > 0 && (
-                    <div>
-                      <p className="font-medium mb-2">Itens</p>
-                      <div className="rounded-lg border overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-muted/50">
-                              <th className="text-left p-2 font-medium">
-                                Produto
-                              </th>
-                              <th className="text-left p-2 font-medium">
-                                Estoque
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Qtd
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Valor un.
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Subtotal
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detailExpense.expense_items!.map((it, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-2">
-                                  <span>{it.product_name || "—"}</span>
-                                  {it.product_id && it.products && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      → {it.products.name}
-                                    </p>
-                                  )}
-                                </td>
-                                <td className="p-2">
-                                  {it.product_id ? (
-                                    <Badge variant="secondary">Vinculado</Badge>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openLinkItemSheet({
-                                          id: it.id!,
-                                          product_name: it.product_name,
-                                          quantity: Number(it.quantity),
-                                          unit_value: Number(it.unit_value),
-                                        });
-                                      }}
-                                    >
-                                      Vincular
-                                    </Button>
-                                  )}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {it.quantity}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(Number(it.unit_value))}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(
-                                    Number(it.quantity) * Number(it.unit_value),
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p className="text-right font-medium mt-2">
-                        Total:{" "}
-                        {formatCurrency(
-                          detailExpense.expense_items!.reduce(
-                            (s, it) =>
-                              s + Number(it.quantity) * Number(it.unit_value),
-                            0,
-                          ),
-                        )}
-                      </p>
-                    </div>
-                  )}
-
-                  {getBoletoForExpense(detailExpense.id) ? (
-                    <BoletoLinkedBlock
-                      boleto={getBoletoForExpense(detailExpense.id)!}
-                      categoriesById={categoriesById}
-                      formatCurrency={formatCurrency}
-                      formatDate={formatDate}
-                      onVerBoleto={() =>
-                        setBoletoResumo(getBoletoForExpense(detailExpense.id)!)
-                      }
-                    />
-                  ) : null}
-                </div>
-              )}
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Excluir despesa</DialogTitle>
-            <DialogDescription>
-              Tem certeza que deseja excluir esta despesa? O recebimento e
-              boleto vinculados serão excluídos. Se o recebimento já foi
-              confirmado, as quantidades serão deduzidas do estoque.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteExpense}
-              disabled={deleting}
-            >
-              {deleting ? "Excluindo..." : "Excluir"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Sheet
-        open={linkItemSheetOpen}
-        onOpenChange={(o) => {
-          if (!o) {
-            setLinkItemSheetOpen(false);
-            setLinkItem(null);
-          }
-        }}
-      >
-        <SheetContent>
-          {linkItem && (
-            <>
-              <SheetHeader>
-                <SheetTitle>Vincular ao produto</SheetTitle>
-                <SheetDescription>
-                  Vincule este item da nota a um produto do estoque. O estoque
-                  será atualizado quando o recebimento for confirmado.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="space-y-4 py-6">
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">{linkItem.product_name || "—"}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {Number(linkItem.quantity).toLocaleString("pt-BR")} un ×{" "}
-                    {formatCurrency(linkItem.unit_value)}
-                  </p>
-                </div>
-                <div>
-                  <Label>Produto (estoque)</Label>
-                  <Select
-                    value={linkProductId}
-                    onValueChange={setLinkProductId}
-                  >
-                    <SelectTrigger className="mt-2">
-                      <SelectValue placeholder="Selecione o produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {products
-                        .filter((p) => p.is_active !== false)
-                        .map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                            {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                            {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
-                            {p.unit}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <SheetFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setLinkItemSheetOpen(false)}
-                  disabled={linkSaving}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleLinkItemSave}
-                  disabled={!linkProductId || linkSaving}
-                >
-                  {linkSaving ? "Vinculando..." : "Vincular"}
-                </Button>
-              </SheetFooter>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
     </PageShell>
   );
 }

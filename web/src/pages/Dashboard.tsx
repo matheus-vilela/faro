@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
@@ -45,6 +46,7 @@ export function Dashboard() {
   const { currentCompany, currentRole } = useCompany();
   const canSeeAlerts =
     currentRole === "gestor" || currentRole === "owner";
+  const isOwner = currentRole === "owner";
 
   const [loadingBoletos, setLoadingBoletos] = useState(true);
   const [todayBoletos, setTodayBoletos] = useState<Boleto[]>([]);
@@ -114,7 +116,7 @@ export function Dashboard() {
           .gt("min_quantity", 0),
         supabase
           .from("expenses")
-          .select("id")
+          .select("id, expense_source, status")
           .eq("company_id", companyId),
         supabase
           .from("boletos")
@@ -160,7 +162,20 @@ export function Dashboard() {
         .map((b) => b.expense_id)
         .filter(Boolean) as string[],
     );
-    const expenseIds = (expensesData ?? []).map((e) => e.id);
+    const expenseRows = (expensesData ?? []) as {
+      id: string;
+      expense_source?: string | null;
+      status?: string | null;
+    }[];
+    const expenseIds = expenseRows
+      .filter(
+        (e) =>
+          !(
+            e.expense_source === "whatsapp" &&
+            e.status === "pending"
+          ),
+      )
+      .map((e) => e.id);
     const withoutBoleto = expenseIds.filter((id) => !linkedExpenseIds.has(id))
       .length;
 
@@ -377,6 +392,10 @@ export function Dashboard() {
           </Card>
         )}
       </div>
+
+      {isOwner && currentCompany && (
+        <PendingWhatsappExpensesCard />
+      )}
     </PageShell>
   );
 }
