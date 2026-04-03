@@ -1,4 +1,5 @@
-import { MonthSelector } from "@/components/MonthSelector";
+import { type MonthYear } from "@/components/MonthSelector";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import {
   DreExpandableLine,
   DreHighlightBlock,
@@ -6,12 +7,13 @@ import {
 import { DreTreePanel } from "@/components/dre/DreTreePanel";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDreReport } from "@/hooks/useDreReport";
@@ -25,7 +27,7 @@ import { Navigate } from "react-router-dom";
 export function Dre() {
   const { currentCompany, currentRole } = useCompany();
   const now = new Date();
-  const [period, setPeriod] = useState({
+  const [period, setPeriod] = useState<MonthYear>({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
@@ -62,9 +64,12 @@ export function Dre() {
         icon={FileBarChart}
       />
 
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <MonthSelector value={period} onChange={setPeriod} />
-      </div>
+      <ReferencePeriodCard
+        className="mb-6"
+        value={period}
+        onChange={setPeriod}
+        description="Relatório e totais usam este mês"
+      />
 
       {error ? (
         <div
@@ -138,6 +143,7 @@ export function Dre() {
           ) : (
             <div className="divide-y divide-border/70">
               <DreExpandableLine
+                accordionValue="brutas"
                 label="Vendas brutas"
                 amount={computed.vendasBrutas}
                 tone="receita"
@@ -145,6 +151,7 @@ export function Dre() {
                 tree={trees?.brutas ?? []}
               />
               <DreExpandableLine
+                accordionValue="deducoes"
                 label="Deduções da receita / despesas sobre vendas"
                 amount={-computed.deducoesReceita}
                 tone="deducao"
@@ -158,6 +165,7 @@ export function Dre() {
               </div>
 
               <DreExpandableLine
+                accordionValue="cmv"
                 label="CMV (custo das mercadorias vendidas)"
                 amount={-computed.cmv}
                 tone="despesa"
@@ -171,6 +179,7 @@ export function Dre() {
               </div>
 
               <DreExpandableLine
+                accordionValue="despesas-var"
                 label="Despesas variáveis"
                 amount={-computed.despesasVariaveis}
                 tone="despesa"
@@ -179,6 +188,7 @@ export function Dre() {
                 treeDisplayNegative
               />
               <DreExpandableLine
+                accordionValue="despesas-fix"
                 label="Despesas fixas"
                 amount={-computed.despesasFixas}
                 tone="despesa"
@@ -194,61 +204,62 @@ export function Dre() {
                 />
               </div>
 
-              <Collapsible defaultOpen={false} className="group/fin">
-                <CollapsibleTrigger
-                  className={cn(
-                    "flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md py-2.5 text-left text-sm sm:text-base outline-none",
-                    "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  <span className="flex min-w-0 flex-1 items-center gap-3 font-medium">
-                    <span className="w-8 shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
-                      (+/−)
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                      <span className="min-w-0 truncate">Resultado financeiro</span>
-                      <ChevronDown
-                        className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/fin:rotate-180"
-                        aria-hidden
-                      />
-                    </span>
-                  </span>
-                  <span
+              <Accordion type="single" collapsible>
+                <AccordionItem value="fin" className="border-0">
+                  <AccordionTrigger
                     className={cn(
-                      "shrink-0 text-right tabular-nums text-sm font-semibold sm:text-base",
-                      computed.resultadoFinanceiroLiquido >= 0
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-700 dark:text-rose-400",
+                      "hover:no-underline flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md py-2.5 text-left text-sm sm:text-base",
                     )}
                   >
-                    {computed.resultadoFinanceiroLiquido.toLocaleString("pt-BR", {
-                      style: "currency",
-                      currency: "BRL",
-                    })}
-                  </span>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-4 pb-4 pl-4 sm:pl-8">
-                  <div>
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Receitas não operacionais
-                    </p>
-                    <DreTreePanel
-                      nodes={trees?.finRec ?? []}
-                      valueClassName="text-emerald-600 dark:text-emerald-400"
-                    />
-                  </div>
-                  <div>
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Investimentos e financiamentos
-                    </p>
-                    <DreTreePanel
-                      nodes={trees?.finDesp ?? []}
-                      valueClassName="text-rose-700 dark:text-rose-400"
-                      displayNegative
-                    />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+                    <span className="flex min-w-0 flex-1 items-center gap-3 font-medium">
+                      <span className="w-8 shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
+                        (+/−)
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                        <span className="min-w-0 truncate">Resultado financeiro</span>
+                        <ChevronDown
+                          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/accordion-trigger:rotate-180"
+                          aria-hidden
+                        />
+                      </span>
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 text-right tabular-nums text-sm font-semibold sm:text-base",
+                        computed.resultadoFinanceiroLiquido >= 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-rose-700 dark:text-rose-400",
+                      )}
+                    >
+                      {computed.resultadoFinanceiroLiquido.toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                      })}
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-4 pl-4 sm:pl-8">
+                    <div>
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Receitas não operacionais
+                      </p>
+                      <DreTreePanel
+                        nodes={trees?.finRec ?? []}
+                        valueClassName="text-emerald-600 dark:text-emerald-400"
+                      />
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Investimentos e financiamentos
+                      </p>
+                      <DreTreePanel
+                        nodes={trees?.finDesp ?? []}
+                        valueClassName="text-rose-700 dark:text-rose-400"
+                        displayNegative
+                      />
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
 
               <div className="py-2">
                 <div className="flex min-w-0 items-baseline justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2.5 sm:gap-3 sm:px-4">
@@ -265,6 +276,7 @@ export function Dre() {
               </div>
 
               <DreExpandableLine
+                accordionValue="impostos"
                 label="Imposto sobre o lucro"
                 amount={-computed.impostos}
                 tone="despesa"
