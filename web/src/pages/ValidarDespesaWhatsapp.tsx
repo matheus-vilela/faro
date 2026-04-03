@@ -39,10 +39,12 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { Link, useParams } from "react-router-dom";
+import { toast } from "sonner";
 
 function formatBrl(amount: number): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -208,6 +210,8 @@ export function ValidarDespesaWhatsapp() {
   /** IDs estáveis por linha (React key + scroll/destaque). */
   const [itemRowIds, setItemRowIds] = useState<string[]>([]);
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  /** Alinhado após cada load; transição true→false dispara toast (usuário corrigiu divergência). */
+  const prevDivergeRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -240,6 +244,10 @@ export function ValidarDespesaWhatsapp() {
       return;
     }
     const coerced = coerceExtracted(obj.extracted_json);
+    const tn0 = coerced.totalAmount ?? 0;
+    const sm0 = sumItems(coerced.items);
+    prevDivergeRef.current =
+      Math.abs(Math.round(tn0 * 100) - Math.round(sm0 * 100)) > 2;
     setExtracted(coerced);
     const baseBindings = initLineBindings(coerced);
     const idsMissingLabel = [
@@ -333,6 +341,17 @@ export function ValidarDespesaWhatsapp() {
   const diverge =
     Math.abs(Math.round(totalNota * 100) - Math.round(soma * 100)) > 2;
 
+  useEffect(() => {
+    if (!extracted) return;
+    if (prevDivergeRef.current && !diverge) {
+      toast.success("Diferença corrigida", {
+        description:
+          "O total da nota e a soma dos itens agora conferem. Revise e finalize quando estiver pronto.",
+      });
+    }
+    prevDivergeRef.current = diverge;
+  }, [diverge, extracted]);
+
   const insertItemAt = useCallback((atIndex: number | "append") => {
     const newId = crypto.randomUUID();
     setFlashRowId(newId);
@@ -389,9 +408,9 @@ export function ValidarDespesaWhatsapp() {
     });
   }, []);
 
-  const addItemAtEnd = useCallback(() => {
-    insertItemAt("append");
-  }, [insertItemAt]);
+  // const addItemAtEnd = useCallback(() => {
+  //   insertItemAt("append");
+  // }, [insertItemAt]);
 
   const removeItem = (index: number) => {
     setExtracted((prev) => {
@@ -632,25 +651,18 @@ export function ValidarDespesaWhatsapp() {
 
           {diverge && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-              Total da nota ({formatBrl(totalNota)}) e soma dos itens (
-              {formatBrl(soma)}) ainda divergem. Ajuste quantidades, valores ou
-              inclua/remova itens até bater com o total.
+              Total da nota ({formatBrl(totalNota)})<br />
+              Soma dos itens ({formatBrl(soma)})<br />
+              <br />
+              Ainda divergem. <br />
+              Ajuste quantidades, valores ou inclua/remova itens até bater com o
+              total.
             </div>
           )}
 
           <div className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-sm font-semibold">Itens</h3>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full shrink-0 sm:w-auto"
-                onClick={addItemAtEnd}
-              >
-                <Plus className="mr-1.5 h-4 w-4" aria-hidden />
-                Adicionar item ao fim
-              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               O vínculo automático só ocorre com similaridade ≥{" "}

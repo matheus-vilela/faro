@@ -21,6 +21,7 @@ import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
 import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
 import { Register } from "@/pages/Register";
+import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
 import { ValidarDespesaWhatsapp } from "@/pages/ValidarDespesaWhatsapp";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
@@ -92,6 +93,8 @@ function AppRoutes() {
       <Route path="/c/:token" element={<ConfirmarRecebimento />} />
       {/* Slug → redirect para /c/:token */}
       <Route path="/s/:slug" element={<RedirectRecebimentoSlug />} />
+      {/* Slug curto → redirect para /w/:token (rascunho despesa WhatsApp) */}
+      <Route path="/e/:slug" element={<RedirectWhatsappExpenseDraftSlug />} />
       {/* Rascunho de despesa (WhatsApp): público, token no URL; não usar ProtectedRoute */}
       <Route path="/w/:token" element={<ValidarDespesaWhatsapp />} />
       <Route

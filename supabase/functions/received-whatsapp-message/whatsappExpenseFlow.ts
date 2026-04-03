@@ -12,6 +12,7 @@ import {
   resolveProductMatches,
   upsertProductInvoiceAlias,
 } from "./productMatch.ts";
+import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -27,10 +28,66 @@ function publicAppAbsoluteBase(): string {
   return `https://${raw.replace(/\/$/, "")}`;
 }
 
-function formatDraftShortLink(accessToken: string | null | undefined): string {
+function randomShortSlug(len = 8): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/** Cria ou reutiliza slug em `whatsapp_expense_draft_short_links` (service role). */
+async function ensureWhatsappExpenseDraftShortSlug(
+  supabase: Supabase,
+  draftId: string,
+  accessTokenUuid: string,
+): Promise<string | null> {
+  const { data: existing } = await supabase
+    .from("whatsapp_expense_draft_short_links")
+    .select("slug")
+    .eq("draft_id", draftId)
+    .maybeSingle();
+
+  const existingSlug = existing as { slug?: string } | null;
+  if (existingSlug?.slug && typeof existingSlug.slug === "string") {
+    return existingSlug.slug;
+  }
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const slug = randomShortSlug(8);
+    const { error } = await supabase
+      .from("whatsapp_expense_draft_short_links")
+      .insert({
+        slug,
+        draft_id: draftId,
+        access_token: accessTokenUuid,
+      });
+    if (!error) return slug;
+    const code = (error as { code?: string }).code;
+    if (code !== "23505") {
+      console.error(
+        "[whatsappExpenseFlow] ensureWhatsappExpenseDraftShortSlug:",
+        error.message,
+      );
+      return null;
+    }
+  }
+  return null;
+}
+
+/** URL pública do rascunho: `/e/:slug` quando possível; senão `/w/:token`. */
+async function buildDraftShortLink(
+  supabase: Supabase,
+  draftId: string,
+  accessToken: string | null | undefined,
+): Promise<string> {
   const base = publicAppAbsoluteBase();
   if (!base || !accessToken) return "";
-  return `${base}/w/${accessToken}`;
+  const slug = await ensureWhatsappExpenseDraftShortSlug(
+    supabase,
+    draftId,
+    accessToken,
+  );
+  return slug ? `${base}/e/${slug}` : `${base}/w/${accessToken}`;
 }
 
 function formatMoneyBrl(amount: number): string {
@@ -135,6 +192,8 @@ function enrichExtractedWithTaxId(
   return { ...extracted, supplierDocument: digits };
 }
 
+export type SaveDraftResult = { draftId: string; accessToken: string };
+
 export async function saveDraft(
   supabase: Supabase,
   companyId: string,
@@ -142,7 +201,7 @@ export async function saveDraft(
   extracted: ExtractedDocumentResult & Record<string, unknown>,
   sumItemsVal: number,
   totalDoc: number,
-): Promise<string | null> {
+): Promise<SaveDraftResult | null> {
   await supabase
     .from("whatsapp_expense_drafts")
     .delete()
@@ -159,14 +218,17 @@ export async function saveDraft(
       sum_items: sumItemsVal,
       total_document: totalDoc,
     })
-    .select("access_token")
+    .select("id, access_token")
     .single();
 
   if (error) {
     console.error("[whatsappExpenseFlow] saveDraft insert:", error.message);
     return null;
   }
-  return (data?.access_token as string | undefined) ?? null;
+  const draftId = data?.id as string | undefined;
+  const accessToken = data?.access_token as string | undefined;
+  if (!draftId || !accessToken) return null;
+  return { draftId, accessToken };
 }
 
 /**
@@ -333,7 +395,10 @@ async function processMatchedExpenseFlow(
       likelyNotEffectivePurchase: false,
       likelyNotPurchaseReason: null,
       notes:
-        [working.notes, "Confirmado no WhatsApp: lançar como despesa apesar de orçamento/proposta."]
+        [
+          working.notes,
+          "Confirmado no WhatsApp: lançar como despesa apesar de orçamento/proposta.",
+        ]
           .filter(Boolean)
           .join(" — ") ||
         "Confirmado no WhatsApp: lançar como despesa apesar de orçamento/proposta.",
@@ -358,7 +423,8 @@ async function processMatchedExpenseFlow(
       sum,
       totalDoc,
     );
-    const reason = (working.likelyNotPurchaseReason ?? "").trim() ||
+    const reason =
+      (working.likelyNotPurchaseReason ?? "").trim() ||
       "O documento parece ser orçamento, proposta ou não indica compra concluída.";
     await sendWhatsapp(
       senderNormalized,
@@ -378,14 +444,19 @@ async function processMatchedExpenseFlow(
       if (id) {
         await sendWhatsapp(
           senderNormalized,
-          `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
+          withFaroFlowFooter(
+            `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
+            "registro",
+          ),
           "despesa_whatsapp_ok",
           flowId,
         );
       } else {
         await sendWhatsapp(
           senderNormalized,
-          "Extraí os dados, mas não consegui salvar. Tente pelo app.",
+          withFaroFlowFooter(
+            "Extraí os dados, mas não consegui salvar. Tente pelo app.",
+          ),
           "despesa_whatsapp_erro_insert",
           flowId,
         );
@@ -398,7 +469,7 @@ async function processMatchedExpenseFlow(
       items: matchItems,
       _requiresProductConfirmation: true,
     };
-    const accessToken = await saveDraft(
+    const saved = await saveDraft(
       supabase,
       companyId,
       senderNormalized,
@@ -406,11 +477,16 @@ async function processMatchedExpenseFlow(
       sum,
       totalDoc,
     );
-    const shortLink = formatDraftShortLink(accessToken);
+    const shortLink = saved
+      ? await buildDraftShortLink(supabase, saved.draftId, saved.accessToken)
+      : "";
     const linkBlock = shortLink ? `\n\n🔗 Conferir produtos: ${shortLink}` : "";
     await sendWhatsapp(
       senderNormalized,
-      `Reconheci a nota (${formatMoneyBrl(totalDoc)}).\n\nAlguns itens não foram reconhecidos e vinculados automaticamente com os seus produtos.\n\n Confirme o vínculo dos itens no link.${linkBlock}`,
+      withFaroFlowFooter(
+        `Reconheci a nota (${formatMoneyBrl(totalDoc)}).\n\nAlguns itens não foram reconhecidos e vinculados automaticamente com os seus produtos.\n\n Confirme o vínculo dos itens no link.${linkBlock}`,
+        "registro",
+      ),
       "despesa_whatsapp_produtos_pendentes",
       flowId,
     );
@@ -422,7 +498,7 @@ async function processMatchedExpenseFlow(
     items: matchItems,
     _requiresProductConfirmation: matchResult.requiresProductConfirmation,
   };
-  const accessToken = await saveDraft(
+  const saved = await saveDraft(
     supabase,
     companyId,
     senderNormalized,
@@ -431,7 +507,9 @@ async function processMatchedExpenseFlow(
     totalDoc,
   );
 
-  const shortLink = formatDraftShortLink(accessToken);
+  const shortLink = saved
+    ? await buildDraftShortLink(supabase, saved.draftId, saved.accessToken)
+    : "";
   const linkBlock = shortLink
     ? `\n\n🔗 Conferir e corrigir no app: ${shortLink}`
     : "";
@@ -441,7 +519,10 @@ async function processMatchedExpenseFlow(
 
   await sendWhatsapp(
     senderNormalized,
-    `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens* (${formatMoneyBrl(sum)}).${prodHint}${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
+    withFaroFlowFooter(
+      `Encontrei divergência entre o *total da nota* (${formatMoneyBrl(totalDoc)}) e a *soma dos itens identificados* (${formatMoneyBrl(sum)}).${prodHint}${linkBlock}\n\nOu responda com *cancelar* para cancelar o registro.`,
+      "registro",
+    ),
     "despesa_whatsapp_divergencia",
     flowId,
   );
@@ -491,10 +572,7 @@ export async function tryHandleExpenseDraftReply(
 
   if (extracted._pendingQuoteConfirmation) {
     const cancelQ =
-      cmd === "cancelar" ||
-      cmd === "nao" ||
-      cmd === "não" ||
-      cmd === "3";
+      cmd === "cancelar" || cmd === "nao" || cmd === "não" || cmd === "3";
     const yes =
       cmd === "sim" ||
       cmd === "si" ||
@@ -506,7 +584,9 @@ export async function tryHandleExpenseDraftReply(
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
         senderNormalized,
-        "Ok, não registrei a despesa. Envie outra nota quando quiser.",
+        withFaroFlowFooter(
+          "Ok, não registrei a despesa. Envie outra nota quando quiser.",
+        ),
         "despesa_whatsapp_cancelada_orcamento",
         flowId,
       );
@@ -576,7 +656,9 @@ export async function tryHandleExpenseDraftReply(
     await deleteDraft(supabase, draft.id);
     await sendWhatsapp(
       senderNormalized,
-      "Ok, cancelamos a inclusão dessa despesa. Envie outra foto ou texto quando quiser.",
+      withFaroFlowFooter(
+        "Ok, cancelamos a inclusão dessa despesa. Envie outra foto ou texto quando quiser.",
+      ),
       "despesa_whatsapp_cancelada",
       flowId,
     );
@@ -584,7 +666,11 @@ export async function tryHandleExpenseDraftReply(
   }
 
   if (extracted._requiresProductConfirmation) {
-    const linkRem = formatDraftShortLink(draft.access_token);
+    const linkRem = await buildDraftShortLink(
+      supabase,
+      draft.id,
+      draft.access_token,
+    );
     const linkBlock = linkRem ? `\n\n🔗 Conferir no app: ${linkRem}` : "";
     await sendWhatsapp(
       senderNormalized,
@@ -602,14 +688,19 @@ export async function tryHandleExpenseDraftReply(
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
         senderNormalized,
-        `Despesa registrada usando o *total da nota* (${formatMoneyBrl(totalDoc)}). Abra o Faro para revisar e aprovar.`,
+        withFaroFlowFooter(
+          `Despesa registrada usando o *total da nota* (${formatMoneyBrl(totalDoc)}). Abra o Faro para revisar e aprovar.`,
+          "registro",
+        ),
         "despesa_whatsapp_ok_total",
         flowId,
       );
     } else {
       await sendWhatsapp(
         senderNormalized,
-        "Não foi possível salvar a despesa. Tente pelo app ou envie de novo.",
+        withFaroFlowFooter(
+          "Não foi possível salvar a despesa. Tente pelo app ou envie de novo.",
+        ),
         "despesa_whatsapp_erro_insert",
         flowId,
       );
@@ -623,14 +714,19 @@ export async function tryHandleExpenseDraftReply(
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
         senderNormalized,
-        `Despesa registrada usando a *soma dos itens* (${formatMoneyBrl(sum)}). Abra o Faro para revisar e aprovar.`,
+        withFaroFlowFooter(
+          `Despesa registrada usando a *soma dos itens* (${formatMoneyBrl(sum)}). Abra o Faro para revisar e aprovar.`,
+          "registro",
+        ),
         "despesa_whatsapp_ok_soma",
         flowId,
       );
     } else {
       await sendWhatsapp(
         senderNormalized,
-        "Não foi possível salvar a despesa. Tente pelo app ou envie de novo.",
+        withFaroFlowFooter(
+          "Não foi possível salvar a despesa. Tente pelo app ou envie de novo.",
+        ),
         "despesa_whatsapp_erro_insert",
         flowId,
       );
@@ -638,7 +734,11 @@ export async function tryHandleExpenseDraftReply(
     return true;
   }
 
-  const linkRem = formatDraftShortLink(draft.access_token);
+  const linkRem = await buildDraftShortLink(
+    supabase,
+    draft.id,
+    draft.access_token,
+  );
   const linkBlock = linkRem ? `\n\n🔗 Conferir no app: ${linkRem}` : "";
   await sendWhatsapp(
     senderNormalized,
@@ -663,7 +763,9 @@ function extractImageUrl(payload: Record<string, unknown>): string | null {
 }
 
 /** PDF enviado como documento (Z-API: document.documentUrl, mime application/pdf). */
-function extractPdfDocumentUrl(payload: Record<string, unknown>): string | null {
+function extractPdfDocumentUrl(
+  payload: Record<string, unknown>,
+): string | null {
   const doc = payload.document as Record<string, unknown> | undefined;
   if (!doc) return null;
   const u =
@@ -674,17 +776,14 @@ function extractPdfDocumentUrl(payload: Record<string, unknown>): string | null 
   const mime = String(doc.mimeType ?? "").toLowerCase();
   const name = String(doc.fileName ?? doc.title ?? "").toLowerCase();
   const looksPdf =
-    mime.includes("pdf") ||
-    name.endsWith(".pdf") ||
-    /\.pdf(\?|#|$)/i.test(u);
+    mime.includes("pdf") || name.endsWith(".pdf") || /\.pdf(\?|#|$)/i.test(u);
   if (!looksPdf) return null;
   return u;
 }
 
 export function hasImageInPayload(payload: Record<string, unknown>): boolean {
   return (
-    extractImageUrl(payload) !== null ||
-    extractPdfDocumentUrl(payload) !== null
+    extractImageUrl(payload) !== null || extractPdfDocumentUrl(payload) !== null
   );
 }
 
@@ -807,7 +906,9 @@ export async function tryHandleIncomingExpenseDocument(
   if (!result.ok) {
     await sendWhatsapp(
       auth.senderNormalized,
-      "Não consegui ler o documento agora. Tente de novo em instantes.",
+      withFaroFlowFooter(
+        "Não consegui ler o documento agora. Tente de novo em instantes.",
+      ),
       "despesa_openai_erro",
       flowId,
     );
@@ -822,7 +923,9 @@ export async function tryHandleIncomingExpenseDocument(
       "Não identifiquei um documento de compra legível.";
     await sendWhatsapp(
       auth.senderNormalized,
-      `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, confira se é a nota completa. Se for texto, descreva fornecedor, itens e valores com clareza.`,
+      withFaroFlowFooter(
+        `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, confira se é a nota completa. Se for texto, descreva fornecedor, itens e valores com clareza.`,
+      ),
       "despesa_whatsapp_invalida",
       flowId,
     );
@@ -834,7 +937,9 @@ export async function tryHandleIncomingExpenseDocument(
   if (items.length === 0 || totalDoc <= 0) {
     await sendWhatsapp(
       auth.senderNormalized,
-      "Identifiquei o documento, mas faltam itens ou total. Envie outra foto/PDF ou complete o texto.",
+      withFaroFlowFooter(
+        "Identifiquei o documento, mas faltam itens ou total. Envie outra foto/PDF ou complete o texto.",
+      ),
       "despesa_whatsapp_incompleto",
       flowId,
     );

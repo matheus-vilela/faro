@@ -6,6 +6,7 @@ import {
   tryHandleExpenseDraftReply,
   tryHandleIncomingExpenseDocument,
 } from "./whatsappExpenseFlow.ts";
+import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 /**
  * Webhook Z-API "Ao receber" — fluxo completo neste arquivo.
@@ -22,7 +23,7 @@ import {
  * Opcional: ZAPI_WEBHOOK_SECRET
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
- *   — recebimentos (/c/, /s/) e rascunho de despesa WhatsApp (/w/:token)
+ *   — recebimentos (/c/, /s/) e rascunho de despesa WhatsApp (/w/:token ou /e/:slug)
  * Opcional (despesa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
  *   PDF: OPENAI_EXPENSE_PDF_MODEL (default gpt-4o) + Responses API; download de mídia Z-API usa o mesmo ZAPI_CLIENT_TOKEN.
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
@@ -1064,7 +1065,9 @@ async function handleRecebimentoTextFlow(
     if (!ids || ids.length === 0) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "Não encontrei um menu de recebimentos recente. Envie *lista* para ver as opções pendentes.",
+        withFaroFlowFooter(
+          "Não encontrei um menu de recebimentos recente. Envie *lista* para ver as opções pendentes.",
+        ),
         "recebimento_menu_sem_estado",
         flowId,
       );
@@ -1079,7 +1082,9 @@ async function handleRecebimentoTextFlow(
     if (idx < 0 || idx >= ids.length) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        `Opção inválida. Responda com um número de 1 a ${ids.length}.`,
+        withFaroFlowFooter(
+          `Opção inválida. Responda com um número de 1 a ${ids.length}.`,
+        ),
         "recebimento_opcao_invalida",
         flowId,
       );
@@ -1095,7 +1100,9 @@ async function handleRecebimentoTextFlow(
     if (!token) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "Não foi possível encontrar esse recebimento. Peça a lista novamente.",
+        withFaroFlowFooter(
+          "Não foi possível encontrar esse recebimento. Peça a lista novamente.",
+        ),
         "recebimento_token_nao_encontrado",
         flowId,
       );
@@ -1113,7 +1120,9 @@ async function handleRecebimentoTextFlow(
       );
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "Link indisponível no momento (configuração do servidor). Tente pelo painel do Faro.",
+        withFaroFlowFooter(
+          "Link indisponível no momento (configuração do servidor). Tente pelo painel do Faro.",
+        ),
         "recebimento_link_publico_ausente",
         flowId,
       );
@@ -1136,7 +1145,9 @@ async function handleRecebimentoTextFlow(
     }
     await sendWhatsappMessage(
       auth.senderNormalized,
-      `Aqui está o link para confirmar o recebimento:\n\n${link}\n\nAbra no navegador para conferir os itens.`,
+      withFaroFlowFooter(
+        `Aqui está o link para confirmar o recebimento:\n\n${link}\n\nAbra no navegador para conferir os itens.`,
+      ),
       "recebimento_link_confirmacao",
       flowId,
     );
@@ -1152,7 +1163,7 @@ async function handleRecebimentoTextFlow(
   if (isComandosCommand(text)) {
     await sendWhatsappMessage(
       auth.senderNormalized,
-      buildComandosWhatsappMessage(isOwner),
+      withFaroFlowFooter(buildComandosWhatsappMessage(isOwner)),
       "recebimento_comandos_ajuda",
       flowId,
     );
@@ -1168,7 +1179,9 @@ async function handleRecebimentoTextFlow(
     if (!isOwner) {
       await sendWhatsappMessage(
         auth.senderNormalized,
-        "Este comando não está disponível para o seu perfil. Envie *comandos* para ver o que você pode usar.",
+        withFaroFlowFooter(
+          "Este comando não está disponível para o seu perfil. Envie *comandos* para ver o que você pode usar.",
+        ),
         "contas_a_pagar_somente_owner",
         flowId,
       );
@@ -1185,7 +1198,7 @@ async function handleRecebimentoTextFlow(
     );
     await sendWhatsappMessage(
       auth.senderNormalized,
-      msg,
+      withFaroFlowFooter(msg),
       "contas_a_pagar_lista_7_dias",
       flowId,
     );
@@ -1227,9 +1240,11 @@ async function handleRecebimentoTextFlow(
     );
     await sendWhatsappMessage(
       auth.senderNormalized,
-      isOwner
-        ? "Não há recebimentos pendentes na empresa no momento."
-        : "Não há recebimentos pendentes vinculados ao seu número no momento.",
+      withFaroFlowFooter(
+        isOwner
+          ? "Não há recebimentos pendentes na empresa no momento."
+          : "Não há recebimentos pendentes vinculados ao seu número no momento.",
+      ),
       "recebimento_lista_vazia",
       flowId,
     );

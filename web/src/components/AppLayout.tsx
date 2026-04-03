@@ -15,6 +15,7 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -26,7 +27,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ROLE_LABELS } from "@/lib/roles";
+import { ROLE_LABELS, type UserCompanyRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
@@ -43,63 +44,96 @@ import {
   Sun,
   Truck,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 
-const NAV_ITEMS = [
+type NavItem = {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  roles: UserCompanyRole[];
+};
+
+const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
-    title: "Dashboard",
-    url: "/app",
-    icon: LayoutDashboard,
-    roles: ["operador", "gestor", "owner"],
+    label: "Principal",
+    items: [
+      {
+        title: "Dashboard",
+        url: "/app",
+        icon: LayoutDashboard,
+        roles: ["operador", "gestor", "owner"],
+      },
+    ],
   },
   {
-    title: "Fluxo de Caixa",
-    url: "/app/fluxo-de-caixa",
-    icon: FileText,
-    roles: ["operador", "gestor", "owner"],
+    label: "Operação",
+    items: [
+      {
+        title: "Despesas",
+        url: "/app/despesas",
+        icon: Wallet,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Recebimento",
+        url: "/app/recebimento",
+        icon: PackageCheck,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Fornecedores",
+        url: "/app/fornecedores",
+        icon: Truck,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Produtos",
+        url: "/app/produtos",
+        icon: Package,
+        roles: ["operador", "gestor", "owner"],
+      },
+    ],
   },
   {
-    title: "Despesas",
-    url: "/app/despesas",
-    icon: Wallet,
-    roles: ["operador", "gestor", "owner"],
+    label: "Financeiro",
+    items: [
+      {
+        title: "Fluxo de Caixa",
+        url: "/app/fluxo-de-caixa",
+        icon: FileText,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "DRE",
+        url: "/app/dre",
+        icon: BarChart3,
+        roles: ["gestor", "owner"],
+      },
+    ],
   },
   {
-    title: "Fornecedores",
-    url: "/app/fornecedores",
-    icon: Truck,
-    roles: ["operador", "gestor", "owner"],
+    label: "Gestão",
+    items: [
+      {
+        title: "Alertas",
+        url: "/app/alertas",
+        icon: Bell,
+        roles: ["gestor", "owner"],
+      },
+    ],
   },
   {
-    title: "Produtos",
-    url: "/app/produtos",
-    icon: Package,
-    roles: ["operador", "gestor", "owner"],
-  },
-  {
-    title: "Recebimento",
-    url: "/app/recebimento",
-    icon: PackageCheck,
-    roles: ["operador", "gestor", "owner"],
-  },
-  {
-    title: "Alertas",
-    url: "/app/alertas",
-    icon: Bell,
-    roles: ["gestor", "owner"],
-  },
-  {
-    title: "DRE",
-    url: "/app/dre",
-    icon: BarChart3,
-    roles: ["gestor", "owner"],
-  },
-  {
-    title: "Configurações",
-    url: "/app/configuracoes",
-    icon: Settings2,
-    roles: ["owner"],
+    label: "Sistema",
+    items: [
+      {
+        title: "Configurações",
+        url: "/app/configuracoes",
+        icon: Settings2,
+        roles: ["owner"],
+      },
+    ],
   },
 ];
 
@@ -142,9 +176,12 @@ function AppLayoutContent() {
   const location = useLocation();
   const { isMobile } = useSidebar();
 
-  const navItems = currentRole
-    ? NAV_ITEMS.filter((item) => item.roles.includes(currentRole))
-    : NAV_ITEMS;
+  const navSections = currentRole
+    ? NAV_SECTIONS.map((section) => ({
+        label: section.label,
+        items: section.items.filter((item) => item.roles.includes(currentRole)),
+      })).filter((section) => section.items.length > 0)
+    : NAV_SECTIONS.map((s) => ({ ...s, items: [...s.items] }));
   const initials = user?.email?.split("@")[0].slice(0, 2).toUpperCase() ?? "U";
 
   return (
@@ -264,39 +301,42 @@ function AppLayoutContent() {
 
       <Sidebar collapsible="icon" className="mt-12">
         <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupContent className="mt-2">
-              <SidebarMenu>
-                {navItems.map((item) => {
-                  const active = isNavActive(location.pathname, item.url);
-                  return (
-                    <SidebarMenuItem key={item.url}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={active}
-                        tooltip={item.title}
-                        className={cn(
-                          "transition-colors",
-                          active &&
-                            "bg-primary/15 text-primary shadow-sm hover:bg-primary/20 hover:text-primary data-[active=true]:bg-primary/15 data-[active=true]:text-primary",
-                        )}
-                      >
-                        <Link to={item.url}>
-                          <item.icon
-                            className={cn(
-                              "h-4 w-4 shrink-0",
-                              active && "text-primary",
-                            )}
-                          />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {navSections.map((section) => (
+            <SidebarGroup key={section.label}>
+              <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+              <SidebarGroupContent className="mt-0">
+                <SidebarMenu>
+                  {section.items.map((item) => {
+                    const active = isNavActive(location.pathname, item.url);
+                    return (
+                      <SidebarMenuItem key={item.url}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={active}
+                          tooltip={item.title}
+                          className={cn(
+                            "transition-colors",
+                            active &&
+                              "bg-primary/15 text-primary shadow-sm hover:bg-primary/20 hover:text-primary data-[active=true]:bg-primary/15 data-[active=true]:text-primary",
+                          )}
+                        >
+                          <Link to={item.url}>
+                            <item.icon
+                              className={cn(
+                                "h-4 w-4 shrink-0",
+                                active && "text-primary",
+                              )}
+                            />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
         </SidebarContent>
       </Sidebar>
       <SidebarInset className="mt-12 ">

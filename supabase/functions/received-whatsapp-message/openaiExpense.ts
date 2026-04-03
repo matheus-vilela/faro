@@ -157,7 +157,8 @@ async function fetchPdfBytesAuthenticated(
     };
   }
   const buf = new Uint8Array(await fetchRes.arrayBuffer());
-  const sniff = new TextDecoder().decode(buf.subarray(0, Math.min(80, buf.length)))
+  const sniff = new TextDecoder()
+    .decode(buf.subarray(0, Math.min(80, buf.length)))
     .trimStart()
     .toLowerCase();
   if (sniff.startsWith("<!") || sniff.startsWith("<html")) {
@@ -217,12 +218,18 @@ async function extractDocumentFromPdfUrl(
   apiKey: string,
   documentUrl: string,
   model: string,
-): Promise<{ ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
+> {
   let fileId: string | null = null;
   try {
     const downloaded = await fetchPdfBytesAuthenticated(documentUrl);
     if (!downloaded.ok) {
-      console.error("[openaiExpense] download PDF:", downloaded.error, documentUrl.slice(0, 80));
+      console.error(
+        "[openaiExpense] download PDF:",
+        downloaded.error,
+        documentUrl.slice(0, 80),
+      );
       return downloaded;
     }
     const buf = downloaded.buf;
@@ -281,7 +288,11 @@ async function extractDocumentFromPdfUrl(
 
     const rawText = await res.text();
     if (!res.ok) {
-      console.error("[openaiExpense] responses PDF", res.status, rawText.slice(0, 800));
+      console.error(
+        "[openaiExpense] responses PDF",
+        res.status,
+        rawText.slice(0, 800),
+      );
       return { ok: false, error: `OpenAI (PDF): ${res.status}` };
     }
 
@@ -294,7 +305,11 @@ async function extractDocumentFromPdfUrl(
 
     const p = parsed as Record<string, unknown>;
     if (p.status === "failed" || p.status === "cancelled") {
-      console.error("[openaiExpense] responses PDF status", p.status, rawText.slice(0, 600));
+      console.error(
+        "[openaiExpense] responses PDF status",
+        p.status,
+        rawText.slice(0, 600),
+      );
       return { ok: false, error: "OpenAI (PDF): geração falhou." };
     }
 
@@ -326,22 +341,31 @@ function safeParseJson(s: string): ExtractedDocumentResult | null {
     if (!Array.isArray(o.items)) o.items = [];
     if (o.invoiceSeries === undefined) o.invoiceSeries = null;
     // Modelo pode devolver snake_case ou número no documento
-    o.supplierDocument = strOrNull(raw.supplierDocument ?? raw.supplier_document) ??
-      o.supplierDocument ?? null;
-    o.invoiceNumber = strOrNull(raw.invoiceNumber ?? raw.invoice_number) ??
-      o.invoiceNumber ?? null;
-    o.invoiceSeries = strOrNull(raw.invoiceSeries ?? raw.invoice_series) ??
-      o.invoiceSeries ?? null;
-    o.supplierName = strOrNull(raw.supplierName ?? raw.supplier_name) ??
-      o.supplierName ?? null;
+    o.supplierDocument =
+      strOrNull(raw.supplierDocument ?? raw.supplier_document) ??
+      o.supplierDocument ??
+      null;
+    o.invoiceNumber =
+      strOrNull(raw.invoiceNumber ?? raw.invoice_number) ??
+      o.invoiceNumber ??
+      null;
+    o.invoiceSeries =
+      strOrNull(raw.invoiceSeries ?? raw.invoice_series) ??
+      o.invoiceSeries ??
+      null;
+    o.supplierName =
+      strOrNull(raw.supplierName ?? raw.supplier_name) ??
+      o.supplierName ??
+      null;
     if (typeof raw.likelyNotEffectivePurchase === "boolean") {
       o.likelyNotEffectivePurchase = raw.likelyNotEffectivePurchase;
     } else {
       o.likelyNotEffectivePurchase = false;
     }
     o.likelyNotPurchaseReason =
-      strOrNull(raw.likelyNotPurchaseReason ?? raw.likely_not_purchase_reason) ??
-        null;
+      strOrNull(
+        raw.likelyNotPurchaseReason ?? raw.likely_not_purchase_reason,
+      ) ?? null;
     return o;
   } catch {
     return null;
@@ -355,9 +379,14 @@ export async function extractDocumentWithOpenAI(params: {
   imageUrl?: string;
   /** URL temporária do PDF (ex.: Z-API) — usa Responses API + upload de arquivo */
   documentUrl?: string;
-}): Promise<{ ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }> {
+}): Promise<
+  { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
+> {
   const { apiKey, mode } = params;
-  const baseModel = Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4o-mini";
+  const baseModel =
+    Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4.1-mini";
+  // Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4o-mini";
+
   /** Romaneios/tabelas: opcionalmente use gpt-4o (OPENAI_EXPENSE_VISION_MODEL) para melhor alinhamento linha a linha. */
   const model =
     mode === "image"
@@ -460,10 +489,7 @@ export function sumItems(items: ExtractedExpenseItem[]): number {
 }
 
 /** Compara total do documento com soma dos itens (tolerância centavos + arredondamento) */
-export function totalsMatch(
-  totalDoc: number,
-  sumItemsVal: number,
-): boolean {
+export function totalsMatch(totalDoc: number, sumItemsVal: number): boolean {
   const a = Math.round(totalDoc * 100) / 100;
   const b = Math.round(sumItemsVal * 100) / 100;
   if (a === b) return true;
