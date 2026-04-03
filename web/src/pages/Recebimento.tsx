@@ -37,8 +37,18 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Recebimento } from "@/types/recebimento";
-import { Check, PackageCheck, PackageX, Share2 } from "lucide-react";
+import {
+  Banknote,
+  Calendar,
+  Check,
+  Hash,
+  PackageCheck,
+  PackageX,
+  Share2,
+  User,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -51,6 +61,8 @@ interface ItemStatus {
 
 type CompanyMemberRow = { id: string; name: string };
 
+type RecebimentoStatusFilter = "all" | "pending" | "received";
+
 export function Recebimento() {
   const { currentCompany, currentRole } = useCompany();
   const canAssignShare = currentRole === "owner" || currentRole === "gestor";
@@ -59,6 +71,8 @@ export function Recebimento() {
   const [recebimentosPage, setRecebimentosPage] = useState(1);
   const [recebimentosSearch, setRecebimentosSearch] = useState("");
   const debouncedSearch = useDebounce(recebimentosSearch, 300);
+  const [statusFilter, setStatusFilter] =
+    useState<RecebimentoStatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [detailRecebimento, setDetailRecebimento] =
@@ -135,7 +149,12 @@ export function Recebimento() {
         { count: "exact" },
       )
       .in("expense_id", expenseIds)
-      .order("created_at", { ascending: false });
+      .order("updated_at", { ascending: false });
+    if (statusFilter === "pending") {
+      query = query.eq("status", "pending");
+    } else if (statusFilter === "received") {
+      query = query.eq("status", "received");
+    }
     if (debouncedSearch.trim()) {
       const term = `%${debouncedSearch.trim()}%`;
       const { data: expFilter } = await supabase
@@ -197,7 +216,7 @@ export function Recebimento() {
     setRecebimentos(rows);
     setRecebimentosCount(count ?? 0);
     setLoading(false);
-  }, [currentCompany, debouncedSearch, recebimentosPage]);
+  }, [currentCompany, debouncedSearch, recebimentosPage, statusFilter]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchRecebimentos());
@@ -320,39 +339,72 @@ export function Recebimento() {
         description="Ao compartilhar o link, você pode associar um membro da empresa ao recebimento (referência). Qualquer pessoa com o link pode confirmar."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <PackageCheck className="h-5 w-5" />
-            Cards de recebimento
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b bg-muted/30 pb-4">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <PackageCheck className="h-5 w-5 text-primary" />
+            Recebimentos
           </CardTitle>
-          <CardDescription>
-            Cada despesa gera um card. Use &quot;Compartilhar link&quot; para
-            vincular um membro (referência) e copiar o endereço (proprietário ou
-            gestor).
+          <CardDescription className="text-pretty">
+            Cada despesa gera um recebimento. Use &quot;Compartilhar link&quot;
+            para vincular um membro de referência e copiar o endereço (somente
+            proprietário ou gestor).
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
-            <Input
-              placeholder="Filtrar por fornecedor ou nota..."
-              value={recebimentosSearch}
-              onChange={(e) => {
-                setRecebimentosSearch(e.target.value);
-                setRecebimentosPage(1);
-              }}
-              className="max-w-sm"
-            />
+        <CardContent className="pt-6">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+            <div className="flex flex-col gap-1.5 sm:min-w-[200px]">
+              <Label htmlFor="recebimento-search" className="text-xs">
+                Buscar
+              </Label>
+              <Input
+                id="recebimento-search"
+                placeholder="Filtrar por fornecedor ou nota..."
+                value={recebimentosSearch}
+                onChange={(e) => {
+                  setRecebimentosSearch(e.target.value);
+                  setRecebimentosPage(1);
+                }}
+                className="max-w-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 w-full sm:w-auto sm:min-w-[220px]">
+              <Label htmlFor="recebimento-status" className="text-xs">
+                Situação
+              </Label>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  setStatusFilter(v as RecebimentoStatusFilter);
+                  setRecebimentosPage(1);
+                }}
+              >
+                <SelectTrigger id="recebimento-status" className="w-full">
+                  <SelectValue placeholder="Situação" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="pending">Somente pendentes</SelectItem>
+                  <SelectItem value="received">Somente confirmados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground -mt-1 mb-4">
+            Ordenados pela última atualização do recebimento.
+          </p>
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : recebimentos.length === 0 ? (
             <p className="text-muted-foreground">
-              Nenhum card de recebimento. As despesas criadas geram cards
-              automaticamente.
+              {statusFilter === "pending"
+                ? "Nenhum recebimento pendente no momento."
+                : statusFilter === "received"
+                  ? "Nenhum recebimento confirmado encontrado."
+                  : "Nenhum card de recebimento. As despesas criadas geram cards automaticamente."}
             </p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {recebimentos.map((r) => {
                 const exp = r.expenses as Recebimento["expenses"];
                 const items = exp?.expense_items ?? [];
@@ -372,8 +424,17 @@ export function Recebimento() {
                 const badgeLabel = !isReceived
                   ? "Pendente"
                   : hasPendingReceipt
-                    ? "Confirmado com pendências"
+                    ? "Com pendências"
                     : "Confirmado";
+                const statusStripe = !isReceived
+                  ? "bg-muted-foreground/35"
+                  : hasPendingReceipt
+                    ? "bg-amber-500"
+                    : "bg-emerald-600";
+                const title =
+                  exp?.display_name?.trim() ||
+                  exp?.supplier_name ||
+                  "Sem fornecedor";
                 return (
                   <div
                     key={r.id}
@@ -397,56 +458,123 @@ export function Recebimento() {
                           }
                         : undefined
                     }
-                    className={`rounded-lg border p-4 space-y-3 ${
-                      isReceived
-                        ? "cursor-pointer hover:bg-muted/50 transition-colors"
-                        : ""
-                    }`}
+                    className={cn(
+                      "rounded-xl border bg-card text-left shadow-sm transition-[box-shadow,background-color]",
+                      isReceived &&
+                        "cursor-pointer hover:bg-muted/40 hover:shadow-md",
+                    )}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium">
-                            {exp?.display_name?.trim() ||
-                              exp?.supplier_name ||
-                              "Sem fornecedor"}
-                          </span>
-                          {exp?.invoice_number && (
-                            <span className="text-sm text-muted-foreground">
-                              Nota {exp.invoice_number}
-                            </span>
-                          )}
-                          <Badge
-                            variant={isReceived ? "default" : "secondary"}
-                            className={
-                              isReceived
-                                ? hasPendingReceipt
-                                  ? "bg-amber-600"
-                                  : "bg-green-600"
-                                : ""
-                            }
+                    <div
+                      className={cn("h-1 rounded-t-[inherit]", statusStripe)}
+                      aria-hidden
+                    />
+                    <div className="p-4 sm:p-5">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex min-w-0 flex-1 gap-3">
+                          <div
+                            className={cn(
+                              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border",
+                              !isReceived &&
+                                "bg-muted/80 text-muted-foreground",
+                              isReceived &&
+                                !hasPendingReceipt &&
+                                "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                              isReceived &&
+                                hasPendingReceipt &&
+                                "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+                            )}
                           >
-                            {badgeLabel}
-                          </Badge>
+                            <PackageCheck className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-3">
+                              <div className="min-w-0">
+                                <p className="font-semibold leading-snug text-foreground">
+                                  {title}
+                                </p>
+                                {exp?.invoice_number && (
+                                  <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+                                    <Hash className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                    Nota {exp.invoice_number}
+                                  </p>
+                                )}
+                              </div>
+                              <Badge
+                                variant={isReceived ? "default" : "secondary"}
+                                className={cn(
+                                  "shrink-0 self-start sm:self-center",
+                                  isReceived &&
+                                    !hasPendingReceipt &&
+                                    "bg-emerald-600 hover:bg-emerald-600/90",
+                                  isReceived &&
+                                    hasPendingReceipt &&
+                                    "bg-amber-600 hover:bg-amber-600/90",
+                                )}
+                              >
+                                {badgeLabel}
+                              </Badge>
+                            </div>
+
+                            <dl
+                              className={cn(
+                                "grid grid-cols-2 gap-3 text-sm",
+                                r.assigned_company_member_id
+                                  ? "sm:grid-cols-4"
+                                  : "sm:grid-cols-3",
+                              )}
+                            >
+                              <div className="space-y-0.5">
+                                <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  <Calendar className="h-3.5 w-3.5" />
+                                  Criado
+                                </dt>
+                                <dd className="tabular-nums text-foreground">
+                                  {formatDate(r.created_at)}
+                                </dd>
+                              </div>
+                              <div className="space-y-0.5">
+                                <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  <Banknote className="h-3.5 w-3.5" />
+                                  Total
+                                </dt>
+                                <dd className="font-medium tabular-nums text-foreground">
+                                  {formatCurrency(total)}
+                                </dd>
+                              </div>
+                              <div className="space-y-0.5">
+                                <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  Itens
+                                </dt>
+                                <dd className="tabular-nums text-foreground">
+                                  {items.length}{" "}
+                                  {items.length === 1 ? "item" : "itens"}
+                                </dd>
+                              </div>
+                              {r.assigned_company_member_id ? (
+                                <div className="col-span-2 space-y-0.5 sm:col-span-1">
+                                  <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                    <User className="h-3.5 w-3.5" />
+                                    Referência
+                                  </dt>
+                                  <dd className="truncate text-foreground">
+                                    {r.assigned_member?.name?.trim() || "—"}
+                                  </dd>
+                                </div>
+                              ) : null}
+                            </dl>
+
+                            {hasPendingReceipt && (
+                              <p className="rounded-lg border border-amber-500/35 bg-amber-500/8 px-3 py-2 text-sm text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">
+                                Há itens com falta ou recebimento parcial — abra
+                                o card para ver o detalhe.
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {formatDate(r.created_at)} • {items.length} item(ns) •{" "}
-                          {formatCurrency(total)}
-                          {r.assigned_company_member_id && (
-                            <span className="block sm:inline sm:ml-1 mt-0.5 sm:mt-0 text-foreground/90">
-                              • Membro (ref.):{" "}
-                              {r.assigned_member?.name?.trim() || "—"}
-                            </span>
-                          )}
-                          {hasPendingReceipt && (
-                            <span className="text-amber-600 dark:text-amber-500 font-medium ml-1">
-                              • Faltas ou recebimento parcial
-                            </span>
-                          )}
-                        </p>
                       </div>
+
                       <div
-                        className="flex items-center gap-2"
+                        className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border/60 pt-4"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {!isReceived && (

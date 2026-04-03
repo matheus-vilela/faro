@@ -1,7 +1,6 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -44,6 +43,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
@@ -58,7 +58,14 @@ import {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { Copy, FileText, Plus, Trash2, Wallet } from "lucide-react";
+import {
+  Copy,
+  FileText,
+  MessageCircle,
+  Plus,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -729,6 +736,8 @@ export function Despesas() {
                 const isHighlight = highlightExpenseId === exp.id;
                 const boleto = getBoletoForExpense(exp.id);
                 const linked = !!boleto;
+                const pendingOwnerApproval =
+                  exp.expense_source === "whatsapp" && exp.status === "pending";
                 return (
                   <div
                     key={exp.id}
@@ -739,9 +748,7 @@ export function Despesas() {
                     onKeyDown={(e) =>
                       e.key === "Enter" && setDetailExpenseId(exp.id)
                     }
-                    className={`flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors cursor-pointer hover:bg-muted/50 ${
-                      isHighlight ? "ring-2 ring-primary" : ""
-                    }`}
+                    className={`flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors cursor-pointer ${"hover:bg-muted/50"} ${isHighlight ? "" : ""}`}
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium flex flex-wrap items-center gap-2">
@@ -750,16 +757,19 @@ export function Despesas() {
                             TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS] ||
                             "Sem fornecedor"}
                         </span>
-                        {exp.expense_source === "whatsapp" &&
-                          exp.status === "pending" && (
-                            <Badge
-                              variant="outline"
-                              className="text-xs font-normal"
-                            >
-                              WhatsApp · aguardando dono
-                            </Badge>
-                          )}
                       </p>
+                      {pendingOwnerApproval && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md border border-amber-600/25 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100 mt-1"
+                          title="Importação pelo WhatsApp — aguardando aprovação do proprietário "
+                        >
+                          <MessageCircle
+                            className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300"
+                            aria-hidden
+                          />
+                          Pendente de aprovação
+                        </span>
+                      )}
                       {exp.supplier_document && (
                         <p className="text-sm text-muted-foreground mt-0.5">
                           {formatDocForDisplay(exp.supplier_document)}
@@ -1043,7 +1053,6 @@ export function Despesas() {
         }}
         onRefresh={fetchData}
       />
-
     </PageShell>
   );
 }

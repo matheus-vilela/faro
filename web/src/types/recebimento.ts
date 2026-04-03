@@ -8,6 +8,7 @@ export interface Recebimento {
   assigned_member?: { id: string; name: string } | null
   created_at: string
   received_at: string | null
+  updated_at: string
   expenses?: {
     supplier_name: string | null
     display_name: string | null
