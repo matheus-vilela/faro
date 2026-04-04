@@ -1,8 +1,9 @@
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { DreTreeNode } from "@/lib/dre/dreTree";
 import { formatBrl } from "@/lib/dre/formatBrl";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,8 @@ interface DreExpandableLineProps {
   tree?: DreTreeNode[] | null;
   treeDisplayNegative?: boolean;
   defaultOpen?: boolean;
+  /** Valor único para o item do accordion (Radix `AccordionItem`) */
+  accordionValue: string;
   className?: string;
 }
 
@@ -38,6 +41,7 @@ export function DreExpandableLine({
   tree,
   treeDisplayNegative,
   defaultOpen = false,
+  accordionValue,
   className,
 }: DreExpandableLineProps) {
   const hasTree = tree && tree.length > 0;
@@ -75,39 +79,41 @@ export function DreExpandableLine({
   }
 
   return (
-    <Collapsible defaultOpen={defaultOpen} className={cn("group/line", className)}>
-      <CollapsibleTrigger
-        className={cn(
-          "flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md py-2.5 text-left text-sm sm:text-base outline-none",
-          "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          {prefix ? (
-            <span className="w-6 shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
-              {prefix}
+    <Accordion
+      type="single"
+      collapsible
+      defaultValue={defaultOpen ? accordionValue : undefined}
+      className={cn(className)}
+    >
+      <AccordionItem value={accordionValue} className="border-0">
+        <AccordionTrigger className="hover:no-underline flex w-full min-w-0 items-baseline justify-between gap-3 rounded-md py-2.5 text-sm sm:text-base">
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            {prefix ? (
+              <span className="w-6 shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
+                {prefix}
+              </span>
+            ) : (
+              <span className="w-6 shrink-0" aria-hidden />
+            )}
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="min-w-0 truncate font-medium">{label}</span>
+              <ChevronDown
+                className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/accordion-trigger:rotate-180"
+                aria-hidden
+              />
             </span>
-          ) : (
-            <span className="w-6 shrink-0" aria-hidden />
-          )}
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 truncate font-medium">{label}</span>
-            <ChevronDown
-              className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/line:rotate-180"
-              aria-hidden
-            />
           </span>
-        </span>
-        {amountBlock}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pb-3 pl-4 sm:pl-8">
-        <DreTreePanel
-          nodes={tree!}
-          valueClassName={valueCls}
-          displayNegative={treeDisplayNegative}
-        />
-      </CollapsibleContent>
-    </Collapsible>
+          {amountBlock}
+        </AccordionTrigger>
+        <AccordionContent className="pl-4 sm:pl-8">
+          <DreTreePanel
+            nodes={tree!}
+            valueClassName={valueCls}
+            displayNegative={treeDisplayNegative}
+          />
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 }
 
