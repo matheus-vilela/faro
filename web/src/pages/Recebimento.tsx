@@ -3,13 +3,7 @@ import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -340,18 +334,7 @@ export function Recebimento() {
       />
 
       <Card className="overflow-hidden">
-        <CardHeader className="border-b bg-muted/30 pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <PackageCheck className="h-5 w-5 text-primary" />
-            Recebimentos
-          </CardTitle>
-          <CardDescription className="text-pretty">
-            Cada despesa gera um recebimento. Use &quot;Compartilhar link&quot;
-            para vincular um membro de referência e copiar o endereço (somente
-            proprietário ou gestor).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
+        <CardContent className="">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-start">
             <div className="flex flex-col gap-1.5 sm:min-w-[240px] ">
               <Label htmlFor="recebimento-search" className="text-xs">

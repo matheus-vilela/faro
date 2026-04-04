@@ -9,16 +9,19 @@ import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
 import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
+import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
 import { Dashboard } from "@/pages/Dashboard";
 import { Despesas } from "@/pages/Despesas";
 import { Dre } from "@/pages/Dre";
+import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
+import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
 import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
 import { Register } from "@/pages/Register";
 import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
@@ -58,6 +61,7 @@ function AuthenticatedLayout() {
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
+          <Route path="checklists" element={<Checklists />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
@@ -97,6 +101,8 @@ function AppRoutes() {
       <Route path="/e/:slug" element={<RedirectWhatsappExpenseDraftSlug />} />
       {/* Rascunho de despesa (WhatsApp): público, token no URL; não usar ProtectedRoute */}
       <Route path="/w/:token" element={<ValidarDespesaWhatsapp />} />
+      <Route path="/k/:slug" element={<RedirectChecklistSlug />} />
+      <Route path="/checklist/:token" element={<ExecutarChecklist />} />
       <Route
         path="/*"
         element={

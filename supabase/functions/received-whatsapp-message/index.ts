@@ -6,6 +6,11 @@ import {
   tryHandleExpenseDraftReply,
   tryHandleIncomingExpenseDocument,
 } from "./whatsappExpenseFlow.ts";
+import {
+  isChecklistCommand,
+  sendChecklistMenu,
+  tryChecklistNumericReply,
+} from "./whatsappChecklistFlow.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 /**
@@ -23,15 +28,16 @@ import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
  * Opcional: ZAPI_WEBHOOK_SECRET
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
- *   — recebimentos (/c/, /s/) e rascunho de despesa WhatsApp (/w/:token ou /e/:slug)
+ *   — recebimentos (/c/, /s/), checklist (/checklist/:token ou /k/:slug), rascunho despesa WhatsApp (/w/:token ou /e/:slug)
  * Opcional (despesa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
  *   PDF: OPENAI_EXPENSE_PDF_MODEL (default gpt-4o) + Responses API; download de mídia Z-API usa o mesmo ZAPI_CLIENT_TOKEN.
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
- * Comandos de texto: *lista* (pendentes + menu numérico), *comandos* (lista de ajuda).
+ * Comandos de texto: *lista* (pendentes + menu numérico), *checklist* (checklists atribuídos ao número do membro),
+ * *comandos* (lista de ajuda).
  * Proprietário também vê *contas a pagar* na ajuda e pode usá-lo (7 dias).
- * Membro ativo: *comandos* só lista *lista* e *comandos* (sem *contas a pagar*).
- * Número 1–20 após *lista* escolhe opção do último menu.
+ * Quem tem número de membro vê *checklist* se houver checklists atribuídos.
+ * Número 1–20 após *lista* ou *checklist* escolhe opção do último menu correspondente.
  */
 
 // --- Tipos (payload Z-API) -------------------------------------------------
@@ -662,7 +668,10 @@ async function buildContasAPagarWhatsappMessage(
   return `${header}${blocks.join("\n\n")}${footer}`;
 }
 
-function buildComandosWhatsappMessage(isOwner: boolean): string {
+function buildComandosWhatsappMessage(
+  isOwner: boolean,
+  includeChecklist: boolean,
+): string {
   const lines = [
     "*Comandos disponíveis*",
     "",
@@ -670,6 +679,12 @@ function buildComandosWhatsappMessage(isOwner: boolean): string {
     "",
     "*comandos* — mostra esta lista de comandos.",
   ];
+  if (includeChecklist) {
+    lines.push(
+      "",
+      "*checklist* — lista checklists atribuídos ao seu número para executar.",
+    );
+  }
   if (isOwner) {
     lines.push(
       "",
@@ -760,6 +775,12 @@ async function saveMenuState(
 ): Promise<void> {
   await supabase
     .from("whatsapp_recebimento_menu")
+    .delete()
+    .eq("sender_phone_normalized", senderPhone)
+    .eq("company_id", companyId);
+
+  await supabase
+    .from("whatsapp_checklist_menu")
     .delete()
     .eq("sender_phone_normalized", senderPhone)
     .eq("company_id", companyId);
@@ -1052,6 +1073,27 @@ async function handleRecebimentoTextFlow(
   const opt = parseMenuOptionNumber(text);
   if (opt !== null) {
     flowLog("menu_numerico", { flowId, companyId: auth.companyId, opcao: opt });
+    const checklistHandled = await tryChecklistNumericReply(
+      supabase,
+      {
+        companyId: auth.companyId,
+        senderNormalized: auth.senderNormalized,
+        companyMemberId,
+        role: auth.role,
+      },
+      opt,
+      sendWhatsappMessage,
+      flowId,
+    );
+    if (checklistHandled) {
+      flowLog("processamento_fim", {
+        flowId,
+        branch: "checklist_menu_resolvido",
+        handled: true,
+      });
+      return true;
+    }
+
     const ids = await loadLatestMenu(
       supabase,
       auth.companyId,
@@ -1066,7 +1108,7 @@ async function handleRecebimentoTextFlow(
       await sendWhatsappMessage(
         auth.senderNormalized,
         withFaroFlowFooter(
-          "Não encontrei um menu de recebimentos recente. Envie *lista* para ver as opções pendentes.",
+          "Não encontrei um menu recente. Envie *lista* (recebimentos) ou *checklist* (membros) para ver as opções.",
         ),
         "recebimento_menu_sem_estado",
         flowId,
@@ -1163,7 +1205,12 @@ async function handleRecebimentoTextFlow(
   if (isComandosCommand(text)) {
     await sendWhatsappMessage(
       auth.senderNormalized,
-      withFaroFlowFooter(buildComandosWhatsappMessage(isOwner)),
+      withFaroFlowFooter(
+        buildComandosWhatsappMessage(
+          isOwner,
+          Boolean(companyMemberId),
+        ),
+      ),
       "recebimento_comandos_ajuda",
       flowId,
     );
@@ -1205,6 +1252,26 @@ async function handleRecebimentoTextFlow(
     flowLog("processamento_fim", {
       flowId,
       branch: "contas_a_pagar_enviado",
+      handled: true,
+    });
+    return true;
+  }
+
+  if (isChecklistCommand(text)) {
+    await sendChecklistMenu(
+      supabase,
+      {
+        companyId: auth.companyId,
+        senderNormalized: auth.senderNormalized,
+        companyMemberId,
+        role: auth.role,
+      },
+      sendWhatsappMessage,
+      flowId,
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "checklist_menu_comando",
       handled: true,
     });
     return true;

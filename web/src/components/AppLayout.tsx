@@ -35,6 +35,7 @@ import {
   Building2,
   FileText,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Monitor,
   Moon,
@@ -80,6 +81,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         title: "Recebimento",
         url: "/app/recebimento",
         icon: PackageCheck,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Checklists",
+        url: "/app/checklists",
+        icon: ListChecks,
         roles: ["operador", "gestor", "owner"],
       },
       {
