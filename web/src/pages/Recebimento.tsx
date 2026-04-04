@@ -352,8 +352,8 @@ export function Recebimento() {
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-            <div className="flex flex-col gap-1.5 sm:min-w-[200px]">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-start">
+            <div className="flex flex-col gap-1.5 sm:min-w-[240px] ">
               <Label htmlFor="recebimento-search" className="text-xs">
                 Buscar
               </Label>
