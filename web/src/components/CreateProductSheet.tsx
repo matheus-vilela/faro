@@ -59,6 +59,7 @@ export function CreateProductSheet({
   const [sku, setSku] = useState('')
   const [unit, setUnit] = useState('un')
   const [minQuantity, setMinQuantity] = useState('')
+  const [barcode, setBarcode] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,6 +76,7 @@ export function CreateProductSheet({
         unit,
         min_quantity: parseFloat(minQuantity || '0') || 0,
         current_quantity: 0,
+        barcode: barcode.trim() || null,
       })
       .select()
       .single()
@@ -88,6 +90,7 @@ export function CreateProductSheet({
     setSku('')
     setUnit('un')
     setMinQuantity('')
+    setBarcode('')
     onOpenChange(false)
     onSuccess?.(product)
   }
@@ -124,6 +127,14 @@ export function CreateProductSheet({
             <p className="text-xs text-muted-foreground mt-1">
               Informe um código ou deixe em branco para gerar um aleatório
             </p>
+          </div>
+          <div>
+            <Label>Código de barras (etiquetas)</Label>
+            <Input
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="Opcional — EAN ou código alfanumérico"
+            />
           </div>
           <div>
             <Label>Unidade</Label>

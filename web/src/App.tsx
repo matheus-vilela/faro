@@ -21,7 +21,9 @@ import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
+import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
+import { RedirectInventorySlug } from "@/pages/RedirectInventorySlug";
 import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
 import { Register } from "@/pages/Register";
 import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
@@ -102,6 +104,8 @@ function AppRoutes() {
       {/* Rascunho de despesa (WhatsApp): público, token no URL; não usar ProtectedRoute */}
       <Route path="/w/:token" element={<ValidarDespesaWhatsapp />} />
       <Route path="/k/:slug" element={<RedirectChecklistSlug />} />
+      <Route path="/i/:slug" element={<RedirectInventorySlug />} />
+      <Route path="/contagem-estoque/:token" element={<ContagemEstoquePublic />} />
       <Route path="/checklist/:token" element={<ExecutarChecklist />} />
       <Route
         path="/*"

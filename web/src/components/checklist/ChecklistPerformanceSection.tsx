@@ -162,9 +162,7 @@ export function ChecklistPerformanceSection({
               Desempenho por operador
             </CardTitle>
             <CardDescription className="mt-1 max-w-prose">
-              Atingimento da meta esperada pela recorrência de cada checklist
-              (janelas rolantes). O anel mostra a porcentagem alcançada; no modo
-              comparativo, 7 e 30 dias ficam lado a lado em telas maiores.
+              Atingimento da meta esperada pela recorrência de cada checklist.
             </CardDescription>
           </div>
           <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">

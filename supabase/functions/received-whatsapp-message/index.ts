@@ -11,6 +11,10 @@ import {
   sendChecklistMenu,
   tryChecklistNumericReply,
 } from "./whatsappChecklistFlow.ts";
+import {
+  isInventoryCommand,
+  sendInventoryCountLink,
+} from "./whatsappInventoryFlow.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 /**
@@ -28,13 +32,13 @@ import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
  * Opcional: ZAPI_WEBHOOK_SECRET
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
- *   — recebimentos (/c/, /s/), checklist (/checklist/:token ou /k/:slug), rascunho despesa WhatsApp (/w/:token ou /e/:slug)
+ *   — recebimentos (/c/, /s/), checklist (/checklist/:token ou /k/:slug), contagem estoque (/contagem-estoque/:token ou /i/:slug), rascunho despesa WhatsApp (/w/:token ou /e/:slug)
  * Opcional (despesa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
  *   PDF: OPENAI_EXPENSE_PDF_MODEL (default gpt-4o) + Responses API; download de mídia Z-API usa o mesmo ZAPI_CLIENT_TOKEN.
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
  * Comandos de texto: *lista* (pendentes + menu numérico), *checklist* (checklists atribuídos ao número do membro),
- * *comandos* (lista de ajuda).
+ * *estoque* / *inventario* (link de contagem de inventário), *comandos* (lista de ajuda).
  * Proprietário também vê *contas a pagar* na ajuda e pode usá-lo (7 dias).
  * Quem tem número de membro vê *checklist* se houver checklists atribuídos.
  * Número 1–20 após *lista* ou *checklist* escolhe opção do último menu correspondente.
@@ -679,6 +683,10 @@ function buildComandosWhatsappMessage(
     "",
     "*comandos* — mostra esta lista de comandos.",
   ];
+  lines.push(
+    "",
+    "*estoque* ou *inventario* — recebe o link para contagem de estoque (informar quantidades).",
+  );
   if (includeChecklist) {
     lines.push(
       "",
@@ -1108,7 +1116,7 @@ async function handleRecebimentoTextFlow(
       await sendWhatsappMessage(
         auth.senderNormalized,
         withFaroFlowFooter(
-          "Não encontrei um menu recente. Envie *lista* (recebimentos) ou *checklist* (membros) para ver as opções.",
+          "Não encontrei um menu recente. Envie *lista*, *estoque* ou *checklist* para ver as opções.",
         ),
         "recebimento_menu_sem_estado",
         flowId,
@@ -1252,6 +1260,25 @@ async function handleRecebimentoTextFlow(
     flowLog("processamento_fim", {
       flowId,
       branch: "contas_a_pagar_enviado",
+      handled: true,
+    });
+    return true;
+  }
+
+  if (isInventoryCommand(text)) {
+    await sendInventoryCountLink(
+      supabase,
+      {
+        companyId: auth.companyId,
+        senderNormalized: auth.senderNormalized,
+        companyMemberId,
+      },
+      sendWhatsappMessage,
+      flowId,
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "inventory_link_comando",
       handled: true,
     });
     return true;

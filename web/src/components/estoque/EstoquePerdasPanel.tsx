@@ -1,0 +1,222 @@
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { supabase } from "@/lib/supabase";
+import type { Product } from "@/types/product";
+import { Loader2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+
+type WasteRow = {
+  id: string;
+  quantity: number;
+  reason: string | null;
+  created_at: string;
+  products: { name: string; unit: string } | null;
+};
+
+export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [rows, setRows] = useState<WasteRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [productId, setProductId] = useState("");
+  const [qty, setQty] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [p, w] = await Promise.all([
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .or("is_active.is.null,is_active.eq.true")
+        .order("name"),
+      supabase
+        .from("product_waste")
+        .select(
+          "id, quantity, reason, created_at, products!inner(name, unit, company_id)",
+        )
+        .eq("products.company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(80),
+    ]);
+    setLoading(false);
+    setProducts((p.data ?? []) as Product[]);
+    setRows((w.data ?? []) as unknown as WasteRow[]);
+  }, [companyId]);
+
+  useEffect(() => {
+    queueMicrotask(() => void load());
+  }, [load]);
+
+  const submit = async () => {
+    if (!productId) {
+      toast.error("Selecione o produto.");
+      return;
+    }
+    const q = parseFloat(qty);
+    if (Number.isNaN(q) || q <= 0) {
+      toast.error("Informe uma quantidade válida.");
+      return;
+    }
+    setSaving(true);
+    const { data: w, error: we } = await supabase
+      .from("product_waste")
+      .insert({
+        company_id: companyId,
+        product_id: productId,
+        quantity: q,
+        reason: reason.trim() || null,
+      })
+      .select("id")
+      .single();
+
+    if (we || !w?.id) {
+      console.error(we);
+      toast.error("Não foi possível registrar a perda.");
+      setSaving(false);
+      return;
+    }
+
+    const wid = w.id as string;
+    const { error: ae } = await supabase.rpc("adjust_product_stock", {
+      p_product_id: productId,
+      p_delta: -q,
+      p_type: "out",
+      p_reference_type: "waste",
+      p_reference_id: wid,
+      p_unit_value: null,
+    });
+
+    if (ae) {
+      console.error(ae);
+      await supabase.from("product_waste").delete().eq("id", wid);
+      toast.error("Estoque insuficiente ou erro ao baixar.");
+      setSaving(false);
+      return;
+    }
+
+    toast.success("Perda registrada e estoque atualizado.");
+    setQty("");
+    setReason("");
+    setSaving(false);
+    void load();
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Trash2 className="h-4 w-4" />
+          Controle de desperdícios
+        </CardTitle>
+        <CardDescription>
+          Registre perdas e avarias para manter o estoque alinhado à realidade e
+          identificar itens críticos.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
+          <div className="space-y-2 sm:col-span-2">
+            <Label>Produto</Label>
+            <Select value={productId || "__"} onValueChange={(v) => setProductId(v === "__" ? "" : v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecionar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__">—</SelectItem>
+                {products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Quantidade</Label>
+            <Input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2 sm:col-span-2">
+            <Label>Motivo (opcional)</Label>
+            <Textarea
+              rows={2}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Validade, quebra, preparo errado…"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Button
+              type="button"
+              disabled={saving}
+              onClick={() => void submit()}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando…
+                </>
+              ) : (
+                "Registrar perda"
+              )}
+            </Button>
+          </div>
+        </div>
+
+        <div>
+          <h4 className="mb-2 text-sm font-medium">Histórico recente</h4>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Carregando…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum registro.</p>
+          ) : (
+            <ul className="divide-y rounded-md border text-sm">
+              {rows.map((r) => (
+                <li key={r.id} className="flex flex-wrap justify-between gap-2 p-3">
+                  <div>
+                    <span className="font-medium">{r.products?.name ?? "—"}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — {Number(r.quantity).toLocaleString("pt-BR")}{" "}
+                      {r.products?.unit}
+                    </span>
+                    {r.reason && (
+                      <p className="text-xs text-muted-foreground">{r.reason}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(r.created_at).toLocaleString("pt-BR")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

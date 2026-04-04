@@ -24,7 +24,13 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyMember } from "@/types/companyMember";
-import { CalendarClock, ChevronLeft, ChevronRight, History, Loader2 } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Loader2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type ChecklistOption = { id: string; title: string };
@@ -74,10 +80,7 @@ export function ChecklistHistorySection({
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const checklistIds = useMemo(
-    () => checklists.map((c) => c.id),
-    [checklists],
-  );
+  const checklistIds = useMemo(() => checklists.map((c) => c.id), [checklists]);
 
   const bounds = useMemo(() => {
     try {
@@ -133,14 +136,8 @@ export function ChecklistHistorySection({
       setRows([]);
       return;
     }
-    setRows((data ?? []) as HistoryRow[]);
-  }, [
-    companyId,
-    checklistIds,
-    bounds,
-    filterChecklist,
-    filterMember,
-  ]);
+    setRows((data ?? []) as unknown as HistoryRow[]);
+  }, [companyId, checklistIds, bounds, filterChecklist, filterMember]);
 
   useEffect(() => {
     void load();
@@ -162,8 +159,8 @@ export function ChecklistHistorySection({
         </CardTitle>
         <CardDescription>
           Consulte envios concluídos por data (fuso America/Sao_Paulo, mesmo
-          critério da recorrência). Útil para auditar se o checklist foi feito em
-          um dia específico.
+          critério da recorrência). Útil para auditar se o checklist foi feito
+          em um dia específico.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -271,10 +268,7 @@ export function ChecklistHistorySection({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Checklist</Label>
-            <Select
-              value={filterChecklist}
-              onValueChange={setFilterChecklist}
-            >
+            <Select value={filterChecklist} onValueChange={setFilterChecklist}>
               <SelectTrigger>
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
@@ -320,7 +314,12 @@ export function ChecklistHistorySection({
               </>
             ) : null}
           </span>
-          <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void load()}
+          >
             Atualizar
           </Button>
         </div>
@@ -350,7 +349,10 @@ export function ChecklistHistorySection({
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-border/60 last:border-0">
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/60 last:border-0"
+                  >
                     <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
                       {formatSubmittedAt(r.submitted_at)}
                     </td>
@@ -365,8 +367,8 @@ export function ChecklistHistorySection({
               </tbody>
             </table>
             <p className="border-t bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              {rows.length} envio{rows.length !== 1 ? "s" : ""} · apenas runs com
-              status concluído.
+              {rows.length} envio{rows.length !== 1 ? "s" : ""} · apenas runs
+              com status concluído.
             </p>
           </div>
         )}

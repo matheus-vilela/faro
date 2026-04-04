@@ -492,7 +492,7 @@ export function Checklists() {
     <PageShell>
       <PageHeader
         title="Checklists"
-        description="Recorrência diária (dias da semana e quantas execuções em cada um) ou mensal (até 3× por mês civil). No WhatsApp: *checklist* e o número para abrir o link público."
+        description="Recorrência diária (dias da semana e quantas execuções em cada um) ou mensal (até 3× por mês). Envie no WhatsApp: 'checklist' e o número para abrir o link para a rotina."
         action={
           <Button type="button" size="sm" onClick={openCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -710,7 +710,7 @@ export function Checklists() {
               </>
             ) : (
               <div className="space-y-2">
-                <Label>Execuções por mês civil</Label>
+                <Label>Execuções por mês</Label>
                 <Select
                   value={monthlyExecutions}
                   onValueChange={setMonthlyExecutions}

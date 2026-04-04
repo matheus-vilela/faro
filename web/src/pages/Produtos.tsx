@@ -1,4 +1,11 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
+import { EstoqueCmvPanel } from "@/components/estoque/EstoqueCmvPanel";
+import { EstoqueComprasPanel } from "@/components/estoque/EstoqueComprasPanel";
+import { EstoqueContagemPanel } from "@/components/estoque/EstoqueContagemPanel";
+import { EstoqueEtiquetasPanel } from "@/components/estoque/EstoqueEtiquetasPanel";
+import { EstoqueMovimentacoesPanel } from "@/components/estoque/EstoqueMovimentacoesPanel";
+import { EstoquePerdasPanel } from "@/components/estoque/EstoquePerdasPanel";
+import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -33,13 +40,22 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
 import {
   AlertTriangle,
+  ChefHat,
+  ClipboardList,
+  Coins,
   FileSpreadsheet,
+  LayoutGrid,
   Package,
   Plus,
   PowerOff,
+  ShoppingCart,
+  SlidersHorizontal,
+  Tag,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -63,6 +79,18 @@ export function Produtos() {
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockIsActive, setStockIsActive] = useState(true);
   const [stockSaving, setStockSaving] = useState(false);
+
+  type EstoqueTab =
+    | "catalogo"
+    | "movimentos"
+    | "cmv"
+    | "contagem"
+    | "compras"
+    | "etiquetas"
+    | "perdas"
+    | "receitas";
+
+  const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
 
   const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -88,7 +116,7 @@ export function Produtos() {
     setProducts((data as Product[]) ?? []);
     setProductsCount(count ?? 0);
     setLoading(false);
-  }, [currentCompany?.id, debouncedSearch, filterActive, productsPage]);
+  }, [currentCompany, debouncedSearch, filterActive, productsPage]);
 
   const fetchLowStockCount = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -102,7 +130,7 @@ export function Produtos() {
       (p) => Number(p.current_quantity) <= Number(p.min_quantity),
     ).length;
     setLowStockCount(low);
-  }, [currentCompany?.id]);
+  }, [currentCompany]);
 
   useEffect(() => {
     queueMicrotask(() => setProductsPage(1));
@@ -192,30 +220,62 @@ export function Produtos() {
   return (
     <PageShell className="space-y-8" narrow>
       <PageHeader
-        title="Produtos"
-        description="Cadastre produtos e controle o estoque"
+        title="Produtos e estoque"
+        description="Catálogo, CMV, movimentações, contagem (incluindo link pelo WhatsApp), compras, etiquetas, perdas e receitas."
         action={
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setImportSheetOpen(true)}
-              className="h-10 w-full shrink-0 sm:w-auto"
-            >
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Importar planilha
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setProductSheetOpen(true)}
-              className="h-10 w-full shrink-0 sm:w-auto"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Novo produto
-            </Button>
-          </div>
+          estoqueTab === "catalogo" ? (
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setImportSheetOpen(true)}
+                className="h-10 w-full shrink-0 sm:w-auto"
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Importar planilha
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setProductSheetOpen(true)}
+                className="h-10 w-full shrink-0 sm:w-auto"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Novo produto
+              </Button>
+            </div>
+          ) : undefined
         }
       />
+
+      <div className="-mx-1 flex gap-0.5 overflow-x-auto border-b border-border/80 pb-px scrollbar-thin">
+        {(
+          [
+            ["catalogo", "Catálogo", LayoutGrid],
+            ["movimentos", "Movimentos", SlidersHorizontal],
+            ["cmv", "CMV", Coins],
+            ["contagem", "Contagem", ClipboardList],
+            ["compras", "Compras", ShoppingCart],
+            ["etiquetas", "Etiquetas", Tag],
+            ["perdas", "Perdas", Trash2],
+            ["receitas", "Receitas", ChefHat],
+          ] as const
+        ).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setEstoqueTab(id as EstoqueTab)}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1.5 rounded-none border-b-2 px-2.5 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+              estoqueTab === id
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            {label}
+          </button>
+        ))}
+      </div>
 
       {currentCompany?.id && (
         <>
@@ -237,6 +297,8 @@ export function Produtos() {
         </>
       )}
 
+      {estoqueTab === "catalogo" && (
+        <>
       <Card>
         <CardHeader>
           <div>
@@ -458,6 +520,30 @@ export function Produtos() {
             </CardDescription>
           </CardHeader>
         </Card>
+      )}
+        </>
+      )}
+
+      {currentCompany?.id && estoqueTab === "movimentos" && (
+        <EstoqueMovimentacoesPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "cmv" && (
+        <EstoqueCmvPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "contagem" && (
+        <EstoqueContagemPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "compras" && (
+        <EstoqueComprasPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "etiquetas" && (
+        <EstoqueEtiquetasPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "perdas" && (
+        <EstoquePerdasPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "receitas" && (
+        <EstoqueReceitasPanel companyId={currentCompany.id} />
       )}
     </PageShell>
   );
