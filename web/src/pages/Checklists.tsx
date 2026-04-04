@@ -1,6 +1,11 @@
+import { ChecklistHistorySection } from "@/components/checklist/ChecklistHistorySection";
+import { ChecklistPerformanceSection } from "@/components/checklist/ChecklistPerformanceSection";
+import type {
+  ChecklistAssignmentStatRow,
+  ChecklistPerformancePeriod,
+} from "@/components/checklist/checklistPerformanceTypes";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,7 +43,14 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyMember } from "@/types/companyMember";
-import { ListChecks, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  History,
+  LayoutGrid,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -59,21 +71,6 @@ type ChecklistRow = {
 type ChecklistItemRow = {
   title: string;
   sort_order: number;
-};
-
-type AssignmentStatRow = {
-  key: string;
-  checklistId: string;
-  checklistTitle: string;
-  memberId: string;
-  memberName: string;
-  recurrenceSummary: string;
-  expected7: number;
-  actual7: number;
-  rate7: number;
-  expected30: number;
-  actual30: number;
-  rate30: number;
 };
 
 function rowToMeta(r: ChecklistRow): ChecklistRecurrenceMeta {
@@ -99,8 +96,13 @@ export function Checklists() {
   const [rows, setRows] = useState<ChecklistRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<CompanyMember[]>([]);
-  const [stats, setStats] = useState<AssignmentStatRow[]>([]);
+  const [stats, setStats] = useState<ChecklistAssignmentStatRow[]>([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [performancePeriod, setPerformancePeriod] =
+    useState<ChecklistPerformancePeriod>("both");
+  const [checklistsTab, setChecklistsTab] = useState<"overview" | "historico">(
+    "overview",
+  );
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<ChecklistRow | null>(null);
@@ -198,7 +200,11 @@ export function Checklists() {
       submitted_at: string;
     }[];
 
-    const countInRange = (cid: string, mid: string, startMs: number): number => {
+    const countInRange = (
+      cid: string,
+      mid: string,
+      startMs: number,
+    ): number => {
       return runsList.filter(
         (r) =>
           r.checklist_id === cid &&
@@ -211,7 +217,7 @@ export function Checklists() {
     const byChecklist = new Map(
       (cl as ChecklistRow[]).map((c) => [c.id, c] as const),
     );
-    const out: AssignmentStatRow[] = [];
+    const out: ChecklistAssignmentStatRow[] = [];
 
     const metaExpected = (row: ChecklistRow, days: number) =>
       expectedCompletionsRolling(rowToMeta(row), days, nowRef);
@@ -227,7 +233,9 @@ export function Checklists() {
       const actual7 = countInRange(cid, mid, start7ms);
       const actual30 = countInRange(cid, mid, start30ms);
       const rate7 =
-        expected7 > 0 ? Math.min(100, Math.round((actual7 / expected7) * 100)) : 0;
+        expected7 > 0
+          ? Math.min(100, Math.round((actual7 / expected7) * 100))
+          : 0;
       const rate30 =
         expected30 > 0
           ? Math.min(100, Math.round((actual30 / expected30) * 100))
@@ -305,7 +313,9 @@ export function Checklists() {
       .from("checklist_assignments")
       .select("company_member_id")
       .eq("checklist_id", r.id);
-    setMemberIds(new Set((asg ?? []).map((x) => x.company_member_id as string)));
+    setMemberIds(
+      new Set((asg ?? []).map((x) => x.company_member_id as string)),
+    );
     setSheetOpen(true);
   };
 
@@ -371,7 +381,10 @@ export function Checklists() {
           .eq("company_id", companyId);
         if (uerr) throw uerr;
 
-        await supabase.from("checklist_items").delete().eq("checklist_id", editing.id);
+        await supabase
+          .from("checklist_items")
+          .delete()
+          .eq("checklist_id", editing.id);
         const itemRows = lines.map((line, i) => ({
           checklist_id: editing.id,
           title: line,
@@ -387,12 +400,14 @@ export function Checklists() {
           .delete()
           .eq("checklist_id", editing.id);
         if (memberIds.size > 0) {
-          const { error: aerr } = await supabase.from("checklist_assignments").insert(
-            [...memberIds].map((mid) => ({
-              checklist_id: editing.id,
-              company_member_id: mid,
-            })),
-          );
+          const { error: aerr } = await supabase
+            .from("checklist_assignments")
+            .insert(
+              [...memberIds].map((mid) => ({
+                checklist_id: editing.id,
+                company_member_id: mid,
+              })),
+            );
           if (aerr) throw aerr;
         }
         toast.success("Checklist atualizado.");
@@ -422,12 +437,14 @@ export function Checklists() {
         if (itErr) throw itErr;
 
         if (memberIds.size > 0) {
-          const { error: aerr } = await supabase.from("checklist_assignments").insert(
-            [...memberIds].map((mid) => ({
-              checklist_id: cid,
-              company_member_id: mid,
-            })),
-          );
+          const { error: aerr } = await supabase
+            .from("checklist_assignments")
+            .insert(
+              [...memberIds].map((mid) => ({
+                checklist_id: cid,
+                company_member_id: mid,
+              })),
+            );
           if (aerr) throw aerr;
         }
         toast.success("Checklist criado.");
@@ -484,116 +501,108 @@ export function Checklists() {
         }
       />
 
-      <div className="space-y-8">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ListChecks className="h-4 w-4" />
-              Desempenho (submissões vs. meta)
-            </CardTitle>
-            <CardDescription>
-              Janelas rolantes: últimos 7 e 30 dias. A meta esperada usa a
-              recorrência de cada checklist (dias da semana, execuções/dia ou
-              cota mensal). Taxa limitada a 100%.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingStats ? (
-              <p className="text-sm text-muted-foreground">Carregando…</p>
-            ) : stats.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nenhuma atribuição ou ainda sem submissões no período.
-              </p>
-            ) : (
-              <div className="overflow-x-auto rounded-md border">
-                <div className="grid grid-cols-[1.2fr_1fr_auto_auto] gap-2 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
-                  <div>Checklist · recorrência</div>
-                  <div>Membro</div>
-                  <div className="text-right">7 dias (rolante)</div>
-                  <div className="text-right">30 dias (rolante)</div>
-                </div>
-                {stats.map((s) => (
-                  <div
-                    key={s.key}
-                    className="grid grid-cols-[1.2fr_1fr_auto_auto] gap-2 border-b px-3 py-2 text-sm last:border-0"
-                  >
-                    <div>
-                      <div className="font-medium">{s.checklistTitle}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {s.recurrenceSummary}
-                      </div>
-                    </div>
-                    <div>{s.memberName}</div>
-                    <div className="text-right tabular-nums">
-                      {s.actual7}/{s.expected7}{" "}
-                      <Badge variant="secondary">{s.rate7}%</Badge>
-                    </div>
-                    <div className="text-right tabular-nums">
-                      {s.actual30}/{s.expected30}{" "}
-                      <Badge variant="outline">{s.rate30}%</Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="flex gap-1 border-b border-border/80">
+        <button
+          type="button"
+          onClick={() => setChecklistsTab("overview")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            checklistsTab === "overview"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <LayoutGrid className="h-4 w-4 shrink-0" />
+          Visão geral
+        </button>
+        <button
+          type="button"
+          onClick={() => setChecklistsTab("historico")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            checklistsTab === "historico"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <History className="h-4 w-4 shrink-0" />
+          Histórico
+        </button>
+      </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Checklists</CardTitle>
-            <CardDescription>
-              Membros ativos aparecem na atribuição. Apenas números cadastrados em
-              membros recebem o fluxo no WhatsApp.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <p className="text-sm text-muted-foreground">Carregando…</p>
-            ) : rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nenhum checklist ainda.
-              </p>
-            ) : (
-              <ul className="divide-y rounded-md border">
-                {rows.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex flex-wrap items-center justify-between gap-2 p-3"
-                  >
-                    <div>
-                      <p className="font-medium">{r.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatRecurrenceSummary(rowToMeta(r))} ·{" "}
-                        {r.active ? "ativo" : "inativo"}
-                      </p>
-                    </div>
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => void openEdit(r)}
-                        aria-label="Editar"
+      <div className="space-y-8 pt-6">
+        {checklistsTab === "overview" ? (
+          <>
+            <ChecklistPerformanceSection
+              stats={stats}
+              loading={loadingStats}
+              period={performancePeriod}
+              onPeriodChange={setPerformancePeriod}
+            />
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Checklists</CardTitle>
+                <CardDescription>
+                  Membros ativos aparecem na atribuição. Apenas números
+                  cadastrados em membros recebem o fluxo no WhatsApp.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <p className="text-sm text-muted-foreground">Carregando…</p>
+                ) : rows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum checklist ainda.
+                  </p>
+                ) : (
+                  <ul className="divide-y rounded-md border">
+                    {rows.map((r) => (
+                      <li
+                        key={r.id}
+                        className="flex flex-wrap items-center justify-between gap-2 p-3"
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => void remove(r)}
-                        aria-label="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+                        <div>
+                          <p className="font-medium">{r.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatRecurrenceSummary(rowToMeta(r))} ·{" "}
+                            {r.active ? "ativo" : "inativo"}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => void openEdit(r)}
+                            aria-label="Editar"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => void remove(r)}
+                            aria-label="Excluir"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <ChecklistHistorySection
+            companyId={companyId}
+            checklists={rows.map((r) => ({ id: r.id, title: r.title }))}
+            members={members}
+          />
+        )}
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -648,9 +657,7 @@ export function Checklists() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="daily">
-                    Diária (dias da semana)
-                  </SelectItem>
+                  <SelectItem value="daily">Diária (dias da semana)</SelectItem>
                   <SelectItem value="monthly">Mensal (até 3×/mês)</SelectItem>
                 </SelectContent>
               </Select>
