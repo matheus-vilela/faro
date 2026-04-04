@@ -685,7 +685,7 @@ function buildComandosWhatsappMessage(
   ];
   lines.push(
     "",
-    "*estoque* ou *inventario* — recebe o link para contagem de estoque (informar quantidades).",
+    "*estoque* ou *inventario* — link para contagem de estoque. Membros precisam de permissão em *Configurações* → *Usuários e membros*.",
   );
   if (includeChecklist) {
     lines.push(
@@ -1272,6 +1272,7 @@ async function handleRecebimentoTextFlow(
         companyId: auth.companyId,
         senderNormalized: auth.senderNormalized,
         companyMemberId,
+        role: auth.role,
       },
       sendWhatsappMessage,
       flowId,

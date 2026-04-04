@@ -67,6 +67,9 @@ export function ConfiguracoesUsuariosMembros() {
   );
   const [memberName, setMemberName] = useState("");
   const [memberPhoneDigits, setMemberPhoneDigits] = useState("");
+  /** Membro pode usar *estoque* / *inventario* no WhatsApp (além do proprietário). */
+  const [memberCanInventoryCount, setMemberCanInventoryCount] =
+    useState(false);
 
   const activeCount = useMemo(
     () => members.filter((m) => m.is_active).length,
@@ -210,6 +213,7 @@ export function ConfiguracoesUsuariosMembros() {
     setEditingMember(null);
     setMemberName("");
     setMemberPhoneDigits("");
+    setMemberCanInventoryCount(false);
     setMemberSheetOpen(true);
   };
 
@@ -219,6 +223,7 @@ export function ConfiguracoesUsuariosMembros() {
     setMemberPhoneDigits(
       m.phone_normalized ?? stripToDigits(m.phone_display ?? ""),
     );
+    setMemberCanInventoryCount(m.can_inventory_count ?? false);
     setMemberSheetOpen(true);
   };
 
@@ -263,6 +268,7 @@ export function ConfiguracoesUsuariosMembros() {
         phone_normalized: v.normalized,
         phone_display: displayStored,
         is_active: true,
+        can_inventory_count: memberCanInventoryCount,
       });
       setSaving(false);
       setMemberSheetOpen(false);
@@ -296,6 +302,30 @@ export function ConfiguracoesUsuariosMembros() {
       return;
     }
     toast.success(active ? "Membro ativado." : "Membro desativado.");
+    await loadMembers();
+  };
+
+  const toggleMemberInventoryCount = async (
+    m: CompanyMember,
+    allowed: boolean,
+  ) => {
+    if (!currentCompany?.id || !isOwner) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from("company_members")
+      .update({ can_inventory_count: allowed })
+      .eq("id", m.id)
+      .eq("company_id", currentCompany.id);
+    setSaving(false);
+    if (error) {
+      toast.error(mapSupabaseError(error.message));
+      return;
+    }
+    toast.success(
+      allowed
+        ? "Membro pode solicitar contagem de estoque pelo WhatsApp."
+        : "Permissão de contagem de estoque removida.",
+    );
     await loadMembers();
   };
 
@@ -398,9 +428,10 @@ export function ConfiguracoesUsuariosMembros() {
               </CardTitle>
               <CardDescription className="max-w-xl">
                 Membros <strong>não recebem acesso</strong> ao sistema Faro (sem
-                login). Eles aparecem aqui apenas para autorizar o{" "}
-                <strong>número de WhatsApp</strong> que poderá enviar mensagens
-                pela integração — conforme o cadastro abaixo.
+                login). Eles aparecem aqui para autorizar o{" "}
+                <strong>número de WhatsApp</strong> e, se você permitir, o
+                comando de <strong>contagem de estoque</strong> (*estoque* /
+                *inventario*).
               </CardDescription>
             </div>
             <Button
@@ -432,9 +463,15 @@ export function ConfiguracoesUsuariosMembros() {
             </p>
           ) : (
             <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="grid grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid-cols-[1fr_1fr_auto_auto]">
+              <div className="grid grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid-cols-[1fr_1fr_auto_auto_auto]">
                 <span>Nome</span>
                 <span>WhatsApp</span>
+                <span
+                  className="hidden sm:block text-center"
+                  title="Contagem de estoque pelo WhatsApp"
+                >
+                  Contagem
+                </span>
                 <span className="hidden sm:block text-center">Ativo</span>
                 <span className="hidden sm:block sr-only">Ações</span>
               </div>
@@ -442,7 +479,7 @@ export function ConfiguracoesUsuariosMembros() {
                 {members.map((m) => (
                   <li
                     key={m.id}
-                    className="flex flex-col gap-3 px-4 py-4 sm:grid sm:grid-cols-[1fr_1fr_auto_auto] sm:items-center sm:gap-2"
+                    className="flex flex-col gap-3 px-4 py-4 sm:grid sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-center sm:gap-2"
                   >
                     <span className="font-medium">{m.name}</span>
                     <span className="text-muted-foreground text-sm font-mono">
@@ -450,6 +487,19 @@ export function ConfiguracoesUsuariosMembros() {
                         ? m.phone_display
                         : formatNormalizedForDisplay(m.phone_normalized)}
                     </span>
+                    <div className="flex items-center justify-between gap-2 sm:justify-center">
+                      <span className="text-xs text-muted-foreground sm:hidden">
+                        Contagem (estoque)
+                      </span>
+                      <Switch
+                        checked={m.can_inventory_count ?? false}
+                        onCheckedChange={(checked) =>
+                          toggleMemberInventoryCount(m, checked)
+                        }
+                        disabled={saving}
+                        aria-label="Permitir contagem de estoque pelo WhatsApp"
+                      />
+                    </div>
                     <div className="flex items-center justify-between gap-2 sm:justify-center">
                       <span className="text-xs text-muted-foreground sm:hidden">
                         Ativo
@@ -526,6 +576,25 @@ export function ConfiguracoesUsuariosMembros() {
                     ),
                   )
                 }
+              />
+            </div>
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
+              <div className="space-y-1 min-w-0">
+                <Label htmlFor="mInvCount" className="text-sm font-medium">
+                  Contagem de estoque (WhatsApp)
+                </Label>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  Se ativo, este membro pode enviar <strong>*estoque*</strong> ou{" "}
+                  <strong>*inventario*</strong> para receber o link de contagem.
+                  O proprietário sempre pode.
+                </p>
+              </div>
+              <Switch
+                id="mInvCount"
+                checked={memberCanInventoryCount}
+                onCheckedChange={setMemberCanInventoryCount}
+                disabled={saving}
+                className="shrink-0 mt-0.5"
               />
             </div>
           </div>

@@ -14,6 +14,7 @@ type InventoryAuth = {
   companyId: string;
   senderNormalized: string;
   companyMemberId: string | null;
+  role: "owner" | "member";
 };
 
 function normalizeSingleCommandWord(text: string): string {
@@ -81,6 +82,55 @@ export async function sendInventoryCountLink(
   sendWhatsappMessage: SendWhatsappMessageFn,
   flowId?: string,
 ): Promise<void> {
+  if (auth.role === "member") {
+    if (!auth.companyMemberId) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Não foi possível validar seu cadastro de membro. Tente novamente.",
+        ),
+        "inventory_membro_sem_id",
+        flowId,
+      );
+      return;
+    }
+    const { data: mem, error: me } = await supabase
+      .from("company_members")
+      .select("can_inventory_count, is_active")
+      .eq("id", auth.companyMemberId)
+      .maybeSingle();
+
+    if (me) {
+      console.error("[inventory-flow] fetch member permission:", me.message);
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Não foi possível verificar sua permissão agora. Tente de novo em instantes.",
+        ),
+        "inventory_erro_permissao",
+        flowId,
+      );
+      return;
+    }
+
+    const row = mem as {
+      can_inventory_count?: boolean;
+      is_active?: boolean;
+    } | null;
+
+    if (!row?.is_active || !row.can_inventory_count) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Você não tem permissão para contagem de estoque. O proprietário pode habilitar em *Configurações* → *Usuários e membros* (coluna de permissão de inventário).",
+        ),
+        "inventory_sem_permissao_membro",
+        flowId,
+      );
+      return;
+    }
+  }
+
   const { data: oneProduct, error: pe } = await supabase
     .from("products")
     .select("id")
