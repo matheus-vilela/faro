@@ -7,6 +7,8 @@ export interface Product {
   min_quantity: number
   current_quantity: number
   last_unit_value: number | null
+  /** Folha RECEITA (operacional) para classificar venda pontual no DRE */
+  revenue_category_id?: string | null
   /** Custo médio ponderado (CMV), quando houver entradas valoradas */
   average_cost?: number | null
   /** Código para etiqueta (EAN/Code128) */

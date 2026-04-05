@@ -194,7 +194,7 @@ export function useMonthClosingChecklist(
   const reopenMonth = useCallback(
     (reason: string) => {
       const now = new Date().toISOString();
-      setPersisted((prev) => {
+      setPersisted(() => {
         const fresh = buildChecklistItems(
           amounts,
           null,

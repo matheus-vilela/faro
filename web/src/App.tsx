@@ -13,6 +13,7 @@ import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
 import { Dashboard } from "@/pages/Dashboard";
 import { Despesas } from "@/pages/Despesas";
+import { Receitas } from "@/pages/Receitas";
 import { Dre } from "@/pages/Dre";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
@@ -55,6 +56,11 @@ function AuthenticatedLayout() {
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="despesas" element={<Despesas />} />
+          <Route path="receitas" element={<Receitas />} />
+          <Route
+            path="lancamento-receitas"
+            element={<Navigate to="/app/receitas" replace />}
+          />
           <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
           <Route
             path="boletos"

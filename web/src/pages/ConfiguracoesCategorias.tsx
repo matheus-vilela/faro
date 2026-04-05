@@ -13,6 +13,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { buildChildrenMap, categoryPathLabel, TIPO_LABEL } from "@/lib/companyCategoryLabels";
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
+import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { cn } from "@/lib/utils";
 import type {
   CompanyCategory,
@@ -664,12 +665,13 @@ export function ConfiguracoesCategorias() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="BRUTA">Vendas brutas (padrão)</SelectItem>
-                    <SelectItem value="DEDUCAO">Dedução da receita (contra-receita)</SelectItem>
+                    <SelectItem value="DEDUCAO">
+                      {ptBrUi.configuracoesCategorias.deducaoReceitaSelectItem}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Use deduções para descontos, devoluções e impostos incidentes sobre vendas que
-                  reduzem a receita bruta.
+                  {ptBrUi.configuracoesCategorias.deducoesHelp}
                 </p>
               </div>
             ) : null}
