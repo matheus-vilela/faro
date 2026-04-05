@@ -101,6 +101,10 @@ export function Dre() {
         icon={BarChart3}
       />
 
+      <p className="mb-6 max-w-3xl text-sm text-muted-foreground leading-relaxed">
+        {ptBrUi.dre.regrasClassificacao}
+      </p>
+
       <div className="mb-6 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
         <div className="flex min-w-0 flex-1 justify-start">
           <ReferencePeriodCard

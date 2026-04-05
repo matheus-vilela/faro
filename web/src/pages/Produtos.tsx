@@ -40,10 +40,8 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
-  buildChildrenMap,
-  companyCategoryDisplayName,
-  isLeafCategory,
-  isSelectableReceitaLeaf,
+  categoryPathLabel,
+  isSelectableCmvProductGroup,
 } from "@/lib/companyCategoryLabels";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -105,8 +103,10 @@ export function Produtos() {
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockLastUnitValue, setStockLastUnitValue] = useState("");
   const [stockIsActive, setStockIsActive] = useState(true);
-  const [stockRevenueCategoryId, setStockRevenueCategoryId] = useState("");
-  const [receitaLeaves, setReceitaLeaves] = useState<CompanyCategory[]>([]);
+  const [stockCmvCategoryId, setStockCmvCategoryId] = useState("");
+  const [cmvCategoriesFull, setCmvCategoriesFull] = useState<CompanyCategory[]>(
+    [],
+  );
   const [stockSaving, setStockSaving] = useState(false);
 
   type EstoqueTab =
@@ -129,51 +129,58 @@ export function Produtos() {
     return base;
   }, [stockUnit]);
 
-  const defaultReceitaLeafId = useMemo(() => {
-    const vendas = receitaLeaves.find(
-      (c) =>
-        c.name.toLowerCase().includes("vendas") &&
-        c.name.toLowerCase().includes("produt"),
-    );
-    return vendas?.id ?? receitaLeaves[0]?.id ?? "";
-  }, [receitaLeaves]);
+  const cmvById = useMemo(
+    () => new Map(cmvCategoriesFull.map((c) => [c.id, c])),
+    [cmvCategoriesFull],
+  );
 
-  const loadReceitaCategories = useCallback(async () => {
+  const cmvSelectableSorted = useMemo(() => {
+    return cmvCategoriesFull
+      .filter((c) => isSelectableCmvProductGroup(c))
+      .sort((a, b) =>
+        categoryPathLabel(a.id, cmvById).localeCompare(
+          categoryPathLabel(b.id, cmvById),
+          "pt-BR",
+        ),
+      );
+  }, [cmvCategoriesFull, cmvById]);
+
+  const defaultCmvLeafId = useMemo(() => {
+    const outras = cmvSelectableSorted.find((c) =>
+      c.name.toLowerCase().includes("outras"),
+    );
+    return outras?.id ?? cmvSelectableSorted[0]?.id ?? "";
+  }, [cmvSelectableSorted]);
+
+  const loadCmvCategories = useCallback(async () => {
     if (!currentCompany?.id) return;
     const { data, error } = await supabase
       .from("company_categories")
       .select("*")
       .eq("company_id", currentCompany.id)
-      .eq("natureza", "RECEITA")
-      .eq("tipo", "OPERACIONAL")
+      .eq("natureza", "DESPESA")
+      .eq("tipo", "CMV")
       .or("ativo.is.null,ativo.eq.true")
       .order("ordem", { ascending: true })
       .order("name", { ascending: true });
     if (error) {
       console.error(error);
-      setReceitaLeaves([]);
+      setCmvCategoriesFull([]);
       return;
     }
-    const list = (data ?? []) as CompanyCategory[];
-    const cm = buildChildrenMap(list);
-    const leaves = list.filter(
-      (c) => isSelectableReceitaLeaf(c) && isLeafCategory(c.id, cm),
-    );
-    setReceitaLeaves(leaves);
+    setCmvCategoriesFull((data ?? []) as CompanyCategory[]);
   }, [currentCompany?.id]);
 
   useEffect(() => {
     if (!stockProduct || !currentCompany?.id) return;
-    void loadReceitaCategories();
-  }, [stockProduct, currentCompany?.id, loadReceitaCategories]);
+    void loadCmvCategories();
+  }, [stockProduct, currentCompany?.id, loadCmvCategories]);
 
-  const revenueCategoryDisplayName = useMemo(() => {
-    if (!stockProduct?.revenue_category_id) return null;
-    const leaf = receitaLeaves.find(
-      (c) => c.id === stockProduct.revenue_category_id,
-    );
-    return leaf ? companyCategoryDisplayName(leaf) : null;
-  }, [stockProduct?.revenue_category_id, receitaLeaves]);
+  const cmvCategoryDisplayName = useMemo(() => {
+    if (!stockProduct?.cmv_category_id) return null;
+    if (!cmvById.has(stockProduct.cmv_category_id)) return null;
+    return categoryPathLabel(stockProduct.cmv_category_id, cmvById);
+  }, [stockProduct?.cmv_category_id, cmvById]);
 
   const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -246,6 +253,7 @@ export function Produtos() {
         : "",
     );
     setStockIsActive(p.is_active !== false);
+    setStockCmvCategoryId(p.cmv_category_id ?? "");
   }, []);
 
   const openStockSheet = (p: Product) => {
@@ -280,11 +288,10 @@ export function Produtos() {
     const unitChanged = stockUnit !== (stockProduct.unit || "un");
     const barcodeChanged =
       (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
-    const resolvedRevenueCategoryId =
-      stockRevenueCategoryId || defaultReceitaLeafId || null;
-    const revenueCategoryChanged =
-      (stockProduct.revenue_category_id ?? null) !==
-      (resolvedRevenueCategoryId ?? null);
+    const resolvedCmvCategoryId =
+      stockCmvCategoryId || defaultCmvLeafId || null;
+    const cmvCategoryChanged =
+      (stockProduct.cmv_category_id ?? null) !== (resolvedCmvCategoryId ?? null);
 
     const rawLast = stockLastUnitValue.trim();
     let resolvedLastUnit: number | null = null;
@@ -317,7 +324,7 @@ export function Produtos() {
       !skuChanged &&
       !unitChanged &&
       !barcodeChanged &&
-      !revenueCategoryChanged &&
+      !cmvCategoryChanged &&
       !lastUnitValueChanged
     ) {
       closeStockSheet();
@@ -345,7 +352,7 @@ export function Produtos() {
       sku?: string | null;
       unit?: string;
       barcode?: string | null;
-      revenue_category_id?: string | null;
+      cmv_category_id?: string | null;
       last_unit_value?: number | null;
     } = {};
     if (nameChanged) updates.name = newName;
@@ -354,8 +361,8 @@ export function Produtos() {
     if (skuChanged) updates.sku = stockSku.trim() || null;
     if (unitChanged) updates.unit = stockUnit;
     if (barcodeChanged) updates.barcode = stockBarcode.trim() || null;
-    if (revenueCategoryChanged) {
-      updates.revenue_category_id = resolvedRevenueCategoryId;
+    if (cmvCategoryChanged) {
+      updates.cmv_category_id = resolvedCmvCategoryId;
     }
     if (lastUnitValueChanged) {
       updates.last_unit_value = resolvedLastUnit;
@@ -641,11 +648,10 @@ export function Produtos() {
                   ) : null}
                   <div className="flex justify-between gap-3">
                     <span className="text-muted-foreground">
-                      Categoria de receita
+                      Categoria de CMV (custo)
                     </span>
                     <span className="text-right wrap-anywhere">
-                      {revenueCategoryDisplayName ??
-                        (stockProduct.revenue_category_id ? "—" : "Padrão")}
+                      {cmvCategoryDisplayName ?? "—"}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3 border-t border-border/60 pt-3">
@@ -729,7 +735,7 @@ export function Produtos() {
               <SheetHeader>
                 <SheetTitle>Editar produto</SheetTitle>
                 <SheetDescription>
-                  Ajuste nome, SKU, unidade, categoria de receita, estoque e status.
+                  Ajuste nome, SKU, unidade, categoria de CMV, estoque e status.
                 </SheetDescription>
               </SheetHeader>
               <div className="flex-1 space-y-4 overflow-y-auto py-6">
@@ -776,33 +782,33 @@ export function Produtos() {
                   </Select>
                 </div>
                 <div>
-                  <Label>Categoria de receita (venda pontual)</Label>
+                  <Label>Categoria de despesa (CMV)</Label>
                   <Select
                     value={
-                      stockRevenueCategoryId ||
-                      defaultReceitaLeafId ||
-                      "__auto__"
+                      stockCmvCategoryId || defaultCmvLeafId || "__none__"
                     }
                     onValueChange={(v) =>
-                      setStockRevenueCategoryId(v === "__auto__" ? "" : v)
+                      setStockCmvCategoryId(v === "__none__" ? "" : v)
                     }
+                    disabled={cmvSelectableSorted.length === 0}
                   >
                     <SelectTrigger className="mt-2">
-                      <SelectValue placeholder="Padrão do sistema" />
+                      <SelectValue placeholder="Selecione o grupo de CMV" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__auto__">
-                        Padrão (ex.: Vendas de produtos)
+                      <SelectItem value="__none__" disabled>
+                        Selecione o grupo de CMV
                       </SelectItem>
-                      {receitaLeaves.map((c) => (
+                      {cmvSelectableSorted.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {companyCategoryDisplayName(c)}
+                          {categoryPathLabel(c.id, cmvById)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Usada no lançamento de receitas por venda de produto e no DRE
+                    Use uma subcategoria de CMV (não o grupo principal). A receita
+                    da venda é escolhida no lançamento em Receitas.
                   </p>
                 </div>
                 <div>

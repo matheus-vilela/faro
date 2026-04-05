@@ -37,6 +37,7 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -327,7 +328,9 @@ export function FluxoDeCaixa() {
       >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium leading-snug">{b.description}</p>
+            <p className="font-medium leading-snug">
+              {formatBoletoFluxoDescription(b)}
+            </p>
             <span
               className={cn(
                 "text-xs font-semibold rounded-full px-2.5 py-0.5",
@@ -399,7 +402,9 @@ export function FluxoDeCaixa() {
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className="text-sm font-medium leading-snug">{b.description}</p>
+            <p className="text-sm font-medium leading-snug">
+              {formatBoletoFluxoDescription(b)}
+            </p>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-semibold",
@@ -715,7 +720,9 @@ export function FluxoDeCaixa() {
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div>
-                  <p className="font-semibold">{boletoResumo.description}</p>
+                  <p className="font-semibold">
+                    {formatBoletoFluxoDescription(boletoResumo)}
+                  </p>
                   <p
                     className={cn(
                       "text-2xl font-bold mt-1",
@@ -901,7 +908,9 @@ export function FluxoDeCaixa() {
           </DialogHeader>
           {boletoResumo && (
             <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-              <p className="font-medium">{boletoResumo.description}</p>
+              <p className="font-medium">
+                {formatBoletoFluxoDescription(boletoResumo)}
+              </p>
               <p className="text-muted-foreground tabular-nums">
                 {formatCurrency(boletoResumo.amount)} · venc.{" "}
                 {formatDate(boletoResumo.due_date)}

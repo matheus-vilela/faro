@@ -18,10 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  buildChildrenMap,
-  companyCategoryDisplayName,
-  isLeafCategory,
-  isSelectableReceitaLeaf,
+  categoryPathLabel,
+  isSelectableCmvProductGroup,
 } from '@/lib/companyCategoryLabels'
 import { supabase } from '@/lib/supabase'
 import type { CompanyCategory } from '@/types/category'
@@ -68,50 +66,66 @@ export function CreateProductSheet({
   const [minQuantity, setMinQuantity] = useState('')
   const [lastUnitValue, setLastUnitValue] = useState('')
   const [barcode, setBarcode] = useState('')
-  const [revenueCategoryId, setRevenueCategoryId] = useState<string>('')
-  const [receitaLeaves, setReceitaLeaves] = useState<CompanyCategory[]>([])
+  const [cmvCategoryId, setCmvCategoryId] = useState<string>('')
+  const [cmvCategoriesFull, setCmvCategoriesFull] = useState<CompanyCategory[]>(
+    [],
+  )
   const [loading, setLoading] = useState(false)
 
-  const loadReceitaCategories = useCallback(async () => {
+  const loadCmvCategories = useCallback(async () => {
     if (!companyId) return
     const { data, error } = await supabase
       .from('company_categories')
       .select('*')
       .eq('company_id', companyId)
-      .eq('natureza', 'RECEITA')
-      .eq('tipo', 'OPERACIONAL')
+      .eq('natureza', 'DESPESA')
+      .eq('tipo', 'CMV')
       .or('ativo.is.null,ativo.eq.true')
       .order('ordem', { ascending: true })
       .order('name', { ascending: true })
     if (error) {
       console.error(error)
-      setReceitaLeaves([])
+      setCmvCategoriesFull([])
       return
     }
-    const list = (data ?? []) as CompanyCategory[]
-    const cm = buildChildrenMap(list)
-    const leaves = list.filter(
-      (c) => isSelectableReceitaLeaf(c) && isLeafCategory(c.id, cm),
-    )
-    setReceitaLeaves(leaves)
+    setCmvCategoriesFull((data ?? []) as CompanyCategory[])
   }, [companyId])
 
   useEffect(() => {
     if (!open || !companyId) return
-    void loadReceitaCategories()
-  }, [open, companyId, loadReceitaCategories])
+    void loadCmvCategories()
+  }, [open, companyId, loadCmvCategories])
 
-  const defaultReceitaLeafId = useMemo(() => {
-    const vendas = receitaLeaves.find((c) =>
-      c.name.toLowerCase().includes('vendas') &&
-      c.name.toLowerCase().includes('produt'),
+  const cmvById = useMemo(
+    () => new Map(cmvCategoriesFull.map((c) => [c.id, c])),
+    [cmvCategoriesFull],
+  )
+
+  const cmvSelectableSorted = useMemo(() => {
+    return cmvCategoriesFull
+      .filter((c) => isSelectableCmvProductGroup(c))
+      .sort((a, b) =>
+        categoryPathLabel(a.id, cmvById).localeCompare(
+          categoryPathLabel(b.id, cmvById),
+          'pt-BR',
+        ),
+      )
+  }, [cmvCategoriesFull, cmvById])
+
+  const defaultCmvLeafId = useMemo(() => {
+    const outras = cmvSelectableSorted.find((c) =>
+      c.name.toLowerCase().includes('outras'),
     )
-    return vendas?.id ?? receitaLeaves[0]?.id ?? ''
-  }, [receitaLeaves])
+    return outras?.id ?? cmvSelectableSorted[0]?.id ?? ''
+  }, [cmvSelectableSorted])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!companyId || !name.trim()) return
+    const resolvedCmv = cmvCategoryId || defaultCmvLeafId
+    if (!resolvedCmv) {
+      return
+    }
     setLoading(true)
     const finalSku = sku.trim() || generateRandomSku()
     const parsedLast = parseFloat(
@@ -133,7 +147,7 @@ export function CreateProductSheet({
         min_quantity: parseFloat(minQuantity || '0') || 0,
         current_quantity: 0,
         barcode: barcode.trim() || null,
-        revenue_category_id: revenueCategoryId || defaultReceitaLeafId || null,
+        cmv_category_id: resolvedCmv,
         ...(lastUnitValueToSave != null
           ? { last_unit_value: lastUnitValueToSave }
           : {}),
@@ -152,10 +166,17 @@ export function CreateProductSheet({
     setMinQuantity('')
     setLastUnitValue('')
     setBarcode('')
-    setRevenueCategoryId('')
+    setCmvCategoryId('')
     onOpenChange(false)
     onSuccess?.(product)
   }
+
+  const cmvSelectValue = cmvCategoryId || defaultCmvLeafId || '__none__'
+  const canSubmit =
+    !!name.trim() &&
+    !!cmvSelectableSorted.length &&
+    !!(cmvCategoryId || defaultCmvLeafId) &&
+    !loading
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -214,29 +235,32 @@ export function CreateProductSheet({
             </Select>
           </div>
           <div>
-            <Label>Categoria de receita (venda pontual)</Label>
+            <Label>Categoria de despesa (CMV) *</Label>
             <Select
-              value={revenueCategoryId || defaultReceitaLeafId || '__auto__'}
+              value={cmvSelectValue}
               onValueChange={(v) =>
-                setRevenueCategoryId(v === '__auto__' ? '' : v)
+                setCmvCategoryId(v === '__none__' ? '' : v)
               }
+              disabled={cmvSelectableSorted.length === 0}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Padrão do sistema" />
+                <SelectValue placeholder="Selecione o grupo de CMV" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__auto__">
-                  Padrão (ex.: Vendas de produtos)
+                <SelectItem value="__none__" disabled>
+                  Selecione o grupo de CMV
                 </SelectItem>
-                {receitaLeaves.map((c) => (
+                {cmvSelectableSorted.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {companyCategoryDisplayName(c)}
+                    {categoryPathLabel(c.id, cmvById)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground mt-1">
-              Usada no lançamento de receitas por venda de produto e no DRE
+              Escolha uma subcategoria de CMV (o grupo principal &quot;CMV&quot;
+              não pode ser selecionado). Cadastre em Configurações › Categorias
+              se necessário.
             </p>
           </div>
           <div>
@@ -270,7 +294,7 @@ export function CreateProductSheet({
             </p>
           </div>
           <SheetFooter>
-            <Button type="submit" disabled={!name.trim() || loading}>
+            <Button type="submit" disabled={!canSubmit}>
               <Plus className="h-4 w-4 mr-2" />
               {loading ? 'Cadastrando...' : 'Cadastrar produto'}
             </Button>

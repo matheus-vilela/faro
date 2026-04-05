@@ -7,9 +7,7 @@ export interface Product {
   min_quantity: number
   current_quantity: number
   last_unit_value: number | null
-  /** Folha RECEITA (operacional) para classificar venda pontual no DRE */
-  revenue_category_id?: string | null
-  /** Folha DESPESA tipo CMV para o custo da venda pontual no DRE; se nulo, usa folha padrão (ex.: Outras - CMV) */
+  /** Folha DESPESA tipo CMV: grupo de custo no DRE em vendas deste produto (obrigatório para venda pontual) */
   cmv_category_id?: string | null
   /** Custo médio ponderado (CMV), quando houver entradas valoradas */
   average_cost?: number | null

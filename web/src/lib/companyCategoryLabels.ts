@@ -83,6 +83,23 @@ export function isSelectableReceitaLeaf(c: CompanyCategory): boolean {
   return natureza === "RECEITA" && ativa;
 }
 
+/** Qualquer categoria CMV (despesa) ativa: folhas ou nós intermediários (ex.: grupo CMV › subgrupo). */
+export function isSelectableCmvCategory(c: CompanyCategory): boolean {
+  const ativa = c.ativo !== false;
+  return c.natureza === "DESPESA" && c.tipo === "CMV" && ativa;
+}
+
+/**
+ * CMV no cadastro de produto: subs (qualquer profundidade), exclui o nó raiz "CMV"
+ * (`parent_id` nulo).
+ */
+export function isSelectableCmvProductGroup(c: CompanyCategory): boolean {
+  return isSelectableCmvCategory(c) && c.parent_id != null;
+}
+
+/** @deprecated use isSelectableCmvCategory */
+export const isSelectableCmvLeaf = isSelectableCmvCategory;
+
 export function tipoBadge(c: CompanyCategory): string {
   return TIPO_LABEL[c.tipo] ?? "—";
 }
