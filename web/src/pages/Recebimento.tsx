@@ -329,8 +329,8 @@ export function Recebimento() {
     <PageShell className="space-y-8" narrow>
       <PageHeader
         icon={PackageCheck}
-        title="Recebimento"
-        description="Ao compartilhar o link, você pode associar um membro da empresa ao recebimento (referência). Qualquer pessoa com o link pode confirmar."
+        title="Recebimento de mercadorias"
+        description="Você pode associar um membro da empresa ao recebimento da mercadoria. Qualquer pessoa com o link pode confirmar."
       />
 
       <Card className="overflow-hidden">
