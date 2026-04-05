@@ -65,6 +65,7 @@ export function CreateProductSheet({
   const [sku, setSku] = useState('')
   const [unit, setUnit] = useState('un')
   const [minQuantity, setMinQuantity] = useState('')
+  const [lastUnitValue, setLastUnitValue] = useState('')
   const [barcode, setBarcode] = useState('')
   const [revenueCategoryId, setRevenueCategoryId] = useState<string>('')
   const [receitaLeaves, setReceitaLeaves] = useState<CompanyCategory[]>([])
@@ -112,6 +113,15 @@ export function CreateProductSheet({
     if (!companyId || !name.trim()) return
     setLoading(true)
     const finalSku = sku.trim() || generateRandomSku()
+    const parsedLast = parseFloat(
+      lastUnitValue.trim().replace(/\s/g, '').replace(',', '.'),
+    )
+    const lastUnitValueToSave =
+      lastUnitValue.trim() !== '' &&
+      !Number.isNaN(parsedLast) &&
+      parsedLast >= 0
+        ? parsedLast
+        : null
     const { data, error } = await supabase
       .from('products')
       .insert({
@@ -123,6 +133,9 @@ export function CreateProductSheet({
         current_quantity: 0,
         barcode: barcode.trim() || null,
         revenue_category_id: revenueCategoryId || defaultReceitaLeafId || null,
+        ...(lastUnitValueToSave != null
+          ? { last_unit_value: lastUnitValueToSave }
+          : {}),
       })
       .select()
       .single()
@@ -136,6 +149,7 @@ export function CreateProductSheet({
     setSku('')
     setUnit('un')
     setMinQuantity('')
+    setLastUnitValue('')
     setBarcode('')
     setRevenueCategoryId('')
     onOpenChange(false)
@@ -236,6 +250,22 @@ export function CreateProductSheet({
             />
             <p className="text-xs text-muted-foreground mt-1">
               Será exibido alerta quando o estoque estiver abaixo deste valor
+            </p>
+          </div>
+          <div>
+            <Label>Último valor pago (opcional)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              inputMode="decimal"
+              value={lastUnitValue}
+              onChange={(e) => setLastUnitValue(e.target.value)}
+              placeholder="Ex.: último preço de compra por unidade"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Referência de preço por {unit}; usada no estoque e CMV até haver
+              movimentações valoradas
             </p>
           </div>
           <SheetFooter>

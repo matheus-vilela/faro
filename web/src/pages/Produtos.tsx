@@ -39,8 +39,14 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import {
+  buildChildrenMap,
+  isLeafCategory,
+  isSelectableReceitaLeaf,
+} from "@/lib/companyCategoryLabels";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import type { CompanyCategory } from "@/types/category";
 import type { Product } from "@/types/product";
 import {
   AlertTriangle,
@@ -96,7 +102,10 @@ export function Produtos() {
   const [stockBarcode, setStockBarcode] = useState("");
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
+  const [stockLastUnitValue, setStockLastUnitValue] = useState("");
   const [stockIsActive, setStockIsActive] = useState(true);
+  const [stockRevenueCategoryId, setStockRevenueCategoryId] = useState("");
+  const [receitaLeaves, setReceitaLeaves] = useState<CompanyCategory[]>([]);
   const [stockSaving, setStockSaving] = useState(false);
 
   type EstoqueTab =
@@ -118,6 +127,52 @@ export function Produtos() {
     }
     return base;
   }, [stockUnit]);
+
+  const defaultReceitaLeafId = useMemo(() => {
+    const vendas = receitaLeaves.find(
+      (c) =>
+        c.name.toLowerCase().includes("vendas") &&
+        c.name.toLowerCase().includes("produt"),
+    );
+    return vendas?.id ?? receitaLeaves[0]?.id ?? "";
+  }, [receitaLeaves]);
+
+  const loadReceitaCategories = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    const { data, error } = await supabase
+      .from("company_categories")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .eq("natureza", "RECEITA")
+      .eq("tipo", "OPERACIONAL")
+      .or("ativo.is.null,ativo.eq.true")
+      .order("ordem", { ascending: true })
+      .order("name", { ascending: true });
+    if (error) {
+      console.error(error);
+      setReceitaLeaves([]);
+      return;
+    }
+    const list = (data ?? []) as CompanyCategory[];
+    const cm = buildChildrenMap(list);
+    const leaves = list.filter(
+      (c) => isSelectableReceitaLeaf(c) && isLeafCategory(c.id, cm),
+    );
+    setReceitaLeaves(leaves);
+  }, [currentCompany?.id]);
+
+  useEffect(() => {
+    if (!stockProduct || !currentCompany?.id) return;
+    void loadReceitaCategories();
+  }, [stockProduct, currentCompany?.id, loadReceitaCategories]);
+
+  const revenueCategoryDisplayName = useMemo(() => {
+    if (!stockProduct?.revenue_category_id) return null;
+    const leaf = receitaLeaves.find(
+      (c) => c.id === stockProduct.revenue_category_id,
+    );
+    return leaf?.name ?? null;
+  }, [stockProduct?.revenue_category_id, receitaLeaves]);
 
   const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -184,6 +239,11 @@ export function Produtos() {
     setStockBarcode(p.barcode ?? "");
     setStockQuantity(String(p.current_quantity));
     setStockMinQuantity(String(p.min_quantity ?? 0));
+    setStockLastUnitValue(
+      p.last_unit_value != null && !Number.isNaN(Number(p.last_unit_value))
+        ? String(Number(p.last_unit_value))
+        : "",
+    );
     setStockIsActive(p.is_active !== false);
   }, []);
 
@@ -219,6 +279,34 @@ export function Produtos() {
     const unitChanged = stockUnit !== (stockProduct.unit || "un");
     const barcodeChanged =
       (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
+    const resolvedRevenueCategoryId =
+      stockRevenueCategoryId || defaultReceitaLeafId || null;
+    const revenueCategoryChanged =
+      (stockProduct.revenue_category_id ?? null) !==
+      (resolvedRevenueCategoryId ?? null);
+
+    const rawLast = stockLastUnitValue.trim();
+    let resolvedLastUnit: number | null = null;
+    if (rawLast !== "") {
+      const parsedLast = parseFloat(
+        rawLast.replace(/\s/g, "").replace(",", "."),
+      );
+      if (Number.isNaN(parsedLast) || parsedLast < 0) {
+        return;
+      }
+      resolvedLastUnit = parsedLast;
+    }
+    const currentLastUnit =
+      stockProduct.last_unit_value != null &&
+      !Number.isNaN(Number(stockProduct.last_unit_value))
+        ? Number(stockProduct.last_unit_value)
+        : null;
+    const lastUnitValueChanged =
+      resolvedLastUnit === null && currentLastUnit === null
+        ? false
+        : resolvedLastUnit === null || currentLastUnit === null
+          ? true
+          : Math.abs(resolvedLastUnit - currentLastUnit) > 1e-6;
 
     if (
       !qtyChanged &&
@@ -227,7 +315,9 @@ export function Produtos() {
       !nameChanged &&
       !skuChanged &&
       !unitChanged &&
-      !barcodeChanged
+      !barcodeChanged &&
+      !revenueCategoryChanged &&
+      !lastUnitValueChanged
     ) {
       closeStockSheet();
       return;
@@ -254,6 +344,8 @@ export function Produtos() {
       sku?: string | null;
       unit?: string;
       barcode?: string | null;
+      revenue_category_id?: string | null;
+      last_unit_value?: number | null;
     } = {};
     if (nameChanged) updates.name = newName;
     if (minChanged) updates.min_quantity = newMinQty;
@@ -261,6 +353,12 @@ export function Produtos() {
     if (skuChanged) updates.sku = stockSku.trim() || null;
     if (unitChanged) updates.unit = stockUnit;
     if (barcodeChanged) updates.barcode = stockBarcode.trim() || null;
+    if (revenueCategoryChanged) {
+      updates.revenue_category_id = resolvedRevenueCategoryId;
+    }
+    if (lastUnitValueChanged) {
+      updates.last_unit_value = resolvedLastUnit;
+    }
     if (Object.keys(updates).length > 0) {
       const { error } = await supabase
         .from("products")
@@ -539,6 +637,15 @@ export function Produtos() {
                       </span>
                     </div>
                   ) : null}
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      Categoria de receita
+                    </span>
+                    <span className="text-right wrap-anywhere">
+                      {revenueCategoryDisplayName ??
+                        (stockProduct.revenue_category_id ? "—" : "Padrão")}
+                    </span>
+                  </div>
                   <div className="flex justify-between gap-3 border-t border-border/60 pt-3">
                     <span className="text-muted-foreground">Em estoque</span>
                     <span className="font-semibold tabular-nums">
@@ -620,7 +727,7 @@ export function Produtos() {
               <SheetHeader>
                 <SheetTitle>Editar produto</SheetTitle>
                 <SheetDescription>
-                  Ajuste nome, SKU, unidade, estoque e status.
+                  Ajuste nome, SKU, unidade, categoria de receita, estoque e status.
                 </SheetDescription>
               </SheetHeader>
               <div className="flex-1 space-y-4 overflow-y-auto py-6">
@@ -667,6 +774,36 @@ export function Produtos() {
                   </Select>
                 </div>
                 <div>
+                  <Label>Categoria de receita (venda pontual)</Label>
+                  <Select
+                    value={
+                      stockRevenueCategoryId ||
+                      defaultReceitaLeafId ||
+                      "__auto__"
+                    }
+                    onValueChange={(v) =>
+                      setStockRevenueCategoryId(v === "__auto__" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Padrão do sistema" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__auto__">
+                        Padrão (ex.: Vendas de produtos)
+                      </SelectItem>
+                      {receitaLeaves.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Usada no lançamento de receitas por venda de produto e no DRE
+                  </p>
+                </div>
+                <div>
                   <Label>Quantidade em estoque</Label>
                   <Input
                     type="number"
@@ -676,13 +813,6 @@ export function Produtos() {
                     onChange={(e) => setStockQuantity(e.target.value)}
                     className="mt-2"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Último preço registrado:{" "}
-                    {stockProduct.last_unit_value != null &&
-                    stockProduct.last_unit_value > 0
-                      ? `${formatCurrency(Number(stockProduct.last_unit_value))}/${stockUnit}`
-                      : "—"}
-                  </p>
                 </div>
                 <div>
                   <Label>Quantidade mínima</Label>
@@ -697,6 +827,23 @@ export function Produtos() {
                   />
                   <p className="text-xs text-muted-foreground mt-1">
                     Usado para alertas de estoque baixo (0 = desativado)
+                  </p>
+                </div>
+                <div>
+                  <Label>Último valor pago (opcional)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    value={stockLastUnitValue}
+                    onChange={(e) => setStockLastUnitValue(e.target.value)}
+                    placeholder="Ex.: último preço de compra por unidade"
+                    className="mt-2"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Referência de preço por {stockUnit}; usada no estoque e CMV
+                    até haver movimentações valoradas
                   </p>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border p-4">
