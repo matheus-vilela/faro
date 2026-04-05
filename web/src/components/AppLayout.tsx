@@ -33,6 +33,7 @@ import {
   BarChart3,
   Bell,
   Building2,
+  CircleDollarSign,
   FileText,
   LayoutDashboard,
   ListChecks,
@@ -79,6 +80,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       },
       {
         title: "Recebimento de mercadorias",
+        url: "/app/receitas",
+        icon: CircleDollarSign,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Recebimento",
         url: "/app/recebimento",
         icon: PackageCheck,
         roles: ["operador", "gestor", "owner"],

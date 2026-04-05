@@ -32,6 +32,7 @@ import {
   taxaMargemContribuicao,
 } from "@/lib/dre/dreIndicators";
 import { buildDreTreeForBucket } from "@/lib/dre/dreTree";
+import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { cn } from "@/lib/utils";
 import { canGestorAccess } from "@/lib/roles";
 import {
@@ -203,8 +204,7 @@ export function Dre() {
         <CardHeader className="pb-2">
           <CardTitle className="text-lg">Resumo analítico</CardTitle>
           <CardDescription className="text-xs sm:text-sm">
-            Receitas em verde, deduções em âmbar, custos e despesas em vermelho, resultados em
-            destaque.
+            {ptBrUi.dre.resumoAnaliticoDesc}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-0 pt-0">
@@ -228,7 +228,7 @@ export function Dre() {
               />
               <DreExpandableLine
                 accordionValue="deducoes"
-                label="Deduções da receita / despesas sobre vendas"
+                label={ptBrUi.dre.deducoesReceitaLabel}
                 amount={-computed.deducoesReceita}
                 tone="deducao"
                 prefix="(−)"

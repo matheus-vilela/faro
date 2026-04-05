@@ -4,7 +4,6 @@ import {
   countDone,
   defaultItemStatusForAmount,
   deriveClosingChecklistAmounts,
-  hasMoneyValue,
   monthKeyFromPeriod,
 } from "./monthClosingChecklist";
 import type { DreComputed } from "./dre/computeDre";
