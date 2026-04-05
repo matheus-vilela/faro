@@ -78,7 +78,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         roles: ["operador", "gestor", "owner"],
       },
       {
-        title: "Recebimento",
+        title: "Recebimento de mercadorias",
         url: "/app/recebimento",
         icon: PackageCheck,
         roles: ["operador", "gestor", "owner"],
@@ -96,7 +96,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         roles: ["operador", "gestor", "owner"],
       },
       {
-        title: "Produtos",
+        title: "Produtos e estoque",
         url: "/app/produtos",
         icon: Package,
         roles: ["operador", "gestor", "owner"],

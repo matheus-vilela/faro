@@ -140,7 +140,7 @@ export function ChecklistHistorySection({
   }, [companyId, checklistIds, bounds, filterChecklist, filterMember]);
 
   useEffect(() => {
-    void load();
+    void queueMicrotask(() => load());
   }, [load]);
 
   const modeLabel =

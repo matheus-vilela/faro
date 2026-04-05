@@ -45,6 +45,7 @@ import type { Product } from "@/types/product";
 import {
   AlertTriangle,
   ChefHat,
+  ChevronRight,
   ClipboardList,
   Coins,
   FileSpreadsheet,
@@ -340,10 +341,15 @@ export function Produtos() {
           ) : products.length === 0 ? (
             <p className="text-muted-foreground">Nenhum produto cadastrado</p>
           ) : (
-            <div className="space-y-2">
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
               {products.map((p) => {
                 const isLowStock =
                   p.min_quantity > 0 && p.current_quantity <= p.min_quantity;
+                const qtyStr = Number(p.current_quantity).toLocaleString("pt-BR");
+                const minStr =
+                  p.min_quantity > 0
+                    ? Number(p.min_quantity).toLocaleString("pt-BR")
+                    : null;
                 return (
                   <div
                     key={p.id}
@@ -351,55 +357,75 @@ export function Produtos() {
                     tabIndex={0}
                     onClick={() => openStockSheet(p)}
                     onKeyDown={(e) => e.key === "Enter" && openStockSheet(p)}
-                    className={`flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors ${
-                      p.is_active === false ? "opacity-70" : ""
-                    }`}
+                    className={cn(
+                      "flex w-full items-center gap-3 border-b border-border px-3 py-3.5 text-left transition-colors last:border-b-0 sm:gap-4 sm:px-4",
+                      "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                      p.is_active === false && "opacity-[0.78]",
+                      isLowStock && "bg-destructive/6",
+                    )}
                   >
-                    <div className="flex-1 flex justify-between min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex flex-col items-start gap-2">
-                          <span className="font-medium">{p.name}</span>
-                          {p.sku && (
-                            <span className="text-xs text-muted-foreground rounded bg-muted px-2 py-0.5">
-                              {p.sku}
-                            </span>
-                          )}
-                          {p.is_active === false && (
-                            <Badge variant="secondary" className="gap-1">
-                              <PowerOff className="h-3 w-3" />
-                              Inativo
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Estoque:{" "}
-                          {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
-                          {p.unit}
-                          {p.min_quantity > 0 && (
-                            <span className="ml-2">
-                              • Mín:{" "}
-                              {Number(p.min_quantity).toLocaleString("pt-BR")}{" "}
-                              {p.unit}
-                            </span>
-                          )}
-                          {p.last_unit_value != null &&
-                            p.last_unit_value > 0 && (
-                              <span className="ml-2">
-                                • Último:{" "}
-                                {formatCurrency(Number(p.last_unit_value))}/
-                                {p.unit}
-                              </span>
-                            )}
-                        </p>
+                    <div
+                      className={cn(
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50 text-muted-foreground",
+                        isLowStock &&
+                          "border-destructive/35 bg-destructive/10 text-destructive",
+                      )}
+                      aria-hidden
+                    >
+                      <Package className="h-5 w-5" strokeWidth={1.75} />
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-medium leading-snug text-foreground">
+                          {p.name}
+                        </span>
+                        {p.is_active === false && (
+                          <Badge
+                            variant="secondary"
+                            className="h-5 gap-1 px-1.5 text-[0.65rem] font-normal"
+                          >
+                            <PowerOff className="h-3 w-3" />
+                            Inativo
+                          </Badge>
+                        )}
                         {isLowStock && (
-                          <Badge variant="destructive" className="gap-1">
+                          <Badge
+                            variant="destructive"
+                            className="h-5 gap-1 px-1.5 text-[0.65rem] font-normal"
+                          >
                             <AlertTriangle className="h-3 w-3" />
-                            Estoque baixo
+                            Baixo
                           </Badge>
                         )}
                       </div>
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-mono">
+                          {p.sku ? p.sku : "—"}
+                        </span>
+                        <span className="mx-1.5 text-border">·</span>
+                        <span>{p.unit}</span>
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+                      <div className="text-right leading-tight">
+                        <p className="text-base font-semibold tabular-nums leading-none text-foreground sm:text-lg">
+                          {qtyStr}
+                        </p>
+                        <p className="mt-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+                          em estoque
+                        </p>
+                        {minStr != null && (
+                          <p className="mt-1 text-[0.65rem] tabular-nums text-muted-foreground">
+                            mín. {minStr} {p.unit}
+                          </p>
+                        )}
+                      </div>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-muted-foreground/70 sm:h-5 sm:w-5"
+                        aria-hidden
+                      />
                     </div>
                   </div>
                 );

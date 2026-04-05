@@ -580,7 +580,7 @@ export function Recebimento() {
                             ) : (
                               <>
                                 <Share2 className="h-4 w-4 mr-2" />
-                                Compartilhar link
+                                Vincular operador
                               </>
                             )}
                           </Button>
@@ -877,7 +877,7 @@ export function Recebimento() {
               )}
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-2 sm:gap-1">
             <Button
               type="button"
               variant="outline"
@@ -895,7 +895,7 @@ export function Recebimento() {
                 !shareMemberId
               }
             >
-              {savingShare ? "Salvando…" : "Copiar link"}
+              {savingShare ? "Salvando…" : "Vincular e copiar o link"}
             </Button>
           </DialogFooter>
         </DialogContent>
