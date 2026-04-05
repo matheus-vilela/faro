@@ -41,6 +41,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
   buildChildrenMap,
+  companyCategoryDisplayName,
   isLeafCategory,
   isSelectableReceitaLeaf,
 } from "@/lib/companyCategoryLabels";
@@ -171,7 +172,7 @@ export function Produtos() {
     const leaf = receitaLeaves.find(
       (c) => c.id === stockProduct.revenue_category_id,
     );
-    return leaf?.name ?? null;
+    return leaf ? companyCategoryDisplayName(leaf) : null;
   }, [stockProduct?.revenue_category_id, receitaLeaves]);
 
   const fetchProducts = useCallback(async () => {
@@ -381,6 +382,7 @@ export function Produtos() {
       <PageHeader
         title="Produtos e estoque"
         description="Catálogo, CMV, movimentações, contagem (incluindo link pelo WhatsApp), compras, etiquetas, perdas e receitas."
+        icon={Package}
         action={
           estoqueTab === "catalogo" ? (
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
@@ -794,7 +796,7 @@ export function Produtos() {
                       </SelectItem>
                       {receitaLeaves.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.name}
+                          {companyCategoryDisplayName(c)}
                         </SelectItem>
                       ))}
                     </SelectContent>

@@ -249,6 +249,7 @@ export function Companies() {
           className="flex-col items-center text-center sm:flex-col sm:items-center"
           title="Grupos e unidades"
           description="Cada grupo reúne uma ou mais empresas (unidades). Só o dono do grupo pode renomear o grupo e adicionar ou remover unidades."
+          icon={Building2}
         />
 
         <div className="grid gap-6">

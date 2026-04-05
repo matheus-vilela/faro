@@ -50,7 +50,7 @@ export function ConfiguracoesLayout() {
   return (
     <PageShell narrow className="space-y-8">
       <PageHeader
-        // icon={Settings2}
+        icon={Settings2}
         title="Configurações"
         description="Centralize ajustes da empresa, integrações e permissões."
       />

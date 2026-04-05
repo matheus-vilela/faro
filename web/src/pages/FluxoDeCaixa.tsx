@@ -48,6 +48,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  FileText,
   Loader2,
   Plus,
   TrendingDown,
@@ -450,6 +451,7 @@ export function FluxoDeCaixa() {
       <PageHeader
         title="Fluxo de Caixa"
         description="Contas a pagar e a receber com calendário e listas por tipo"
+        icon={FileText}
         action={
           <Button
             onClick={() => {

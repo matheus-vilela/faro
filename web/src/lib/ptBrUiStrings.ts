@@ -1,5 +1,5 @@
 /**
- * Cópias com escapes Unicode para evitar mojibake (ex.: "Dedu��es") quando o
+ * Cópias com escapes Unicode para evitar mojibake nos acentos quando o
  * arquivo-fonte é salvo ou interpretado com encoding incorreto no Windows.
  */
 export const ptBrUi = {

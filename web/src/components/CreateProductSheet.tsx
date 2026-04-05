@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select'
 import {
   buildChildrenMap,
+  companyCategoryDisplayName,
   isLeafCategory,
   isSelectableReceitaLeaf,
 } from '@/lib/companyCategoryLabels'
@@ -229,7 +230,7 @@ export function CreateProductSheet({
                 </SelectItem>
                 {receitaLeaves.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name}
+                    {companyCategoryDisplayName(c)}
                   </SelectItem>
                 ))}
               </SelectContent>

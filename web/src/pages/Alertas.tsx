@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import {
   AlertTriangle,
+  Bell,
   Calendar,
   CheckCircle2,
   FileText,
@@ -242,6 +243,7 @@ export function Alertas() {
       <PageHeader
         title="Alertas"
         description="Vencimentos, estoque e acompanhamento de recebimentos"
+        icon={Bell}
         action={
           hasAnyAlerta ? (
             <Badge variant="secondary" className="w-fit text-base px-4 py-1.5">

@@ -19,6 +19,7 @@ import {
   Bell,
   CalendarDays,
   FileText,
+  LayoutDashboard,
   Loader2,
   PackageX,
 } from "lucide-react";
@@ -264,6 +265,7 @@ export function Dashboard() {
       <PageHeader
         title="Dashboard"
         description={`Bem-vindo ao Faro${currentCompany ? ` — ${currentCompany.name}` : ""}`}
+        icon={LayoutDashboard}
       />
 
       <div

@@ -398,6 +398,7 @@ export function Despesas() {
             ? "Revisar despesas registradas e vincular contas a pagar"
             : "Registrar despesas e vincular contas a pagar"
         }
+        icon={Wallet}
         action={
           <Button
             type="button"
