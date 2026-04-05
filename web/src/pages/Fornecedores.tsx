@@ -38,9 +38,11 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Supplier } from "@/types/supplier";
 import {
   Check,
+  ChevronRight,
   Copy,
   CreditCard,
   Link2,
@@ -343,66 +345,101 @@ export function Fornecedores() {
               Nenhum fornecedor cadastrado
             </p>
           ) : (
-            <div className="space-y-2">
-              {suppliers.map((s) => (
-                <div
-                  key={s.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openDetail(s)}
-                  onKeyDown={(e) => e.key === "Enter" && openDetail(s)}
-                  className="flex items-center justify-between gap-4 rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{s.name}</span>
-                      {/* {hasPaymentInfo(s) ? (
-                        <Badge variant="default" className="bg-green-600">
-                          Conta cadastrada
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">Sem conta</Badge>
-                      )} */}
-                    </div>
-                    {(s.document || s.email) && (
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {[s.document, s.email].filter(Boolean).join(" • ")}
-                      </p>
-                    )}
-                  </div>
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              {suppliers.map((s) => {
+                const hasPay = hasPaymentInfo(s);
+                const metaParts: string[] = [];
+                if (s.document?.trim()) {
+                  metaParts.push(maskCpfCnpj(s.document));
+                }
+                if (s.email?.trim()) {
+                  metaParts.push(s.email.trim());
+                }
+                if (s.phone?.trim()) {
+                  metaParts.push(maskPhone(s.phone));
+                }
+                return (
                   <div
-                    className="flex gap-2"
-                    onClick={(e) => e.stopPropagation()}
+                    key={s.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openDetail(s)}
+                    onKeyDown={(e) => e.key === "Enter" && openDetail(s)}
+                    className={cn(
+                      "flex w-full items-center gap-3 border-b border-border px-3 py-3.5 text-left transition-colors last:border-b-0 sm:gap-4 sm:px-4",
+                      "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    )}
                   >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openPaymentDialog(s)}
-                      title={
-                        hasPaymentInfo(s)
-                          ? "Editar conta de pagamento"
-                          : "Inserir conta de pagamento"
-                      }
+                    <div
+                      className={cn(
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50 text-muted-foreground",
+                        // hasPay &&
+                        //   "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-400",
+                      )}
+                      aria-hidden
                     >
-                      <CreditCard
-                        className={
-                          hasPaymentInfo(s)
-                            ? "h-4 w-4 text-green-600 dark:text-green-500"
-                            : "h-4 w-4 text-red-600 dark:text-red-500"
+                      <Truck className="h-5 w-5" strokeWidth={1.75} />
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <span className="font-medium leading-snug text-foreground">
+                        {s.name}
+                      </span>
+                      {metaParts.length > 0 ? (
+                        <p className="text-xs text-muted-foreground wrap-anywhere">
+                          {metaParts.join(" · ")}
+                        </p>
+                      ) : (
+                        <p className="text-xs italic text-muted-foreground/90">
+                          Sem CPF/CNPJ, e-mail ou telefone
+                        </p>
+                      )}
+                    </div>
+
+                    <div
+                      className="flex shrink-0 items-center gap-1 sm:gap-1.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 rounded-lg"
+                        onClick={() => openPaymentDialog(s)}
+                        title={
+                          hasPay
+                            ? "Editar conta de pagamento"
+                            : "Inserir conta de pagamento"
                         }
-                      />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openLinkDialog(s)}
-                      title="Gerar link para fornecedor atualizar"
-                    >
-                      <Link2 className="h-4 w-4" />
-                    </Button>
+                      >
+                        <CreditCard
+                          className={cn(
+                            "h-4 w-4",
+                            hasPay
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-red-600 dark:text-red-500",
+                          )}
+                        />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 rounded-lg"
+                        onClick={() => openLinkDialog(s)}
+                        title="Gerar link para o fornecedor atualizar"
+                      >
+                        <Link2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <ChevronRight
+                      className="hidden h-4 w-4 shrink-0 text-muted-foreground/70 sm:block sm:h-5 sm:w-5"
+                      aria-hidden
+                    />
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {!loading && (
@@ -523,7 +560,7 @@ export function Fornecedores() {
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Link para fornecedor atualizar</DialogTitle>
+            <DialogTitle>Link para fornecedor atualizar dados</DialogTitle>
             <DialogDescription>
               Envie este link ao fornecedor {linkSupplier?.name}. O link é
               válido para uma única atualização e expira em 7 dias.

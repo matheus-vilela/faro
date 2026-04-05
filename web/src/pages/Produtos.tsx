@@ -51,6 +51,7 @@ import {
   FileSpreadsheet,
   LayoutGrid,
   Package,
+  Pencil,
   Plus,
   PowerOff,
   ShoppingCart,
@@ -58,7 +59,17 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+const PRODUCT_UNIT_OPTIONS = [
+  { value: "un", label: "Unidade" },
+  { value: "kg", label: "Quilograma (kg)" },
+  { value: "g", label: "Gramas (g)" },
+  { value: "l", label: "Litro (l)" },
+  { value: "ml", label: "Mililitro (ml)" },
+  { value: "cx", label: "Caixa" },
+  { value: "pct", label: "Pacote" },
+] as const;
 
 export function Produtos() {
   const { currentCompany } = useCompany();
@@ -75,7 +86,14 @@ export function Produtos() {
   const [productSheetOpen, setProductSheetOpen] = useState(false);
   const [importSheetOpen, setImportSheetOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
+  /** Resumo ao abrir; edição após "Editar". */
+  const [productSheetView, setProductSheetView] = useState<"summary" | "edit">(
+    "summary",
+  );
   const [stockName, setStockName] = useState("");
+  const [stockSku, setStockSku] = useState("");
+  const [stockUnit, setStockUnit] = useState("un");
+  const [stockBarcode, setStockBarcode] = useState("");
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockIsActive, setStockIsActive] = useState(true);
@@ -92,6 +110,14 @@ export function Produtos() {
     | "receitas";
 
   const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
+
+  const unitSelectOptions = useMemo(() => {
+    const base = [...PRODUCT_UNIT_OPTIONS];
+    if (stockUnit && !base.some((o) => o.value === stockUnit)) {
+      return [{ value: stockUnit, label: stockUnit }, ...base];
+    }
+    return base;
+  }, [stockUnit]);
 
   const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -151,12 +177,25 @@ export function Produtos() {
       currency: "BRL",
     }).format(v);
 
-  const openStockSheet = (p: Product) => {
-    setStockProduct(p);
+  const syncStockFormFromProduct = useCallback((p: Product) => {
     setStockName(p.name);
+    setStockSku(p.sku ?? "");
+    setStockUnit(p.unit || "un");
+    setStockBarcode(p.barcode ?? "");
     setStockQuantity(String(p.current_quantity));
     setStockMinQuantity(String(p.min_quantity ?? 0));
     setStockIsActive(p.is_active !== false);
+  }, []);
+
+  const openStockSheet = (p: Product) => {
+    setStockProduct(p);
+    syncStockFormFromProduct(p);
+    setProductSheetView("summary");
+  };
+
+  const closeStockSheet = () => {
+    setStockProduct(null);
+    setProductSheetView("summary");
   };
 
   const handleStockSave = async () => {
@@ -175,8 +214,22 @@ export function Produtos() {
     const minChanged = newMinQty !== currentMinQty;
     const activeChanged = stockIsActive !== currentActive;
     const qtyChanged = delta !== 0;
-    if (!qtyChanged && !minChanged && !activeChanged && !nameChanged) {
-      setStockProduct(null);
+    const skuChanged =
+      (stockSku.trim() || null) !== (stockProduct.sku?.trim() || null);
+    const unitChanged = stockUnit !== (stockProduct.unit || "un");
+    const barcodeChanged =
+      (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
+
+    if (
+      !qtyChanged &&
+      !minChanged &&
+      !activeChanged &&
+      !nameChanged &&
+      !skuChanged &&
+      !unitChanged &&
+      !barcodeChanged
+    ) {
+      closeStockSheet();
       return;
     }
     setStockSaving(true);
@@ -198,10 +251,16 @@ export function Produtos() {
       name?: string;
       min_quantity?: number;
       is_active?: boolean;
+      sku?: string | null;
+      unit?: string;
+      barcode?: string | null;
     } = {};
     if (nameChanged) updates.name = newName;
     if (minChanged) updates.min_quantity = newMinQty;
     if (activeChanged) updates.is_active = stockIsActive;
+    if (skuChanged) updates.sku = stockSku.trim() || null;
+    if (unitChanged) updates.unit = stockUnit;
+    if (barcodeChanged) updates.barcode = stockBarcode.trim() || null;
     if (Object.keys(updates).length > 0) {
       const { error } = await supabase
         .from("products")
@@ -214,8 +273,9 @@ export function Produtos() {
       }
     }
     setStockSaving(false);
-    setStockProduct(null);
+    closeStockSheet();
     fetchProducts();
+    void fetchLowStockCount();
   };
 
   return (
@@ -444,18 +504,126 @@ export function Produtos() {
 
       <Sheet
         open={!!stockProduct}
-        onOpenChange={(o) => !o && setStockProduct(null)}
+        onOpenChange={(o) => {
+          if (!o) closeStockSheet();
+        }}
       >
-        <SheetContent>
-          {stockProduct && (
+        <SheetContent className="flex flex-col sm:max-w-md">
+          {stockProduct && productSheetView === "summary" && (
             <>
               <SheetHeader>
-                <SheetTitle>Atualizar produto</SheetTitle>
+                <SheetTitle className="pr-8 leading-snug">
+                  {stockProduct.name}
+                </SheetTitle>
                 <SheetDescription>
-                  {stockProduct.sku && `SKU: ${stockProduct.sku}`}
+                  Resumo do cadastro. Use Editar para alterar estoque e dados.
                 </SheetDescription>
               </SheetHeader>
-              <div className="space-y-4 py-6">
+              <div className="flex-1 space-y-4 overflow-y-auto py-6">
+                <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">SKU</span>
+                    <span className="font-mono text-right wrap-anywhere">
+                      {stockProduct.sku ?? "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Unidade</span>
+                    <span>{stockProduct.unit}</span>
+                  </div>
+                  {stockProduct.barcode ? (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Código barras</span>
+                      <span className="font-mono text-right wrap-anywhere">
+                        {stockProduct.barcode}
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between gap-3 border-t border-border/60 pt-3">
+                    <span className="text-muted-foreground">Em estoque</span>
+                    <span className="font-semibold tabular-nums">
+                      {Number(stockProduct.current_quantity).toLocaleString(
+                        "pt-BR",
+                      )}{" "}
+                      {stockProduct.unit}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Mínimo</span>
+                    <span className="tabular-nums">
+                      {Number(stockProduct.min_quantity) > 0
+                        ? `${Number(stockProduct.min_quantity).toLocaleString("pt-BR")} ${stockProduct.unit}`
+                        : "—"}
+                    </span>
+                  </div>
+                  {stockProduct.last_unit_value != null &&
+                    stockProduct.last_unit_value > 0 && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">Último preço</span>
+                        <span className="tabular-nums">
+                          {formatCurrency(
+                            Number(stockProduct.last_unit_value),
+                          )}
+                          /{stockProduct.unit}
+                        </span>
+                      </div>
+                    )}
+                  <div className="flex justify-between gap-3 border-t border-border/60 pt-3">
+                    <span className="text-muted-foreground">Status</span>
+                    <span>
+                      {stockProduct.is_active !== false ? (
+                        <Badge variant="secondary">Ativo</Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <PowerOff className="h-3 w-3" />
+                          Inativo
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+                  {stockProduct.min_quantity > 0 &&
+                    stockProduct.current_quantity <= stockProduct.min_quantity && (
+                      <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span className="text-xs font-medium">
+                          Estoque no ou abaixo do mínimo
+                        </span>
+                      </div>
+                    )}
+                </div>
+              </div>
+              <SheetFooter className="mt-auto flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={closeStockSheet}
+                >
+                  Fechar
+                </Button>
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  onClick={() => {
+                    syncStockFormFromProduct(stockProduct);
+                    setProductSheetView("edit");
+                  }}
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Editar
+                </Button>
+              </SheetFooter>
+            </>
+          )}
+          {stockProduct && productSheetView === "edit" && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Editar produto</SheetTitle>
+                <SheetDescription>
+                  Ajuste nome, SKU, unidade, estoque e status.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex-1 space-y-4 overflow-y-auto py-6">
                 <div>
                   <Label>Nome</Label>
                   <Input
@@ -464,6 +632,39 @@ export function Produtos() {
                     placeholder="Nome do produto"
                     className="mt-2"
                   />
+                </div>
+                <div>
+                  <Label>Código (SKU)</Label>
+                  <Input
+                    value={stockSku}
+                    onChange={(e) => setStockSku(e.target.value)}
+                    placeholder="Opcional"
+                    className="mt-2 font-mono"
+                  />
+                </div>
+                <div>
+                  <Label>Código de barras</Label>
+                  <Input
+                    value={stockBarcode}
+                    onChange={(e) => setStockBarcode(e.target.value)}
+                    placeholder="Opcional — EAN ou alfanumérico"
+                    className="mt-2 font-mono"
+                  />
+                </div>
+                <div>
+                  <Label>Unidade</Label>
+                  <Select value={stockUnit} onValueChange={setStockUnit}>
+                    <SelectTrigger className="mt-2">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {unitSelectOptions.map((u) => (
+                        <SelectItem key={u.value} value={u.value}>
+                          {u.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label>Quantidade em estoque</Label>
@@ -476,16 +677,11 @@ export function Produtos() {
                     className="mt-2"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Unidade: {stockProduct.unit}
+                    Último preço registrado:{" "}
                     {stockProduct.last_unit_value != null &&
-                      stockProduct.last_unit_value > 0 && (
-                        <>
-                          {" "}
-                          • Último pago:{" "}
-                          {formatCurrency(Number(stockProduct.last_unit_value))}
-                          /{stockProduct.unit}
-                        </>
-                      )}
+                    stockProduct.last_unit_value > 0
+                      ? `${formatCurrency(Number(stockProduct.last_unit_value))}/${stockUnit}`
+                      : "—"}
                   </p>
                 </div>
                 <div>
@@ -517,17 +713,38 @@ export function Produtos() {
                   />
                 </div>
               </div>
-              <SheetFooter>
+              <SheetFooter className="mt-auto flex-col gap-2 border-t pt-4 sm:flex-row sm:justify-end">
                 <Button
-                  variant="outline"
-                  onClick={() => setStockProduct(null)}
+                  type="button"
+                  variant="ghost"
+                  className="w-full sm:w-auto"
+                  onClick={() => {
+                    syncStockFormFromProduct(stockProduct);
+                    setProductSheetView("summary");
+                  }}
                   disabled={stockSaving}
                 >
-                  Cancelar
+                  Voltar ao resumo
                 </Button>
-                <Button onClick={handleStockSave} disabled={stockSaving}>
-                  {stockSaving ? "Salvando..." : "Salvar"}
-                </Button>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={closeStockSheet}
+                    disabled={stockSaving}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="w-full sm:w-auto"
+                    onClick={handleStockSave}
+                    disabled={stockSaving}
+                  >
+                    {stockSaving ? "Salvando..." : "Salvar"}
+                  </Button>
+                </div>
               </SheetFooter>
             </>
           )}
