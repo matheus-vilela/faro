@@ -3,13 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -320,15 +314,6 @@ export function Fornecedores() {
       )}
 
       <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Fornecedores cadastrados</CardTitle>
-            <CardDescription>
-              Inserir conta de pagamento ou gerar link para o fornecedor
-              atualizar
-            </CardDescription>
-          </div>
-        </CardHeader>
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">
             <Input
@@ -612,9 +597,9 @@ export function Fornecedores() {
         <SheetContent className="overflow-y-auto sm:max-w-lg">
           {detailSupplier && (
             <>
-              <SheetHeader>
+              <SheetHeader className="pl-0">
                 <div className="flex items-center justify-between pr-8">
-                  <SheetTitle className="flex items-center gap-2">
+                  <SheetTitle className="flex items-center gap-2 text-lg">
                     <Truck className="h-5 w-5" />
                     {detailEditMode
                       ? "Editar fornecedor"

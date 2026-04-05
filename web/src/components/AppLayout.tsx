@@ -16,6 +16,7 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
+  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -79,13 +80,13 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         roles: ["operador", "gestor", "owner"],
       },
       {
-        title: "Recebimento de mercadorias",
+        title: "Receitas",
         url: "/app/receitas",
         icon: CircleDollarSign,
         roles: ["operador", "gestor", "owner"],
       },
       {
-        title: "Recebimento",
+        title: "Recebimento de mercadorias",
         url: "/app/recebimento",
         icon: PackageCheck,
         roles: ["operador", "gestor", "owner"],
@@ -232,7 +233,7 @@ function AppLayoutContent() {
               width={128}
               height={64}
               aria-hidden
-              className="h-8 w-28 shrink-0 object-contain"
+              className="h-12 w-20 shrink-0 object-contain"
             />
           )}
         </Link>
@@ -314,6 +315,35 @@ function AppLayoutContent() {
       </header>
 
       <Sidebar collapsible="icon" className="mt-12">
+        {isMobile && (
+          <SidebarHeader className="flex items-start justify-center ">
+            <Link
+              to="/app"
+              aria-label="Faro — início"
+              className="flex min-w-0  items-center justify-center gap-2.5 overflow-hidden font-semibold tracking-tight group-data-[collapsible=icon]:justify-center  rounded-md pr-6"
+            >
+              {resolvedTheme === "dark" ? (
+                <img
+                  src={logoDark}
+                  alt=""
+                  width={128}
+                  height={64}
+                  aria-hidden
+                  className="h-12 w-20 shrink-0 object-contain"
+                />
+              ) : (
+                <img
+                  src={logoLight}
+                  alt=""
+                  width={128}
+                  height={64}
+                  aria-hidden
+                  className="h-12 w-20 shrink-0 object-contain"
+                />
+              )}
+            </Link>
+          </SidebarHeader>
+        )}
         <SidebarContent>
           {navSections.map((section) => (
             <SidebarGroup key={section.label}>
