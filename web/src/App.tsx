@@ -18,6 +18,7 @@ import { Dre } from "@/pages/Dre";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { Fornecedores } from "@/pages/Fornecedores";
+import { Integracoes } from "@/pages/Integracoes";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { Produtos } from "@/pages/Produtos";
@@ -71,6 +72,7 @@ function AuthenticatedLayout() {
           <Route path="recebimento" element={<Recebimento />} />
           <Route path="checklists" element={<Checklists />} />
           <Route path="alertas" element={<Alertas />} />
+          <Route path="integracoes" element={<Integracoes />} />
           <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />
