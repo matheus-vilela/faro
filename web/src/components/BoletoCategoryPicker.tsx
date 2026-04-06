@@ -17,6 +17,7 @@ import {
 import {
   buildChildrenMap,
   categoryPathLabel,
+  companyCategoryDisplayName,
   isLeafCategory,
   isSelectableDespesaLeaf,
   isSelectableReceitaLeaf,
@@ -55,15 +56,15 @@ function buildLeafOptions(
   );
   leaves.sort((a, b) => {
     if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-    return a.name.localeCompare(
-      b.name,
+    return companyCategoryDisplayName(a).localeCompare(
+      companyCategoryDisplayName(b),
       "pt-BR",
     );
   });
   return leaves.map((c) => {
     const parent = c.parent_id ? byId.get(c.parent_id) : null;
     const parentLabel = parent ? categoryPathLabel(parent.id, byId) : "Raiz";
-    const leafLabel = c.name;
+    const leafLabel = companyCategoryDisplayName(c);
     const fullPath = categoryPathLabel(c.id, byId);
     return {
       id: c.id,
@@ -158,7 +159,12 @@ export function BoletoCategoryPicker({
       .map(([key, value]) => ({
         key,
         label: value.label,
-        items: value.items.sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+        items: value.items.sort((a, b) =>
+          companyCategoryDisplayName(a).localeCompare(
+            companyCategoryDisplayName(b),
+            "pt-BR",
+          ),
+        ),
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }, [parentFiltered, parentById, byId]);
@@ -215,7 +221,10 @@ export function BoletoCategoryPicker({
       .sort((a, b) => a.parentLabel.localeCompare(b.parentLabel, "pt-BR"));
   }, [filtered]);
 
-  const selectedLabel = value ? byId.get(value)?.name ?? "" : "";
+  const selectedCategory = value ? byId.get(value) : undefined;
+  const selectedLabel = selectedCategory
+    ? companyCategoryDisplayName(selectedCategory)
+    : "";
   const triggerDisabled = Boolean(disabled) || loading;
 
   const openCreate = () => {
@@ -483,7 +492,9 @@ export function BoletoCategoryPicker({
                               >
                                 <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
                                 <Check className={cn("h-4 w-4 shrink-0", newParentId === opt.id ? "opacity-100" : "opacity-0")} />
-                                <span className="truncate">{opt.name}</span>
+                                <span className="truncate">
+                                  {companyCategoryDisplayName(opt)}
+                                </span>
                               </button>
                             ))}
                           </div>

@@ -1,28 +1,10 @@
-import { buildChildrenMap } from "@/lib/companyCategoryLabels";
-import { ptBrUi } from "@/lib/ptBrUiStrings";
+import {
+  buildChildrenMap,
+  companyCategoryDisplayName,
+} from "@/lib/companyCategoryLabels";
 import type { CompanyCategory } from "@/types/category";
 import type { DreBucket } from "./dreMapping";
 import { mapCategoryToDreBucket } from "./dreMapping";
-
-/** Nome exibido na árvore DRE; o texto no banco pode vir com encoding ruim em seeds/backfills antigos. */
-function dreTreeCategoryDisplayName(cat: CompanyCategory): string {
-  const isDeducaoOpReceita =
-    cat.papel_receita_dre === "DEDUCAO" &&
-    cat.natureza === "RECEITA" &&
-    cat.tipo === "OPERACIONAL";
-  if (!isDeducaoOpReceita) return cat.name;
-
-  if (cat.padrao_sistema) {
-    return ptBrUi.dre.deducoesReceitaLabel;
-  }
-
-  // Fallback: sufixo do plano padrão costuma ficar legível em ASCII mesmo com mojibake no prefixo
-  if (/da receita\s*\/\s*despesas sobre vendas/i.test(cat.name)) {
-    return ptBrUi.dre.deducoesReceitaLabel;
-  }
-
-  return cat.name;
-}
 
 export interface DreTreeNode {
   id: string;
@@ -74,7 +56,7 @@ export function buildDreTreeForBucket(
     if (total === 0 && childNodes.length === 0) return null;
     return {
       id: cat.id,
-      name: dreTreeCategoryDisplayName(cat),
+      name: companyCategoryDisplayName(cat),
       amount: total,
       children: childNodes,
     };

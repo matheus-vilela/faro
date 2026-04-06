@@ -37,9 +37,9 @@ import { cn } from "@/lib/utils";
 import { canGestorAccess } from "@/lib/roles";
 import {
   AlertTriangle,
+  BarChart3,
   ChevronDown,
   Coins,
-  FileBarChart,
   PieChart,
   Scale,
 } from "lucide-react";
@@ -98,8 +98,12 @@ export function Dre() {
       <PageHeader
         title="DRE"
         description="Demonstração do resultado do exercício por competência (vencimento dos lançamentos)."
-        icon={FileBarChart}
+        icon={BarChart3}
       />
+
+      <p className="mb-6 max-w-3xl text-sm text-muted-foreground leading-relaxed">
+        {ptBrUi.dre.regrasClassificacao}
+      </p>
 
       <div className="mb-6 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
         <div className="flex min-w-0 flex-1 justify-start">

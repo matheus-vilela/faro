@@ -292,6 +292,7 @@ export function Fornecedores() {
       <PageHeader
         title="Fornecedores"
         description="Cadastre fornecedores e gerencie as informações de pagamento"
+        icon={Truck}
         action={
           <Button
             type="button"

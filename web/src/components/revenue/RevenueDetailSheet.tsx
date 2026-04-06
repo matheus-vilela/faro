@@ -240,9 +240,7 @@ export function RevenueDetailSheet({
     setRevenueType(detail.revenue_type);
     setEntryDate(detail.entry_date.slice(0, 10));
     setTitle(detail.title);
-    setCategoryLeafId(
-      detail.entry_mode === "manual" ? detail.subcategory_id : "",
-    );
+    setCategoryLeafId(detail.subcategory_id);
     setProductId(detail.product_id ?? "");
     setQuantity(
       detail.quantity != null ? String(detail.quantity) : "1",
@@ -266,9 +264,11 @@ export function RevenueDetailSheet({
     if (!entryDate) return false;
     if (!title.trim()) return false;
     if (entryMode === "manual" && !categoryLeafId) return false;
+    if (entryMode === "product_sale" && !categoryLeafId) return false;
     if (effectiveGross <= 0) return false;
     if (entryMode === "product_sale") {
       if (!productId || qtyNum <= 0) return false;
+      if (!selectedProduct?.cmv_category_id) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
       if (!stockOk) return false;
@@ -288,6 +288,7 @@ export function RevenueDetailSheet({
     unitNum,
     grossNum,
     stockOk,
+    selectedProduct?.cmv_category_id,
   ]);
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -299,8 +300,7 @@ export function RevenueDetailSheet({
         ? computedGrossProduct
         : effectiveGross;
 
-    const manualLeaf =
-      entryMode === "manual" ? categoriesById.get(categoryLeafId) : undefined;
+    const revenueLeaf = categoriesById.get(categoryLeafId);
     const payload: Record<string, unknown> = {
       entry_id: detail.id,
       company_id: companyId,
@@ -308,11 +308,8 @@ export function RevenueDetailSheet({
       title: title.trim(),
       entry_mode: entryMode,
       revenue_type: entryMode === "product_sale" ? "operational" : revenueType,
-      category_id: manualLeaf?.parent_id ?? null,
-      subcategory_id:
-        entryMode === "product_sale"
-          ? selectedProduct?.revenue_category_id ?? null
-          : categoryLeafId,
+      category_id: revenueLeaf?.parent_id ?? null,
+      subcategory_id: categoryLeafId,
       gross_amount: grossPayload,
       tax_type: taxType,
       tax_value: taxValNum,
@@ -495,9 +492,9 @@ export function RevenueDetailSheet({
 
                   {entryMode === "product_sale" && (
                     <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
-                      Venda pontual usa receita{" "}
-                      <span className="font-medium text-foreground">operacional</span>{" "}
-                      e a categoria definida no cadastro do produto.
+                      Venda pontual é receita{" "}
+                      <span className="font-medium text-foreground">operacional</span>.
+                      A <span className="font-medium text-foreground">categoria da venda</span> classifica a receita no DRE; o produto define estoque e CMV.
                     </p>
                   )}
 
@@ -577,6 +574,27 @@ export function RevenueDetailSheet({
                           </SelectContent>
                         </Select>
                       </div>
+                      <div>
+                        <Label>Categoria da venda *</Label>
+                        <Select
+                          value={categoryLeafId || "__none__"}
+                          onValueChange={(v) =>
+                            setCategoryLeafId(v === "__none__" ? "" : v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a categoria da receita" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Selecione</SelectItem>
+                            {leafCategoryOptions.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {categoryPathLabel(c.id, categoriesById)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label>Quantidade</Label>
@@ -644,6 +662,15 @@ export function RevenueDetailSheet({
                           onChange={(e) => setTitle(e.target.value)}
                         />
                       </div>
+                      {selectedProduct && !selectedProduct.cmv_category_id && (
+                        <div
+                          role="alert"
+                          className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                        >
+                          Este produto não tem categoria de CMV no cadastro. Defina em
+                          Produtos e estoque antes de salvar.
+                        </div>
+                      )}
                       {selectedProduct && !stockOk && (
                         <div
                           role="alert"

@@ -46,6 +46,7 @@ import type { CompanyMember } from "@/types/companyMember";
 import {
   History,
   LayoutGrid,
+  ListChecks,
   Loader2,
   Pencil,
   Plus,
@@ -493,6 +494,7 @@ export function Checklists() {
       <PageHeader
         title="Checklists"
         description="Recorrência diária (dias da semana e quantas execuções em cada um) ou mensal (até 3× por mês). Envie no WhatsApp: 'checklist' e o número para abrir o link para a rotina."
+        icon={ListChecks}
         action={
           <Button type="button" size="sm" onClick={openCreate}>
             <Plus className="mr-1.5 h-4 w-4" />

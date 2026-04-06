@@ -30,7 +30,7 @@ import {
   validateAndNormalizePhone,
 } from "@/lib/whatsappPhone";
 import type { CompanyMember } from "@/types/companyMember";
-import { Info, Loader2, Pencil, Plus, UserCircle } from "lucide-react";
+import { Info, Loader2, Pencil, Plus, UserCircle, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -334,6 +334,7 @@ export function ConfiguracoesUsuariosMembros() {
       <PageHeader
         title="Usuários e membros"
         description="Dados do proprietário com acesso ao sistema e membros que interagem apenas pelo WhatsApp (sem login no Faro)."
+        icon={Users}
       />
 
       <Card className="shadow-sm border-primary/15">

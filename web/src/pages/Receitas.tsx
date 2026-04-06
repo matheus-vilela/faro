@@ -276,7 +276,7 @@ export function Receitas() {
   useEffect(() => {
     if (!sheetOpen) return;
     setCategoryLeafId("");
-  }, [tipoFilter, sheetOpen]);
+  }, [tipoFilter, sheetOpen, entryMode]);
 
   useEffect(() => {
     if (!productId) return;
@@ -321,9 +321,11 @@ export function Receitas() {
     if (!entryDate) return false;
     if (!title.trim()) return false;
     if (entryMode === "manual" && !categoryLeafId) return false;
+    if (entryMode === "product_sale" && !categoryLeafId) return false;
     if (effectiveGross <= 0) return false;
     if (entryMode === "product_sale") {
       if (!productId || qtyNum <= 0) return false;
+      if (!selectedProduct?.cmv_category_id) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
       if (!stockOk) return false;
@@ -342,6 +344,7 @@ export function Receitas() {
     unitNum,
     grossNum,
     stockOk,
+    selectedProduct?.cmv_category_id,
   ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -353,10 +356,7 @@ export function Receitas() {
         ? computedGrossProduct
         : effectiveGross;
 
-    const manualLeaf =
-      entryMode === "manual"
-        ? categoriesById.get(categoryLeafId)
-        : undefined;
+    const revenueLeaf = categoriesById.get(categoryLeafId);
     const payload: Record<string, unknown> = {
       company_id: currentCompany.id,
       entry_date: entryDate,
@@ -364,11 +364,8 @@ export function Receitas() {
       entry_mode: entryMode,
       revenue_type:
         entryMode === "product_sale" ? "operational" : revenueType,
-      category_id: manualLeaf?.parent_id ?? null,
-      subcategory_id:
-        entryMode === "product_sale"
-          ? selectedProduct?.revenue_category_id ?? null
-          : categoryLeafId,
+      category_id: revenueLeaf?.parent_id ?? null,
+      subcategory_id: categoryLeafId,
       gross_amount: grossPayload,
       tax_type: taxType,
       tax_value: taxValNum,
@@ -438,7 +435,7 @@ export function Receitas() {
     <PageShell className="space-y-8 pb-0" narrow>
       <PageHeader
         title="Receitas"
-        description="Registre receitas operacionais e não operacionais; vendas de produto dão baixa no estoque e entram no DRE."
+        description="Receitas manuais e vendas de produto: a classificação da receita no DRE vem da categoria escolhida no lançamento; o CMV segue o grupo cadastrado no produto."
         icon={CircleDollarSign}
         action={
           <Button
@@ -513,10 +510,9 @@ export function Receitas() {
 
             {entryMode === "product_sale" && (
               <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
-                Venda pontual usa receita{" "}
-                <span className="font-medium text-foreground">operacional</span>{" "}
-                e a categoria definida no cadastro do produto (ou padrão do
-                sistema).
+                Venda pontual é receita{" "}
+                <span className="font-medium text-foreground">operacional</span>.
+                Escolha a <span className="font-medium text-foreground">categoria da venda</span> para o DRE; o produto define apenas estoque e CMV.
               </p>
             )}
 
@@ -604,6 +600,34 @@ export function Receitas() {
                   </Select>
                 </div>
 
+                <div>
+                  <Label>Categoria da venda *</Label>
+                  <Select
+                    value={categoryLeafId || "__none__"}
+                    onValueChange={(v) =>
+                      setCategoryLeafId(v === "__none__" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione a categoria da receita" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Selecione</SelectItem>
+                      {leafCategoryOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {categoryPathLabel(c.id, categoriesById)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {leafCategoryOptions.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Cadastre categorias de receita operacional em Configurações ›
+                      Categorias.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Quantidade</Label>
@@ -674,6 +698,16 @@ export function Receitas() {
                     placeholder="Gerado a partir do produto"
                   />
                 </div>
+
+                {selectedProduct && !selectedProduct.cmv_category_id && (
+                  <div
+                    role="alert"
+                    className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                  >
+                    Este produto não tem categoria de CMV no cadastro. Defina em
+                    Produtos e estoque antes de lançar a venda.
+                  </div>
+                )}
 
                 {selectedProduct && !stockOk && (
                   <div

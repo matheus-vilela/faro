@@ -10,7 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
-import { buildChildrenMap, categoryPathLabel, TIPO_LABEL } from "@/lib/companyCategoryLabels";
+import {
+  buildChildrenMap,
+  categoryPathLabel,
+  companyCategoryDisplayName,
+  TIPO_LABEL,
+} from "@/lib/companyCategoryLabels";
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
@@ -150,7 +155,12 @@ export function ConfiguracoesCategorias() {
       .map(([key, value]) => ({
         key,
         label: value.label,
-        items: value.items.sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+        items: value.items.sort((a, b) =>
+          companyCategoryDisplayName(a).localeCompare(
+            companyCategoryDisplayName(b),
+            "pt-BR",
+          ),
+        ),
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }, [filteredParentOptions, byId]);
@@ -200,7 +210,7 @@ export function ConfiguracoesCategorias() {
     setEditing(row);
     setFormKind("edicao");
     setSelectedId(row.id);
-    setFormName(row.name);
+    setFormName(companyCategoryDisplayName(row));
     setFormNatureza(row.natureza);
     setFormTipo(row.tipo);
     setFormParentId(row.parent_id ?? "ROOT");
@@ -360,7 +370,9 @@ export function ConfiguracoesCategorias() {
               className="relative z-[1] min-w-0 flex-1 text-left"
               onClick={() => openEdit(node)}
             >
-              <p className="truncate text-sm font-medium">{node.name}</p>
+              <p className="truncate text-sm font-medium">
+                {companyCategoryDisplayName(node)}
+              </p>
             </button>
             {node.ativo === false ? (
               <Badge variant="destructive" className="shrink-0 text-[10px]">
@@ -560,7 +572,10 @@ export function ConfiguracoesCategorias() {
                         {formParentId === "ROOT"
                           ? "Selecione uma categoria"
                           : formParentId
-                            ? byId.get(formParentId)?.name ?? "Selecione"
+                            ? (() => {
+                                const p = byId.get(formParentId);
+                                return p ? companyCategoryDisplayName(p) : "Selecione";
+                              })()
                             : "Selecione"}
                       </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -627,7 +642,9 @@ export function ConfiguracoesCategorias() {
                               >
                                 <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
                                 <Check className={cn("h-4 w-4", formParentId === opt.id ? "opacity-100" : "opacity-0")} />
-                                <span className="truncate">{opt.name}</span>
+                                <span className="truncate">
+                                  {companyCategoryDisplayName(opt)}
+                                </span>
                               </button>
                             ))}
                           </div>
