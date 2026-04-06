@@ -194,14 +194,22 @@ export function RevenueDetailSheet({
     }
     setLoading(true);
     const [entryRes, catRes, prodRes] = await Promise.all([
-      supabase.from("revenue_entries").select("*").eq("id", revenueEntryId).single(),
+      supabase
+        .from("revenue_entries")
+        .select("*")
+        .eq("id", revenueEntryId)
+        .single(),
       supabase
         .from("company_categories")
         .select("*")
         .eq("company_id", companyId)
         .order("ordem", { ascending: true })
         .order("name", { ascending: true }),
-      supabase.from("products").select("*").eq("company_id", companyId).order("name"),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
     ]);
     setLoading(false);
 
@@ -218,19 +226,21 @@ export function RevenueDetailSheet({
   }, [revenueEntryId, companyId]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
   useEffect(() => {
     if (!revenueEntryId) {
-      setDetail(null);
-      setDetailEditMode(false);
+      queueMicrotask(() => {
+        setDetail(null);
+        setDetailEditMode(false);
+      });
     }
   }, [revenueEntryId]);
 
   useEffect(() => {
     if (entryMode === "product_sale") {
-      setRevenueType("operational");
+      queueMicrotask(() => setRevenueType("operational"));
     }
   }, [entryMode]);
 
@@ -242,13 +252,9 @@ export function RevenueDetailSheet({
     setTitle(detail.title);
     setCategoryLeafId(detail.subcategory_id);
     setProductId(detail.product_id ?? "");
-    setQuantity(
-      detail.quantity != null ? String(detail.quantity) : "1",
-    );
+    setQuantity(detail.quantity != null ? String(detail.quantity) : "1");
     setPricingMode(detail.pricing_mode ?? "unit");
-    setUnitValue(
-      detail.unit_value != null ? String(detail.unit_value) : "",
-    );
+    setUnitValue(detail.unit_value != null ? String(detail.unit_value) : "");
     setGrossInput(String(detail.gross_amount));
     setTaxType(detail.tax_type);
     setTaxValue(String(detail.tax_value));
@@ -441,7 +447,9 @@ export function RevenueDetailSheet({
                   )}
                 </div>
                 <SheetDescription className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-foreground">{detail.title}</span>
+                  <span className="font-medium text-foreground">
+                    {detail.title}
+                  </span>
                   <Badge variant="secondary">
                     {ENTRY_MODE_LABEL[detail.entry_mode] ?? detail.entry_mode}
                   </Badge>
@@ -462,8 +470,12 @@ export function RevenueDetailSheet({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="manual">Lançamento por período</SelectItem>
-                        <SelectItem value="product_sale">Venda pontual</SelectItem>
+                        <SelectItem value="manual">
+                          Lançamento por período
+                        </SelectItem>
+                        <SelectItem value="product_sale">
+                          Venda pontual
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -481,7 +493,9 @@ export function RevenueDetailSheet({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="operational">Operacional</SelectItem>
+                          <SelectItem value="operational">
+                            Operacional
+                          </SelectItem>
                           <SelectItem value="non_operational">
                             Não operacional
                           </SelectItem>
@@ -493,8 +507,15 @@ export function RevenueDetailSheet({
                   {entryMode === "product_sale" && (
                     <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
                       Venda pontual é receita{" "}
-                      <span className="font-medium text-foreground">operacional</span>.
-                      A <span className="font-medium text-foreground">categoria da venda</span> classifica a receita no DRE; o produto define estoque e CMV.
+                      <span className="font-medium text-foreground">
+                        operacional
+                      </span>
+                      . A{" "}
+                      <span className="font-medium text-foreground">
+                        categoria da venda
+                      </span>{" "}
+                      classifica a receita no DRE; o produto define estoque e
+                      CMV.
                     </p>
                   )}
 
@@ -567,7 +588,9 @@ export function RevenueDetailSheet({
                                 <SelectItem key={p.id} value={p.id}>
                                   {p.name}
                                   {p.sku ? ` (${p.sku})` : ""} — Est.:{" "}
-                                  {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
+                                  {Number(p.current_quantity).toLocaleString(
+                                    "pt-BR",
+                                  )}{" "}
                                   {p.unit}
                                 </SelectItem>
                               ))}
@@ -626,7 +649,9 @@ export function RevenueDetailSheet({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="unit">Valor unitário</SelectItem>
+                              <SelectItem value="unit">
+                                Valor unitário
+                              </SelectItem>
                               <SelectItem value="total">Valor total</SelectItem>
                             </SelectContent>
                           </Select>
@@ -667,8 +692,8 @@ export function RevenueDetailSheet({
                           role="alert"
                           className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
                         >
-                          Este produto não tem categoria de CMV no cadastro. Defina em
-                          Produtos e estoque antes de salvar.
+                          Este produto não tem categoria de CMV no cadastro.
+                          Defina em Produtos e estoque antes de salvar.
                         </div>
                       )}
                       {selectedProduct && !stockOk && (
@@ -677,9 +702,9 @@ export function RevenueDetailSheet({
                           className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
                         >
                           Estoque insuficiente. Disponível:{" "}
-                          {Number(selectedProduct.current_quantity).toLocaleString(
-                            "pt-BR",
-                          )}{" "}
+                          {Number(
+                            selectedProduct.current_quantity,
+                          ).toLocaleString("pt-BR")}{" "}
                           {selectedProduct.unit}.
                         </div>
                       )}
@@ -711,8 +736,12 @@ export function RevenueDetailSheet({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="percentage">Percentual (%)</SelectItem>
-                          <SelectItem value="currency">Valor em reais (R$)</SelectItem>
+                          <SelectItem value="percentage">
+                            Percentual (%)
+                          </SelectItem>
+                          <SelectItem value="currency">
+                            Valor em reais (R$)
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -733,13 +762,17 @@ export function RevenueDetailSheet({
                   </div>
 
                   <div className="rounded-lg border bg-muted/30 px-3 py-3 text-sm space-y-1.5">
-                    <p className="font-medium text-foreground">Resumo financeiro</p>
+                    <p className="font-medium text-foreground">
+                      Resumo financeiro
+                    </p>
                     <div className="flex justify-between gap-2">
                       <span className="text-muted-foreground">Valor bruto</span>
                       <span>{formatCurrency(effectiveGross)}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-muted-foreground">{taxSummaryLabel}</span>
+                      <span className="text-muted-foreground">
+                        {taxSummaryLabel}
+                      </span>
                       <span>- {formatCurrency(displayTax)}</span>
                     </div>
                     <div className="flex justify-between gap-2 font-medium">
@@ -792,18 +825,24 @@ export function RevenueDetailSheet({
                     <div>
                       <span className="text-muted-foreground">Categoria:</span>{" "}
                       <span className="break-words">
-                        {categoryPathLabel(detail.subcategory_id, categoriesById)}
+                        {categoryPathLabel(
+                          detail.subcategory_id,
+                          categoriesById,
+                        )}
                       </span>
                     </div>
-                    {detail.entry_mode === "product_sale" && detail.product_id ? (
+                    {detail.entry_mode === "product_sale" &&
+                    detail.product_id ? (
                       <div>
                         <span className="text-muted-foreground">Produto:</span>{" "}
-                        {productNameById.get(detail.product_id) ?? detail.product_id}
+                        {productNameById.get(detail.product_id) ??
+                          detail.product_id}
                         {detail.quantity != null ? (
                           <>
                             {" "}
                             · {String(detail.quantity)}{" "}
-                            {products.find((p) => p.id === detail.product_id)?.unit ?? ""}
+                            {products.find((p) => p.id === detail.product_id)
+                              ?.unit ?? ""}
                           </>
                         ) : null}
                       </div>
@@ -811,7 +850,9 @@ export function RevenueDetailSheet({
                     {categoriesById.get(detail.subcategory_id) ? (
                       <div>
                         <Badge variant="outline">
-                          {tipoBadge(categoriesById.get(detail.subcategory_id)!)}
+                          {tipoBadge(
+                            categoriesById.get(detail.subcategory_id)!,
+                          )}
                         </Badge>
                       </div>
                     ) : null}
@@ -823,7 +864,9 @@ export function RevenueDetailSheet({
                       <span>{formatCurrency(Number(detail.gross_amount))}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-muted-foreground">Taxas / deduções</span>
+                      <span className="text-muted-foreground">
+                        Taxas / deduções
+                      </span>
                       <span>- {formatCurrency(Number(detail.tax_amount))}</span>
                     </div>
                     <div className="flex justify-between gap-2 font-medium border-t border-border/60 pt-2">
@@ -835,8 +878,8 @@ export function RevenueDetailSheet({
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <CircleDollarSign className="h-4 w-4 shrink-0" />
                     <span>
-                      Lançamento reconhecido no DRE pelos boletos a receber vinculados
-                      (competência pela data da receita).
+                      Lançamento reconhecido no DRE pelos boletos a receber
+                      vinculados (competência pela data da receita).
                     </span>
                   </div>
                 </div>

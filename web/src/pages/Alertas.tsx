@@ -9,7 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -96,6 +96,7 @@ function KindIcon({ kind }: { kind: CompanyAlertKind }) {
 
 export function Alertas() {
   const { currentCompany, currentRole } = useCompany();
+  const companyId = currentCompany?.id;
   const canSee = currentRole ? canGestorAccess(currentRole) : false;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -133,17 +134,16 @@ export function Alertas() {
   );
 
   const load = useCallback(async () => {
-    if (!currentCompany?.id || !canSee) {
+    if (!companyId || !canSee) {
       setRows([]);
       setLoading(false);
       return;
     }
     setLoading(true);
-    await syncCompanyAlerts(currentCompany.id);
     const { data, error } = await supabase
       .from("company_alerts")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("status", "open")
       .order("created_at", { ascending: false });
     if (error) {
@@ -153,10 +153,10 @@ export function Alertas() {
       setRows((data ?? []) as CompanyAlertRow[]);
     }
     setLoading(false);
-  }, [currentCompany?.id, canSee]);
+  }, [companyId, canSee]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
   const handleRefresh = async () => {

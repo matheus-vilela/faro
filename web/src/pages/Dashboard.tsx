@@ -5,7 +5,6 @@ import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhats
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -37,18 +36,9 @@ function formatLongDate(d: Date): string {
   });
 }
 
-function formatDayTitle(key: string): string {
-  const [y, m, d] = key.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "short",
-  });
-}
-
 export function Dashboard() {
   const { currentCompany, currentRole } = useCompany();
+  const companyId = currentCompany?.id;
   const canSeeAlerts = currentRole === "gestor" || currentRole === "owner";
   const isOwner = currentRole === "owner";
 
@@ -64,7 +54,7 @@ export function Dashboard() {
   });
 
   const loadBoletos = useCallback(async () => {
-    if (!currentCompany?.id) {
+    if (!companyId) {
       setLoadingBoletos(false);
       setTodayBoletos([]);
       setTomorrowBoletos([]);
@@ -79,7 +69,7 @@ export function Dashboard() {
     const { data, error } = await supabase
       .from("boletos")
       .select("id, description, due_date, amount, status")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("flow_type", "payable")
       .in("due_date", [todayStr, tomorrowStr])
       .eq("status", "pending")
@@ -97,18 +87,15 @@ export function Dashboard() {
       );
     }
     setLoadingBoletos(false);
-  }, [currentCompany?.id]);
+  }, [companyId]);
 
   const loadAlertSummary = useCallback(async () => {
-    if (!currentCompany?.id || !canSeeAlerts) {
+    if (!companyId || !canSeeAlerts) {
       setLoadingAlerts(false);
       setAlertSummary({ lowStock: 0, withoutBoleto: 0, notReceived: 0 });
       return;
     }
     setLoadingAlerts(true);
-
-    const companyId = currentCompany.id;
-    await syncCompanyAlerts(companyId);
 
     const { data, error } = await supabase
       .from("company_alerts")
@@ -130,14 +117,14 @@ export function Dashboard() {
       notReceived: list.filter((r) => r.kind === "recebimento_falta").length,
     });
     setLoadingAlerts(false);
-  }, [currentCompany?.id, canSeeAlerts]);
+  }, [companyId, canSeeAlerts]);
 
   useEffect(() => {
-    void loadBoletos();
+    queueMicrotask(() => void loadBoletos());
   }, [loadBoletos]);
 
   useEffect(() => {
-    void loadAlertSummary();
+    queueMicrotask(() => void loadAlertSummary());
   }, [loadAlertSummary]);
 
   const formatCurrency = (v: number) =>
@@ -145,11 +132,6 @@ export function Dashboard() {
       style: "currency",
       currency: "BRL",
     }).format(v);
-
-  const todayKey = localDateKey(new Date());
-  const tomorrowD = new Date();
-  tomorrowD.setDate(tomorrowD.getDate() + 1);
-  const tomorrowKey = localDateKey(tomorrowD);
 
   const todayTotal = useMemo(
     () => todayBoletos.reduce((s, b) => s + b.amount, 0),

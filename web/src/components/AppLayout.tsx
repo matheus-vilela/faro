@@ -203,7 +203,7 @@ function AppLayoutContent() {
     <div className="relative flex  w-full">
       <header
         className={cn(
-          "fixed top-0 z-50 flex w-full h-12 shrink-0 items-center gap-1 sm:gap-2 px-2 border-b border-border bg-card backdrop-blur supports-[backdrop-filter]:bg-card",
+          "fixed top-0 z-50 flex w-full h-12 shrink-0 items-center gap-1 sm:gap-2 px-2 border-b border-border bg-card backdrop-blur supports-backdrop-filter:bg-card",
         )}
       >
         {isMobile && (

@@ -31,7 +31,7 @@ export function DashboardAlertsCard({
 }) {
   return (
     <Card className="overflow-hidden border-l-4 border-l-amber-500/80 shadow-sm ring-1 ring-border/60">
-      <CardHeader className="border-b border-border/50 bg-gradient-to-br from-amber-500/[0.07] to-transparent pb-4 dark:from-amber-500/12">
+      <CardHeader className="border-b border-border/50 bg-linear-to-br from-amber-500/[0.07] to-transparent pb-4 dark:from-amber-500/12">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3 min-w-0">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/15 text-amber-800 dark:text-amber-400">

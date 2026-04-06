@@ -152,7 +152,8 @@ export function MonthClosingChecklist({
                     Checklist de Fechamento
                   </SheetTitle>
                   <SheetDescription className="text-left text-xs sm:text-sm">
-                    Competência: <span className="font-medium">{periodLabel}</span>
+                    Competência:{" "}
+                    <span className="font-medium">{periodLabel}</span>
                   </SheetDescription>
                 </div>
               </div>
@@ -179,18 +180,21 @@ export function MonthClosingChecklist({
               ) : (
                 <>
                   <p className="text-sm font-medium leading-snug text-foreground">
-                    Confira os principais valores do mês antes de fechar o período.
+                    Confira os principais valores do mês antes de fechar o
+                    período.
                   </p>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Marque cada item como conferido ou informe quando não houve movimentação no
-                    mês.
+                    Marque cada item como conferido ou informe quando não houve
+                    movimentação no mês.
                   </p>
                   {lastReopenReason ? (
                     <div
                       role="note"
                       className="rounded-lg border border-border/80 bg-muted/40 px-3 py-2 text-xs leading-relaxed text-foreground"
                     >
-                      <span className="font-semibold">Motivo registrado na última reabertura: </span>
+                      <span className="font-semibold">
+                        Motivo registrado na última reabertura:{" "}
+                      </span>
                       {lastReopenReason}
                     </div>
                   ) : null}
@@ -200,9 +204,7 @@ export function MonthClosingChecklist({
               {!isClosed ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span>
-                      {doneCount} de 5 itens conferidos
-                    </span>
+                    <span>{doneCount} de 5 itens conferidos</span>
                     <span className="tabular-nums">{doneCount}/5</span>
                   </div>
                   <div
@@ -225,7 +227,9 @@ export function MonthClosingChecklist({
               {!hydrated ? (
                 <p className="text-sm text-muted-foreground">Carregando…</p>
               ) : loading ? (
-                <p className="text-sm text-muted-foreground">Carregando valores do período…</p>
+                <p className="text-sm text-muted-foreground">
+                  Carregando valores do período…
+                </p>
               ) : isClosed ? (
                 <ClosedMonthSummary items={items} />
               ) : (
@@ -254,12 +258,15 @@ export function MonthClosingChecklist({
                   <div className="flex gap-2">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-700 dark:text-orange-300" />
                     <div className="min-w-0 space-y-1">
-                      <h3 id="reopen-heading" className="text-sm font-semibold text-foreground">
+                      <h3
+                        id="reopen-heading"
+                        className="text-sm font-semibold text-foreground"
+                      >
                         Reabrir mês
                       </h3>
                       <p className="text-xs leading-relaxed text-muted-foreground">
-                        Ao reabrir, todas as confirmações serão resetadas e você precisará revisar
-                        os itens novamente.
+                        Ao reabrir, todas as confirmações serão resetadas e você
+                        precisará revisar os itens novamente.
                       </p>
                     </div>
                   </div>
@@ -273,7 +280,8 @@ export function MonthClosingChecklist({
                       value={reopenReasonDraft}
                       onChange={(e) => {
                         setReopenReasonDraft(e.target.value);
-                        if (reopenError && e.target.value.trim()) setReopenError(false);
+                        if (reopenError && e.target.value.trim())
+                          setReopenError(false);
                       }}
                       aria-invalid={reopenError}
                       placeholder="Descreva o motivo para reabrir este período."
@@ -285,7 +293,9 @@ export function MonthClosingChecklist({
                       )}
                     />
                     {reopenError ? (
-                      <p className="text-xs text-destructive">Informe o motivo da reabertura.</p>
+                      <p className="text-xs text-destructive">
+                        Informe o motivo da reabertura.
+                      </p>
                     ) : null}
                   </div>
                   <Button
@@ -301,9 +311,13 @@ export function MonthClosingChecklist({
             </div>
 
             {!isClosed ? (
-              <div className="shrink-0 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <div className="shrink-0 border-t bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80">
                 {canClose ? (
-                  <Button type="button" className="w-full" onClick={() => setConfirm({ type: "close_month" })}>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => setConfirm({ type: "close_month" })}
+                  >
                     Confirmar e fechar mês
                   </Button>
                 ) : (
@@ -320,7 +334,7 @@ export function MonthClosingChecklist({
       <Dialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
         <DialogContent
           overlayClassName="z-[60] bg-black/50"
-          className="z-[60] max-w-[calc(100%-2rem)] sm:max-w-md"
+          className="z-60 max-w-[calc(100%-2rem)] sm:max-w-md"
         >
           <DialogHeader>
             <DialogTitle>
@@ -332,27 +346,35 @@ export function MonthClosingChecklist({
             </DialogTitle>
             {confirm?.type === "no_value" ? (
               <DialogDescription>
-                Confirmar que não houve valor neste mês para este item? O card será marcado como
-                conferido sem movimentação.
+                Confirmar que não houve valor neste mês para este item? O card
+                será marcado como conferido sem movimentação.
               </DialogDescription>
             ) : confirm?.type === "close_month" ? (
               <DialogDescription>
-                Tem certeza de que deseja fechar este período? Os dados conferidos permanecem
-                registrados; você pode reabrir depois informando o motivo.
+                Tem certeza de que deseja fechar este período? Os dados
+                conferidos permanecem registrados; você pode reabrir depois
+                informando o motivo.
               </DialogDescription>
             ) : (
-              <DialogDescription className="sr-only">Fechando.</DialogDescription>
+              <DialogDescription className="sr-only">
+                Fechando.
+              </DialogDescription>
             )}
           </DialogHeader>
           {confirm?.type === "no_value" ? (
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirm(null)}
+              >
                 Cancelar
               </Button>
               <Button
                 type="button"
                 onClick={() => {
-                  if (confirm?.type === "no_value") onConfirmNoValue(confirm.id);
+                  if (confirm?.type === "no_value")
+                    onConfirmNoValue(confirm.id);
                   setConfirm(null);
                 }}
               >
@@ -361,7 +383,11 @@ export function MonthClosingChecklist({
             </DialogFooter>
           ) : confirm?.type === "close_month" ? (
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirm(null)}
+              >
                 Cancelar
               </Button>
               <Button
@@ -411,8 +437,12 @@ function ChecklistCard({
           <p className="font-mono text-base font-semibold tabular-nums text-foreground">
             {formatBrl(item.amount)}
           </p>
-          <p className="text-xs leading-relaxed opacity-95">{item.description}</p>
-          <p className="text-xs font-medium text-foreground/90">{statusLabel(item)}</p>
+          <p className="text-xs leading-relaxed opacity-95">
+            {item.description}
+          </p>
+          <p className="text-xs font-medium text-foreground/90">
+            {statusLabel(item)}
+          </p>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:w-44">
           {!done ? (
@@ -463,7 +493,9 @@ function ChecklistCard({
 function ClosedMonthSummary({ items }: { items: ChecklistItemState[] }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm font-medium text-foreground">Itens conferidos neste fechamento</p>
+      <p className="text-sm font-medium text-foreground">
+        Itens conferidos neste fechamento
+      </p>
       <ul className="space-y-2">
         {items.map((item) => {
           const label =
@@ -479,9 +511,13 @@ function ClosedMonthSummary({ items }: { items: ChecklistItemState[] }) {
               <div className="min-w-0 flex-1">
                 <p className="font-medium leading-snug">{item.title}</p>
                 <p className="font-mono text-xs tabular-nums text-muted-foreground">
-                  {hasMoneyValue(item.amount) ? formatBrl(item.amount) : "R$ 0,00"}
+                  {hasMoneyValue(item.amount)
+                    ? formatBrl(item.amount)
+                    : "R$ 0,00"}
                 </p>
-                <p className="text-xs text-emerald-900/90 dark:text-emerald-100/90">{label}</p>
+                <p className="text-xs text-emerald-900/90 dark:text-emerald-100/90">
+                  {label}
+                </p>
               </div>
             </li>
           );
