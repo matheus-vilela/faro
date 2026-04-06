@@ -322,54 +322,58 @@ export function MonthClosingChecklist({
           overlayClassName="z-[60] bg-black/50"
           className="z-[60] max-w-[calc(100%-2rem)] sm:max-w-md"
         >
+          <DialogHeader>
+            <DialogTitle>
+              {confirm?.type === "no_value"
+                ? "Sem movimentação?"
+                : confirm?.type === "close_month"
+                  ? "Fechamento do mês"
+                  : "Confirmação"}
+            </DialogTitle>
+            {confirm?.type === "no_value" ? (
+              <DialogDescription>
+                Confirmar que não houve valor neste mês para este item? O card será marcado como
+                conferido sem movimentação.
+              </DialogDescription>
+            ) : confirm?.type === "close_month" ? (
+              <DialogDescription>
+                Tem certeza de que deseja fechar este período? Os dados conferidos permanecem
+                registrados; você pode reabrir depois informando o motivo.
+              </DialogDescription>
+            ) : (
+              <DialogDescription className="sr-only">Fechando.</DialogDescription>
+            )}
+          </DialogHeader>
           {confirm?.type === "no_value" ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Sem movimentação?</DialogTitle>
-                <DialogDescription>
-                  Confirmar que não houve valor neste mês para este item? O card será marcado como
-                  conferido sem movimentação.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    onConfirmNoValue(confirm.id);
-                    setConfirm(null);
-                  }}
-                >
-                  Confirmar
-                </Button>
-              </DialogFooter>
-            </>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (confirm?.type === "no_value") onConfirmNoValue(confirm.id);
+                  setConfirm(null);
+                }}
+              >
+                Confirmar
+              </Button>
+            </DialogFooter>
           ) : confirm?.type === "close_month" ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Fechamento do mês</DialogTitle>
-                <DialogDescription>
-                  Tem certeza de que deseja fechar este período? Os dados conferidos permanecem
-                  registrados; você pode reabrir depois informando o motivo.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    onCloseMonth();
-                    setConfirm(null);
-                  }}
-                >
-                  Fechar período
-                </Button>
-              </DialogFooter>
-            </>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setConfirm(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  onCloseMonth();
+                  setConfirm(null);
+                }}
+              >
+                Fechar período
+              </Button>
+            </DialogFooter>
           ) : null}
         </DialogContent>
       </Dialog>
