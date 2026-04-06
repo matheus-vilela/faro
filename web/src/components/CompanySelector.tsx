@@ -316,7 +316,7 @@ export function CompanySelector() {
             <Button
               variant="outline"
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="h-9 w-9 shrink-0 hidden sm:block"
               title="Mais opções de grupo e unidades"
               aria-label="Mais opções de grupo e unidades"
             >

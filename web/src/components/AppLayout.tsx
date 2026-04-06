@@ -203,7 +203,7 @@ function AppLayoutContent() {
     <div className="relative flex  w-full">
       <header
         className={cn(
-          "fixed top-0 z-50 flex w-full h-12 shrink-0 items-center gap-2 px-2 border-b border-border bg-card backdrop-blur supports-[backdrop-filter]:bg-card",
+          "fixed top-0 z-50 flex w-full h-12 shrink-0 items-center gap-1 sm:gap-2 px-2 border-b border-border bg-card backdrop-blur supports-[backdrop-filter]:bg-card",
         )}
       >
         {isMobile && (
@@ -224,7 +224,7 @@ function AppLayoutContent() {
               width={128}
               height={64}
               aria-hidden
-              className="h-12 w-20 shrink-0 object-contain"
+              className="h-12 w-16 sm:w-20 shrink-0 object-contain"
             />
           ) : (
             <img
@@ -233,13 +233,13 @@ function AppLayoutContent() {
               width={128}
               height={64}
               aria-hidden
-              className="h-12 w-20 shrink-0 object-contain"
+              className="h-12 w-16 sm:w-20 shrink-0 object-contain"
             />
           )}
         </Link>
         <CompanySelector />
         <div className="flex-1" />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">
