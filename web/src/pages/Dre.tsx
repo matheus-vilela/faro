@@ -317,25 +317,29 @@ export function Dre() {
                       })}
                     </span>
                   </AccordionTrigger>
-                  <AccordionContent className="space-y-4 pl-4 sm:pl-8">
-                    <div>
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Receitas não operacionais
-                      </p>
-                      <DreTreePanel
-                        nodes={trees?.finRec ?? []}
-                        valueClassName="text-emerald-600 dark:text-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Investimentos e financiamentos
-                      </p>
-                      <DreTreePanel
-                        nodes={trees?.finDesp ?? []}
-                        valueClassName="text-rose-700 dark:text-rose-400"
-                        displayNegative
-                      />
+                  <AccordionContent className="pl-4 pt-1 sm:pl-8">
+                    <div className="space-y-4 rounded-md border border-border/60 bg-background/50 p-3 sm:p-4">
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Receitas não operacionais
+                        </p>
+                        <DreTreePanel
+                          embedded
+                          nodes={trees?.finRec ?? []}
+                          valueClassName="text-emerald-600 dark:text-emerald-400"
+                        />
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Investimentos e financiamentos
+                        </p>
+                        <DreTreePanel
+                          embedded
+                          nodes={trees?.finDesp ?? []}
+                          valueClassName="text-rose-700 dark:text-rose-400"
+                          displayNegative
+                        />
+                      </div>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
