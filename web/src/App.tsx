@@ -27,6 +27,7 @@ import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
 import { RedirectInventorySlug } from "@/pages/RedirectInventorySlug";
 import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
+import { RedefinirSenha } from "@/pages/RedefinirSenha";
 import { Register } from "@/pages/Register";
 import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
 import { ValidarDespesaWhatsapp } from "@/pages/ValidarDespesaWhatsapp";
@@ -95,6 +96,7 @@ function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/redefinir-senha" element={<RedefinirSenha />} />
       <Route
         path="/atualizar-pagamento/:token"
         element={<AtualizarPagamento />}

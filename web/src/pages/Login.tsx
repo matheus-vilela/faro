@@ -9,12 +9,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 export function Login() {
   const { resolvedTheme } = useTheme();
@@ -25,6 +35,13 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+
+  const senhaRedefinida = searchParams.get("senha") === "redefinida";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +62,37 @@ export function Login() {
       setError(err instanceof Error ? err.message : "Erro ao fazer login");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const addr = forgotEmail.trim();
+    if (!addr) {
+      setForgotError("Informe seu email.");
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      const redirectTo = `${window.location.origin}/redefinir-senha`;
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(
+        addr,
+        { redirectTo },
+      );
+      if (resetErr) throw resetErr;
+      toast.success(
+        "Se existir uma conta com este email, você receberá um link para redefinir a senha.",
+        { duration: 8000 },
+      );
+      setForgotOpen(false);
+      setForgotEmail("");
+    } catch (err: unknown) {
+      setForgotError(
+        err instanceof Error ? err.message : "Não foi possível enviar o email.",
+      );
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -81,6 +129,11 @@ export function Login() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
+            {senhaRedefinida && (
+              <p className="text-sm text-emerald-800 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 p-3 rounded-md">
+                Senha alterada com sucesso. Entre com a nova senha.
+              </p>
+            )}
             {error && (
               <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
                 {error}
@@ -98,14 +151,27 @@ export function Login() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
-              <Input
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="password">Senha</Label>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={() => {
+                    setForgotEmail(email);
+                    setForgotError(null);
+                    setForgotOpen(true);
+                  }}
+                >
+                  Esqueci minha senha
+                </button>
+              </div>
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
               />
             </div>
           </CardContent>
@@ -128,6 +194,52 @@ export function Login() {
           </CardFooter>
         </form>
       </Card>
+
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={handleForgotSubmit}>
+            <DialogHeader>
+              <DialogTitle>Recuperar senha</DialogTitle>
+              <DialogDescription>
+                Enviaremos um link para o seu email. <br />
+                Confira também a caixa de spam.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              {forgotError && (
+                <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+                  {forgotError}
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email">Email</Label>
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setForgotOpen(false)}
+                disabled={forgotLoading}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={forgotLoading}>
+                {forgotLoading ? "Enviando…" : "Enviar link"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
