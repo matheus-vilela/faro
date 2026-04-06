@@ -10,520 +10,416 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useCompany } from "@/contexts/CompanyContext";
-import { supabase } from "@/lib/supabase";
-import type { Product } from "@/types/product";
 import {
-  AlertTriangle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCompany } from "@/contexts/CompanyContext";
+import {
+  dismissCompanyAlert,
+  syncCompanyAlerts,
+} from "@/lib/companyAlerts/syncCompanyAlerts";
+import { canGestorAccess } from "@/lib/roles";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import type { CompanyAlertKind, CompanyAlertRow } from "@/types/companyAlert";
+import {
   Bell,
-  Calendar,
   CheckCircle2,
+  ExternalLink,
   FileText,
+  Loader2,
   Package,
   PackageX,
-  TrendingDown,
+  RefreshCw,
+  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
-interface ExpenseWithoutBoleto {
-  id: string;
-  supplier_name: string | null;
-  display_name: string | null;
-  invoice_number: string | null;
-  created_at: string;
+const KIND_LABEL: Record<CompanyAlertKind, string> = {
+  low_stock: "Estoque baixo",
+  expense_no_boleto: "Sem boleto",
+  recebimento_falta: "Falta no recebimento",
+};
+
+function severityBadgeVariant(
+  s: CompanyAlertRow["severity"],
+): "default" | "secondary" | "destructive" | "outline" {
+  if (s === "danger") return "destructive";
+  if (s === "warning") return "secondary";
+  return "outline";
 }
 
-interface ItemNaoEntregue {
-  id: string;
-  recebimento_id: string;
-  expense_id: string;
-  expense_item_id: string;
-  supplier_name: string | null;
-  display_name: string | null;
-  invoice_number: string | null;
-  product_name: string;
-  /** Quantidade pedida na nota */
-  quantity_ordered: number;
-  /** Quantidade efetivamente recebida (0 se não recebeu) */
-  quantity_received: number;
-  /** Faltante = pedido − recebido */
-  quantity_missing: number;
-  received_at: string | null;
+function alertCardAccent(severity: CompanyAlertRow["severity"]) {
+  return cn(
+    "border-l-4 shadow-sm transition-shadow hover:shadow-md",
+    severity === "danger" &&
+      "border-l-destructive bg-gradient-to-br from-destructive/[0.06] to-card dark:from-destructive/10",
+    severity === "warning" &&
+      "border-l-amber-500 bg-gradient-to-br from-amber-500/[0.07] to-card dark:from-amber-500/15",
+    severity === "info" &&
+      "border-l-sky-500 bg-gradient-to-br from-sky-500/[0.06] to-card dark:from-sky-500/10",
+  );
+}
+
+function kindIconWrap(kind: CompanyAlertKind) {
+  return cn(
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border",
+    kind === "low_stock" &&
+      "border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    kind === "expense_no_boleto" &&
+      "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    kind === "recebimento_falta" &&
+      "border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  );
+}
+
+function KindIcon({ kind }: { kind: CompanyAlertKind }) {
+  const cls = "h-5 w-5";
+  if (kind === "low_stock") return <Package className={cls} strokeWidth={2} />;
+  if (kind === "expense_no_boleto")
+    return <FileText className={cls} strokeWidth={2} />;
+  return <PackageX className={cls} strokeWidth={2} />;
 }
 
 export function Alertas() {
-  const { currentCompany } = useCompany();
-  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
-  const [expensesWithoutBoleto, setExpensesWithoutBoleto] = useState<
-    ExpenseWithoutBoleto[]
-  >([]);
-  const [itensNaoEntregues, setItensNaoEntregues] = useState<ItemNaoEntregue[]>(
-    [],
+  const { currentCompany, currentRole } = useCompany();
+  const canSee = currentRole ? canGestorAccess(currentRole) : false;
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const kindFilter = useMemo(() => {
+    const k = searchParams.get("kind");
+    if (
+      k === "recebimento_falta" ||
+      k === "expense_no_boleto" ||
+      k === "low_stock"
+    ) {
+      return k;
+    }
+    return "all";
+  }, [searchParams]);
+
+  const handleKindFilterChange = (v: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === "all") next.delete("kind");
+        else next.set("kind", v);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [rows, setRows] = useState<CompanyAlertRow[]>([]);
+  const [search, setSearch] = useState("");
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [alertToDismiss, setAlertToDismiss] = useState<CompanyAlertRow | null>(
+    null,
   );
-  const [filterItens, setFilterItens] = useState("");
-  const [filterDespesas, setFilterDespesas] = useState("");
-  const [filterEstoque, setFilterEstoque] = useState("");
+
+  const load = useCallback(async () => {
+    if (!currentCompany?.id || !canSee) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    await syncCompanyAlerts(currentCompany.id);
+    const { data, error } = await supabase
+      .from("company_alerts")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      setRows([]);
+    } else {
+      setRows((data ?? []) as CompanyAlertRow[]);
+    }
+    setLoading(false);
+  }, [currentCompany?.id, canSee]);
 
   useEffect(() => {
-    const load = async () => {
-      if (!currentCompany?.id) return;
-      const { data: productsData } = await supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", currentCompany.id)
-        .gt("min_quantity", 0);
-      const list = (productsData ?? []) as Product[];
-      setLowStockProducts(
-        list.filter(
-          (p) => p.current_quantity <= p.min_quantity && p.is_active !== false,
-        ),
-      );
+    void load();
+  }, [load]);
 
-      const { data: expensesData } = await supabase
-        .from("expenses")
-        .select(
-          "id, supplier_name, display_name, invoice_number, created_at, expense_source, status",
-        )
-        .eq("company_id", currentCompany.id)
-        .order("created_at", { ascending: false });
-      const { data: boletosData } = await supabase
-        .from("boletos")
-        .select("expense_id")
-        .eq("company_id", currentCompany.id)
-        .eq("flow_type", "payable")
-        .not("expense_id", "is", null);
-      const linkedExpenseIds = new Set(
-        (boletosData ?? [])
-          .map((b) => b.expense_id)
-          .filter(Boolean) as string[],
-      );
-      const withoutBoleto = (expensesData ?? []).filter((e) => {
-        const row = e as {
-          id: string;
-          expense_source?: string | null;
-          status?: string | null;
-        };
-        if (
-          row.expense_source === "whatsapp" &&
-          row.status === "pending"
-        ) {
-          return false;
-        }
-        return !linkedExpenseIds.has(row.id);
-      }) as ExpenseWithoutBoleto[];
-      setExpensesWithoutBoleto(withoutBoleto);
+  const handleRefresh = async () => {
+    if (!currentCompany?.id || !canSee) return;
+    setSyncing(true);
+    await syncCompanyAlerts(currentCompany.id);
+    const { data, error } = await supabase
+      .from("company_alerts")
+      .select("*")
+      .eq("company_id", currentCompany.id)
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+    if (!error) setRows((data ?? []) as CompanyAlertRow[]);
+    setSyncing(false);
+  };
 
-      const { data: notReceivedData } = await supabase
-        .from("recebimento_item_status")
-        .select(
-          `
-          id,
-          recebimento_id,
-          expense_item_id,
-          quantity_received,
-          status,
-          recebimentos!inner (
-            expense_id,
-            received_at,
-            expenses!inner (
-              supplier_name,
-              display_name,
-              invoice_number,
-              company_id
-            )
-          ),
-          expense_items!inner (
-            product_name,
-            quantity
-          )
-        `,
-        )
-        .in("status", ["not_received", "partial"]);
-      const notDeliveredList: ItemNaoEntregue[] = [];
-      for (const r of notReceivedData ?? []) {
-        const rec = r as unknown as {
-          id: string;
-          recebimento_id: string;
-          expense_item_id: string;
-          quantity_received: number | null;
-          recebimentos: {
-            expense_id: string;
-            received_at: string | null;
-            expenses: {
-              supplier_name: string | null;
-              display_name: string | null;
-              invoice_number: string | null;
-              company_id: string;
-            };
-          };
-          expense_items: { product_name: string; quantity: number };
-        };
-        const rb = Array.isArray(rec.recebimentos)
-          ? rec.recebimentos[0]
-          : rec.recebimentos;
-        const exp =
-          rb && (Array.isArray(rb.expenses) ? rb.expenses[0] : rb.expenses);
-        if (!exp || exp.company_id !== currentCompany.id) continue;
-        const ei = Array.isArray(rec.expense_items)
-          ? rec.expense_items[0]
-          : rec.expense_items;
-        const ordered = Number(ei?.quantity ?? 0);
-        const qRec =
-          rec.quantity_received != null ? Number(rec.quantity_received) : 0;
-        const missing = Math.max(0, ordered - qRec);
-        if (missing <= 0) continue;
-        notDeliveredList.push({
-          id: rec.id,
-          recebimento_id: rec.recebimento_id,
-          expense_id: rb.expense_id,
-          expense_item_id: rec.expense_item_id,
-          supplier_name: exp.supplier_name,
-          display_name: exp.display_name,
-          invoice_number: exp.invoice_number,
-          product_name: ei?.product_name ?? "—",
-          quantity_ordered: ordered,
-          quantity_received: qRec,
-          quantity_missing: missing,
-          received_at: rb.received_at,
-        });
-      }
-      setItensNaoEntregues(notDeliveredList);
-    };
-    load();
-  }, [currentCompany?.id]);
+  const confirmDismissAlert = async () => {
+    if (!alertToDismiss) return;
+    const id = alertToDismiss.id;
+    setDismissingId(id);
+    const ok = await dismissCompanyAlert(id);
+    setDismissingId(null);
+    if (ok) {
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setAlertToDismiss(null);
+    }
+  };
 
-  const filteredItens = filterItens.trim()
-    ? itensNaoEntregues.filter(
-        (i) =>
-          (i.product_name ?? "")
-            .toLowerCase()
-            .includes(filterItens.toLowerCase()) ||
-          (i.display_name ?? "")
-            .toLowerCase()
-            .includes(filterItens.toLowerCase()) ||
-          (i.supplier_name ?? "")
-            .toLowerCase()
-            .includes(filterItens.toLowerCase()) ||
-          (i.invoice_number ?? "")
-            .toLowerCase()
-            .includes(filterItens.toLowerCase()),
-      )
-    : itensNaoEntregues;
-  const filteredDespesas = filterDespesas.trim()
-    ? expensesWithoutBoleto.filter(
-        (e) =>
-          (e.display_name ?? "")
-            .toLowerCase()
-            .includes(filterDespesas.toLowerCase()) ||
-          (e.supplier_name ?? "")
-            .toLowerCase()
-            .includes(filterDespesas.toLowerCase()) ||
-          (e.invoice_number ?? "")
-            .toLowerCase()
-            .includes(filterDespesas.toLowerCase()),
-      )
-    : expensesWithoutBoleto;
-  const filteredLowStock = filterEstoque.trim()
-    ? lowStockProducts.filter(
-        (p) =>
-          p.name.toLowerCase().includes(filterEstoque.toLowerCase()) ||
-          (p.sku ?? "").toLowerCase().includes(filterEstoque.toLowerCase()),
-      )
-    : lowStockProducts;
+  const filtered = useMemo(() => {
+    let list = rows;
+    if (kindFilter !== "all") {
+      list = list.filter((r) => r.kind === kindFilter);
+    }
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (r) =>
+        r.title.toLowerCase().includes(q) ||
+        (r.message ?? "").toLowerCase().includes(q) ||
+        KIND_LABEL[r.kind].toLowerCase().includes(q),
+    );
+  }, [rows, kindFilter, search]);
 
-  const totalAlertas =
-    itensNaoEntregues.length +
-    expensesWithoutBoleto.length +
-    lowStockProducts.length;
-  const hasAnyAlerta = totalAlertas > 0;
+  const totalOpen = rows.length;
+
+  if (!canSee) {
+    return (
+      <PageShell className="space-y-8" narrow>
+        <PageHeader
+          title="Alertas"
+          description="Resumo operacional e financeiro"
+          icon={Bell}
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Acesso restrito</CardTitle>
+            <CardDescription>
+              Apenas gestores e proprietários visualizam esta página.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </PageShell>
+    );
+  }
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Alertas"
-        description="Vencimentos, estoque e acompanhamento de recebimentos"
+        description="Lista sincronizada com estoque, despesas e recebimentos da empresa"
         icon={Bell}
         action={
-          hasAnyAlerta ? (
-            <Badge variant="secondary" className="w-fit text-base px-4 py-1.5">
-              {totalAlertas} alerta{totalAlertas !== 1 ? "s" : ""} pendente
-              {totalAlertas !== 1 ? "s" : ""}
-            </Badge>
-          ) : undefined
+          <div className="flex flex-wrap items-center gap-2">
+            {totalOpen > 0 && (
+              <Badge variant="secondary" className="text-base px-3 py-1">
+                {totalOpen} aberto{totalOpen !== 1 ? "s" : ""}
+              </Badge>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => void handleRefresh()}
+              disabled={syncing || loading || !currentCompany?.id}
+            >
+              {syncing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              <span className="ml-2 hidden sm:inline">Atualizar</span>
+            </Button>
+          </div>
         }
       />
 
-      {!hasAnyAlerta && (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-16">
-            <div className="rounded-full bg-green-500/10 p-4 mb-4">
-              <CheckCircle2 className="h-12 w-12 text-green-600 dark:text-green-500" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <Input
+          placeholder="Buscar por título ou detalhe..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-md"
+        />
+        <Select value={kindFilter} onValueChange={handleKindFilterChange}>
+          <SelectTrigger className="w-full sm:w-[220px]">
+            <SelectValue placeholder="Tipo" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os tipos</SelectItem>
+            <SelectItem value="low_stock">{KIND_LABEL.low_stock}</SelectItem>
+            <SelectItem value="expense_no_boleto">
+              {KIND_LABEL.expense_no_boleto}
+            </SelectItem>
+            <SelectItem value="recebimento_falta">
+              {KIND_LABEL.recebimento_falta}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+        </div>
+      ) : totalOpen === 0 ? (
+        <Card className="border-dashed border-2 bg-muted/20">
+          <CardContent className="flex flex-col items-center justify-center py-16 px-6">
+            <div className="rounded-2xl bg-emerald-500/10 p-5 mb-5 ring-1 ring-emerald-500/20">
+              <CheckCircle2 className="h-14 w-14 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <h3 className="text-lg font-semibold">Tudo em ordem</h3>
-            <p className="text-muted-foreground text-center max-w-sm mt-2">
-              Não há alertas pendentes no momento. Vencimentos e margem em
-              breve.
+            <h3 className="text-lg font-semibold tracking-tight">
+              Tudo em ordem
+            </h3>
+            <p className="text-muted-foreground text-center max-w-sm mt-2 text-sm leading-relaxed">
+              Não há alertas abertos. Use &quot;Atualizar&quot; para sincronizar
+              com as regras atuais (estoque, boletos e recebimentos).
             </p>
           </CardContent>
         </Card>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {itensNaoEntregues.length > 0 && (
-          <Card className="border-l-4 border-l-destructive overflow-hidden">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-destructive/10 p-2">
-                    <PackageX className="h-5 w-5 text-destructive" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">
-                      Faltas no recebimento
-                    </CardTitle>
-                    <CardDescription className="mt-0.5">
-                      Itens não recebidos ou quantidade menor que o pedido
-                      (parcial)
-                    </CardDescription>
-                  </div>
+      ) : filtered.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            Nenhum resultado com os filtros atuais.
+          </CardContent>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {filtered.map((r) => (
+            <li key={r.id}>
+              <div
+                className={cn(
+                  "flex flex-col gap-4 rounded-xl border border-border/80 p-4 sm:flex-row sm:items-start sm:gap-5",
+                  alertCardAccent(r.severity),
+                )}
+              >
+                <div className={kindIconWrap(r.kind)}>
+                  <KindIcon kind={r.kind} />
                 </div>
-                <Badge variant="destructive">{itensNaoEntregues.length}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="mb-3 flex flex-wrap gap-3 items-center">
-                <Input
-                  placeholder="Filtrar por produto, fornecedor ou nota..."
-                  value={filterItens}
-                  onChange={(e) => setFilterItens(e.target.value)}
-                  className="max-w-sm"
-                />
-              </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {filteredItens.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">
-                        {item.product_name}
-                        {item.quantity_missing > 0 && (
-                          <span className="text-destructive">
-                            {" "}
-                            — faltam {item.quantity_missing.toLocaleString("pt-BR")}{" "}
-                            un
-                            {item.quantity_received > 0 && (
-                              <span className="text-muted-foreground font-normal">
-                                {" "}
-                                (pedido {item.quantity_ordered.toLocaleString("pt-BR")}{" "}
-                                un, recebido{" "}
-                                {item.quantity_received.toLocaleString("pt-BR")} un)
-                              </span>
-                            )}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-sm text-muted-foreground truncate">
-                        {item.display_name?.trim() ||
-                          item.supplier_name ||
-                          "Sem fornecedor"}
-                        {item.invoice_number &&
-                          ` • Nota ${item.invoice_number}`}
-                      </p>
-                    </div>
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {KIND_LABEL[r.kind]}
+                    </span>
+                    <Badge
+                      variant={severityBadgeVariant(r.severity)}
+                      className="text-[10px] uppercase tracking-wide"
                     >
-                      <Link to={`/app/despesas?expense=${item.expense_id}`}>
-                        Ver
+                      {r.severity === "danger"
+                        ? "Alta"
+                        : r.severity === "warning"
+                          ? "Média"
+                          : "Info"}
+                    </Badge>
+                  </div>
+                  <h3 className="font-display text-base font-semibold leading-snug tracking-[-0.02em] text-foreground">
+                    {r.title}
+                  </h3>
+                  {r.message ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground line-clamp-3">
+                      {r.message}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-row items-center justify-end gap-2 border-t border-border/50 pt-3 sm:border-t-0 sm:pt-0 sm:flex-col sm:items-stretch">
+                  {r.link_path ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="gap-1.5"
+                      asChild
+                    >
+                      <Link to={r.link_path}>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Abrir
                       </Link>
                     </Button>
-                  </div>
-                ))}
-              </div>
-              <Button asChild variant="outline" size="sm" className="w-full">
-                <Link to="/app/recebimento">Ver recebimentos</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {expensesWithoutBoleto.length > 0 && (
-          <Card className="border-l-4 border-l-amber-500 overflow-hidden">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-amber-500/10 p-2">
-                    <FileText className="h-5 w-5 text-amber-600 dark:text-amber-500" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">
-                      Sem boleto vinculado
-                    </CardTitle>
-                    <CardDescription className="mt-0.5">
-                      Despesas sem boleto ou pagamento
-                    </CardDescription>
-                  </div>
-                </div>
-                <Badge
-                  variant="secondary"
-                  className="bg-amber-500/20 text-amber-700 dark:text-amber-400"
-                >
-                  {expensesWithoutBoleto.length}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="mb-3 flex flex-wrap gap-3 items-center">
-                <Input
-                  placeholder="Filtrar por fornecedor ou nota..."
-                  value={filterDespesas}
-                  onChange={(e) => setFilterDespesas(e.target.value)}
-                  className="max-w-sm"
-                />
-              </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {filteredDespesas.slice(0, 8).map((e) => (
-                  <div
-                    key={e.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setAlertToDismiss(r)}
+                    disabled={dismissingId === r.id}
+                    aria-label="Dispensar alerta"
                   >
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">
-                        {e.display_name?.trim() ||
-                          e.supplier_name ||
-                          "Sem fornecedor"}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {e.invoice_number && `Nota ${e.invoice_number} • `}
-                        {new Date(e.created_at).toLocaleDateString("pt-BR")}
-                      </p>
-                    </div>
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                    >
-                      <Link to={`/app/despesas?expense=${e.id}`}>Vincular</Link>
-                    </Button>
-                  </div>
-                ))}
-                {filteredDespesas.length > 8 && (
-                  <p className="text-sm text-muted-foreground text-center py-2">
-                    + {filteredDespesas.length - 8} despesa(s)
+                    <X className="h-4 w-4" />
+                    Dispensar
+                  </Button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Dialog
+        open={!!alertToDismiss}
+        onOpenChange={(open) => {
+          if (!open && !dismissingId) setAlertToDismiss(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Dispensar este alerta?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  O alerta será ocultado da lista. Enquanto a situação continuar
+                  (por exemplo, estoque ainda abaixo do mínimo), ele não será
+                  exibido de novo automaticamente.
+                </p>
+                {alertToDismiss ? (
+                  <p className="rounded-md border bg-muted/50 px-3 py-2 text-foreground font-medium line-clamp-2">
+                    {alertToDismiss.title}
                   </p>
-                )}
+                ) : null}
               </div>
-              <Button asChild variant="outline" size="sm" className="w-full">
-                <Link to="/app/despesas">Ver todas as despesas</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {lowStockProducts.length > 0 && (
-          <Card className="border-l-4 border-l-destructive overflow-hidden lg:col-span-2">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-destructive/10 p-2">
-                    <AlertTriangle className="h-5 w-5 text-destructive" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Estoque baixo</CardTitle>
-                    <CardDescription className="mt-0.5">
-                      Produtos abaixo da quantidade mínima
-                    </CardDescription>
-                  </div>
-                </div>
-                <Badge variant="destructive">{lowStockProducts.length}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 flex flex-wrap gap-3 items-center">
-                <Input
-                  placeholder="Filtrar por nome ou SKU..."
-                  value={filterEstoque}
-                  onChange={(e) => setFilterEstoque(e.target.value)}
-                  className="max-w-sm"
-                />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredLowStock.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Package className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {Number(p.current_quantity).toLocaleString("pt-BR")} /{" "}
-                          {Number(p.min_quantity).toLocaleString("pt-BR")}{" "}
-                          {p.unit}
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                    >
-                      <Link to="/app/produtos">Ver</Link>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      <div className="border-t pt-8">
-        <h2 className="text-lg font-semibold mb-4">Em breve</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Card className="opacity-75">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Calendar className="h-4 w-4" />
-                Vencimentos
-              </CardTitle>
-              <CardDescription className="text-sm">
-                Contas a pagar e obrigações próximas do vencimento
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button disabled size="sm">
-                Em breve
-              </Button>
-            </CardContent>
-          </Card>
-          <Card className="opacity-75">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <TrendingDown className="h-4 w-4" />
-                Margem
-              </CardTitle>
-              <CardDescription className="text-sm">
-                Alertas quando a margem estiver abaixo do esperado
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button disabled size="sm">
-                Em breve
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setAlertToDismiss(null)}
+              disabled={!!dismissingId}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void confirmDismissAlert()}
+              disabled={!!dismissingId}
+            >
+              {dismissingId ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Confirmar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

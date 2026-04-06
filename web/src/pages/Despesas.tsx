@@ -45,6 +45,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
@@ -364,6 +365,7 @@ export function Despesas() {
     else {
       setLinkDialogOpen(false);
       fetchData();
+      if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
     }
   };
 
@@ -373,7 +375,10 @@ export function Despesas() {
       .update({ expense_id: null })
       .eq("id", boletoId);
     if (error) console.error(error);
-    else fetchData();
+    else {
+      fetchData();
+      if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
+    }
   };
 
   const formatDate = (s: string) =>
@@ -901,7 +906,10 @@ export function Despesas() {
           }}
           companyId={currentCompany.id}
           expenseId={boletoExpenseId}
-          onSuccess={() => fetchData()}
+          onSuccess={() => {
+            fetchData();
+            void syncCompanyAlerts(currentCompany.id);
+          }}
         />
       )}
 

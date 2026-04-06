@@ -35,6 +35,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
@@ -542,6 +543,7 @@ export function FluxoDeCaixa() {
           defaultDueDate={createBoletoDefaultDueDate}
           onSuccess={() => {
             refreshAll();
+            void syncCompanyAlerts(currentCompany.id);
             if (expenseIdFromUrl) navigate("/app/despesas");
           }}
         />

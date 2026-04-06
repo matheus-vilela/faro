@@ -26,6 +26,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
@@ -248,6 +249,7 @@ export function ExpenseDetailSheet({
     else {
       await loadExpenseData();
       onRefresh?.();
+      if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
     }
   };
 

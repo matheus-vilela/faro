@@ -1,4 +1,5 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { EstoqueCmvPanel } from "@/components/estoque/EstoqueCmvPanel";
 import { EstoqueComprasPanel } from "@/components/estoque/EstoqueComprasPanel";
 import { EstoqueContagemPanel } from "@/components/estoque/EstoqueContagemPanel";
@@ -65,6 +66,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 const PRODUCT_UNIT_OPTIONS = [
   { value: "un", label: "Unidade" },
@@ -78,6 +80,9 @@ const PRODUCT_UNIT_OPTIONS = [
 
 export function Produtos() {
   const { currentCompany } = useCompany();
+  const [searchParams] = useSearchParams();
+  const lowStockOnly = searchParams.get("estoque") === "baixo";
+
   const [products, setProducts] = useState<Product[]>([]);
   const [productsCount, setProductsCount] = useState(0);
   const [productsPage, setProductsPage] = useState(1);
@@ -185,6 +190,33 @@ export function Produtos() {
   const fetchProducts = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
+    if (lowStockOnly) {
+      let query = supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", currentCompany.id)
+        .gt("min_quantity", 0)
+        .order("name");
+      if (debouncedSearch.trim()) {
+        const term = `%${debouncedSearch.trim()}%`;
+        query = query.or(`name.ilike.${term},sku.ilike.${term}`);
+      }
+      if (filterActive === "active") {
+        query = query.or("is_active.is.null,is_active.eq.true");
+      } else if (filterActive === "inactive") {
+        query = query.eq("is_active", false);
+      }
+      const { data, error } = await query;
+      if (error) console.error(error);
+      const list = ((data ?? []) as Product[]).filter(
+        (p) => Number(p.current_quantity) <= Number(p.min_quantity),
+      );
+      setProductsCount(list.length);
+      const start = (productsPage - 1) * PAGE_SIZE;
+      setProducts(list.slice(start, start + PAGE_SIZE));
+      setLoading(false);
+      return;
+    }
     let query = supabase
       .from("products")
       .select("*", { count: "exact" })
@@ -206,7 +238,13 @@ export function Produtos() {
     setProducts((data as Product[]) ?? []);
     setProductsCount(count ?? 0);
     setLoading(false);
-  }, [currentCompany, debouncedSearch, filterActive, productsPage]);
+  }, [
+    currentCompany,
+    debouncedSearch,
+    filterActive,
+    productsPage,
+    lowStockOnly,
+  ]);
 
   const fetchLowStockCount = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -224,7 +262,13 @@ export function Produtos() {
 
   useEffect(() => {
     queueMicrotask(() => setProductsPage(1));
-  }, [debouncedSearch, filterActive]);
+  }, [debouncedSearch, filterActive, lowStockOnly]);
+
+  useEffect(() => {
+    if (searchParams.get("estoque") === "baixo") {
+      setEstoqueTab("catalogo");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchProducts());
@@ -382,6 +426,7 @@ export function Produtos() {
     closeStockSheet();
     fetchProducts();
     void fetchLowStockCount();
+    if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
   };
 
   return (
@@ -451,7 +496,10 @@ export function Produtos() {
             open={productSheetOpen}
             onOpenChange={setProductSheetOpen}
             companyId={currentCompany.id}
-            onSuccess={() => fetchProducts()}
+            onSuccess={() => {
+              void fetchProducts();
+              void syncCompanyAlerts(currentCompany.id);
+            }}
           />
           <ProductImportSheet
             open={importSheetOpen}
@@ -460,6 +508,7 @@ export function Produtos() {
             onSuccess={() => {
               void fetchProducts();
               void fetchLowStockCount();
+              void syncCompanyAlerts(currentCompany.id);
             }}
           />
         </>
@@ -480,6 +529,17 @@ export function Produtos() {
           </div>
         </CardHeader>
         <CardContent>
+          {lowStockOnly && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+              <span>
+                Mostrando apenas produtos com estoque na ou abaixo do mínimo
+                cadastrado.
+              </span>
+              <Button variant="ghost" size="sm" className="shrink-0" asChild>
+                <Link to="/app/produtos">Ver todos os produtos</Link>
+              </Button>
+            </div>
+          )}
           <div className="mb-4 flex flex-wrap gap-3 items-center">
             <Input
               placeholder="Buscar por nome ou SKU..."
@@ -506,7 +566,11 @@ export function Produtos() {
           {loading ? (
             <p className="text-muted-foreground">Carregando...</p>
           ) : products.length === 0 ? (
-            <p className="text-muted-foreground">Nenhum produto cadastrado</p>
+            <p className="text-muted-foreground">
+              {lowStockOnly
+                ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
+                : "Nenhum produto cadastrado"}
+            </p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               {products.map((p) => {

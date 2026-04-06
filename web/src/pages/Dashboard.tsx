@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/card";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { useCompany } from "@/contexts/CompanyContext";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { supabase } from "@/lib/supabase";
-import type { Product } from "@/types/product";
 import type { Boleto } from "@/types/expense";
 import {
   AlertTriangle,
@@ -107,127 +107,27 @@ export function Dashboard() {
     setLoadingAlerts(true);
 
     const companyId = currentCompany.id;
+    await syncCompanyAlerts(companyId);
 
-    const [{ data: productsData }, { data: expensesData }, { data: boletosData }, { data: notReceivedData }] =
-      await Promise.all([
-        supabase
-          .from("products")
-          .select("*")
-          .eq("company_id", companyId)
-          .gt("min_quantity", 0),
-        supabase
-          .from("expenses")
-          .select("id, expense_source, status")
-          .eq("company_id", companyId),
-        supabase
-          .from("boletos")
-          .select("expense_id")
-          .eq("company_id", companyId)
-          .eq("flow_type", "payable")
-          .not("expense_id", "is", null),
-        supabase
-          .from("recebimento_item_status")
-          .select(
-            `
-          id,
-          recebimento_id,
-          expense_item_id,
-          quantity_received,
-          status,
-          recebimentos!inner (
-            expense_id,
-            received_at,
-            expenses!inner (
-              supplier_name,
-              display_name,
-              invoice_number,
-              company_id
-            )
-          ),
-          expense_items!inner (
-            product_name,
-            quantity
-          )
-        `,
-          )
-          .in("status", ["not_received", "partial"]),
-      ]);
+    const { data, error } = await supabase
+      .from("company_alerts")
+      .select("kind")
+      .eq("company_id", companyId)
+      .eq("status", "open");
 
-    const list = (productsData ?? []) as Product[];
-    const lowStock = list.filter(
-      (p) => p.current_quantity <= p.min_quantity && p.is_active !== false,
-    ).length;
-
-    const linkedExpenseIds = new Set(
-      (boletosData ?? [])
-        .map((b) => b.expense_id)
-        .filter(Boolean) as string[],
-    );
-    const expenseRows = (expensesData ?? []) as {
-      id: string;
-      expense_source?: string | null;
-      status?: string | null;
-    }[];
-    const expenseIds = expenseRows
-      .filter(
-        (e) =>
-          !(
-            e.expense_source === "whatsapp" &&
-            e.status === "pending"
-          ),
-      )
-      .map((e) => e.id);
-    const withoutBoleto = expenseIds.filter((id) => !linkedExpenseIds.has(id))
-      .length;
-
-    let notReceived = 0;
-    for (const r of notReceivedData ?? []) {
-      const rec = r as unknown as {
-        recebimentos:
-          | {
-              expense_id: string;
-              received_at: string | null;
-              expenses:
-                | {
-                    supplier_name: string | null;
-                    display_name: string | null;
-                    invoice_number: string | null;
-                    company_id: string;
-                  }
-                | {
-                    supplier_name: string | null;
-                    display_name: string | null;
-                    invoice_number: string | null;
-                    company_id: string;
-                  }[];
-            }
-          | {
-              expense_id: string;
-              received_at: string | null;
-              expenses:
-                | {
-                    supplier_name: string | null;
-                    display_name: string | null;
-                    invoice_number: string | null;
-                    company_id: string;
-                  }
-                | {
-                    supplier_name: string | null;
-                    display_name: string | null;
-                    invoice_number: string | null;
-                    company_id: string;
-                  }[];
-            }[];
-      };
-      const rb = Array.isArray(rec.recebimentos)
-        ? rec.recebimentos[0]
-        : rec.recebimentos;
-      const exp =
-        rb && (Array.isArray(rb.expenses) ? rb.expenses[0] : rb.expenses);
-      if (exp && exp.company_id === companyId) notReceived += 1;
+    if (error) {
+      console.error(error);
+      setAlertSummary({ lowStock: 0, withoutBoleto: 0, notReceived: 0 });
+      setLoadingAlerts(false);
+      return;
     }
 
-    setAlertSummary({ lowStock, withoutBoleto, notReceived });
+    const list = data ?? [];
+    setAlertSummary({
+      lowStock: list.filter((r) => r.kind === "low_stock").length,
+      withoutBoleto: list.filter((r) => r.kind === "expense_no_boleto").length,
+      notReceived: list.filter((r) => r.kind === "recebimento_falta").length,
+    });
     setLoadingAlerts(false);
   }, [currentCompany?.id, canSeeAlerts]);
 
@@ -327,66 +227,91 @@ export function Dashboard() {
         </Card>
 
         {canSeeAlerts && (
-          <Card>
-            <CardHeader className="pb-3">
+          <Card className="overflow-hidden border-l-4 border-l-amber-500/70 shadow-sm ring-1 ring-border/60">
+            <CardHeader className="pb-3 bg-gradient-to-br from-amber-500/[0.06] to-transparent dark:from-amber-500/10">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                    <Bell className="h-5 w-5 text-muted-foreground" />
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                    <Bell className="h-5 w-5" strokeWidth={2} />
                   </div>
-                  <div>
-                    <CardTitle className="text-lg">Alertas</CardTitle>
-                    <CardDescription>
-                      Resumo do que precisa de atenção
+                  <div className="min-w-0">
+                    <CardTitle className="text-lg font-semibold tracking-tight">
+                      Alertas
+                    </CardTitle>
+                    <CardDescription className="mt-0.5">
+                      Resumo do que precisa de atenção na operação
                     </CardDescription>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" asChild className="shrink-0">
+                <Button variant="outline" size="sm" asChild className="shrink-0 shadow-sm">
                   <Link to="/app/alertas">
-                    Abrir
+                    Ver todos
                     <ArrowRight className="ml-1 h-4 w-4" />
                   </Link>
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               {loadingAlerts ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-6 justify-center">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Carregando…
                 </div>
               ) : totalAlerts === 0 ? (
-                <p className="text-sm text-muted-foreground py-2">
-                  Nenhum alerta ativo no momento.
-                </p>
+                <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum alerta aberto no momento.
+                  </p>
+                </div>
               ) : (
-                <ul className="space-y-3 text-sm">
-                  <li className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-muted-foreground">
-                      <PackageX className="h-4 w-4 shrink-0 text-destructive" />
-                      Itens não entregues
-                    </span>
-                    <span className="font-semibold tabular-nums">
-                      {alertSummary.notReceived}
-                    </span>
+                <ul className="space-y-2">
+                  <li>
+                    <Link
+                      to="/app/alertas?kind=recebimento_falta"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium text-foreground">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/15 text-orange-700 dark:text-orange-400">
+                          <PackageX className="h-4 w-4" />
+                        </span>
+                        <span className="truncate">Itens não entregues</span>
+                      </span>
+                      <span className="shrink-0 rounded-md bg-background px-2 py-0.5 text-sm font-bold tabular-nums shadow-sm">
+                        {alertSummary.notReceived}
+                      </span>
+                    </Link>
                   </li>
-                  <li className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-muted-foreground">
-                      <FileText className="h-4 w-4 shrink-0 text-amber-600" />
-                      Despesas sem boleto
-                    </span>
-                    <span className="font-semibold tabular-nums">
-                      {alertSummary.withoutBoleto}
-                    </span>
+                  <li>
+                    <Link
+                      to="/app/alertas?kind=expense_no_boleto"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium text-foreground">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-400">
+                          <FileText className="h-4 w-4" />
+                        </span>
+                        <span className="truncate">Despesas sem boleto</span>
+                      </span>
+                      <span className="shrink-0 rounded-md bg-background px-2 py-0.5 text-sm font-bold tabular-nums shadow-sm">
+                        {alertSummary.withoutBoleto}
+                      </span>
+                    </Link>
                   </li>
-                  <li className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-muted-foreground">
-                      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                      Estoque baixo
-                    </span>
-                    <span className="font-semibold tabular-nums">
-                      {alertSummary.lowStock}
-                    </span>
+                  <li>
+                    <Link
+                      to="/app/produtos?estoque=baixo"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium text-foreground">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-400">
+                          <AlertTriangle className="h-4 w-4" />
+                        </span>
+                        <span className="truncate">Estoque baixo</span>
+                      </span>
+                      <span className="shrink-0 rounded-md bg-background px-2 py-0.5 text-sm font-bold tabular-nums shadow-sm">
+                        {alertSummary.lowStock}
+                      </span>
+                    </Link>
                   </li>
                 </ul>
               )}
