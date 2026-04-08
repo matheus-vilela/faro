@@ -161,6 +161,7 @@ export function ExpenseDetailSheet({
   const [linkProductId, setLinkProductId] = useState<string>("");
   const [linkSaving, setLinkSaving] = useState(false);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
+  const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -226,6 +227,24 @@ export function ExpenseDetailSheet({
     setLoading(true);
     void loadExpenseData().finally(() => setLoading(false));
   }, [expenseId, companyId, loadExpenseData]);
+
+  useEffect(() => {
+    const path = detailExpense?.source_document_path?.trim();
+    if (!path) {
+      setComprovanteUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.storage
+        .from("expense-documents")
+        .createSignedUrl(path, 3600);
+      if (!cancelled && !error && data?.signedUrl) setComprovanteUrl(data.signedUrl);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailExpense?.source_document_path]);
 
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("pt-BR", {
@@ -1084,6 +1103,41 @@ export function ExpenseDetailSheet({
                       }
                     />
                   ) : null}
+
+                  {detailExpense.source_document_path && (
+                    <div className="rounded-lg border p-4 space-y-2">
+                      <p className="font-medium">Comprovante</p>
+                      {!comprovanteUrl ? (
+                        <p className="text-sm text-muted-foreground">
+                          Carregando visualização…
+                        </p>
+                      ) : /\.(jpe?g|png|webp|gif)$/i.test(
+                          detailExpense.source_document_path,
+                        ) ? (
+                        <a
+                          href={comprovanteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block"
+                        >
+                          <img
+                            src={comprovanteUrl}
+                            alt="Comprovante da despesa"
+                            className="max-h-80 w-full rounded-md border object-contain bg-muted/30"
+                          />
+                        </a>
+                      ) : (
+                        <a
+                          href={comprovanteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-primary underline"
+                        >
+                          Abrir arquivo anexo (PDF ou XML)
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </>

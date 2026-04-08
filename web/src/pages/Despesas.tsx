@@ -44,10 +44,15 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
-import { maskCpfCnpj } from "@/lib/masks";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import type {
+  ExtractedDocumentResult,
+  ExtractedExpenseItemWithMatch,
+} from "@/lib/whatsappExtractedExpense";
 import type { CompanyCategory } from "@/types/category";
 import {
   isBoletoPayable,
@@ -60,14 +65,18 @@ import {
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
 import {
+  CheckCircle2,
   Copy,
   FileText,
+  Loader2,
   MessageCircle,
   Plus,
+  Sparkles,
   Trash2,
+  Upload,
   Wallet,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -80,6 +89,37 @@ const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
   romaneio: "Romaneio",
   recibo: "Recibo",
 };
+
+const COMPROVANTE_ACCEPT =
+  "image/jpeg,image/png,image/webp,application/pdf,.xml,text/xml,application/xml";
+
+function isAcceptedComprovanteFile(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  if (
+    lower.endsWith(".pdf") ||
+    lower.endsWith(".xml") ||
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".jpeg") ||
+    lower.endsWith(".png") ||
+    lower.endsWith(".webp")
+  ) {
+    return true;
+  }
+  const t = (file.type ?? "").toLowerCase();
+  return (
+    t.startsWith("image/") ||
+    t === "application/pdf" ||
+    t === "application/xml" ||
+    t === "text/xml"
+  );
+}
+
+function formatFileSizeShort(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const STATUS_LABELS = {
   pending: "Pendente",
@@ -139,6 +179,14 @@ export function Despesas() {
 
   // Sheet nova despesa
   const [expenseSheetOpen, setExpenseSheetOpen] = useState(false);
+  const [expenseAttachmentFile, setExpenseAttachmentFile] =
+    useState<File | null>(null);
+  const [parsingDocument, setParsingDocument] = useState(false);
+  const [comprovanteDropActive, setComprovanteDropActive] = useState(false);
+  const comprovanteInputRef = useRef<HTMLInputElement>(null);
+  /** Com arquivo anexo: esconde o restante do formulário até IA concluir ou "preencher manualmente". */
+  const [expenseFullFormRevealed, setExpenseFullFormRevealed] = useState(true);
+  const showFullExpenseForm = !expenseAttachmentFile || expenseFullFormRevealed;
 
   // Link boleto dialog
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -311,6 +359,28 @@ export function Despesas() {
       console.error(expErr);
       return;
     }
+    if (expenseAttachmentFile && currentCompany?.id) {
+      const lower = expenseAttachmentFile.name.toLowerCase();
+      let ext = "jpg";
+      if (lower.endsWith(".pdf")) ext = "pdf";
+      else if (lower.endsWith(".xml")) ext = "xml";
+      else if (lower.endsWith(".png")) ext = "png";
+      else if (lower.endsWith(".webp")) ext = "webp";
+      else if (lower.endsWith(".jpeg") || lower.endsWith(".jpg")) ext = "jpg";
+      const storagePath = `${currentCompany.id}/${exp.id}/source.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("expense-documents")
+        .upload(storagePath, expenseAttachmentFile, { upsert: true });
+      if (!upErr) {
+        await supabase
+          .from("expenses")
+          .update({ source_document_path: storagePath })
+          .eq("id", exp.id);
+      } else {
+        console.error(upErr);
+        toast.error("Despesa criada, mas o comprovante não foi enviado.");
+      }
+    }
     for (const it of items) {
       await supabase.from("expense_items").insert({
         expense_id: exp.id,
@@ -334,8 +404,155 @@ export function Despesas() {
     setItems([
       { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
     ]);
+    setExpenseAttachmentFile(null);
     setExpenseSheetOpen(false);
     fetchData();
+  };
+
+  const handleInterpretExpenseAttachment = async () => {
+    if (!currentCompany?.id || !expenseAttachmentFile) return;
+    setParsingDocument(true);
+    try {
+      const { data: refreshData, error: refreshErr } =
+        await supabase.auth.refreshSession();
+      let accessToken = refreshData.session?.access_token;
+      if (!accessToken) {
+        const { data: sessData } = await supabase.auth.getSession();
+        accessToken = sessData.session?.access_token;
+      }
+      if (!accessToken) {
+        toast.error(
+          refreshErr?.message ??
+            "Sessão inválida ou expirada. Entre novamente e tente de novo.",
+        );
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("company_id", currentCompany.id);
+      fd.append("file", expenseAttachmentFile);
+
+      const base = supabaseUrl.replace(/\/$/, "");
+      const res = await fetch(`${base}/functions/v1/parse-expense-document`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: supabaseAnonKey,
+        },
+        body: fd,
+      });
+      let data: unknown;
+      try {
+        data = await res.json();
+      } catch {
+        toast.error("Resposta inválida do servidor.");
+        return;
+      }
+      if (!res.ok) {
+        const d = typeof data === "object" && data !== null ? data : null;
+        const msg =
+          (d && "message" in d && typeof d.message === "string" && d.message) ||
+          (d && "error" in d && typeof d.error === "string" && d.error) ||
+          res.statusText;
+        toast.error(msg || "Falha ao interpretar o arquivo.");
+        return;
+      }
+      const payload = data as {
+        ok?: boolean;
+        error?: string;
+        data?: ExtractedDocumentResult;
+        resolvedSupplierId?: string | null;
+      };
+      if (!payload?.ok) {
+        toast.error(
+          payload?.error ?? "Não foi possível interpretar o arquivo.",
+        );
+        return;
+      }
+      const ex = payload.data;
+      if (!ex) return;
+      if (!ex.validDocument) {
+        toast.error(ex.invalidReason ?? "Documento não reconhecido.");
+        return;
+      }
+      const resolvedSupplierId = payload.resolvedSupplierId ?? null;
+
+      const dk = ex.documentKind;
+      setType(
+        dk === "romaneio"
+          ? "romaneio"
+          : dk === "recibo"
+            ? "recibo"
+            : "nota_fiscal",
+      );
+
+      if (resolvedSupplierId) {
+        const { data: supRow } = await supabase
+          .from("suppliers")
+          .select("*")
+          .eq("id", resolvedSupplierId)
+          .maybeSingle();
+        const s = supRow as Supplier | null;
+        setSupplierId(resolvedSupplierId);
+        setSupplierName(s?.name ?? (ex.supplierName ?? "").trim());
+        setSupplierDocument(
+          s?.document
+            ? maskCpfCnpj(s.document)
+            : ex.supplierDocument
+              ? maskCpfCnpj(ex.supplierDocument)
+              : "",
+        );
+        if (s) {
+          setSuppliers((prev) =>
+            prev.some((x) => x.id === resolvedSupplierId)
+              ? prev
+              : [...prev, s].sort((a, b) => a.name.localeCompare(b.name)),
+          );
+        }
+      } else {
+        const docDigits = (ex.supplierDocument ?? "").replace(/\D/g, "");
+        const sup = docDigits
+          ? suppliers.find(
+              (s) => (s.document ?? "").replace(/\D/g, "") === docDigits,
+            )
+          : undefined;
+        if (sup) {
+          setSupplierId(sup.id);
+          setSupplierName(sup.name);
+          setSupplierDocument(sup.document ? maskCpfCnpj(sup.document) : "");
+        } else {
+          setSupplierId("");
+          setSupplierName((ex.supplierName ?? "").trim());
+          setSupplierDocument(
+            ex.supplierDocument ? maskCpfCnpj(ex.supplierDocument) : "",
+          );
+        }
+      }
+
+      setInvoiceNumber((ex.invoiceNumber ?? "").trim());
+      setInvoiceSeries((ex.invoiceSeries ?? "").trim());
+      setNotes((ex.notes ?? "").trim());
+      setItems(
+        (ex.items ?? []).map((it: ExtractedExpenseItemWithMatch) => ({
+          product_name: it.productName,
+          quantity: it.quantity,
+          unit_value: it.unitValue,
+          product_id:
+            it.productId ?? it.productMatch?.resolvedProductId ?? undefined,
+        })),
+      );
+      setExpenseFullFormRevealed(true);
+      toast.success(
+        "Campos preenchidos a partir do arquivo. Confira e salve.",
+        {
+          description: ex._requiresProductConfirmation
+            ? "Algumas linhas não têm produto automático no cadastro (abaixo de 95% de similaridade). Vincule manualmente antes de salvar."
+            : undefined,
+        },
+      );
+    } finally {
+      setParsingDocument(false);
+    }
   };
 
   const unlinkedBoletos = boletos.filter(
@@ -422,7 +639,17 @@ export function Despesas() {
         description="Lista filtrada pelo mês de cadastro da despesa"
       />
 
-      <Sheet open={expenseSheetOpen} onOpenChange={setExpenseSheetOpen}>
+      <Sheet
+        open={expenseSheetOpen}
+        onOpenChange={(o) => {
+          setExpenseSheetOpen(o);
+          if (!o) {
+            setExpenseAttachmentFile(null);
+            setComprovanteDropActive(false);
+            setExpenseFullFormRevealed(true);
+          }
+        }}
+      >
         <SheetContent className="overflow-y-auto sm:max-w-xl">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
@@ -430,247 +657,511 @@ export function Despesas() {
               Nova despesa
             </SheetTitle>
             <SheetDescription>
-              Cadastre compras, notas fiscais, romaneios ou recibos
+              {showFullExpenseForm ? (
+                <>
+                  Cadastre compras, notas fiscais, romaneios ou recibos. Você
+                  pode anexar foto, PDF ou XML da NF-e para preencher os campos
+                  automaticamente.
+                </>
+              ) : (
+                <>
+                  Comprovante adicionado. Use a leitura por IA para importar os
+                  dados da nota ou escolha preencher manualmente.
+                </>
+              )}
             </SheetDescription>
           </SheetHeader>
           <form onSubmit={handleSubmit} className="space-y-6 py-4">
-            <div>
-              <Label>Tipo</Label>
-              <Select
-                value={type}
-                onValueChange={(v) => setType(v as ExpenseType)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="nota_fiscal">Nota fiscal</SelectItem>
-                  <SelectItem value="romaneio">Romaneio</SelectItem>
-                  <SelectItem value="recibo">Recibo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label>Fornecedor</Label>
-              <Select
-                value={supplierId === "__create__" ? "" : supplierId}
-                onValueChange={(v) => {
-                  if (v === "__create__") {
-                    setCreateSupplierOpen(true);
+            <div className="rounded-lg border p-4 space-y-3">
+              <Label htmlFor="expense-comprovante">
+                Comprovante (opcional)
+              </Label>
+              <input
+                ref={comprovanteInputRef}
+                id="expense-comprovante"
+                type="file"
+                accept={COMPROVANTE_ACCEPT}
+                className="sr-only"
+                tabIndex={-1}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && !isAcceptedComprovanteFile(f)) {
+                    toast.error(
+                      "Use imagem (JPG, PNG, WebP), PDF ou XML de NF-e.",
+                    );
+                    e.target.value = "";
                     return;
                   }
-                  setSupplierId(v);
-                  const s = suppliers.find((x) => x.id === v);
-                  if (s) {
-                    setSupplierName(s.name);
-                    setSupplierDocument(s.document ?? "");
+                  setExpenseAttachmentFile(f ?? null);
+                  if (f) setExpenseFullFormRevealed(false);
+                }}
+              />
+              <div
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "relative flex cursor-pointer flex-col rounded-lg border-2 px-4 py-6 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  expenseAttachmentFile
+                    ? cn(
+                        "min-h-0 items-stretch border-solid border-emerald-500/80 bg-emerald-500/12 py-5 text-left shadow-sm dark:border-emerald-400/60 dark:bg-emerald-500/15",
+                        comprovanteDropActive &&
+                          "border-primary ring-2 ring-primary/25 dark:ring-primary/35",
+                      )
+                    : cn(
+                        "min-h-[140px] items-center justify-center gap-2 border-dashed",
+                        comprovanteDropActive
+                          ? "border-primary bg-primary/5"
+                          : "border-muted-foreground/25 bg-muted/30 hover:border-muted-foreground/40 hover:bg-muted/50",
+                      ),
+                )}
+                onClick={() => comprovanteInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    comprovanteInputRef.current?.click();
                   }
                 }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setComprovanteDropActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const next = e.relatedTarget as Node | null;
+                  if (!next || !e.currentTarget.contains(next)) {
+                    setComprovanteDropActive(false);
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setComprovanteDropActive(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (!f) return;
+                  if (!isAcceptedComprovanteFile(f)) {
+                    toast.error(
+                      "Use imagem (JPG, PNG, WebP), PDF ou XML de NF-e.",
+                    );
+                    return;
+                  }
+                  setExpenseAttachmentFile(f);
+                  setExpenseFullFormRevealed(false);
+                }}
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione o fornecedor" />
-                </SelectTrigger>
-                <SelectContent>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                      {s.document ? ` — ${s.document}` : ""}
-                    </SelectItem>
-                  ))}
-                  <SelectItem
-                    value="__create__"
-                    className="text-primary font-medium"
-                  >
-                    <Plus className="h-4 w-4 inline mr-2" />
-                    Criar fornecedor
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {suppliers.length === 0 && !supplierId && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  Nenhum fornecedor cadastrado.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setCreateSupplierOpen(true)}
-                    className="text-primary underline"
-                  >
-                    Criar fornecedor
-                  </button>
-                </p>
-              )}
-              {!supplierId && suppliers.length > 0 && (
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <div>
-                    <Label className="text-xs">Nome (manual)</Label>
-                    <Input
-                      value={supplierName}
-                      onChange={(e) => setSupplierName(e.target.value)}
-                      placeholder="Ou informe manualmente"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">CNPJ/CPF (manual)</Label>
-                    <Input
-                      value={supplierDocument}
-                      onChange={(e) =>
-                        setSupplierDocument(maskCpfCnpj(e.target.value))
-                      }
-                      placeholder="000.000.000-00 ou 00.000.000/0001-00"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {type === "nota_fiscal" && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Nº da nota / NFC-e</Label>
-                  <Input
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="Ex: 12345"
-                  />
-                </div>
-                <div>
-                  <Label>Série</Label>
-                  <Input
-                    value={invoiceSeries}
-                    onChange={(e) => setInvoiceSeries(e.target.value)}
-                    placeholder="Ex: 1"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div>
-              <div className="flex items-center justify-between">
-                <Label>Itens</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addItem}
-                >
-                  <Plus className="h-4 w-4 mr-1" /> Adicionar item
-                </Button>
-              </div>
-              <div className="mt-2 space-y-3">
-                {items.map((it, i) => (
-                  <div key={i} className="space-y-2 rounded-lg border p-3">
-                    <div className="flex gap-2 items-end">
-                      <div className="flex-1">
-                        <Label className="text-xs">Descrição da nota</Label>
-                        <Input
-                          placeholder="Produto (como vem na nota)"
-                          value={it.product_name}
-                          onChange={(e) =>
-                            updateItem(i, { product_name: e.target.value })
-                          }
+                {expenseAttachmentFile ? (
+                  <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div className="flex shrink-0 justify-center sm:pt-0.5">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/20 dark:bg-emerald-400/20">
+                        <CheckCircle2
+                          className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
+                          aria-hidden
                         />
-                      </div>
-                      <div className="w-24">
-                        <Label className="text-xs">Qtd</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="Qtd"
-                          value={it.quantity || ""}
-                          onChange={(e) =>
-                            updateItem(i, {
-                              quantity: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="w-28">
-                        <Label className="text-xs">Valor un.</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="Valor un."
-                          value={it.unit_value || ""}
-                          onChange={(e) =>
-                            updateItem(i, {
-                              unit_value: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeItem(i)}
-                        disabled={items.length === 1}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      </span>
                     </div>
-                    <div>
-                      <Label className="text-xs">
-                        Vincular ao produto (estoque)
-                      </Label>
-                      <Select
-                        value={it.product_id ?? "__none__"}
-                        onValueChange={(v) =>
-                          updateItem(i, {
-                            product_id: v === "__none__" ? undefined : v,
-                          })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Não vincular" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Não vincular</SelectItem>
-                          {products
-                            .filter((p) => p.is_active !== false)
-                            .map((p) => (
-                              <SelectItem key={p.id} value={p.id}>
-                                {p.name}
-                                {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                                {Number(p.current_quantity).toLocaleString(
-                                  "pt-BR",
-                                )}{" "}
-                                {p.unit}
-                                {p.last_unit_value != null &&
-                                  p.last_unit_value > 0 &&
-                                  ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Ao vincular, o estoque será atualizado quando o
-                        recebimento for confirmado
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                          Documento carregado
+                        </p>
+                        <p
+                          className="mt-1 wrap-break-word font-medium text-foreground"
+                          title={expenseAttachmentFile.name}
+                        >
+                          {expenseAttachmentFile.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSizeShort(expenseAttachmentFile.size)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="border-emerald-600/40 text-emerald-800 hover:bg-emerald-500/10 dark:border-emerald-400/40 dark:text-emerald-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            comprovanteInputRef.current?.click();
+                          }}
+                        >
+                          Trocar arquivo
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpenseAttachmentFile(null);
+                            setExpenseFullFormRevealed(true);
+                            if (comprovanteInputRef.current) {
+                              comprovanteInputRef.current.value = "";
+                            }
+                          }}
+                        >
+                          Remover
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Clique na área ou em &quot;Trocar arquivo&quot; para
+                        substituir; ou arraste outro documento sobre esta
+                        região.
                       </p>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <Upload
+                      className={cn(
+                        "h-10 w-10 shrink-0",
+                        comprovanteDropActive
+                          ? "text-primary"
+                          : "text-muted-foreground",
+                      )}
+                      aria-hidden
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">
+                        {comprovanteDropActive
+                          ? "Solte o arquivo aqui"
+                          : "Arraste o arquivo ou clique para escolher"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        JPG, PNG, WebP, PDF ou XML (NF-e)
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                Total: {formatCurrency(totalItems)}
-              </p>
+              {!showFullExpenseForm ? (
+                <div className="mt-4 space-y-4 rounded-xl border-2 border-primary/35 bg-gradient-to-b from-primary/12 via-primary/8 to-primary/5 p-4 shadow-sm dark:from-primary/20 dark:via-primary/12 dark:to-primary/8">
+                  <p className="text-center text-sm font-semibold text-primary">
+                    Próximo passo
+                  </p>
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="h-12 w-full gap-2 text-base font-semibold shadow-md"
+                    disabled={
+                      !expenseAttachmentFile ||
+                      parsingDocument ||
+                      !currentCompany
+                    }
+                    onClick={() => void handleInterpretExpenseAttachment()}
+                  >
+                    {parsingDocument ? (
+                      <>
+                        <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                        Interpretando documento…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-5 w-5 shrink-0" />
+                        Preencher com IA a partir do arquivo
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-center text-xs text-muted-foreground">
+                    A leitura usa o mesmo serviço do WhatsApp (OpenAI). XML:
+                    prefira o arquivo da NF-e autorizada.
+                  </p>
+                  <button
+                    type="button"
+                    className="w-full text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                    disabled={parsingDocument}
+                    onClick={() => setExpenseFullFormRevealed(true)}
+                  >
+                    Preencher manualmente sem usar IA
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {expenseAttachmentFile && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={
+                          !expenseAttachmentFile ||
+                          parsingDocument ||
+                          !currentCompany
+                        }
+                        onClick={() => void handleInterpretExpenseAttachment()}
+                      >
+                        {parsingDocument ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Interpretando…
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            Preencher com IA a partir do arquivo
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {expenseAttachmentFile
+                      ? "Você pode usar a IA de novo para reler o arquivo ou editar os campos abaixo."
+                      : "A leitura por IA fica disponível após anexar um comprovante."}
+                  </p>
+                </>
+              )}
             </div>
+            {showFullExpenseForm && (
+              <>
+                <div>
+                  <Label>Tipo</Label>
+                  <Select
+                    value={type}
+                    onValueChange={(v) => setType(v as ExpenseType)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nota_fiscal">Nota fiscal</SelectItem>
+                      <SelectItem value="romaneio">Romaneio</SelectItem>
+                      <SelectItem value="recibo">Recibo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div>
-              <Label>Observações</Label>
-              <Input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Opcional"
-              />
-            </div>
+                <div>
+                  <Label>Fornecedor</Label>
+                  <Select
+                    value={supplierId === "__create__" ? "" : supplierId}
+                    onValueChange={(v) => {
+                      if (v === "__create__") {
+                        setCreateSupplierOpen(true);
+                        return;
+                      }
+                      setSupplierId(v);
+                      const s = suppliers.find((x) => x.id === v);
+                      if (s) {
+                        setSupplierName(s.name);
+                        setSupplierDocument(s.document ?? "");
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione o fornecedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {suppliers.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                          {s.document ? ` — ${s.document}` : ""}
+                        </SelectItem>
+                      ))}
+                      <SelectItem
+                        value="__create__"
+                        className="text-primary font-medium"
+                      >
+                        <Plus className="h-4 w-4 inline mr-2" />
+                        Criar fornecedor
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {suppliers.length === 0 && !supplierId && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Nenhum fornecedor cadastrado.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setCreateSupplierOpen(true)}
+                        className="text-primary underline"
+                      >
+                        Criar fornecedor
+                      </button>
+                    </p>
+                  )}
+                  {!supplierId && suppliers.length > 0 && (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <Label className="text-xs">Nome (manual)</Label>
+                        <Input
+                          value={supplierName}
+                          onChange={(e) => setSupplierName(e.target.value)}
+                          placeholder="Ou informe manualmente"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">CNPJ/CPF (manual)</Label>
+                        <Input
+                          value={supplierDocument}
+                          onChange={(e) =>
+                            setSupplierDocument(maskCpfCnpj(e.target.value))
+                          }
+                          placeholder="000.000.000-00 ou 00.000.000/0001-00"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-            <SheetFooter>
-              <Button type="submit" disabled={!canSubmit}>
-                Registrar despesa
-              </Button>
-            </SheetFooter>
+                {type === "nota_fiscal" && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label>Nº da nota / NFC-e</Label>
+                      <Input
+                        value={invoiceNumber}
+                        onChange={(e) => setInvoiceNumber(e.target.value)}
+                        placeholder="Ex: 12345"
+                      />
+                    </div>
+                    <div>
+                      <Label>Série</Label>
+                      <Input
+                        value={invoiceSeries}
+                        onChange={(e) => setInvoiceSeries(e.target.value)}
+                        placeholder="Ex: 1"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label>Itens</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addItem}
+                    >
+                      <Plus className="h-4 w-4 mr-1" /> Adicionar item
+                    </Button>
+                  </div>
+                  <div className="mt-2 space-y-3">
+                    {items.map((it, i) => (
+                      <div key={i} className="space-y-2 rounded-lg border p-3">
+                        <div className="flex gap-2 items-end">
+                          <div className="flex-1">
+                            <Label className="text-xs">Descrição da nota</Label>
+                            <Input
+                              placeholder="Produto (como vem na nota)"
+                              value={it.product_name}
+                              onChange={(e) =>
+                                updateItem(i, { product_name: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="w-24">
+                            <Label className="text-xs">Qtd</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="Qtd"
+                              value={it.quantity || ""}
+                              onChange={(e) =>
+                                updateItem(i, {
+                                  quantity: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="w-28">
+                            <Label className="text-xs">Valor un.</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="Valor un."
+                              value={it.unit_value || ""}
+                              onChange={(e) =>
+                                updateItem(i, {
+                                  unit_value: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeItem(i)}
+                            disabled={items.length === 1}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                        <div>
+                          <Label className="text-xs">
+                            Vincular ao produto (estoque)
+                          </Label>
+                          <Select
+                            value={it.product_id ?? "__none__"}
+                            onValueChange={(v) =>
+                              updateItem(i, {
+                                product_id: v === "__none__" ? undefined : v,
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Não vincular" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">
+                                Não vincular
+                              </SelectItem>
+                              {products
+                                .filter((p) => p.is_active !== false)
+                                .map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    {p.name}
+                                    {p.sku && ` (${p.sku})`} — Estoque:{" "}
+                                    {Number(p.current_quantity).toLocaleString(
+                                      "pt-BR",
+                                    )}{" "}
+                                    {p.unit}
+                                    {p.last_unit_value != null &&
+                                      p.last_unit_value > 0 &&
+                                      ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Ao vincular, o estoque será atualizado quando o
+                            recebimento for confirmado
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Total: {formatCurrency(totalItems)}
+                  </p>
+                </div>
+
+                <div>
+                  <Label>Observações</Label>
+                  <Input
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Opcional"
+                  />
+                </div>
+
+                <SheetFooter>
+                  <Button type="submit" disabled={!canSubmit}>
+                    Registrar despesa
+                  </Button>
+                </SheetFooter>
+              </>
+            )}
           </form>
         </SheetContent>
       </Sheet>

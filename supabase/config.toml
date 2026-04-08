@@ -31,3 +31,6 @@ enable_confirmations = false
 
 [functions.received-whatsapp-message]
 verify_jwt = false
+
+[functions.parse-expense-document]
+verify_jwt = false

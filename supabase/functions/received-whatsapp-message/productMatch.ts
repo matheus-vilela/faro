@@ -1,4 +1,4 @@
-import type { ExtractedExpenseItem } from "./openaiExpense.ts";
+import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 
 export type ProductRow = { id: string; name: string };
 

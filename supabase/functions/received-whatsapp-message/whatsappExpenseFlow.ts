@@ -1,12 +1,19 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
+  enrichExtractedWithTaxId,
+  ensureSupplierFromExtracted,
+  extractTaxIdDigits,
+} from "../_shared/expenseSupplierEnsure.ts";
+import {
   type ExtractedDocumentResult,
   extractDocumentWithOpenAI,
   mapDocumentKindToExpenseType,
   scaleItemsToTotal,
   sumItems,
   totalsMatch,
-} from "./openaiExpense.ts";
+} from "../_shared/openaiExpense.ts";
+import { bytesToImageDataUrlSafe, optimizeExpenseImage } from "../_shared/optimizeExpenseImage.ts";
+import { fetchZApiMediaBytes } from "../_shared/zapiMedia.ts";
 import {
   type ItemWithProductMatch,
   resolveProductMatches,
@@ -116,10 +123,11 @@ export async function loadPendingDraft(
   id: string;
   extracted_json: unknown;
   access_token: string | null;
+  source_document_path: string | null;
 } | null> {
   const { data, error } = await supabase
     .from("whatsapp_expense_drafts")
-    .select("id, extracted_json, access_token")
+    .select("id, extracted_json, access_token, source_document_path")
     .eq("company_id", companyId)
     .eq("sender_phone_normalized", senderNormalized)
     .gte("expires_at", new Date().toISOString())
@@ -135,61 +143,12 @@ export async function loadPendingDraft(
     id: string;
     extracted_json: unknown;
     access_token: string | null;
+    source_document_path: string | null;
   } | null;
 }
 
 export async function deleteDraft(supabase: Supabase, draftId: string) {
   await supabase.from("whatsapp_expense_drafts").delete().eq("id", draftId);
-}
-
-/** Apenas dígitos; aceita número vindo do JSON. */
-function normalizeDocumentDigits(raw: string | null | undefined): string {
-  return String(raw ?? "").replace(/\D/g, "");
-}
-
-/**
- * CPF (11) ou CNPJ (14) a partir de supplierDocument, notes ou nome (OCR costuma
- * colocar CNPJ só no rodapé ou o modelo devolve snake_case/número errado).
- */
-function extractTaxIdDigits(extracted: ExtractedDocumentResult): string | null {
-  const blocks: string[] = [];
-  const push = (v: string | null | undefined) => {
-    if (v && String(v).trim()) blocks.push(String(v));
-  };
-  push(extracted.supplierDocument);
-  push(extracted.notes);
-  push(extracted.supplierName);
-
-  const pickFromDigits = (d: string): string | null => {
-    let x = d.replace(/\D/g, "");
-    if (x.length === 11 || x.length === 14) return x;
-    if (x.length > 14) {
-      x = x.slice(-14);
-      return x.length === 14 ? x : null;
-    }
-    return null;
-  };
-
-  for (const b of blocks) {
-    const n = pickFromDigits(b);
-    if (n) return n;
-  }
-
-  const all = blocks.join(" ").replace(/\D/g, "");
-  if (all.length >= 14) return all.slice(-14);
-  if (all.length === 11) return all;
-  return null;
-}
-
-/** Garante supplierDocument no JSON persistido para o link /w e finalize RPC. */
-function enrichExtractedWithTaxId(
-  extracted: ExtractedDocumentResult,
-): ExtractedDocumentResult {
-  const digits = extractTaxIdDigits(extracted);
-  if (!digits) return extracted;
-  const cur = normalizeDocumentDigits(extracted.supplierDocument);
-  if (cur === digits) return extracted;
-  return { ...extracted, supplierDocument: digits };
 }
 
 export type SaveDraftResult = { draftId: string; accessToken: string };
@@ -201,6 +160,7 @@ export async function saveDraft(
   extracted: ExtractedDocumentResult & Record<string, unknown>,
   sumItemsVal: number,
   totalDoc: number,
+  sourceDocumentPath?: string | null,
 ): Promise<SaveDraftResult | null> {
   await supabase
     .from("whatsapp_expense_drafts")
@@ -217,6 +177,7 @@ export async function saveDraft(
       extracted_json: toStore,
       sum_items: sumItemsVal,
       total_document: totalDoc,
+      source_document_path: sourceDocumentPath ?? null,
     })
     .select("id, access_token")
     .single();
@@ -231,56 +192,12 @@ export async function saveDraft(
   return { draftId, accessToken };
 }
 
-/**
- * Se houver CPF/CNPJ na extração, localiza fornecedor pelo documento (normalizado)
- * ou cria um com nome e documento. Retorna null se não houver documento válido.
- */
-async function ensureSupplierFromExtracted(
-  supabase: Supabase,
-  companyId: string,
-  extracted: ExtractedDocumentResult,
-): Promise<string | null> {
-  const digits = extractTaxIdDigits(extracted);
-  if (!digits || (digits.length !== 11 && digits.length !== 14)) return null;
-
-  const { data: rows, error } = await supabase
-    .from("suppliers")
-    .select("id, document")
-    .eq("company_id", companyId);
-
-  if (error) {
-    console.error("[whatsappExpenseFlow] suppliers list:", error.message);
-    return null;
-  }
-
-  const norm = (d: string | null | undefined) => normalizeDocumentDigits(d);
-  const found = rows?.find((r) => norm(r.document) === digits);
-  if (found) return found.id as string;
-
-  const name = (extracted.supplierName ?? "").trim() || "Fornecedor (WhatsApp)";
-  const { data: inserted, error: insErr } = await supabase
-    .from("suppliers")
-    .insert({
-      company_id: companyId,
-      name,
-      document: digits,
-      notes: "Cadastrado automaticamente — importação WhatsApp",
-    })
-    .select("id")
-    .single();
-
-  if (insErr) {
-    console.error("[whatsappExpenseFlow] insert supplier:", insErr.message);
-    return null;
-  }
-  return (inserted?.id as string) ?? null;
-}
-
 async function insertExpense(
   supabase: Supabase,
   companyId: string,
   extracted: ExtractedDocumentResult,
   items: ItemWithProductMatch[],
+  sourceDocumentPath: string | null,
 ): Promise<string | null> {
   const type = mapDocumentKindToExpenseType(extracted.documentKind);
   const taxIdDigits = extractTaxIdDigits(extracted);
@@ -351,6 +268,18 @@ async function insertExpense(
       );
     }
   }
+  if (sourceDocumentPath) {
+    const { error: upErr } = await supabase
+      .from("expenses")
+      .update({ source_document_path: sourceDocumentPath })
+      .eq("id", expenseId);
+    if (upErr) {
+      console.error(
+        "[whatsappExpenseFlow] source_document_path:",
+        upErr.message,
+      );
+    }
+  }
   // Recebimento: criado no app após approve_whatsapp_expense_as_owner.
   return expenseId;
 }
@@ -381,6 +310,7 @@ async function processMatchedExpenseFlow(
     flowId?: string,
   ) => Promise<unknown>,
   flowId: string,
+  sourceDocumentPath: string | null,
   opts?: { quoteUserConfirmed?: boolean },
 ): Promise<void> {
   const matchItems = matchResult.items;
@@ -418,6 +348,7 @@ async function processMatchedExpenseFlow(
       pending as ExtractedDocumentResult & Record<string, unknown>,
       sum,
       totalDoc,
+      sourceDocumentPath,
     );
     const reason =
       (working.likelyNotPurchaseReason ?? "").trim() ||
@@ -436,7 +367,13 @@ async function processMatchedExpenseFlow(
 
   if (totalsMatch(totalDoc, sum)) {
     if (!matchResult.requiresProductConfirmation) {
-      const id = await insertExpense(supabase, companyId, working, matchItems);
+      const id = await insertExpense(
+        supabase,
+        companyId,
+        working,
+        matchItems,
+        sourceDocumentPath,
+      );
       if (id) {
         await sendWhatsapp(
           senderNormalized,
@@ -472,6 +409,7 @@ async function processMatchedExpenseFlow(
       extractedPayload as ExtractedDocumentResult & Record<string, unknown>,
       sum,
       totalDoc,
+      sourceDocumentPath,
     );
     const shortLink = saved
       ? await buildDraftShortLink(supabase, saved.draftId, saved.accessToken)
@@ -501,6 +439,7 @@ async function processMatchedExpenseFlow(
     extractedWithProducts as ExtractedDocumentResult & Record<string, unknown>,
     sum,
     totalDoc,
+    sourceDocumentPath,
   );
 
   const shortLink = saved
@@ -617,6 +556,7 @@ export async function tryHandleExpenseDraftReply(
         },
         sendWhatsapp,
         flowId,
+        draft.source_document_path ?? null,
         { quoteUserConfirmed: true },
       );
       return true;
@@ -679,7 +619,13 @@ export async function tryHandleExpenseDraftReply(
 
   if (useTotal && totalDoc > 0 && items.length > 0) {
     const scaled = scaleItemsToTotal(items, totalDoc);
-    const id = await insertExpense(supabase, companyId, extracted, scaled);
+    const id = await insertExpense(
+      supabase,
+      companyId,
+      extracted,
+      scaled,
+      draft.source_document_path ?? null,
+    );
     if (id) {
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
@@ -705,7 +651,13 @@ export async function tryHandleExpenseDraftReply(
   }
 
   if (useSum && items.length > 0) {
-    const id = await insertExpense(supabase, companyId, extracted, items);
+    const id = await insertExpense(
+      supabase,
+      companyId,
+      extracted,
+      items,
+      draft.source_document_path ?? null,
+    );
     if (id) {
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
@@ -862,6 +814,56 @@ export async function tryHandleIncomingExpenseDocument(
     return false;
   }
 
+  let sourceDocumentPath: string | null = null;
+  let imageDataUrlForAi: string | undefined;
+
+  if (imageUrl) {
+    const rawFetch = await fetchZApiMediaBytes(
+      imageUrl,
+      "image/*,application/octet-stream;q=0.8,*/*;q=0.5",
+    );
+    if (rawFetch.ok) {
+      try {
+        const opt = await optimizeExpenseImage(rawFetch.buf);
+        const key = `${auth.companyId}/whatsapp-incoming/${
+          messageId ?? crypto.randomUUID()
+        }.jpg`;
+        const { error: stErr } = await supabase.storage
+          .from("expense-documents")
+          .upload(key, opt.bytes, {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+        if (!stErr) {
+          sourceDocumentPath = key;
+          imageDataUrlForAi = bytesToImageDataUrlSafe(opt.bytes, "image/jpeg");
+        }
+      } catch (e) {
+        console.error("[whatsappExpenseFlow] optimize/upload imagem:", e);
+      }
+    }
+  } else if (pdfUrl) {
+    const rawPdf = await fetchZApiMediaBytes(
+      pdfUrl,
+      "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    );
+    if (rawPdf.ok && rawPdf.buf.length >= 5) {
+      const head = new TextDecoder().decode(rawPdf.buf.subarray(0, 5));
+      if (head === "%PDF-") {
+        const key = `${auth.companyId}/whatsapp-incoming/${
+          messageId ?? crypto.randomUUID()
+        }.pdf`;
+        const { error: stErr } = await supabase.storage
+          .from("expense-documents")
+          .upload(key, rawPdf.buf, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+        if (!stErr) sourceDocumentPath = key;
+      }
+    }
+  }
+
   if (imageUrl) {
     await sendWhatsapp(
       auth.senderNormalized,
@@ -883,7 +885,8 @@ export async function tryHandleIncomingExpenseDocument(
     result = await extractDocumentWithOpenAI({
       apiKey,
       mode: "image",
-      imageUrl,
+      imageUrl: imageDataUrlForAi ? undefined : imageUrl,
+      imageDataUrl: imageDataUrlForAi,
     });
   } else if (pdfUrl) {
     result = await extractDocumentWithOpenAI({
@@ -955,6 +958,7 @@ export async function tryHandleIncomingExpenseDocument(
     matchResult,
     sendWhatsapp,
     flowId,
+    sourceDocumentPath,
   );
   return true;
 }

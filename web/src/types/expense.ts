@@ -35,6 +35,8 @@ export interface Expense {
   display_name?: string | null
   status: ExpenseStatus
   notes: string | null
+  /** Caminho no bucket `expense-documents` (comprovante). */
+  source_document_path?: string | null
   created_at: string
   updated_at: string
   items?: ExpenseItem[]

@@ -1,6 +1,7 @@
 /**
  * Extração estruturada de nota/cupom/romaneio/recibo via OpenAI (texto, imagem ou PDF).
  */
+import { fetchZApiMediaBytes } from "./zapiMedia.ts";
 
 export type ExtractedExpenseItem = {
   productName: string;
@@ -11,7 +12,6 @@ export type ExtractedExpenseItem = {
 
 export type ExtractedDocumentResult = {
   validDocument: boolean;
-  /** Motivo quando validDocument é false */
   invalidReason?: string;
   documentKind:
     | "nota_fiscal"
@@ -22,17 +22,11 @@ export type ExtractedDocumentResult = {
     | null;
   supplierName: string | null;
   supplierDocument: string | null;
-  /** Número da nota/cupom (em NFC-e costuma ficar ao lado do rótulo "NFC-e") */
   invoiceNumber: string | null;
-  /** Série fiscal quando constar no documento (NF-e / NFC-e) */
   invoiceSeries: string | null;
   totalAmount: number | null;
   items: ExtractedExpenseItem[];
   notes: string | null;
-  /**
-   * true = orçamento, proposta, cotação, simulação etc., sem compra efetiva clara.
-   * O fluxo WhatsApp pergunta se ainda assim deseja lançar como despesa.
-   */
   likelyNotEffectivePurchase?: boolean;
   likelyNotPurchaseReason?: string | null;
 };
@@ -75,7 +69,6 @@ TABELAS, ROMANEIOS E DOCUMENTOS COM COLUNAS ALINHADAS (crítico):
 - Após montar cada item, verifique coerência: lineTotal deve bater com quantity × unitValue (aceite pequenas diferenças de arredondamento, ex. centavos). Se o documento mostrar total explícito na linha, use-o em lineTotal e ajuste unitValue ou quantity de forma consistente com o texto daquela linha.
 - Ordene "items" na mesma ordem em que as linhas aparecem no documento (de cima para baixo).`;
 
-/** Instrução extra para imagens: reforça leitura linha a linha (tabelas/romaneios). */
 const USER_PROMPT_IMAGE = `Esta imagem pode ser um documento com tabela ou colunas alinhadas (ex.: romaneio, nota, pedido).
 
 Extraia um único objeto JSON conforme o sistema. Regras essenciais:
@@ -84,7 +77,6 @@ Extraia um único objeto JSON conforme o sistema. Regras essenciais:
 3) Inclua todas as linhas de item que conseguir ler; não descarte linhas no meio da lista por achar que são iguais sem verificar.
 4) Se a imagem não for um documento fiscal/compra legível, use validDocument: false e invalidReason em português.`;
 
-/** Instrução extra para PDF (mesmo problema de alinhamento em tabelas). */
 const USER_PROMPT_PDF = `Analise este arquivo PDF (nota fiscal, cupom, romaneio ou recibo de compra). Responda apenas com um json válido (um único objeto) conforme as instruções do sistema. Se não for documento de compra legível, marque validDocument false.
 
 Para a lista de itens: em tabelas e romaneios, extraia linha por linha — descrição, quantidade e valores da mesma linha física; não una dados de linhas diferentes; inclua todas as linhas de produto visíveis na ordem de cima para baixo.`;
@@ -121,42 +113,15 @@ function extractTextFromResponsesOutput(raw: unknown): string | null {
   return null;
 }
 
-/** URLs de mídia Z-API exigem o mesmo Client-Token das demais chamadas à API. */
-function isZApiMediaHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return h.includes("z-api.io");
-}
-
 async function fetchPdfBytesAuthenticated(
   documentUrl: string,
 ): Promise<{ ok: true; buf: Uint8Array } | { ok: false; error: string }> {
-  let hostname = "";
-  try {
-    hostname = new URL(documentUrl).hostname;
-  } catch {
-    return { ok: false, error: "URL do PDF inválida." };
-  }
-
-  const headers: HeadersInit = {
-    Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
-  };
-  const clientToken = Deno.env.get("ZAPI_CLIENT_TOKEN")?.trim();
-  if (isZApiMediaHost(hostname) && clientToken) {
-    (headers as Record<string, string>)["Client-Token"] = clientToken;
-  } else if (isZApiMediaHost(hostname) && !clientToken) {
-    console.warn(
-      "[openaiExpense] PDF em host Z-API sem ZAPI_CLIENT_TOKEN na edge — download costuma falhar (403 ou HTML).",
-    );
-  }
-
-  const fetchRes = await fetch(documentUrl, { headers });
-  if (!fetchRes.ok) {
-    return {
-      ok: false,
-      error: `Baixar PDF: HTTP ${fetchRes.status}`,
-    };
-  }
-  const buf = new Uint8Array(await fetchRes.arrayBuffer());
+  const r = await fetchZApiMediaBytes(
+    documentUrl,
+    "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+  );
+  if (!r.ok) return r;
+  const buf = r.buf;
   const sniff = new TextDecoder()
     .decode(buf.subarray(0, Math.min(80, buf.length)))
     .trimStart()
@@ -214,25 +179,16 @@ async function deleteOpenAiFile(apiKey: string, fileId: string): Promise<void> {
   }
 }
 
-async function extractDocumentFromPdfUrl(
+async function runOpenAiPdfExtraction(
   apiKey: string,
-  documentUrl: string,
+  buf: Uint8Array,
+  filename: string,
   model: string,
 ): Promise<
   { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
 > {
   let fileId: string | null = null;
   try {
-    const downloaded = await fetchPdfBytesAuthenticated(documentUrl);
-    if (!downloaded.ok) {
-      console.error(
-        "[openaiExpense] download PDF:",
-        downloaded.error,
-        documentUrl.slice(0, 80),
-      );
-      return downloaded;
-    }
-    const buf = downloaded.buf;
     if (buf.length === 0) {
       return { ok: false, error: "PDF vazio." };
     }
@@ -241,22 +197,7 @@ async function extractDocumentFromPdfUrl(
     }
     const head = new TextDecoder().decode(buf.subarray(0, 5));
     if (head !== "%PDF-") {
-      console.error(
-        "[openaiExpense] corpo não é PDF (primeiros bytes):",
-        head,
-        "len=",
-        buf.length,
-      );
       return { ok: false, error: "Arquivo não parece ser um PDF válido." };
-    }
-
-    let filename = "documento.pdf";
-    try {
-      const path = new URL(documentUrl).pathname;
-      const last = path.split("/").pop();
-      if (last && /\.pdf$/i.test(last)) filename = decodeURIComponent(last);
-    } catch {
-      /* keep default */
     }
 
     const up = await uploadPdfToOpenAI(apiKey, buf, filename);
@@ -305,20 +246,11 @@ async function extractDocumentFromPdfUrl(
 
     const p = parsed as Record<string, unknown>;
     if (p.status === "failed" || p.status === "cancelled") {
-      console.error(
-        "[openaiExpense] responses PDF status",
-        p.status,
-        rawText.slice(0, 600),
-      );
       return { ok: false, error: "OpenAI (PDF): geração falhou." };
     }
 
     const content = extractTextFromResponsesOutput(parsed);
     if (!content || typeof content !== "string") {
-      console.error(
-        "[openaiExpense] sem output_text na resposta PDF",
-        rawText.slice(0, 800),
-      );
       return { ok: false, error: "OpenAI (PDF) sem texto de saída." };
     }
 
@@ -333,6 +265,50 @@ async function extractDocumentFromPdfUrl(
   }
 }
 
+async function extractDocumentFromPdfUrl(
+  apiKey: string,
+  documentUrl: string,
+  model: string,
+): Promise<
+  { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
+> {
+  const downloaded = await fetchPdfBytesAuthenticated(documentUrl);
+  if (!downloaded.ok) {
+    console.error(
+      "[openaiExpense] download PDF:",
+      downloaded.error,
+      documentUrl.slice(0, 80),
+    );
+    return downloaded;
+  }
+  let filename = "documento.pdf";
+  try {
+    const path = new URL(documentUrl).pathname;
+    const last = path.split("/").pop();
+    if (last && /\.pdf$/i.test(last)) filename = decodeURIComponent(last);
+  } catch {
+    /* keep default */
+  }
+  return runOpenAiPdfExtraction(
+    apiKey,
+    downloaded.buf,
+    filename,
+    model,
+  );
+}
+
+/** PDF já em memória (upload pelo app). */
+export async function extractDocumentFromPdfBuffer(
+  apiKey: string,
+  buf: Uint8Array,
+  filename: string,
+  model: string,
+): Promise<
+  { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
+> {
+  return runOpenAiPdfExtraction(apiKey, buf, filename || "documento.pdf", model);
+}
+
 function safeParseJson(s: string): ExtractedDocumentResult | null {
   try {
     const raw = JSON.parse(s) as Record<string, unknown>;
@@ -340,7 +316,6 @@ function safeParseJson(s: string): ExtractedDocumentResult | null {
     const o = raw as unknown as ExtractedDocumentResult;
     if (!Array.isArray(o.items)) o.items = [];
     if (o.invoiceSeries === undefined) o.invoiceSeries = null;
-    // Modelo pode devolver snake_case ou número no documento
     o.supplierDocument =
       strOrNull(raw.supplierDocument ?? raw.supplier_document) ??
       o.supplierDocument ??
@@ -377,7 +352,8 @@ export async function extractDocumentWithOpenAI(params: {
   mode: "text" | "image" | "pdf";
   text?: string;
   imageUrl?: string;
-  /** URL temporária do PDF (ex.: Z-API) — usa Responses API + upload de arquivo */
+  /** data:image/...;base64,... — usado após otimização local (WhatsApp) */
+  imageDataUrl?: string;
   documentUrl?: string;
 }): Promise<
   { ok: true; data: ExtractedDocumentResult } | { ok: false; error: string }
@@ -385,9 +361,7 @@ export async function extractDocumentWithOpenAI(params: {
   const { apiKey, mode } = params;
   const baseModel =
     Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4.1-mini";
-  // Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ?? "gpt-4o-mini";
 
-  /** Romaneios/tabelas: opcionalmente use gpt-4o (OPENAI_EXPENSE_VISION_MODEL) para melhor alinhamento linha a linha. */
   const model =
     mode === "image"
       ? (Deno.env.get("OPENAI_EXPENSE_VISION_MODEL")?.trim() ?? baseModel)
@@ -396,7 +370,6 @@ export async function extractDocumentWithOpenAI(params: {
   if (mode === "pdf") {
     const url = params.documentUrl?.trim();
     if (!url) return { ok: false, error: "URL do PDF ausente." };
-    /** PDF via Files + Responses costuma exigir modelo com visão/arquivo; override opcional. */
     const pdfModel =
       Deno.env.get("OPENAI_EXPENSE_PDF_MODEL")?.trim() ||
       Deno.env.get("OPENAI_EXPENSE_MODEL")?.trim() ||
@@ -410,13 +383,19 @@ export async function extractDocumentWithOpenAI(params: {
   > = [];
 
   if (mode === "image") {
+    const dataUrl = params.imageDataUrl?.trim();
     const url = params.imageUrl?.trim();
-    if (!url) return { ok: false, error: "URL da imagem ausente." };
+    if (!dataUrl && !url) {
+      return { ok: false, error: "Imagem ausente (URL ou data URL)." };
+    }
     userContent.push({
       type: "text",
       text: USER_PROMPT_IMAGE,
     });
-    userContent.push({ type: "image_url", image_url: { url } });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: dataUrl ?? url! },
+    });
   } else {
     const t = params.text?.trim() ?? "";
     if (t.length < 20) {
@@ -479,7 +458,6 @@ export function mapDocumentKindToExpenseType(
   return "nota_fiscal";
 }
 
-/** Soma lineTotal dos itens */
 export function sumItems(items: ExtractedExpenseItem[]): number {
   let s = 0;
   for (const it of items) {
@@ -488,7 +466,6 @@ export function sumItems(items: ExtractedExpenseItem[]): number {
   return Math.round(s * 100) / 100;
 }
 
-/** Compara total do documento com soma dos itens (tolerância centavos + arredondamento) */
 export function totalsMatch(totalDoc: number, sumItemsVal: number): boolean {
   const a = Math.round(totalDoc * 100) / 100;
   const b = Math.round(sumItemsVal * 100) / 100;
@@ -499,7 +476,6 @@ export function totalsMatch(totalDoc: number, sumItemsVal: number): boolean {
   return false;
 }
 
-/** Ajusta lineTotal dos itens proporcionalmente para fechar em totalTarget */
 export function scaleItemsToTotal(
   items: ExtractedExpenseItem[],
   totalTarget: number,
