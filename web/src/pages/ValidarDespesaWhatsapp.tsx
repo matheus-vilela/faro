@@ -10,8 +10,14 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ProductSelectPopover } from "@/components/whatsapp/ProductSelectPopover";
 import { useTheme } from "@/contexts/ThemeContext";
+import {
+  countLinesNeedingProductReview,
+  divergenceReasonLabel,
+  itemLineNeedsProductReview,
+} from "@/lib/expenseDivergenceUi";
 import { supabasePublic } from "@/lib/supabasePublic";
 import { cn } from "@/lib/utils";
 import {
@@ -164,8 +170,9 @@ function lineItemInputStringsFromItems(items: ExtractedExpenseItem[]): {
 function buildPayloadForFinalize(
   extracted: ExtractedDocumentResult,
   bindings: LineBinding[],
+  divergenceReasonValue: string,
 ): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     validDocument: extracted.validDocument,
     documentKind: extracted.documentKind,
     supplierName: extracted.supplierName,
@@ -191,6 +198,10 @@ function buildPayloadForFinalize(
       return row;
     }),
   };
+  if (divergenceReasonValue.trim()) {
+    payload.divergenceReason = divergenceReasonLabel(divergenceReasonValue);
+  }
+  return payload;
 }
 
 export function ValidarDespesaWhatsapp() {
@@ -212,6 +223,7 @@ export function ValidarDespesaWhatsapp() {
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
   /** Alinhado após cada load; transição true→false dispara toast (usuário corrigiu divergência). */
   const prevDivergeRef = useRef(false);
+  const [divergenceReasonValue, setDivergenceReasonValue] = useState("");
 
   const load = useCallback(async () => {
     if (!token) {
@@ -465,7 +477,11 @@ export function ValidarDespesaWhatsapp() {
     }
     setSaving(true);
     setError(null);
-    const payload = buildPayloadForFinalize(extracted, lineBindings);
+    const payload = buildPayloadForFinalize(
+      extracted,
+      lineBindings,
+      divergenceReasonValue,
+    );
     const { data: res, error: err } = await supabasePublic.rpc(
       "finalize_whatsapp_expense_draft",
       {
@@ -649,16 +665,17 @@ export function ValidarDespesaWhatsapp() {
             </div>
           </div>
 
-          {diverge && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-              Total da nota ({formatBrl(totalNota)})<br />
-              Soma dos itens ({formatBrl(soma)})<br />
-              <br />
-              Ainda divergem. <br />
-              Ajuste quantidades, valores ou inclua/remova itens até bater com o
-              total.
-            </div>
-          )}
+          <ExpenseImportAttentionPanel
+            className="space-y-3"
+            totalNota={totalNota}
+            sumItens={soma}
+            divergenceReasonValue={divergenceReasonValue}
+            onDivergenceReasonChange={setDivergenceReasonValue}
+            requiresProductConfirmation={!!extracted._requiresProductConfirmation}
+            productReviewLineCount={countLinesNeedingProductReview(
+              extracted.items,
+            )}
+          />
 
           <div className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -707,7 +724,10 @@ export function ValidarDespesaWhatsapp() {
                     <div
                       id={`draft-line-${rowId}`}
                       className={cn(
-                        "rounded-lg border border-border p-3 space-y-3 transition-shadow duration-500",
+                        "rounded-lg border p-3 space-y-3 transition-shadow duration-500",
+                        itemLineNeedsProductReview(it)
+                          ? "border-amber-500/55 bg-amber-500/[0.06]"
+                          : "border-border",
                         flashRowId === rowId &&
                           "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md",
                       )}

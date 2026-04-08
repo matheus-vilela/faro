@@ -1,3 +1,4 @@
+import { ExpenseRecordedDivergenceBanner } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -173,6 +174,19 @@ export function ExpenseDetailSheet({
     if (!detailExpense) return undefined;
     return boletos.find((b) => b.expense_id === detailExpense.id);
   }, [detailExpense, boletos]);
+
+  const detailLineSum = useMemo(() => {
+    if (!detailExpense?.expense_items?.length) return 0;
+    return detailExpense.expense_items.reduce(
+      (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+      0,
+    );
+  }, [detailExpense?.expense_items]);
+
+  const detailUnlinkedProductRows = useMemo(() => {
+    if (!detailExpense?.expense_items?.length) return 0;
+    return detailExpense.expense_items.filter((it) => !it.product_id).length;
+  }, [detailExpense?.expense_items]);
 
   const loadExpenseData = useCallback(async () => {
     if (!expenseId || !companyId) return;
@@ -966,6 +980,12 @@ export function ExpenseDetailSheet({
                 </form>
               ) : (
                 <div className="space-y-6 py-6">
+                  <ExpenseRecordedDivergenceBanner
+                    documentTotal={detailExpense.document_total}
+                    sumLines={detailLineSum}
+                    divergenceReason={detailExpense.divergence_reason}
+                    unlinkedProductRowCount={detailUnlinkedProductRows}
+                  />
                   <div className="grid gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Tipo:</span>{" "}

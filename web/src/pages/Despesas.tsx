@@ -1,6 +1,7 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
@@ -45,6 +46,11 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import {
+  countLinesNeedingProductReview,
+  divergenceReasonLabel,
+  valuesDivergeCents,
+} from "@/lib/expenseDivergenceUi";
 import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj } from "@/lib/masks";
@@ -191,6 +197,15 @@ export function Despesas() {
   /** Com arquivo anexo: esconde o restante do formulário até IA concluir ou "preencher manualmente". */
   const [expenseFullFormRevealed, setExpenseFullFormRevealed] = useState(true);
   const showFullExpenseForm = !expenseAttachmentFile || expenseFullFormRevealed;
+  /** Metadados da última interpretação por IA (comparar total × itens e revisão de produto). */
+  const [importDocumentTotal, setImportDocumentTotal] = useState<number | null>(
+    null,
+  );
+  const [importRequiresProductConfirmation, setImportRequiresProductConfirmation] =
+    useState(false);
+  const [importProductReviewLineCount, setImportProductReviewLineCount] =
+    useState(0);
+  const [divergenceReasonValue, setDivergenceReasonValue] = useState("");
 
   // Link boleto dialog
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -383,6 +398,10 @@ export function Despesas() {
         notes: notes || null,
         status: "pending",
         expense_source: "manual",
+        document_total: importDocumentTotal,
+        divergence_reason: divergenceReasonValue.trim()
+          ? divergenceReasonLabel(divergenceReasonValue)
+          : null,
       })
       .select("id")
       .single();
@@ -440,6 +459,10 @@ export function Despesas() {
     setSupplierDocument("");
     setSupplierName("");
     setNotes("");
+    setImportDocumentTotal(null);
+    setImportRequiresProductConfirmation(false);
+    setImportProductReviewLineCount(0);
+    setDivergenceReasonValue("");
     setItems([
       { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
     ]);
@@ -588,11 +611,23 @@ export function Despesas() {
         })),
       );
       setExpenseFullFormRevealed(true);
+      setImportDocumentTotal(
+        ex.totalAmount != null &&
+          Number.isFinite(Number(ex.totalAmount)) &&
+          Number(ex.totalAmount) > 0
+          ? Number(ex.totalAmount)
+          : null,
+      );
+      setImportRequiresProductConfirmation(!!ex._requiresProductConfirmation);
+      setImportProductReviewLineCount(
+        countLinesNeedingProductReview(ex.items ?? []),
+      );
+      setDivergenceReasonValue("");
       toast.success(
         "Campos preenchidos a partir do arquivo. Confira e salve.",
         {
           description: ex._requiresProductConfirmation
-            ? "Algumas linhas não têm produto automático no cadastro (abaixo de 95% de similaridade). Vincule manualmente antes de salvar."
+            ? "Algumas linhas não têm produto automático no cadastro (menos de 95% de similaridade). Vincule manualmente antes de salvar."
             : undefined,
         },
       );
@@ -694,6 +729,10 @@ export function Despesas() {
             setComprovanteDropActive(false);
             setExpenseFullFormRevealed(true);
             setDocumentRef("");
+            setImportDocumentTotal(null);
+            setImportRequiresProductConfirmation(false);
+            setImportProductReviewLineCount(0);
+            setDivergenceReasonValue("");
           }
         }}
       >
@@ -1206,6 +1245,21 @@ export function Despesas() {
                   <p className="text-sm text-muted-foreground mt-2">
                     Total: {formatCurrency(totalItems)}
                   </p>
+                  {(importDocumentTotal !== null ||
+                    importRequiresProductConfirmation ||
+                    importProductReviewLineCount > 0) && (
+                    <ExpenseImportAttentionPanel
+                      className="mt-4"
+                      totalNota={importDocumentTotal ?? totalItems}
+                      sumItens={totalItems}
+                      divergenceReasonValue={divergenceReasonValue}
+                      onDivergenceReasonChange={setDivergenceReasonValue}
+                      requiresProductConfirmation={
+                        importRequiresProductConfirmation
+                      }
+                      productReviewLineCount={importProductReviewLineCount}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -1297,6 +1351,21 @@ export function Despesas() {
                 const linked = !!boleto;
                 const pendingOwnerApproval =
                   exp.expense_source === "whatsapp" && exp.status === "pending";
+                const sumItemsRow =
+                  exp.expense_items?.reduce(
+                    (s, it) =>
+                      s + Number(it.quantity) * Number(it.unit_value),
+                    0,
+                  ) ?? 0;
+                const documentTotalImport =
+                  exp.document_total != null
+                    ? Number(exp.document_total)
+                    : null;
+                const valueRisk =
+                  documentTotalImport != null &&
+                  valuesDivergeCents(documentTotalImport, sumItemsRow);
+                const unlinkedProducts =
+                  exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
                 return (
                   <div
                     key={exp.id}
@@ -1327,6 +1396,29 @@ export function Despesas() {
                             aria-hidden
                           />
                           Pendente de aprovação
+                        </span>
+                      )}
+                      {(valueRisk || unlinkedProducts > 0) && (
+                        <span className="mt-1 flex flex-wrap gap-1.5">
+                          {valueRisk && (
+                            <span
+                              className="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+                              title="Total do documento na importação difere da soma das linhas"
+                            >
+                              Ajuste: valores
+                            </span>
+                          )}
+                          {unlinkedProducts > 0 && (
+                            <span
+                              className="inline-flex items-center rounded-md border border-violet-500/35 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-900 dark:text-violet-100"
+                              title="Linhas sem produto vinculado ao estoque"
+                            >
+                              Revisar produto
+                              {unlinkedProducts > 1
+                                ? ` (${unlinkedProducts})`
+                                : ""}
+                            </span>
+                          )}
                         </span>
                       )}
                       {exp.supplier_document && (

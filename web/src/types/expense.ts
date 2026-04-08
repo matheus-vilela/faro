@@ -39,6 +39,10 @@ export interface Expense {
   notes: string | null
   /** Caminho no bucket `expense-documents` (comprovante). */
   source_document_path?: string | null
+  /** Total do documento na importação (comparação com soma das linhas). */
+  document_total?: number | null
+  /** Motivo indicado quando havia divergência ou revisão na importação. */
+  divergence_reason?: string | null
   created_at: string
   updated_at: string
   items?: ExpenseItem[]
