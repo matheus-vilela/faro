@@ -440,6 +440,15 @@ export function ExpenseDetailSheet({
     0,
   );
 
+  /** NF-e: exige nº da nota ao criar ou ao mudar de outro tipo para NF; se a despesa já era NF sem número (import/WhatsApp), permite salvar outras alterações. */
+  const notaFiscalInvoiceOk =
+    editType !== "nota_fiscal" ||
+    editInvoiceNumber.trim() !== "" ||
+    (!!detailExpense &&
+      detailExpense.type === "nota_fiscal" &&
+      editType === "nota_fiscal" &&
+      !(detailExpense.invoice_number?.trim()));
+
   const canEditSubmit =
     editItems.every(
       (it) =>
@@ -448,7 +457,7 @@ export function ExpenseDetailSheet({
         Number(it.unit_value) >= 0,
     ) &&
     (editSupplierId !== "" || editSupplierName.trim() !== "") &&
-    (editType !== "nota_fiscal" || editInvoiceNumber.trim() !== "");
+    notaFiscalInvoiceOk;
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -574,6 +583,8 @@ export function ExpenseDetailSheet({
     setDetailEditMode(false);
     setEditSaving(false);
     onRefresh?.();
+    toast.success("Despesa atualizada.");
+    onClose();
   };
 
   const openLinkItemSheet = (it: {
