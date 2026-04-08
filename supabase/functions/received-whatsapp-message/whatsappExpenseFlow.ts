@@ -23,6 +23,54 @@ import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 type Supabase = ReturnType<typeof createClient>;
 
+const WHATSAPP_MSG_NOTA_DUPLICADA =
+  "Esta nota já foi lançada no sistema. Confira em *Despesas* no Faro.";
+
+type InsertExpenseOutcome =
+  | { status: "ok"; expenseId: string }
+  | { status: "duplicate" }
+  | { status: "error" };
+
+/** Alinhado ao índice único em `expenses` e à RPC `expense_find_duplicate_by_supplier_document`. */
+async function findDuplicateExpenseIdForWhatsapp(
+  supabase: Supabase,
+  params: {
+    companyId: string;
+    supplierId: string | null;
+    supplierDocumentDigits: string;
+    invoiceNumber: string;
+    invoiceSeries: string;
+  },
+): Promise<string | null> {
+  const digits = params.supplierDocumentDigits.replace(/\D/g, "");
+  const supplierOk =
+    params.supplierId != null ||
+    digits.length >= 11;
+  const inv = params.invoiceNumber.trim();
+  if (!inv || !supplierOk) {
+    return null;
+  }
+  const { data, error } = await supabase.rpc(
+    "expense_find_duplicate_by_supplier_document",
+    {
+      p_company_id: params.companyId,
+      p_supplier_id: params.supplierId,
+      p_supplier_document: digits,
+      p_invoice_number: inv,
+      p_invoice_series: params.invoiceSeries ?? "",
+      p_exclude_expense_id: null,
+    },
+  );
+  if (error) {
+    console.error(
+      "[whatsappExpenseFlow] expense_find_duplicate_by_supplier_document:",
+      error.message,
+    );
+    return null;
+  }
+  return (data as string | null) ?? null;
+}
+
 function publicAppBaseUrl(): string {
   const u = Deno.env.get("PUBLIC_APP_URL") ?? Deno.env.get("SITE_URL") ?? "";
   return u.replace(/\/$/, "");
@@ -199,7 +247,7 @@ async function insertExpense(
   items: ItemWithProductMatch[],
   sourceDocumentPath: string | null,
   whatsappSenderNormalized: string,
-): Promise<string | null> {
+): Promise<InsertExpenseOutcome> {
   const type = mapDocumentKindToExpenseType(extracted.documentKind);
   const taxIdDigits = extractTaxIdDigits(extracted);
   const supplierId = await ensureSupplierFromExtracted(
@@ -217,13 +265,26 @@ async function insertExpense(
     type === "nota_fiscal" && seriesRaw != null && String(seriesRaw).trim()
       ? String(seriesRaw).trim()
       : null;
+  const invoiceNumberStr = String(extracted.invoiceNumber ?? "").trim();
+
+  const dupId = await findDuplicateExpenseIdForWhatsapp(supabase, {
+    companyId,
+    supplierId,
+    supplierDocumentDigits: (supplierDocumentRow ?? "").replace(/\D/g, ""),
+    invoiceNumber: invoiceNumberStr,
+    invoiceSeries: type === "nota_fiscal" ? (invoiceSeries ?? "") : "",
+  });
+  if (dupId) {
+    return { status: "duplicate" };
+  }
+
   const { data: exp, error: e1 } = await supabase
     .from("expenses")
     .insert({
       company_id: companyId,
       created_by: null,
       type,
-      invoice_number: extracted.invoiceNumber,
+      invoice_number: invoiceNumberStr || null,
       invoice_series: invoiceSeries,
       supplier_id: supplierId,
       supplier_name:
@@ -240,9 +301,16 @@ async function insertExpense(
     .select("id")
     .single();
 
-  if (e1 || !exp) {
-    console.error("[whatsappExpenseFlow] insert expense:", e1?.message);
-    return null;
+  if (e1) {
+    const code = (e1 as { code?: string }).code;
+    if (code === "23505") {
+      return { status: "duplicate" };
+    }
+    console.error("[whatsappExpenseFlow] insert expense:", e1.message);
+    return { status: "error" };
+  }
+  if (!exp) {
+    return { status: "error" };
   }
 
   const expenseId = exp.id as string;
@@ -283,7 +351,7 @@ async function insertExpense(
     }
   }
   // Recebimento: criado no app após approve_whatsapp_expense_as_owner.
-  return expenseId;
+  return { status: "ok", expenseId };
 }
 
 type DraftPayload = ExtractedDocumentResult & {
@@ -369,7 +437,7 @@ async function processMatchedExpenseFlow(
 
   if (totalsMatch(totalDoc, sum)) {
     if (!matchResult.requiresProductConfirmation) {
-      const id = await insertExpense(
+      const outcome = await insertExpense(
         supabase,
         companyId,
         working,
@@ -377,7 +445,7 @@ async function processMatchedExpenseFlow(
         sourceDocumentPath,
         senderNormalized,
       );
-      if (id) {
+      if (outcome.status === "ok") {
         await sendWhatsapp(
           senderNormalized,
           withFaroFlowFooter(
@@ -385,6 +453,13 @@ async function processMatchedExpenseFlow(
             "registro",
           ),
           "despesa_whatsapp_ok",
+          flowId,
+        );
+      } else if (outcome.status === "duplicate") {
+        await sendWhatsapp(
+          senderNormalized,
+          withFaroFlowFooter(WHATSAPP_MSG_NOTA_DUPLICADA, "registro"),
+          "despesa_whatsapp_duplicada",
           flowId,
         );
       } else {
@@ -622,7 +697,7 @@ export async function tryHandleExpenseDraftReply(
 
   if (useTotal && totalDoc > 0 && items.length > 0) {
     const scaled = scaleItemsToTotal(items, totalDoc);
-    const id = await insertExpense(
+    const outcome = await insertExpense(
       supabase,
       companyId,
       extracted,
@@ -630,7 +705,7 @@ export async function tryHandleExpenseDraftReply(
       draft.source_document_path ?? null,
       senderNormalized,
     );
-    if (id) {
+    if (outcome.status === "ok") {
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
         senderNormalized,
@@ -639,6 +714,13 @@ export async function tryHandleExpenseDraftReply(
           "registro",
         ),
         "despesa_whatsapp_ok_total",
+        flowId,
+      );
+    } else if (outcome.status === "duplicate") {
+      await sendWhatsapp(
+        senderNormalized,
+        withFaroFlowFooter(WHATSAPP_MSG_NOTA_DUPLICADA, "registro"),
+        "despesa_whatsapp_duplicada",
         flowId,
       );
     } else {
@@ -655,7 +737,7 @@ export async function tryHandleExpenseDraftReply(
   }
 
   if (useSum && items.length > 0) {
-    const id = await insertExpense(
+    const outcome = await insertExpense(
       supabase,
       companyId,
       extracted,
@@ -663,7 +745,7 @@ export async function tryHandleExpenseDraftReply(
       draft.source_document_path ?? null,
       senderNormalized,
     );
-    if (id) {
+    if (outcome.status === "ok") {
       await deleteDraft(supabase, draft.id);
       await sendWhatsapp(
         senderNormalized,
@@ -672,6 +754,13 @@ export async function tryHandleExpenseDraftReply(
           "registro",
         ),
         "despesa_whatsapp_ok_soma",
+        flowId,
+      );
+    } else if (outcome.status === "duplicate") {
+      await sendWhatsapp(
+        senderNormalized,
+        withFaroFlowFooter(WHATSAPP_MSG_NOTA_DUPLICADA, "registro"),
+        "despesa_whatsapp_duplicada",
         flowId,
       );
     } else {

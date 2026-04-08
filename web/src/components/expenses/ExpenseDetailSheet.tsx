@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
@@ -456,18 +457,50 @@ export function ExpenseDetailSheet({
     const selectedSupplier = editSupplierId
       ? suppliers.find((s) => s.id === editSupplierId)
       : null;
+    const supplierDocDigits =
+      ((selectedSupplier?.document ?? editSupplierDocument) || "")
+        .replace(/\D/g, "")
+        .trim() || null;
+    const invNum = editInvoiceNumber.trim();
+    const invSer = editType === "nota_fiscal" ? editInvoiceSeries.trim() : "";
+
+    const { duplicateId, error: dupErr } = await findExpenseDuplicateId(
+      supabase,
+      {
+        companyId,
+        supplierId: editSupplierId || null,
+        supplierDocumentDigits: supplierDocDigits,
+        invoiceNumber: invNum,
+        invoiceSeries: invSer,
+        excludeExpenseId: detailExpense.id,
+      },
+    );
+    if (dupErr) {
+      console.error(dupErr);
+      toast.error("Não foi possível verificar duplicidade.");
+      setEditSaving(false);
+      return;
+    }
+    if (duplicateId) {
+      toast.error(
+        "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+      );
+      setEditSaving(false);
+      return;
+    }
+
     const { error: expErr } = await supabase
       .from("expenses")
       .update({
         type: editType,
         supplier_id: editSupplierId || null,
-        invoice_number: editType === "nota_fiscal" ? editInvoiceNumber : null,
+        invoice_number:
+          editType === "nota_fiscal"
+            ? editInvoiceNumber.trim()
+            : editInvoiceNumber.trim() || null,
         invoice_series:
           editType === "nota_fiscal" ? editInvoiceSeries.trim() || null : null,
-        supplier_document:
-          ((selectedSupplier?.document ?? editSupplierDocument) || "")
-            .replace(/\D/g, "")
-            .trim() || null,
+        supplier_document: supplierDocDigits,
         supplier_name:
           ((selectedSupplier?.name ?? editSupplierName) || "").trim() || null,
         notes: editNotes || null,
@@ -477,6 +510,13 @@ export function ExpenseDetailSheet({
       .eq("id", detailExpense.id);
     if (expErr) {
       console.error(expErr);
+      if (expErr.code === "23505") {
+        toast.error(
+          "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+        );
+      } else {
+        toast.error(expErr.message ?? "Não foi possível salvar.");
+      }
       setEditSaving(false);
       return;
     }
@@ -697,6 +737,20 @@ export function ExpenseDetailSheet({
                           placeholder="Ex: 1"
                         />
                       </div>
+                    </div>
+                  )}
+                  {(editType === "romaneio" || editType === "recibo") && (
+                    <div>
+                      <Label>Nº do documento (opcional)</Label>
+                      <Input
+                        value={editInvoiceNumber}
+                        onChange={(e) => setEditInvoiceNumber(e.target.value)}
+                        placeholder="Mesmo fornecedor + mesmo nº não podem repetir"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Se informado, não é permitido duplicar para o mesmo
+                        fornecedor.
+                      </p>
                     </div>
                   )}
                   {isGestor &&
@@ -974,7 +1028,11 @@ export function ExpenseDetailSheet({
                       })()}
                     {detailExpense.invoice_number && (
                       <div>
-                        <span className="text-muted-foreground">Nº nota:</span>{" "}
+                        <span className="text-muted-foreground">
+                          {detailExpense.type === "nota_fiscal"
+                            ? "Nº nota:"
+                            : "Nº documento:"}
+                        </span>{" "}
                         {detailExpense.invoice_number}
                         {detailExpense.invoice_series ? (
                           <>

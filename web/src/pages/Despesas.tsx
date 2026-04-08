@@ -45,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj } from "@/lib/masks";
 import { canGestorAccess } from "@/lib/roles";
@@ -168,6 +169,8 @@ export function Despesas() {
   const [supplierId, setSupplierId] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceSeries, setInvoiceSeries] = useState("");
+  /** Romaneio/recibo: referência gravada em `invoice_number` para deduplicação. */
+  const [documentRef, setDocumentRef] = useState("");
   const [supplierDocument, setSupplierDocument] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [notes, setNotes] = useState("");
@@ -331,6 +334,37 @@ export function Despesas() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentCompany?.id || !canSubmit) return;
+    const supplierDocDigits =
+      ((selectedSupplier?.document ?? supplierDocument) || "").replace(
+        /\D/g,
+        "",
+      ) || null;
+    const invNum =
+      type === "nota_fiscal" ? invoiceNumber.trim() : documentRef.trim();
+    const invSer = type === "nota_fiscal" ? invoiceSeries.trim() : "";
+
+    const { duplicateId, error: dupErr } = await findExpenseDuplicateId(
+      supabase,
+      {
+        companyId: currentCompany.id,
+        supplierId: supplierId || null,
+        supplierDocumentDigits: supplierDocDigits,
+        invoiceNumber: invNum,
+        invoiceSeries: invSer,
+      },
+    );
+    if (dupErr) {
+      console.error(dupErr);
+      toast.error("Não foi possível verificar duplicidade.");
+      return;
+    }
+    if (duplicateId) {
+      toast.error(
+        "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+      );
+      return;
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -341,14 +375,10 @@ export function Despesas() {
         created_by: user?.id ?? null,
         type,
         supplier_id: supplierId || null,
-        invoice_number: type === "nota_fiscal" ? invoiceNumber : null,
+        invoice_number: invNum || null,
         invoice_series:
           type === "nota_fiscal" ? invoiceSeries.trim() || null : null,
-        supplier_document:
-          ((selectedSupplier?.document ?? supplierDocument) || "").replace(
-            /\D/g,
-            "",
-          ) || null,
+        supplier_document: supplierDocDigits,
         supplier_name: (selectedSupplier?.name ?? supplierName) || null,
         notes: notes || null,
         status: "pending",
@@ -358,6 +388,13 @@ export function Despesas() {
       .single();
     if (expErr) {
       console.error(expErr);
+      if (expErr.code === "23505") {
+        toast.error(
+          "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+        );
+      } else {
+        toast.error(expErr.message ?? "Não foi possível criar a despesa.");
+      }
       return;
     }
     if (expenseAttachmentFile && currentCompany?.id) {
@@ -399,6 +436,7 @@ export function Despesas() {
     setSupplierId("");
     setInvoiceNumber("");
     setInvoiceSeries("");
+    setDocumentRef("");
     setSupplierDocument("");
     setSupplierName("");
     setNotes("");
@@ -530,8 +568,15 @@ export function Despesas() {
         }
       }
 
-      setInvoiceNumber((ex.invoiceNumber ?? "").trim());
-      setInvoiceSeries((ex.invoiceSeries ?? "").trim());
+      if (dk === "romaneio" || dk === "recibo") {
+        setDocumentRef((ex.invoiceNumber ?? "").trim());
+        setInvoiceNumber("");
+        setInvoiceSeries("");
+      } else {
+        setInvoiceNumber((ex.invoiceNumber ?? "").trim());
+        setInvoiceSeries((ex.invoiceSeries ?? "").trim());
+        setDocumentRef("");
+      }
       setNotes((ex.notes ?? "").trim());
       setItems(
         (ex.items ?? []).map((it: ExtractedExpenseItemWithMatch) => ({
@@ -648,6 +693,7 @@ export function Despesas() {
             setExpenseAttachmentFile(null);
             setComprovanteDropActive(false);
             setExpenseFullFormRevealed(true);
+            setDocumentRef("");
           }
         }}
       >
@@ -1029,6 +1075,21 @@ export function Despesas() {
                         placeholder="Ex: 1"
                       />
                     </div>
+                  </div>
+                )}
+
+                {(type === "romaneio" || type === "recibo") && (
+                  <div>
+                    <Label>Nº do documento (opcional)</Label>
+                    <Input
+                      value={documentRef}
+                      onChange={(e) => setDocumentRef(e.target.value)}
+                      placeholder="Mesmo fornecedor + mesmo nº não podem repetir"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Se informado, o sistema impede lançar de novo o mesmo
+                      número para o mesmo fornecedor (CNPJ/CPF ou cadastro).
+                    </p>
                   </div>
                 )}
 
