@@ -1,3 +1,4 @@
+import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,11 +26,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { useCompany } from "@/contexts/CompanyContext";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
-import { maskCpfCnpj } from "@/lib/masks";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
@@ -42,7 +42,7 @@ import {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -105,7 +105,7 @@ function BoletoLinkedBlock({
 const EXPENSE_SELECT = `
   *,
   expense_items (*, products (id, name, current_quantity, min_quantity)),
-  suppliers (id, name, document)
+  suppliers (id, name, document, sales_contact_name, sales_whatsapp, commercial_manager)
 `;
 
 type ExpenseDetailSheetProps = {
@@ -240,7 +240,8 @@ export function ExpenseDetailSheet({
       const { data, error } = await supabase.storage
         .from("expense-documents")
         .createSignedUrl(path, 3600);
-      if (!cancelled && !error && data?.signedUrl) setComprovanteUrl(data.signedUrl);
+      if (!cancelled && !error && data?.signedUrl)
+        setComprovanteUrl(data.signedUrl);
     })();
     return () => {
       cancelled = true;
@@ -696,9 +697,7 @@ export function ExpenseDetailSheet({
                         <Label>Série</Label>
                         <Input
                           value={editInvoiceSeries}
-                          onChange={(e) =>
-                            setEditInvoiceSeries(e.target.value)
-                          }
+                          onChange={(e) => setEditInvoiceSeries(e.target.value)}
                           placeholder="Ex: 1"
                         />
                       </div>
@@ -931,6 +930,52 @@ export function ExpenseDetailSheet({
                         {formatDocForDisplay(detailExpense.supplier_document)}
                       </div>
                     )}
+                    {detailExpense.supplier_id &&
+                      (() => {
+                        const s = suppliers.find(
+                          (x) => x.id === detailExpense.supplier_id,
+                        );
+                        if (
+                          !s ||
+                          (!s.sales_contact_name?.trim() &&
+                            !s.sales_whatsapp?.trim() &&
+                            !s.commercial_manager?.trim())
+                        ) {
+                          return null;
+                        }
+                        return (
+                          <div className="rounded-lg border border-border/80 p-3 space-y-1.5 text-sm">
+                            <p className="font-medium flex items-center gap-2 text-muted-foreground">
+                              <UserRound className="h-4 w-4" />
+                              Contato comercial (fornecedor)
+                            </p>
+                            {s.sales_contact_name?.trim() && (
+                              <p>
+                                <span className="text-muted-foreground">
+                                  Vendedor:
+                                </span>{" "}
+                                {s.sales_contact_name}
+                              </p>
+                            )}
+                            {s.sales_whatsapp?.trim() && (
+                              <p>
+                                <span className="text-muted-foreground">
+                                  WhatsApp:
+                                </span>{" "}
+                                {maskPhone(s.sales_whatsapp)}
+                              </p>
+                            )}
+                            {s.commercial_manager?.trim() && (
+                              <p>
+                                <span className="text-muted-foreground">
+                                  Nome do gerente comercial:
+                                </span>{" "}
+                                {s.commercial_manager}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                     {detailExpense.invoice_number && (
                       <div>
                         <span className="text-muted-foreground">Nº nota:</span>{" "}
@@ -978,7 +1023,9 @@ export function ExpenseDetailSheet({
                               type="button"
                               size="sm"
                               disabled={approvingWhatsapp}
-                              onClick={() => void handleApproveWhatsappExpense()}
+                              onClick={() =>
+                                void handleApproveWhatsappExpense()
+                              }
                             >
                               {approvingWhatsapp
                                 ? "Aprovando…"

@@ -43,6 +43,7 @@ import {
   Pencil,
   Plus,
   Truck,
+  UserRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -88,6 +89,9 @@ export function Fornecedores() {
   const [editDocument, setEditDocument] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
+  const [editSalesContactName, setEditSalesContactName] = useState("");
+  const [editSalesWhatsapp, setEditSalesWhatsapp] = useState("");
+  const [editCommercialManager, setEditCommercialManager] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
@@ -115,7 +119,7 @@ export function Fornecedores() {
     if (debouncedSearch.trim()) {
       const term = `%${debouncedSearch.trim()}%`;
       query = query.or(
-        `name.ilike.${term},document.ilike.${term},email.ilike.${term}`,
+        `name.ilike.${term},document.ilike.${term},email.ilike.${term},sales_contact_name.ilike.${term},commercial_manager.ilike.${term}`,
       );
     }
     const { data, count } = await query.range(
@@ -252,6 +256,9 @@ export function Fornecedores() {
     setEditDocument(s.document ? maskCpfCnpj(s.document) : "");
     setEditEmail(s.email ?? "");
     setEditPhone(s.phone ? maskPhone(s.phone) : "");
+    setEditSalesContactName(s.sales_contact_name ?? "");
+    setEditSalesWhatsapp(s.sales_whatsapp ? maskPhone(s.sales_whatsapp) : "");
+    setEditCommercialManager(s.commercial_manager ?? "");
     setEditNotes(s.notes ?? "");
   };
 
@@ -266,6 +273,9 @@ export function Fornecedores() {
         document: editDocument.replace(/\D/g, "") || null,
         email: editEmail.trim() || null,
         phone: editPhone.replace(/\D/g, "") || null,
+        sales_contact_name: editSalesContactName.trim() || null,
+        sales_whatsapp: editSalesWhatsapp.replace(/\D/g, "") || null,
+        commercial_manager: editCommercialManager.trim() || null,
         notes: editNotes.trim() || null,
         updated_at: new Date().toISOString(),
       })
@@ -281,6 +291,9 @@ export function Fornecedores() {
             document: editDocument.replace(/\D/g, "") || null,
             email: editEmail.trim() || null,
             phone: editPhone.replace(/\D/g, "") || null,
+            sales_contact_name: editSalesContactName.trim() || null,
+            sales_whatsapp: editSalesWhatsapp.replace(/\D/g, "") || null,
+            commercial_manager: editCommercialManager.trim() || null,
             notes: editNotes.trim() || null,
           }
         : null,
@@ -318,7 +331,7 @@ export function Fornecedores() {
         <CardContent>
           <div className="mb-4 flex flex-wrap gap-3 items-center">
             <Input
-              placeholder="Filtrar por nome, documento ou e-mail..."
+              placeholder="Filtrar por nome, documento, e-mail, vendedor ou gerente..."
               value={suppliersSearch}
               onChange={(e) => setSuppliersSearch(e.target.value)}
               className="max-w-sm"
@@ -665,6 +678,47 @@ export function Fornecedores() {
                       />
                     </div>
                   </div>
+                  <div className="border-t border-border pt-4 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <UserRound className="h-4 w-4" />
+                      <span className="text-sm font-medium">
+                        Contato comercial
+                      </span>
+                    </div>
+                    <div>
+                      <Label>Nome do vendedor</Label>
+                      <Input
+                        value={editSalesContactName}
+                        onChange={(e) =>
+                          setEditSalesContactName(e.target.value)
+                        }
+                        placeholder="Nome do representante"
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label>WhatsApp (comercial)</Label>
+                      <Input
+                        value={editSalesWhatsapp}
+                        onChange={(e) =>
+                          setEditSalesWhatsapp(maskPhone(e.target.value))
+                        }
+                        placeholder="(11) 99999-9999"
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label>Nome do gerente comercial</Label>
+                      <Input
+                        value={editCommercialManager}
+                        onChange={(e) =>
+                          setEditCommercialManager(e.target.value)
+                        }
+                        placeholder="Nome do gerente"
+                        className="mt-2"
+                      />
+                    </div>
+                  </div>
                   <div>
                     <Label>Observações</Label>
                     <Input
@@ -709,6 +763,52 @@ export function Fornecedores() {
                         {maskPhone(detailSupplier.phone)}
                       </div>
                     )}
+                  </div>
+                  <div>
+                    <p className="font-medium mb-2 flex items-center gap-2 text-sm">
+                      <UserRound className="h-4 w-4" />
+                      Contato comercial
+                    </p>
+                    <div className="rounded-lg border p-4 space-y-2 text-sm">
+                      <p>
+                        <span className="text-muted-foreground">
+                          Nome do vendedor:
+                        </span>{" "}
+                        {detailSupplier.sales_contact_name?.trim() ? (
+                          detailSupplier.sales_contact_name
+                        ) : (
+                          <span className="text-muted-foreground italic">
+                            Não informado
+                          </span>
+                        )}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">
+                          WhatsApp (comercial):
+                        </span>{" "}
+                        {detailSupplier.sales_whatsapp?.trim() ? (
+                          maskPhone(detailSupplier.sales_whatsapp)
+                        ) : (
+                          <span className="text-muted-foreground italic">
+                            Não informado
+                          </span>
+                        )}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">
+                          Nome do gerente comercial:
+                        </span>{" "}
+                        {detailSupplier.commercial_manager?.trim() ? (
+                          detailSupplier.commercial_manager
+                        ) : (
+                          <span className="text-muted-foreground italic">
+                            Não informado
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 text-sm">
                     {detailSupplier.notes && (
                       <div>
                         <span className="text-muted-foreground">Obs:</span>{" "}

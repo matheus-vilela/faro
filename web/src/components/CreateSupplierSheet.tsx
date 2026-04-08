@@ -19,7 +19,7 @@ import {
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import type { Supplier } from "@/types/supplier";
-import { Building2, CreditCard, Plus } from "lucide-react";
+import { Building2, CreditCard, Plus, UserRound } from "lucide-react";
 import { useState } from "react";
 
 const ACCOUNT_TYPES = [
@@ -52,6 +52,9 @@ export function CreateSupplierSheet({
   const [document, setDocument] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [salesContactName, setSalesContactName] = useState("");
+  const [salesWhatsapp, setSalesWhatsapp] = useState("");
+  const [commercialManager, setCommercialManager] = useState("");
   const [notes, setNotes] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankCode, setBankCode] = useState("");
@@ -81,6 +84,9 @@ export function CreateSupplierSheet({
         document: document.trim().replace(/\D/g, "") || null,
         email: email.trim() || null,
         phone: phone.trim().replace(/\D/g, "") || null,
+        sales_contact_name: salesContactName.trim() || null,
+        sales_whatsapp: salesWhatsapp.trim().replace(/\D/g, "") || null,
+        commercial_manager: commercialManager.trim() || null,
         notes: notes.trim() || null,
       })
       .select()
@@ -110,6 +116,9 @@ export function CreateSupplierSheet({
     setDocument("");
     setEmail("");
     setPhone("");
+    setSalesContactName("");
+    setSalesWhatsapp("");
+    setCommercialManager("");
     setNotes("");
     setBankName("");
     setBankCode("");
@@ -171,6 +180,43 @@ export function CreateSupplierSheet({
               />
             </div>
           </div>
+
+          <div className="border-t pt-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <UserRound className="h-4 w-4" />
+              <Label className="text-base font-medium">Contato comercial</Label>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Vendedor, WhatsApp e gerente (opcional).
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Nome do vendedor</Label>
+                <Input
+                  value={salesContactName}
+                  onChange={(e) => setSalesContactName(e.target.value)}
+                  placeholder="Nome do representante"
+                />
+              </div>
+              <div>
+                <Label>WhatsApp (comercial)</Label>
+                <Input
+                  value={salesWhatsapp}
+                  onChange={(e) => setSalesWhatsapp(maskPhone(e.target.value))}
+                  placeholder="(11) 99999-9999"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Nome do gerente comercial</Label>
+              <Input
+                value={commercialManager}
+                onChange={(e) => setCommercialManager(e.target.value)}
+                placeholder="Nome do gerente"
+              />
+            </div>
+          </div>
+
           <div>
             <Label>Observações</Label>
             <Input
