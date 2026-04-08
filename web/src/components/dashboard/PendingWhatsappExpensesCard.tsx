@@ -1,4 +1,5 @@
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -158,6 +159,14 @@ export function PendingWhatsappExpensesCard() {
                         minute: "2-digit",
                       })}{" "}
                       · {formatBrl(total)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Quem lançou:{" "}
+                      <ExpenseLauncherInfo
+                        expenseId={row.id}
+                        compact
+                        className="inline"
+                      />
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">

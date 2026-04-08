@@ -25,6 +25,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { useCompany } from "@/contexts/CompanyContext";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
@@ -608,6 +609,9 @@ export function ExpenseDetailSheet({
                   )}
                 </SheetDescription>
               </SheetHeader>
+              <div className="mt-4 border-t border-border pt-4">
+                <ExpenseLauncherInfo expenseId={detailExpense.id} />
+              </div>
               {detailEditMode ? (
                 <form onSubmit={handleUpdate} className="space-y-6 py-6">
                   <div>

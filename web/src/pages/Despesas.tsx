@@ -1,6 +1,7 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -1272,6 +1273,16 @@ export function Despesas() {
                           {formatDocForDisplay(exp.supplier_document)}
                         </p>
                       )}
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <span className="font-medium text-muted-foreground">
+                          Quem lançou:{" "}
+                        </span>
+                        <ExpenseLauncherInfo
+                          expenseId={exp.id}
+                          compact
+                          className="inline"
+                        />
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium">

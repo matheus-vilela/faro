@@ -198,6 +198,7 @@ async function insertExpense(
   extracted: ExtractedDocumentResult,
   items: ItemWithProductMatch[],
   sourceDocumentPath: string | null,
+  whatsappSenderNormalized: string,
 ): Promise<string | null> {
   const type = mapDocumentKindToExpenseType(extracted.documentKind);
   const taxIdDigits = extractTaxIdDigits(extracted);
@@ -234,6 +235,7 @@ async function insertExpense(
         [extracted.notes, "Importado via WhatsApp"]
           .filter(Boolean)
           .join(" — ") || "Importado via WhatsApp",
+      whatsapp_sender_phone_normalized: whatsappSenderNormalized,
     })
     .select("id")
     .single();
@@ -373,6 +375,7 @@ async function processMatchedExpenseFlow(
         working,
         matchItems,
         sourceDocumentPath,
+        senderNormalized,
       );
       if (id) {
         await sendWhatsapp(
@@ -625,6 +628,7 @@ export async function tryHandleExpenseDraftReply(
       extracted,
       scaled,
       draft.source_document_path ?? null,
+      senderNormalized,
     );
     if (id) {
       await deleteDraft(supabase, draft.id);
@@ -657,6 +661,7 @@ export async function tryHandleExpenseDraftReply(
       extracted,
       items,
       draft.source_document_path ?? null,
+      senderNormalized,
     );
     if (id) {
       await deleteDraft(supabase, draft.id);

@@ -25,6 +25,8 @@ export interface Expense {
   type: ExpenseType
   /** manual (app) ou whatsapp — ver fluxo de aprovação */
   expense_source?: ExpenseSource
+  /** Remetente WhatsApp (só dígitos E.164), quando `expense_source` = whatsapp */
+  whatsapp_sender_phone_normalized?: string | null
   supplier_id: string | null
   invoice_number: string | null
   /** Série fiscal (NF-e / NFC-e) */
