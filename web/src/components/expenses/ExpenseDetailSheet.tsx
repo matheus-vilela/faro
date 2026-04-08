@@ -73,27 +73,18 @@ const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 function BoletoLinkedBlock({
   boleto,
-  categoriesById,
   formatCurrency,
-  formatDate,
   onVerBoleto,
 }: {
   boleto: Boleto;
-  categoriesById: Map<string, CompanyCategory>;
   formatCurrency: (v: number) => string;
-  formatDate: (s: string) => string;
   onVerBoleto: () => void;
 }) {
   return (
     <div className="rounded-lg border p-4 space-y-2">
       <p className="font-medium">Boleto vinculado</p>
       <p className="text-sm text-muted-foreground">
-        <span className="text-foreground font-medium">
-          {formatBoletoCategoryLabel(boleto, categoriesById)}
-        </span>
-        {" · "}
-        {boleto.description} • {formatCurrency(boleto.amount)} • Venc.{" "}
-        {formatDate(boleto.due_date)}
+        {boleto.description} • {formatCurrency(boleto.amount)}
       </p>
       <Button variant="outline" size="sm" onClick={onVerBoleto}>
         Ver boleto
@@ -176,6 +167,11 @@ export function ExpenseDetailSheet({
     () => new Map(companyCategories.map((c) => [c.id, c])),
     [companyCategories],
   );
+
+  const linkedBoletoForDetail = useMemo(() => {
+    if (!detailExpense) return undefined;
+    return boletos.find((b) => b.expense_id === detailExpense.id);
+  }, [detailExpense, boletos]);
 
   const loadExpenseData = useCallback(async () => {
     if (!expenseId || !companyId) return;
@@ -599,7 +595,7 @@ export function ExpenseDetailSheet({
                       ] ||
                       "Sem fornecedor"}
                   </span>
-                  {getBoletoForExpense(detailExpense.id) ? (
+                  {linkedBoletoForDetail ? (
                     <Badge variant="default" className="bg-green-600 shrink-0">
                       Boleto vinculado
                     </Badge>
@@ -1010,6 +1006,38 @@ export function ExpenseDetailSheet({
                         </span>
                       )}
                     </div>
+                    <div className="rounded-lg border border-border/80 bg-muted/20 p-3 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Fluxo de caixa e alertas
+                      </p>
+                      <div>
+                        <span className="text-muted-foreground">Categoria:</span>{" "}
+                        <span className="text-foreground">
+                          {linkedBoletoForDetail
+                            ? formatBoletoCategoryLabel(
+                                linkedBoletoForDetail,
+                                categoriesById,
+                              )
+                            : "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">
+                          Vencimento:
+                        </span>{" "}
+                        <span className="text-foreground">
+                          {linkedBoletoForDetail
+                            ? formatDate(linkedBoletoForDetail.due_date)
+                            : "—"}
+                        </span>
+                      </div>
+                      {!linkedBoletoForDetail && (
+                        <p className="text-xs text-muted-foreground">
+                          Categoria e vencimento vêm do boleto vinculado. Use o
+                          ícone na lista de despesas para vincular.
+                        </p>
+                      )}
+                    </div>
                     {detailExpense.expense_source === "whatsapp" &&
                       detailExpense.status === "pending" &&
                       isOwner && (
@@ -1143,14 +1171,12 @@ export function ExpenseDetailSheet({
                     </div>
                   )}
 
-                  {getBoletoForExpense(detailExpense.id) ? (
+                  {linkedBoletoForDetail ? (
                     <BoletoLinkedBlock
-                      boleto={getBoletoForExpense(detailExpense.id)!}
-                      categoriesById={categoriesById}
+                      boleto={linkedBoletoForDetail}
                       formatCurrency={formatCurrency}
-                      formatDate={formatDate}
                       onVerBoleto={() =>
-                        setBoletoResumo(getBoletoForExpense(detailExpense.id)!)
+                        setBoletoResumo(linkedBoletoForDetail)
                       }
                     />
                   ) : null}

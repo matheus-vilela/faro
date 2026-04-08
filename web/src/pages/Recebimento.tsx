@@ -25,6 +25,7 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -40,6 +41,7 @@ import {
   Hash,
   PackageCheck,
   PackageX,
+  Plus,
   Share2,
   User,
 } from "lucide-react";
@@ -56,6 +58,16 @@ interface ItemStatus {
 type CompanyMemberRow = { id: string; name: string };
 
 type RecebimentoStatusFilter = "all" | "pending" | "received";
+
+type ExpenseRecebimentoCandidate = {
+  id: string;
+  supplier_name: string | null;
+  display_name: string | null;
+  invoice_number: string | null;
+  created_at: string;
+  expense_source: string | null;
+  status: string | null;
+};
 
 export function Recebimento() {
   const { currentCompany, currentRole } = useCompany();
@@ -82,6 +94,97 @@ export function Recebimento() {
   const [openingOperadorId, setOpeningOperadorId] = useState<string | null>(
     null,
   );
+
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  const [manualCandidates, setManualCandidates] = useState<
+    ExpenseRecebimentoCandidate[]
+  >([]);
+  const [loadingManualCandidates, setLoadingManualCandidates] = useState(false);
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string>("");
+  const [creatingRecebimento, setCreatingRecebimento] = useState(false);
+
+  const loadManualCandidates = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    setLoadingManualCandidates(true);
+    const { data: exps, error: exErr } = await supabase
+      .from("expenses")
+      .select(
+        "id, supplier_name, display_name, invoice_number, created_at, expense_source, status",
+      )
+      .eq("company_id", currentCompany.id)
+      .or("expense_source.neq.whatsapp,status.eq.approved")
+      .order("created_at", { ascending: false });
+    if (exErr) {
+      setLoadingManualCandidates(false);
+      toast.error(exErr.message);
+      setManualCandidates([]);
+      return;
+    }
+    const list = (exps ?? []) as ExpenseRecebimentoCandidate[];
+    const expenseIds = list.map((e) => e.id);
+    if (expenseIds.length === 0) {
+      setManualCandidates([]);
+      setLoadingManualCandidates(false);
+      return;
+    }
+    const { data: recRows, error: rErr } = await supabase
+      .from("recebimentos")
+      .select("expense_id")
+      .in("expense_id", expenseIds);
+    setLoadingManualCandidates(false);
+    if (rErr) {
+      toast.error(rErr.message);
+      setManualCandidates([]);
+      return;
+    }
+    const used = new Set((recRows ?? []).map((r) => r.expense_id as string));
+    setManualCandidates(list.filter((e) => !used.has(e.id)));
+  }, [currentCompany?.id]);
+
+  useEffect(() => {
+    if (!createSheetOpen || !currentCompany?.id) return;
+    setSelectedExpenseId("");
+    void loadManualCandidates();
+  }, [createSheetOpen, currentCompany?.id, loadManualCandidates]);
+
+  const handleCreateRecebimentoManual = async () => {
+    if (!selectedExpenseId) {
+      toast.error("Selecione uma despesa.");
+      return;
+    }
+    setCreatingRecebimento(true);
+    const { error } = await supabase.from("recebimentos").insert({
+      expense_id: selectedExpenseId,
+    });
+    setCreatingRecebimento(false);
+    if (error) {
+      if (
+        error.code === "23505" ||
+        error.message.toLowerCase().includes("unique")
+      ) {
+        toast.error("Esta despesa já possui um recebimento.");
+      } else {
+        toast.error(error.message);
+      }
+      return;
+    }
+    toast.success("Recebimento criado. Você pode vincular o operador e compartilhar o link.");
+    setCreateSheetOpen(false);
+    setSelectedExpenseId("");
+    void fetchRecebimentos();
+  };
+
+  const formatExpenseCandidateLabel = (e: ExpenseRecebimentoCandidate) => {
+    const title =
+      e.display_name?.trim() || e.supplier_name?.trim() || "Sem fornecedor";
+    const nf = e.invoice_number?.trim()
+      ? ` · NF ${e.invoice_number.trim()}`
+      : "";
+    const d = new Date(e.created_at).toLocaleDateString("pt-BR");
+    const src =
+      e.expense_source === "whatsapp" ? " (WhatsApp)" : "";
+    return `${title}${nf} · ${d}${src}`;
+  };
 
   const openOperadorShortLink = async (r: { id: string }) => {
     setOpeningOperadorId(r.id);
@@ -331,6 +434,16 @@ export function Recebimento() {
         icon={PackageCheck}
         title="Recebimento de mercadorias"
         description="Você pode associar um membro da empresa ao recebimento da mercadoria. Qualquer pessoa com o link pode confirmar."
+        action={
+          <Button
+            type="button"
+            className="h-10 w-full sm:w-auto"
+            onClick={() => setCreateSheetOpen(true)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Novo recebimento
+          </Button>
+        }
       />
 
       <Card className="overflow-hidden">
@@ -384,7 +497,7 @@ export function Recebimento() {
                 ? "Nenhum recebimento pendente no momento."
                 : statusFilter === "received"
                   ? "Nenhum recebimento confirmado encontrado."
-                  : "Nenhum card de recebimento. As despesas criadas geram cards automaticamente."}
+                  : "Nenhum card de recebimento. Use «Novo recebimento» para vincular a uma despesa existente ou crie uma despesa em Despesas (gera card automaticamente)."}
             </p>
           ) : (
             <div className="space-y-3">
@@ -615,6 +728,77 @@ export function Recebimento() {
           )}
         </CardContent>
       </Card>
+
+      <Sheet
+        open={createSheetOpen}
+        onOpenChange={(open) => {
+          setCreateSheetOpen(open);
+          if (!open) setSelectedExpenseId("");
+        }}
+      >
+        <SheetContent className="sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Criar recebimento manual</SheetTitle>
+            <SheetDescription>
+              Escolha uma despesa que ainda não tenha card de recebimento. São
+              listadas despesas manuais ou importações pelo WhatsApp já
+              aprovadas pelo proprietário.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 py-4">
+            {loadingManualCandidates ? (
+              <p className="text-sm text-muted-foreground">Carregando…</p>
+            ) : manualCandidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Não há despesas elegíveis sem recebimento. Todas já possuem
+                card, ou não há despesas aprovadas/manuais nesta empresa.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="manual-expense">Despesa</Label>
+                <Select
+                  value={selectedExpenseId || undefined}
+                  onValueChange={setSelectedExpenseId}
+                >
+                  <SelectTrigger id="manual-expense" className="w-full">
+                    <SelectValue placeholder="Selecione a despesa" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[min(60vh,320px)]">
+                    {manualCandidates.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {formatExpenseCandidateLabel(e)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <SheetFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => setCreateSheetOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={
+                creatingRecebimento ||
+                loadingManualCandidates ||
+                manualCandidates.length === 0 ||
+                !selectedExpenseId
+              }
+              onClick={() => void handleCreateRecebimentoManual()}
+            >
+              {creatingRecebimento ? "Criando…" : "Criar recebimento"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       <Sheet
         open={!!detailRecebimento}

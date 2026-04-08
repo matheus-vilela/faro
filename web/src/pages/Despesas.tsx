@@ -1283,6 +1283,19 @@ export function Despesas() {
                           className="inline"
                         />
                       </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <span className="font-medium text-muted-foreground">
+                          Categoria:
+                        </span>{" "}
+                        {boleto
+                          ? formatBoletoCategoryLabel(boleto, categoriesById)
+                          : "—"}{" "}
+                        <span className="text-muted-foreground/70 mx-1">·</span>{" "}
+                        <span className="font-medium text-muted-foreground">
+                          Venc.:
+                        </span>{" "}
+                        {boleto ? formatDate(boleto.due_date) : "—"}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium">
