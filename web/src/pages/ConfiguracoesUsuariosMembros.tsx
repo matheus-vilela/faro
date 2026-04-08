@@ -19,6 +19,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCompany } from "@/contexts/CompanyContext";
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
@@ -70,6 +75,8 @@ export function ConfiguracoesUsuariosMembros() {
   /** Membro pode usar *estoque* / *inventario* no WhatsApp (além do proprietário). */
   const [memberCanInventoryCount, setMemberCanInventoryCount] =
     useState(false);
+  /** Só no fluxo de edição: membro autorizado no webhook (limite 3 ativos). */
+  const [memberIsActive, setMemberIsActive] = useState(true);
 
   const activeCount = useMemo(
     () => members.filter((m) => m.is_active).length,
@@ -214,6 +221,7 @@ export function ConfiguracoesUsuariosMembros() {
     setMemberName("");
     setMemberPhoneDigits("");
     setMemberCanInventoryCount(false);
+    setMemberIsActive(true);
     setMemberSheetOpen(true);
   };
 
@@ -224,6 +232,7 @@ export function ConfiguracoesUsuariosMembros() {
       m.phone_normalized ?? stripToDigits(m.phone_display ?? ""),
     );
     setMemberCanInventoryCount(m.can_inventory_count ?? false);
+    setMemberIsActive(m.is_active);
     setMemberSheetOpen(true);
   };
 
@@ -242,6 +251,19 @@ export function ConfiguracoesUsuariosMembros() {
 
     const displayStored = maskWhatsappBrInput(memberPhoneDigits).trim() || null;
 
+    if (editingMember) {
+      if (
+        memberIsActive &&
+        !editingMember.is_active &&
+        activeCount >= 3
+      ) {
+        toast.error(
+          "Limite de 3 membros ativos. Desative outro membro primeiro.",
+        );
+        return;
+      }
+    }
+
     setSaving(true);
     if (editingMember) {
       const { error } = await supabase
@@ -250,6 +272,8 @@ export function ConfiguracoesUsuariosMembros() {
           name,
           phone_normalized: v.normalized,
           phone_display: displayStored,
+          is_active: memberIsActive,
+          can_inventory_count: memberCanInventoryCount,
         })
         .eq("id", editingMember.id)
         .eq("company_id", currentCompany.id);
@@ -463,24 +487,27 @@ export function ConfiguracoesUsuariosMembros() {
               Nenhum membro cadastrado.
             </p>
           ) : (
-            <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="grid grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid-cols-[1fr_1fr_auto_auto_auto]">
+            <div className="rounded-lg border bg-card overflow-x-auto">
+              <div
+                className="grid min-w-[min(100%,52rem)] grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_5rem_5rem_2.75rem] md:items-center md:gap-3"
+                role="row"
+              >
                 <span>Nome</span>
                 <span>WhatsApp</span>
                 <span
-                  className="hidden sm:block text-center"
+                  className="hidden text-center md:block"
                   title="Contagem de estoque pelo WhatsApp"
                 >
-                  Contagem
+                  Estoque
                 </span>
-                <span className="hidden sm:block text-center">Ativo</span>
-                <span className="hidden sm:block sr-only">Ações</span>
+                <span className="hidden text-center md:block">Ativo</span>
+                <span className="hidden text-center md:block">Ações</span>
               </div>
               <ul className="divide-y">
                 {members.map((m) => (
                   <li
                     key={m.id}
-                    className="flex flex-col gap-3 px-4 py-4 sm:grid sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-center sm:gap-2"
+                    className="flex min-w-[min(100%,52rem)] flex-col gap-3 px-4 py-4 md:grid md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_5rem_5rem_2.75rem] md:items-center md:gap-3"
                   >
                     <span className="font-medium">{m.name}</span>
                     <span className="text-muted-foreground text-sm font-mono">
@@ -488,9 +515,9 @@ export function ConfiguracoesUsuariosMembros() {
                         ? m.phone_display
                         : formatNormalizedForDisplay(m.phone_normalized)}
                     </span>
-                    <div className="flex items-center justify-between gap-2 sm:justify-center">
-                      <span className="text-xs text-muted-foreground sm:hidden">
-                        Contagem (estoque)
+                    <div className="flex items-center justify-between gap-2 md:justify-center">
+                      <span className="text-xs text-muted-foreground md:hidden">
+                        Estoque
                       </span>
                       <Switch
                         checked={m.can_inventory_count ?? false}
@@ -499,10 +526,11 @@ export function ConfiguracoesUsuariosMembros() {
                         }
                         disabled={saving}
                         aria-label="Permitir contagem de estoque pelo WhatsApp"
+                        className="shrink-0"
                       />
                     </div>
-                    <div className="flex items-center justify-between gap-2 sm:justify-center">
-                      <span className="text-xs text-muted-foreground sm:hidden">
+                    <div className="flex items-center justify-between gap-2 md:justify-center">
+                      <span className="text-xs text-muted-foreground md:hidden">
                         Ativo
                       </span>
                       <Switch
@@ -511,17 +539,23 @@ export function ConfiguracoesUsuariosMembros() {
                           toggleMemberActive(m, checked)
                         }
                         disabled={saving}
+                        className="shrink-0"
                       />
                     </div>
-                    <div className="flex justify-end sm:justify-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => openEditMember(m)}
-                        aria-label="Editar membro"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                    <div className="flex justify-end md:justify-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openEditMember(m)}
+                            aria-label="Editar membro"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Editar</TooltipContent>
+                      </Tooltip>
                     </div>
                   </li>
                 ))}
@@ -598,6 +632,26 @@ export function ConfiguracoesUsuariosMembros() {
                 className="shrink-0 mt-0.5"
               />
             </div>
+            {editingMember ? (
+              <div className="flex items-start justify-between gap-4 rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
+                <div className="space-y-1 min-w-0">
+                  <Label htmlFor="mActive" className="text-sm font-medium">
+                    Membro ativo
+                  </Label>
+                  <p className="text-xs text-muted-foreground leading-snug">
+                    Membros inativos não são autorizados no webhook. Limite de{" "}
+                    <strong>3 membros ativos</strong> por empresa.
+                  </p>
+                </div>
+                <Switch
+                  id="mActive"
+                  checked={memberIsActive}
+                  onCheckedChange={setMemberIsActive}
+                  disabled={saving}
+                  className="shrink-0 mt-0.5"
+                />
+              </div>
+            ) : null}
           </div>
           <SheetFooter className="mt-auto border-t pt-4">
             <Button

@@ -1,0 +1,104 @@
+/** Texto curto na aba após o nome da página. */
+const TAB_BRAND = "Faro";
+
+/** Título da landing e fallback quando a rota não está mapeada. */
+export const MARKETING_DEFAULT_TITLE =
+  "Faro — Gestão fiscal para bares e restaurantes";
+
+function tab(page: string): string {
+  return `${page} · ${TAB_BRAND}`;
+}
+
+/**
+ * Título exibido na aba do navegador para o caminho atual.
+ * Rotas mais específicas devem ser testadas antes das genéricas.
+ */
+export function getDocumentTitle(pathname: string): string {
+  const path =
+    pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
+
+  if (path === "" || path === "/") {
+    return MARKETING_DEFAULT_TITLE;
+  }
+
+  if (path.startsWith("/app/configuracoes/categorias")) {
+    return tab("Categorias");
+  }
+  if (path.startsWith("/app/configuracoes/whatsapp")) {
+    return tab("WhatsApp");
+  }
+  if (path.startsWith("/app/configuracoes/usuarios-membros")) {
+    return tab("Usuários e membros");
+  }
+  if (path.startsWith("/app/configuracoes")) {
+    return tab("Configurações");
+  }
+
+  if (path === "/app") {
+    return tab("Dashboard");
+  }
+
+  const underApp: { prefix: string; label: string }[] = [
+    { prefix: "/app/despesas", label: "Despesas" },
+    { prefix: "/app/receitas", label: "Receitas" },
+    { prefix: "/app/fluxo-de-caixa", label: "Fluxo de caixa" },
+    { prefix: "/app/fornecedores", label: "Fornecedores" },
+    { prefix: "/app/produtos", label: "Produtos e estoque" },
+    { prefix: "/app/recebimento", label: "Recebimento" },
+    { prefix: "/app/checklists", label: "Checklists" },
+    { prefix: "/app/alertas", label: "Alertas" },
+    { prefix: "/app/integracoes", label: "Integrações" },
+    { prefix: "/app/dre", label: "DRE" },
+  ];
+
+  for (const { prefix, label } of underApp) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) {
+      return tab(label);
+    }
+  }
+
+  if (path === "/empresas" || path.startsWith("/empresas/")) {
+    return tab("Empresas");
+  }
+
+  if (path === "/login") {
+    return tab("Entrar");
+  }
+  if (path === "/register") {
+    return tab("Criar conta");
+  }
+  if (path === "/redefinir-senha") {
+    return tab("Redefinir senha");
+  }
+
+  if (path.startsWith("/atualizar-pagamento/")) {
+    return tab("Atualizar pagamento");
+  }
+  if (path.startsWith("/confirmar-recebimento/")) {
+    return tab("Confirmar recebimento");
+  }
+  if (path.startsWith("/c/")) {
+    return tab("Confirmar recebimento");
+  }
+  if (path.startsWith("/contagem-estoque/")) {
+    return tab("Contagem de estoque");
+  }
+  if (path.startsWith("/checklist/")) {
+    return tab("Checklist");
+  }
+  if (path.startsWith("/w/")) {
+    return tab("Validar despesa");
+  }
+  if (
+    path.startsWith("/s/") ||
+    path.startsWith("/e/") ||
+    path.startsWith("/k/") ||
+    path.startsWith("/i/")
+  ) {
+    return tab("Carregando");
+  }
+
+  return MARKETING_DEFAULT_TITLE;
+}

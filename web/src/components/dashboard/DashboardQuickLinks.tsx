@@ -55,7 +55,8 @@ export function DashboardQuickLinks({
   });
 
   return (
-    <div className="rounded-2xl border border-border/80 bg-card/50 p-4 shadow-sm ring-1 ring-border/40">
+    <div className="@container min-w-0">
+      <div className="flex h-full flex-col rounded-2xl border border-border/80 bg-card/50 p-4 shadow-sm ring-1 ring-border/40">
       <div className="mb-4 flex flex-col gap-0.5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
@@ -66,7 +67,13 @@ export function DashboardQuickLinks({
           </p>
         </div>
       </div>
-      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 ">
+      <ul
+        className={cn(
+          "grid gap-2",
+          /* Coluna estreita (ex.: metade do dashboard): 2×2; só em faixa larga vira 1×4 */
+          "grid-cols-2 @[520px]:grid-cols-4",
+        )}
+      >
         {visible.map((item) => (
           <li key={item.to}>
             <Link
@@ -95,6 +102,7 @@ export function DashboardQuickLinks({
           </li>
         ))}
       </ul>
+      </div>
     </div>
   );
 }

@@ -2,12 +2,43 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
@@ -16,9 +47,9 @@ import {
   companyCategoryDisplayName,
   TIPO_LABEL,
 } from "@/lib/companyCategoryLabels";
+import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
-import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { cn } from "@/lib/utils";
 import type {
   CompanyCategory,
@@ -26,7 +57,18 @@ import type {
   PapelReceitaDre,
   TipoCategoria,
 } from "@/types/category";
-import { Check, ChevronDown, ChevronRight, ChevronsUpDown, FolderTree, Loader2, Plus, Search, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  FolderTree,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -49,19 +91,24 @@ export function ConfiguracoesCategorias() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [formName, setFormName] = useState("");
-  const [formNatureza, setFormNatureza] = useState<NaturezaCategoria>("DESPESA");
+  const [formNatureza, setFormNatureza] =
+    useState<NaturezaCategoria>("DESPESA");
   const [formTipo, setFormTipo] = useState<TipoCategoria>("VARIAVEL");
   const [formParentId, setFormParentId] = useState<string>("ROOT");
   const [formOrdem, setFormOrdem] = useState("0");
   const [formAtivo, setFormAtivo] = useState(true);
   const [formDre, setFormDre] = useState(true);
   /** BRUTA = vendas brutas; DEDUCAO = deduções (apenas RECEITA OPERACIONAL). */
-  const [formPapelReceitaDre, setFormPapelReceitaDre] = useState<PapelReceitaDre>("BRUTA");
+  const [formPapelReceitaDre, setFormPapelReceitaDre] =
+    useState<PapelReceitaDre>("BRUTA");
   const [editing, setEditing] = useState<CompanyCategory | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [formKind, setFormKind] = useState<"principal" | "subcategoria" | "edicao">("principal");
+  const [formKind, setFormKind] = useState<
+    "principal" | "subcategoria" | "edicao"
+  >("principal");
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [parentSearch, setParentSearch] = useState("");
+  const [editWarningOpen, setEditWarningOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -88,7 +135,13 @@ export function ConfiguracoesCategorias() {
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const childrenMap = useMemo(() => buildChildrenMap(rows), [rows]);
   const roots = useMemo(
-    () => rows.filter((r) => r.parent_id === null).sort((a, b) => (a.ordem ?? a.sort_order ?? 0) - (b.ordem ?? b.sort_order ?? 0)),
+    () =>
+      rows
+        .filter((r) => r.parent_id === null)
+        .sort(
+          (a, b) =>
+            (a.ordem ?? a.sort_order ?? 0) - (b.ordem ?? b.sort_order ?? 0),
+        ),
     [rows],
   );
   const rootsReceitas = useMemo(
@@ -142,10 +195,15 @@ export function ConfiguracoesCategorias() {
 
   const parentGrouped = useMemo(() => {
     const mapById = new Map(filteredParentOptions.map((p) => [p.id, p]));
-    const groups = new Map<string, { label: string; items: CompanyCategory[] }>();
+    const groups = new Map<
+      string,
+      { label: string; items: CompanyCategory[] }
+    >();
     for (const item of filteredParentOptions) {
       const key = item.parent_id ?? "__root__";
-      const parent = item.parent_id ? mapById.get(item.parent_id) ?? byId.get(item.parent_id) : null;
+      const parent = item.parent_id
+        ? (mapById.get(item.parent_id) ?? byId.get(item.parent_id))
+        : null;
       const label = parent ? categoryPathLabel(parent.id, byId) : "Raiz";
       const existing = groups.get(key);
       if (existing) existing.items.push(item);
@@ -217,14 +275,18 @@ export function ConfiguracoesCategorias() {
     setFormOrdem(String(row.ordem ?? row.sort_order ?? 0));
     setFormAtivo(row.ativo !== false);
     setFormDre(row.incluir_no_dre !== false);
-    setFormPapelReceitaDre(row.papel_receita_dre === "DEDUCAO" ? "DEDUCAO" : "BRUTA");
+    setFormPapelReceitaDre(
+      row.papel_receita_dre === "DEDUCAO" ? "DEDUCAO" : "BRUTA",
+    );
     setSheetOpen(true);
   };
 
   const validTipos = formNatureza === "RECEITA" ? TIPOS_RECEITA : TIPOS_DESPESA;
   const canSelectPrincipalAsParent =
-    formKind === "principal" || (formKind === "edicao" && editing?.parent_id === null);
-  const selectedParent = formParentId !== "ROOT" ? byId.get(formParentId) : null;
+    formKind === "principal" ||
+    (formKind === "edicao" && editing?.parent_id === null);
+  const selectedParent =
+    formParentId !== "ROOT" ? byId.get(formParentId) : null;
   useEffect(() => {
     if (!validTipos.includes(formTipo)) {
       setFormTipo(validTipos[0]);
@@ -239,28 +301,9 @@ export function ConfiguracoesCategorias() {
     }
   }, [formKind, formParentId, formTipo, byId]);
 
-  const save = async () => {
+  const persistCategory = async () => {
     if (!currentCompany?.id || !isOwner) return;
     const name = formName.trim();
-    if (!name) {
-      toast.error("Informe o nome.");
-      return;
-    }
-    if (formKind === "subcategoria" && formParentId === "ROOT") {
-      toast.error("Subcategoria deve estar vinculada a uma categoria principal ou outra subcategoria.");
-      return;
-    }
-    if (formKind === "subcategoria") {
-      const parent = byId.get(formParentId);
-      if (!parent) {
-        toast.error("Selecione uma categoria pai válida.");
-        return;
-      }
-      if (formTipo !== parent.tipo) {
-        toast.error("Subcategoria deve herdar o tipo da categoria pai.");
-        return;
-      }
-    }
     const ordem = Number.parseInt(formOrdem, 10);
     const papelReceitaDrePayload =
       formNatureza === "RECEITA" && formTipo === "OPERACIONAL"
@@ -274,7 +317,12 @@ export function ConfiguracoesCategorias() {
       name,
       natureza: formNatureza,
       tipo: formTipo,
-      parent_id: formKind === "principal" ? null : formParentId === "ROOT" ? null : formParentId,
+      parent_id:
+        formKind === "principal"
+          ? null
+          : formParentId === "ROOT"
+            ? null
+            : formParentId,
       ordem: Number.isFinite(ordem) ? ordem : 0,
       sort_order: Number.isFinite(ordem) ? ordem : 0,
       ativo: formAtivo,
@@ -293,7 +341,9 @@ export function ConfiguracoesCategorias() {
       if (error) return toast.error(error.message);
       toast.success("Categoria atualizada.");
     } else {
-      const { error } = await supabase.from("company_categories").insert(payload);
+      const { error } = await supabase
+        .from("company_categories")
+        .insert(payload);
       setSaving(false);
       if (error) return toast.error(error.message);
       toast.success("Categoria criada.");
@@ -301,6 +351,42 @@ export function ConfiguracoesCategorias() {
     resetForm();
     setSheetOpen(false);
     await load();
+  };
+
+  const save = () => {
+    if (!currentCompany?.id || !isOwner) return;
+    const name = formName.trim();
+    if (!name) {
+      toast.error("Informe o nome.");
+      return;
+    }
+    if (formKind === "subcategoria" && formParentId === "ROOT") {
+      toast.error(
+        "Subcategoria deve estar vinculada a uma categoria principal ou outra subcategoria.",
+      );
+      return;
+    }
+    if (formKind === "subcategoria") {
+      const parent = byId.get(formParentId);
+      if (!parent) {
+        toast.error("Selecione uma categoria pai válida.");
+        return;
+      }
+      if (formTipo !== parent.tipo) {
+        toast.error("Subcategoria deve herdar o tipo da categoria pai.");
+        return;
+      }
+    }
+    if (editing) {
+      setEditWarningOpen(true);
+      return;
+    }
+    void persistCategory();
+  };
+
+  const confirmEditSave = () => {
+    setEditWarningOpen(false);
+    void persistCategory();
   };
 
   const remove = async (row: CompanyCategory) => {
@@ -319,7 +405,11 @@ export function ConfiguracoesCategorias() {
     await load();
   };
 
-  const renderNode = (node: CompanyCategory, depth: number, isLastOfParent = true) => {
+  const renderNode = (
+    node: CompanyCategory,
+    depth: number,
+    isLastOfParent = true,
+  ) => {
     const children = childrenMap.get(node.id) ?? [];
     const isOpen = expanded[node.id] === true;
     return (
@@ -355,12 +445,20 @@ export function ConfiguracoesCategorias() {
             {children.length > 0 ? (
               <button
                 type="button"
-                onClick={() => setExpanded((s) => ({ ...s, [node.id]: !isOpen }))}
+                onClick={() =>
+                  setExpanded((s) => ({ ...s, [node.id]: !isOpen }))
+                }
                 className="relative z-[1] shrink-0 rounded p-0.5 hover:bg-muted"
                 aria-expanded={isOpen}
-                aria-label={isOpen ? "Recolher subcategorias" : "Expandir subcategorias"}
+                aria-label={
+                  isOpen ? "Recolher subcategorias" : "Expandir subcategorias"
+                }
               >
-                {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                {isOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
               </button>
             ) : (
               <span className="relative z-[1] w-5 shrink-0" />
@@ -381,10 +479,35 @@ export function ConfiguracoesCategorias() {
             ) : null}
             {isOwner ? (
               <div className="relative z-[1] flex shrink-0 items-center gap-1">
-                <Button size="sm" variant="outline" onClick={() => openCreateChild(node)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openCreateChild(node)}
+                  aria-label="Nova subcategoria"
+                  title="Nova subcategoria"
+                >
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
-                <Button size="sm" variant="outline" className="text-destructive" onClick={() => remove(node)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openEdit(node)}
+                  aria-label="Editar categoria"
+                  title="Editar"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive"
+                  onClick={() => remove(node)}
+                  aria-label="Remover categoria"
+                  title="Remover"
+                >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -431,7 +554,10 @@ export function ConfiguracoesCategorias() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle>Receitas</CardTitle>
-            <CardDescription>Expanda ou recolha para navegar entre categorias principais e subcategorias de receita.</CardDescription>
+            <CardDescription>
+              Expanda ou recolha para navegar entre categorias principais e
+              subcategorias de receita.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -440,7 +566,9 @@ export function ConfiguracoesCategorias() {
                 Carregando...
               </p>
             ) : rootsReceitas.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhuma categoria de receita cadastrada.</p>
+              <p className="text-sm text-muted-foreground">
+                Nenhuma categoria de receita cadastrada.
+              </p>
             ) : (
               <div className="space-y-1">
                 {rootsReceitas.map((r) => (
@@ -454,7 +582,10 @@ export function ConfiguracoesCategorias() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle>Despesas</CardTitle>
-            <CardDescription>Expanda ou recolha para navegar entre categorias principais e subcategorias de despesa.</CardDescription>
+            <CardDescription>
+              Expanda ou recolha para navegar entre categorias principais e
+              subcategorias de despesa.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -463,7 +594,9 @@ export function ConfiguracoesCategorias() {
                 Carregando...
               </p>
             ) : rootsDespesas.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhuma categoria de despesa cadastrada.</p>
+              <p className="text-sm text-muted-foreground">
+                Nenhuma categoria de despesa cadastrada.
+              </p>
             ) : (
               <div className="space-y-1">
                 {rootsDespesas.map((r) => (
@@ -478,7 +611,13 @@ export function ConfiguracoesCategorias() {
       <Sheet open={sheetOpen} onOpenChange={(o) => !saving && setSheetOpen(o)}>
         <SheetContent className="flex flex-col sm:max-w-md">
           <SheetHeader>
-            <SheetTitle>{editing ? "Editar categoria" : formKind === "subcategoria" ? "Nova subcategoria" : "Nova categoria principal"}</SheetTitle>
+            <SheetTitle>
+              {editing
+                ? "Editar categoria"
+                : formKind === "subcategoria"
+                  ? "Nova subcategoria"
+                  : "Nova categoria principal"}
+            </SheetTitle>
             <SheetDescription>
               {editing
                 ? "Edite nome, natureza, tipo, categoria principal/subcategoria e status."
@@ -491,7 +630,11 @@ export function ConfiguracoesCategorias() {
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
               <Label>Nome</Label>
-              <Input value={formName} onChange={(e) => setFormName(e.target.value)} disabled={saving} />
+              <Input
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                disabled={saving}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -513,7 +656,9 @@ export function ConfiguracoesCategorias() {
                     )}
                   >
                     <p className="font-medium">Receitas</p>
-                    <p className="text-xs text-muted-foreground">Entradas e receitas operacionais/não operacionais</p>
+                    <p className="text-xs text-muted-foreground">
+                      Entradas e receitas operacionais/não operacionais
+                    </p>
                   </button>
                   <button
                     type="button"
@@ -530,21 +675,34 @@ export function ConfiguracoesCategorias() {
                     )}
                   >
                     <p className="font-medium">Despesas</p>
-                    <p className="text-xs text-muted-foreground">CMV, variáveis, fixas, impostos e investimentos</p>
+                    <p className="text-xs text-muted-foreground">
+                      CMV, variáveis, fixas, impostos e investimentos
+                    </p>
                   </button>
                 </div>
               </div>
               <div className="space-y-2 col-span-2">
-                <Label>Tipo ({formNatureza === "RECEITA" ? "Receita" : "Despesa"})</Label>
+                <Label>
+                  Tipo ({formNatureza === "RECEITA" ? "Receita" : "Despesa"})
+                </Label>
                 <Select
                   value={formTipo}
                   onValueChange={(v) => setFormTipo(v as TipoCategoria)}
-                  disabled={saving || (formKind === "subcategoria" && !!selectedParent)}
+                  disabled={
+                    saving || (formKind === "subcategoria" && !!selectedParent)
+                  }
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {(formNatureza === "RECEITA" ? TIPOS_RECEITA : TIPOS_DESPESA).map((t) => (
-                      <SelectItem key={t} value={t}>{TIPO_LABEL[t]}</SelectItem>
+                    {(formNatureza === "RECEITA"
+                      ? TIPOS_RECEITA
+                      : TIPOS_DESPESA
+                    ).map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {TIPO_LABEL[t]}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -552,14 +710,21 @@ export function ConfiguracoesCategorias() {
             </div>
 
             <div className="space-y-2">
-              <Label>{formKind === "principal" ? "Categoria principal" : "Subcategoria de"}</Label>
+              <Label>
+                {formKind === "principal"
+                  ? "Categoria principal"
+                  : "Subcategoria de"}
+              </Label>
               {formKind === "principal" ? (
                 <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">
                   Esta categoria será criada como categoria principal.
                 </div>
               ) : null}
               {formKind !== "principal" ? (
-                <Popover open={parentPickerOpen} onOpenChange={setParentPickerOpen}>
+                <Popover
+                  open={parentPickerOpen}
+                  onOpenChange={setParentPickerOpen}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -574,7 +739,9 @@ export function ConfiguracoesCategorias() {
                           : formParentId
                             ? (() => {
                                 const p = byId.get(formParentId);
-                                return p ? companyCategoryDisplayName(p) : "Selecione";
+                                return p
+                                  ? companyCategoryDisplayName(p)
+                                  : "Selecione";
                               })()
                             : "Selecione"}
                       </span>
@@ -615,14 +782,23 @@ export function ConfiguracoesCategorias() {
                             formParentId === "ROOT" && "bg-accent",
                           )}
                         >
-                          <Check className={cn("h-4 w-4", formParentId === "ROOT" ? "opacity-100" : "opacity-0")} />
+                          <Check
+                            className={cn(
+                              "h-4 w-4",
+                              formParentId === "ROOT"
+                                ? "opacity-100"
+                                : "opacity-0",
+                            )}
+                          />
                           Categoria principal
                         </button>
                       ) : null}
                       {parentGrouped.map((group) => (
                         <div key={group.key} className="px-1 py-1">
                           <p className="px-2 text-xs font-semibold text-foreground">
-                            {group.label === "Raiz" ? "Categorias principais" : group.label}
+                            {group.label === "Raiz"
+                              ? "Categorias principais"
+                              : group.label}
                           </p>
                           <div className="relative mt-1 ml-2 pl-4 before:absolute before:left-1 before:top-1 before:bottom-1 before:w-px before:bg-border">
                             {group.items.map((opt) => (
@@ -641,7 +817,14 @@ export function ConfiguracoesCategorias() {
                                 )}
                               >
                                 <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
-                                <Check className={cn("h-4 w-4", formParentId === opt.id ? "opacity-100" : "opacity-0")} />
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4",
+                                    formParentId === opt.id
+                                      ? "opacity-100"
+                                      : "opacity-0",
+                                  )}
+                                />
                                 <span className="truncate">
                                   {companyCategoryDisplayName(opt)}
                                 </span>
@@ -658,30 +841,47 @@ export function ConfiguracoesCategorias() {
 
             <div className="space-y-2">
               <Label>Ordem</Label>
-              <Input type="number" value={formOrdem} onChange={(e) => setFormOrdem(e.target.value)} disabled={saving} />
+              <Input
+                type="number"
+                value={formOrdem}
+                onChange={(e) => setFormOrdem(e.target.value)}
+                disabled={saving}
+              />
             </div>
 
             <div className="flex items-center justify-between rounded-md border p-3">
               <Label>Ativa</Label>
-              <Switch checked={formAtivo} onCheckedChange={setFormAtivo} disabled={saving} />
+              <Switch
+                checked={formAtivo}
+                onCheckedChange={setFormAtivo}
+                disabled={saving}
+              />
             </div>
             <div className="flex items-center justify-between rounded-md border p-3">
               <Label>Incluir no DRE</Label>
-              <Switch checked={formDre} onCheckedChange={setFormDre} disabled={saving} />
+              <Switch
+                checked={formDre}
+                onCheckedChange={setFormDre}
+                disabled={saving}
+              />
             </div>
             {formNatureza === "RECEITA" && formTipo === "OPERACIONAL" ? (
               <div className="space-y-2">
                 <Label>Papel na DRE (receita operacional)</Label>
                 <Select
                   value={formPapelReceitaDre}
-                  onValueChange={(v) => setFormPapelReceitaDre(v as PapelReceitaDre)}
+                  onValueChange={(v) =>
+                    setFormPapelReceitaDre(v as PapelReceitaDre)
+                  }
                   disabled={saving}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="BRUTA">Vendas brutas (padrão)</SelectItem>
+                    <SelectItem value="BRUTA">
+                      Vendas brutas (padrão)
+                    </SelectItem>
                     <SelectItem value="DEDUCAO">
                       {ptBrUi.configuracoesCategorias.deducaoReceitaSelectItem}
                     </SelectItem>
@@ -695,8 +895,18 @@ export function ConfiguracoesCategorias() {
           </div>
 
           <SheetFooter className="gap-2">
-            <Button onClick={save} disabled={saving || !isOwner} className="w-full">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? "Salvar" : "Criar"}
+            <Button
+              onClick={save}
+              disabled={saving || !isOwner}
+              className="w-full"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : editing ? (
+                "Salvar"
+              ) : (
+                "Criar"
+              )}
             </Button>
             <Button
               variant="outline"
@@ -712,6 +922,48 @@ export function ConfiguracoesCategorias() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog open={editWarningOpen} onOpenChange={setEditWarningOpen}>
+        <DialogContent
+          overlayClassName="z-[60]"
+          className="z-[60] sm:max-w-md"
+        >
+          <DialogHeader>
+            <DialogTitle>Salvar alterações nesta categoria?</DialogTitle>
+            <DialogDescription className="space-y-3">
+              <span className="block">
+                Não é recomendado alterar uma categoria que já está em uso: as
+                mudanças passam a valer para{" "}
+                <span className="font-medium text-foreground">
+                  todos os lançamentos
+                </span>{" "}
+                que já foram classificados com ela (relatórios, DRE e fluxo
+                podem mudar retroativamente).
+              </span>
+              <span className="block">
+                Se você precisa de uma classificação diferente, o ideal é{" "}
+                <span className="font-medium text-foreground">
+                  criar uma nova categoria
+                </span>{" "}
+                e passar a usá-la nos novos lançamentos, em vez de editar a
+                existente.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditWarningOpen(false)}
+            >
+              Voltar
+            </Button>
+            <Button type="button" onClick={confirmEditSave}>
+              Entendi, salvar mesmo assim
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

@@ -1,3 +1,4 @@
+import { DashboardWhatsappPulseTile } from "@/components/dashboard/DashboardWhatsappPulseTile";
 import { Button } from "@/components/ui/button";
 import { canGestorAccess, type UserCompanyRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
@@ -35,12 +36,8 @@ export function DashboardOperationalPulse({
   const canAlerts = role ? canGestorAccess(role) : false;
 
   return (
-    <div
-      className={cn(
-        "grid gap-3",
-        canAlerts ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2",
-      )}
-    >
+    <div className="min-w-0">
+      <div className="grid grid-cols-2 gap-3">
       <PulseTile
         icon={CalendarDays}
         label="Vencem hoje"
@@ -88,37 +85,34 @@ export function DashboardOperationalPulse({
         }
       />
       {canAlerts ? (
-        <PulseTile
-          icon={Bell}
-          label="Alertas abertos"
-          loading={loadingAlerts}
-          primary={totalAlerts > 0 ? String(totalAlerts) : "0"}
-          secondary={totalAlerts === 0 ? "Nada pendente" : "Itens a conferir"}
-          tone={totalAlerts > 0 ? "amber" : "muted"}
-          action={
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs"
-              asChild
-            >
-              <Link to="/app/alertas">
-                Lista
-                <ArrowRight className="ml-1 h-3 w-3" />
-              </Link>
-            </Button>
-          }
-        />
+        <>
+          <PulseTile
+            icon={Bell}
+            label="Alertas abertos"
+            loading={loadingAlerts}
+            primary={totalAlerts > 0 ? String(totalAlerts) : "0"}
+            secondary={totalAlerts === 0 ? "Nada pendente" : "Itens a conferir"}
+            tone={totalAlerts > 0 ? "amber" : "muted"}
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                asChild
+              >
+                <Link to="/app/alertas">
+                  Lista
+                  <ArrowRight className="ml-1 h-3 w-3" />
+                </Link>
+              </Button>
+            }
+          />
+          <DashboardWhatsappPulseTile />
+        </>
       ) : (
-        <div className="flex flex-col justify-center rounded-xl border border-dashed border-primary/35 bg-primary/4 px-4 py-3 sm:col-span-2 sm:min-h-22">
-          <p className="text-xs font-medium text-muted-foreground">
-            Conferência rápida
-          </p>
-          <p className="mt-0.5 text-sm font-semibold leading-snug text-foreground">
-            Use os atalhos abaixo para o dia a dia
-          </p>
-        </div>
+        <DashboardWhatsappPulseTile />
       )}
+      </div>
     </div>
   );
 }
@@ -182,7 +176,9 @@ function PulseTile({
         </div>
         {!loading ? action : null}
       </div>
-      {!loading && <p className="text-xs text-muted-foreground">{secondary}</p>}
+      {!loading && (
+        <p className="wrap-anywhere text-xs text-muted-foreground">{secondary}</p>
+      )}
     </div>
   );
 }

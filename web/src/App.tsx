@@ -1,5 +1,6 @@
 import { AppLayout } from "@/components/AppLayout";
 import { ConfiguracoesLayout } from "@/components/ConfiguracoesLayout";
+import { RouteDocumentTitle } from "@/components/RouteDocumentTitle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { CompanyProvider } from "@/contexts/CompanyContext";
@@ -8,6 +9,7 @@ import { Alertas } from "@/pages/Alertas";
 import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
+import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
 import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
@@ -82,6 +84,7 @@ function AuthenticatedLayout() {
               element={<ConfiguracoesUsuariosMembros />}
             />
             <Route path="categorias" element={<ConfiguracoesCategorias />} />
+            <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
@@ -155,6 +158,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
+        <RouteDocumentTitle />
         <AuthProvider>
           <TooltipProvider>
             <AppRoutes />

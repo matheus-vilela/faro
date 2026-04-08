@@ -169,23 +169,27 @@ export function Dashboard() {
         icon={LayoutDashboard}
       />
 
-      <DashboardOperationalPulse
-        role={currentRole}
-        loadingBoletos={loadingBoletos}
-        todayCount={todayBoletos.length}
-        todayTotal={todayTotal}
-        tomorrowCount={tomorrowBoletos.length}
-        tomorrowTotal={tomorrowTotal}
-        loadingAlerts={loadingAlerts}
-        totalAlerts={totalAlerts}
-        formatCurrency={formatCurrency}
-      />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
+        <section aria-label="Resumo do dia e alertas" className="min-w-0">
+          <DashboardOperationalPulse
+            role={currentRole}
+            loadingBoletos={loadingBoletos}
+            todayCount={todayBoletos.length}
+            todayTotal={todayTotal}
+            tomorrowCount={tomorrowBoletos.length}
+            tomorrowTotal={tomorrowTotal}
+            loadingAlerts={loadingAlerts}
+            totalAlerts={totalAlerts}
+            formatCurrency={formatCurrency}
+          />
+        </section>
+        <section aria-label="Acesso rápido" className="min-w-0">
+          <DashboardQuickLinks role={currentRole} />
+        </section>
+      </div>
 
-      <DashboardQuickLinks role={currentRole} />
-
-      <div
-        className={`grid gap-6 ${canSeeAlerts ? "lg:grid-cols-2" : "lg:max-w-3xl"}`}
-      >
+      <div className="grid gap-6">
+        {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
         {canSeeAlerts ? (
           <DashboardAlertsCard
             loading={loadingAlerts}
@@ -195,7 +199,6 @@ export function Dashboard() {
             notReceived={alertSummary.notReceived}
           />
         ) : null}
-        {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
       </div>
     </PageShell>
   );

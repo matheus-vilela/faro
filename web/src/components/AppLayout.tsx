@@ -321,7 +321,10 @@ function AppLayoutContent() {
         </div>
       </header>
 
-      <Sidebar collapsible="icon" className="mt-12">
+      <Sidebar
+        collapsible="icon"
+        className="top-12 bottom-0 h-auto min-h-0"
+      >
         {isMobile && (
           <SidebarHeader className="flex items-start justify-center ">
             <Link

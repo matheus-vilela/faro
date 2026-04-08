@@ -7,12 +7,15 @@ export function PageHeader({
   icon: Icon,
   action,
   className,
+  iconClassName,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   icon?: LucideIcon;
   action?: React.ReactNode;
   className?: string;
+  /** Classes extras no ícone ao lado do título (ex.: cor de marca). */
+  iconClassName?: string;
 }) {
   return (
     <div
@@ -25,7 +28,7 @@ export function PageHeader({
         {Icon ? (
           <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
             <Icon
-              className="h-7 w-7 shrink-0 text-primary"
+              className={cn("h-7 w-7 shrink-0 text-primary", iconClassName)}
               aria-hidden
             />
             {title}
