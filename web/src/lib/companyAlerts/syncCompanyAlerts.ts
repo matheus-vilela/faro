@@ -100,10 +100,14 @@ export function summarizeAlertsByKind(expected: ExpectedCompanyAlert[]): {
   lowStock: number;
   withoutBoleto: number;
   notReceived: number;
+  boletoD3: number;
+  boletoD1: number;
 } {
   return {
     lowStock: expected.filter((a) => a.kind === "low_stock").length,
     withoutBoleto: expected.filter((a) => a.kind === "expense_no_boleto").length,
     notReceived: expected.filter((a) => a.kind === "recebimento_falta").length,
+    boletoD3: expected.filter((a) => a.kind === "boleto_vencimento_d3").length,
+    boletoD1: expected.filter((a) => a.kind === "boleto_vencimento_d1").length,
   };
 }

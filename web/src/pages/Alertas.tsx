@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import type { CompanyAlertKind, CompanyAlertRow } from "@/types/companyAlert";
 import {
   Bell,
+  CalendarClock,
   CheckCircle2,
   ExternalLink,
   FileText,
@@ -52,7 +53,37 @@ const KIND_LABEL: Record<CompanyAlertKind, string> = {
   low_stock: "Estoque baixo",
   expense_no_boleto: "Sem boleto",
   recebimento_falta: "Falta no recebimento",
+  boleto_vencimento_d3: "Boleto a pagar",
+  boleto_vencimento_d1: "Boleto a pagar",
 };
+
+function isBoletoVencimentoKind(k: CompanyAlertKind): boolean {
+  return k === "boleto_vencimento_d3" || k === "boleto_vencimento_d1";
+}
+
+function VencimentoWindowBadge({ kind }: { kind: CompanyAlertKind }) {
+  if (kind === "boleto_vencimento_d3") {
+    return (
+      <Badge
+        variant="outline"
+        className="border-amber-600/45 bg-amber-500/15 text-[11px] font-bold uppercase tracking-wide text-amber-950 dark:border-amber-500/50 dark:text-amber-100"
+      >
+        D-3
+      </Badge>
+    );
+  }
+  if (kind === "boleto_vencimento_d1") {
+    return (
+      <Badge
+        variant="destructive"
+        className="text-[11px] font-bold uppercase tracking-wide"
+      >
+        D-1
+      </Badge>
+    );
+  }
+  return null;
+}
 
 function severityBadgeVariant(
   s: CompanyAlertRow["severity"],
@@ -83,6 +114,10 @@ function kindIconWrap(kind: CompanyAlertKind) {
       "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     kind === "recebimento_falta" &&
       "border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-400",
+    kind === "boleto_vencimento_d3" &&
+      "border-amber-600/35 bg-amber-500/12 text-amber-800 dark:text-amber-300",
+    kind === "boleto_vencimento_d1" &&
+      "border-red-500/35 bg-red-500/12 text-red-800 dark:text-red-400",
   );
 }
 
@@ -91,6 +126,8 @@ function KindIcon({ kind }: { kind: CompanyAlertKind }) {
   if (kind === "low_stock") return <Package className={cls} strokeWidth={2} />;
   if (kind === "expense_no_boleto")
     return <FileText className={cls} strokeWidth={2} />;
+  if (kind === "boleto_vencimento_d3" || kind === "boleto_vencimento_d1")
+    return <CalendarClock className={cls} strokeWidth={2} />;
   return <PackageX className={cls} strokeWidth={2} />;
 }
 
@@ -105,7 +142,9 @@ export function Alertas() {
     if (
       k === "recebimento_falta" ||
       k === "expense_no_boleto" ||
-      k === "low_stock"
+      k === "low_stock" ||
+      k === "boleto_vencimento_d3" ||
+      k === "boleto_vencimento_d1"
     ) {
       return k;
     }
@@ -196,7 +235,9 @@ export function Alertas() {
       (r) =>
         r.title.toLowerCase().includes(q) ||
         (r.message ?? "").toLowerCase().includes(q) ||
-        KIND_LABEL[r.kind].toLowerCase().includes(q),
+        KIND_LABEL[r.kind].toLowerCase().includes(q) ||
+        (r.kind === "boleto_vencimento_d3" && q.includes("d-3")) ||
+        (r.kind === "boleto_vencimento_d1" && q.includes("d-1")),
     );
   }, [rows, kindFilter, search]);
 
@@ -226,7 +267,7 @@ export function Alertas() {
     <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Alertas"
-        description="Lista sincronizada com estoque, despesas e recebimentos da empresa"
+        description="Estoque, recebimentos, despesas sem boleto e contas a pagar (D-3 / D-1) com vencimento em boletos"
         icon={Bell}
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -274,6 +315,12 @@ export function Alertas() {
             <SelectItem value="recebimento_falta">
               {KIND_LABEL.recebimento_falta}
             </SelectItem>
+            <SelectItem value="boleto_vencimento_d1">
+              Vencimento D-1 (amanhã)
+            </SelectItem>
+            <SelectItem value="boleto_vencimento_d3">
+              Vencimento D-3 (em 3 dias)
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -318,19 +365,22 @@ export function Alertas() {
                 </div>
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
+                    <VencimentoWindowBadge kind={r.kind} />
                     <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       {KIND_LABEL[r.kind]}
                     </span>
-                    <Badge
-                      variant={severityBadgeVariant(r.severity)}
-                      className="text-[10px] uppercase tracking-wide"
-                    >
-                      {r.severity === "danger"
-                        ? "Alta"
-                        : r.severity === "warning"
-                          ? "Média"
-                          : "Info"}
-                    </Badge>
+                    {!isBoletoVencimentoKind(r.kind) ? (
+                      <Badge
+                        variant={severityBadgeVariant(r.severity)}
+                        className="text-[10px] uppercase tracking-wide"
+                      >
+                        {r.severity === "danger"
+                          ? "Alta"
+                          : r.severity === "warning"
+                            ? "Média"
+                            : "Info"}
+                      </Badge>
+                    ) : null}
                   </div>
                   <h3 className="font-display text-base font-semibold leading-snug tracking-[-0.02em] text-foreground">
                     {r.title}

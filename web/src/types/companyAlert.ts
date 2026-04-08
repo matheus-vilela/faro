@@ -1,7 +1,11 @@
 export type CompanyAlertKind =
   | "low_stock"
   | "expense_no_boleto"
-  | "recebimento_falta";
+  | "recebimento_falta"
+  /** Boleto a pagar com vencimento em 3 dias (calendário). */
+  | "boleto_vencimento_d3"
+  /** Boleto a pagar com vencimento amanhã (D-1). */
+  | "boleto_vencimento_d1";
 
 export type CompanyAlertSeverity = "info" | "warning" | "danger";
 

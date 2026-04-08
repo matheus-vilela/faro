@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  CalendarClock,
   FileText,
   Loader2,
   PackageX,
@@ -22,12 +23,16 @@ export function DashboardAlertsCard({
   lowStock,
   withoutBoleto,
   notReceived,
+  boletoD3,
+  boletoD1,
 }: {
   loading: boolean;
   totalAlerts: number;
   lowStock: number;
   withoutBoleto: number;
   notReceived: number;
+  boletoD3: number;
+  boletoD1: number;
 }) {
   return (
     <Card className="overflow-hidden border-l-4 border-l-amber-500/80 shadow-sm ring-1 ring-border/60">
@@ -69,6 +74,38 @@ export function DashboardAlertsCard({
           </div>
         ) : (
           <ul className="space-y-2">
+            <li>
+              <Link
+                to="/app/alertas?kind=boleto_vencimento_d1"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-3 transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/15 text-red-800 dark:text-red-400">
+                    <CalendarClock className="h-4 w-4" />
+                  </span>
+                  <span className="truncate">Boletos D-1 (amanhã)</span>
+                </span>
+                <span className="shrink-0 rounded-md bg-background px-2.5 py-1 text-sm font-bold tabular-nums shadow-sm">
+                  {boletoD1}
+                </span>
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/app/alertas?kind=boleto_vencimento_d3"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-3 transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-900 dark:text-amber-400">
+                    <CalendarClock className="h-4 w-4" />
+                  </span>
+                  <span className="truncate">Boletos D-3 (em 3 dias)</span>
+                </span>
+                <span className="shrink-0 rounded-md bg-background px-2.5 py-1 text-sm font-bold tabular-nums shadow-sm">
+                  {boletoD3}
+                </span>
+              </Link>
+            </li>
             <li>
               <Link
                 to="/app/alertas?kind=recebimento_falta"

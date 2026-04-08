@@ -25,6 +25,8 @@ interface AlertSummary {
   lowStock: number;
   withoutBoleto: number;
   notReceived: number;
+  boletoD3: number;
+  boletoD1: number;
 }
 
 function formatLongDate(d: Date): string {
@@ -51,6 +53,8 @@ export function Dashboard() {
     lowStock: 0,
     withoutBoleto: 0,
     notReceived: 0,
+    boletoD3: 0,
+    boletoD1: 0,
   });
 
   const loadBoletos = useCallback(async () => {
@@ -92,7 +96,13 @@ export function Dashboard() {
   const loadAlertSummary = useCallback(async () => {
     if (!companyId || !canSeeAlerts) {
       setLoadingAlerts(false);
-      setAlertSummary({ lowStock: 0, withoutBoleto: 0, notReceived: 0 });
+      setAlertSummary({
+        lowStock: 0,
+        withoutBoleto: 0,
+        notReceived: 0,
+        boletoD3: 0,
+        boletoD1: 0,
+      });
       return;
     }
     setLoadingAlerts(true);
@@ -105,7 +115,13 @@ export function Dashboard() {
 
     if (error) {
       console.error(error);
-      setAlertSummary({ lowStock: 0, withoutBoleto: 0, notReceived: 0 });
+      setAlertSummary({
+        lowStock: 0,
+        withoutBoleto: 0,
+        notReceived: 0,
+        boletoD3: 0,
+        boletoD1: 0,
+      });
       setLoadingAlerts(false);
       return;
     }
@@ -115,6 +131,8 @@ export function Dashboard() {
       lowStock: list.filter((r) => r.kind === "low_stock").length,
       withoutBoleto: list.filter((r) => r.kind === "expense_no_boleto").length,
       notReceived: list.filter((r) => r.kind === "recebimento_falta").length,
+      boletoD3: list.filter((r) => r.kind === "boleto_vencimento_d3").length,
+      boletoD1: list.filter((r) => r.kind === "boleto_vencimento_d1").length,
     });
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
@@ -145,7 +163,9 @@ export function Dashboard() {
   const totalAlerts =
     alertSummary.lowStock +
     alertSummary.withoutBoleto +
-    alertSummary.notReceived;
+    alertSummary.notReceived +
+    alertSummary.boletoD3 +
+    alertSummary.boletoD1;
 
   const headerDescription = (
     <span className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
@@ -197,6 +217,8 @@ export function Dashboard() {
             lowStock={alertSummary.lowStock}
             withoutBoleto={alertSummary.withoutBoleto}
             notReceived={alertSummary.notReceived}
+            boletoD3={alertSummary.boletoD3}
+            boletoD1={alertSummary.boletoD1}
           />
         ) : null}
       </div>

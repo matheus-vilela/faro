@@ -1,3 +1,4 @@
+import { calendarDaysFromTodayToDueDate } from "@/lib/companyAlerts/dueDateWindow";
 import { supabase } from "@/lib/supabase";
 import type { ExpectedCompanyAlert } from "@/types/companyAlert";
 import type { Product } from "@/types/product";
@@ -93,6 +94,74 @@ export async function computeExpectedCompanyAlerts(
         invoice_number: row.invoice_number,
       },
     });
+  }
+
+  const { data: payableBoletos } = await supabase
+    .from("boletos")
+    .select("id, description, due_date, amount, expense_id")
+    .eq("company_id", companyId)
+    .eq("flow_type", "payable")
+    .eq("status", "pending");
+
+  const money = (n: number) =>
+    new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(n);
+
+  for (const b of payableBoletos ?? []) {
+    const row = b as {
+      id: string;
+      description: string;
+      due_date: string;
+      amount: number;
+      expense_id: string | null;
+    };
+    const days = calendarDaysFromTodayToDueDate(row.due_date);
+    if (days !== 1 && days !== 3) continue;
+
+    const dueLabel = new Date(
+      row.due_date.slice(0, 10) + "T12:00:00",
+    ).toLocaleDateString("pt-BR");
+    const baseMsg = `${row.description.trim() || "Conta a pagar"} · ${money(Number(row.amount))} · venc. ${dueLabel}`;
+
+    if (days === 3) {
+      out.push({
+        dedupe_key: `boleto_vencimento_d3:${row.id}`,
+        kind: "boleto_vencimento_d3",
+        severity: "warning",
+        title: "Boleto vence em 3 dias",
+        message: baseMsg,
+        link_path: row.expense_id
+          ? `/app/despesas?expense=${row.expense_id}`
+          : "/app/fluxo-de-caixa",
+        payload: {
+          boleto_id: row.id,
+          due_date: row.due_date,
+          amount: row.amount,
+          expense_id: row.expense_id,
+          window: "d3",
+        },
+      });
+    } else {
+      out.push({
+        dedupe_key: `boleto_vencimento_d1:${row.id}`,
+        kind: "boleto_vencimento_d1",
+        severity: "danger",
+        title: "Boleto vence amanhã (D-1)",
+        message: baseMsg,
+        link_path: row.expense_id
+          ? `/app/despesas?expense=${row.expense_id}`
+          : "/app/fluxo-de-caixa",
+        payload: {
+          boleto_id: row.id,
+          due_date: row.due_date,
+          amount: row.amount,
+          expense_id: row.expense_id,
+          window: "d1",
+        },
+      });
+    }
   }
 
   const { data: notReceivedData } = await supabase

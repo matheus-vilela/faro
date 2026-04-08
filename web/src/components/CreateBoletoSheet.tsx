@@ -23,6 +23,7 @@ import {
   isSelectableDespesaLeaf,
   isSelectableReceitaLeaf,
 } from "@/lib/companyCategoryLabels";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -274,6 +275,7 @@ export function CreateBoletoSheet({
     setCompanyCategoryId("");
     onOpenChange(false);
     toast.success("Conta cadastrada com sucesso.");
+    void syncCompanyAlerts(companyId);
     onSuccess?.(boleto);
   };
 
