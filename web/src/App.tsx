@@ -9,6 +9,7 @@ import { Alertas } from "@/pages/Alertas";
 import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
+import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
 import { Checklists } from "@/pages/Checklists";
@@ -84,6 +85,10 @@ function AuthenticatedLayout() {
               element={<ConfiguracoesUsuariosMembros />}
             />
             <Route path="categorias" element={<ConfiguracoesCategorias />} />
+            <Route
+              path="impostos-receita"
+              element={<ConfiguracoesImpostosReceita />}
+            />
             <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
           </Route>
         </Route>

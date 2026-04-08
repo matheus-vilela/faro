@@ -51,8 +51,10 @@ import {
   quantityInputPropsForUnit,
 } from "@/lib/productQuantityInput";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
+import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
 import { CircleDollarSign, FileText, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 const REVENUE_TYPE_LABEL: Record<string, string> = {
@@ -118,6 +120,10 @@ export function Receitas() {
   const [grossInput, setGrossInput] = useState<string>("");
   const [taxType, setTaxType] = useState<RevenueTaxType>("percentage");
   const [taxValue, setTaxValue] = useState<string>("0");
+  /** Taxas salvas em Configurações (por folha de receita). */
+  const [categoryTaxSettings, setCategoryTaxSettings] = useState<
+    Pick<CompanyRevenueCategoryTaxSetting, "category_id" | "tax_type" | "tax_value">[]
+  >([]);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -128,6 +134,20 @@ export function Receitas() {
     () => buildChildrenMap(companyCategories),
     [companyCategories],
   );
+
+  const taxPresetByCategory = useMemo(() => {
+    const m = new Map<
+      string,
+      { tax_type: RevenueTaxType; tax_value: number }
+    >();
+    for (const row of categoryTaxSettings) {
+      m.set(row.category_id, {
+        tax_type: row.tax_type,
+        tax_value: Number(row.tax_value),
+      });
+    }
+    return m;
+  }, [categoryTaxSettings]);
 
   const productNameById = useMemo(
     () => new Map(products.map((p) => [p.id, p.name])),
@@ -249,8 +269,19 @@ export function Receitas() {
       .eq("company_id", currentCompany.id)
       .order("name");
 
+    const { data: taxRows } = await supabase
+      .from("company_revenue_category_tax_settings")
+      .select("category_id, tax_type, tax_value")
+      .eq("company_id", currentCompany.id);
+
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     setProducts((prodRows as Product[]) ?? []);
+    setCategoryTaxSettings(
+      (taxRows ?? []) as Pick<
+        CompanyRevenueCategoryTaxSetting,
+        "category_id" | "tax_type" | "tax_value"
+      >[],
+    );
     setLoading(false);
 
     if (error) {
@@ -294,6 +325,22 @@ export function Receitas() {
       setTitle(`Venda — ${selectedProduct.name}`);
     }
   }, [entryMode, productId, selectedProduct?.name]);
+
+  useEffect(() => {
+    if (!categoryLeafId) {
+      setTaxType("percentage");
+      setTaxValue("0");
+      return;
+    }
+    const p = taxPresetByCategory.get(categoryLeafId);
+    if (p) {
+      setTaxType(p.tax_type);
+      setTaxValue(String(p.tax_value));
+    } else {
+      setTaxType("percentage");
+      setTaxValue("0");
+    }
+  }, [categoryLeafId, taxPresetByCategory]);
 
   const resetForm = () => {
     const t = new Date();
@@ -367,8 +414,6 @@ export function Receitas() {
       category_id: revenueLeaf?.parent_id ?? null,
       subcategory_id: categoryLeafId,
       gross_amount: grossPayload,
-      tax_type: taxType,
-      tax_value: taxValNum,
     };
 
     if (entryMode === "manual") {
@@ -435,7 +480,7 @@ export function Receitas() {
     <PageShell className="space-y-8 pb-0" narrow>
       <PageHeader
         title="Receitas"
-        description="Receitas manuais e vendas de produto: a classificação da receita no DRE vem da categoria escolhida no lançamento; o CMV segue o grupo cadastrado no produto."
+        description="Receitas manuais e vendas de produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria). O CMV segue o grupo cadastrado no produto."
         icon={CircleDollarSign}
         action={
           <Button
@@ -739,36 +784,30 @@ export function Receitas() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Tipo de taxa / imposto</Label>
-                <Select
-                  value={taxType}
-                  onValueChange={(v) => setTaxType(v as RevenueTaxType)}
+            <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-3 text-sm space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-foreground">
+                  Taxa / imposto (por categoria)
+                </span>
+                <Link
+                  to="/app/configuracoes/impostos-receita"
+                  className="text-xs text-primary underline-offset-2 hover:underline"
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">Percentual (%)</SelectItem>
-                    <SelectItem value="currency">Valor em reais (R$)</SelectItem>
-                  </SelectContent>
-                </Select>
+                  Configurar
+                </Link>
               </div>
-              <div>
-                <Label>
-                  {taxType === "percentage"
-                    ? "Percentual (%)"
-                    : "Valor da taxa (R$)"}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={taxValue}
-                  onChange={(e) => setTaxValue(e.target.value)}
-                />
-              </div>
+              {categoryLeafId ? (
+                <p className="text-muted-foreground">
+                  {taxSummaryLabel}
+                  {taxPresetByCategory.has(categoryLeafId)
+                    ? " — definido para esta categoria."
+                    : " — sem configuração específica; será usado 0% até você definir em Configurações."}
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  Selecione a categoria de receita para exibir a taxa aplicável.
+                </p>
+              )}
             </div>
 
             <div className="rounded-lg border bg-muted/30 px-3 py-3 text-sm space-y-1.5">
