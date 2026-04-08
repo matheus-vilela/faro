@@ -13,6 +13,7 @@ import {
 } from "./whatsappChecklistFlow.ts";
 import {
   isInventoryCommand,
+  isNovaInventoryCommand,
   sendInventoryCountLink,
 } from "./whatsappInventoryFlow.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
@@ -1260,6 +1261,27 @@ async function handleRecebimentoTextFlow(
     flowLog("processamento_fim", {
       flowId,
       branch: "contas_a_pagar_enviado",
+      handled: true,
+    });
+    return true;
+  }
+
+  if (isNovaInventoryCommand(text) && auth.role === "member") {
+    await sendInventoryCountLink(
+      supabase,
+      {
+        companyId: auth.companyId,
+        senderNormalized: auth.senderNormalized,
+        companyMemberId,
+        role: auth.role,
+      },
+      sendWhatsappMessage,
+      flowId,
+      { forceNew: true },
+    );
+    flowLog("processamento_fim", {
+      flowId,
+      branch: "inventory_link_nova_contagem",
       handled: true,
     });
     return true;

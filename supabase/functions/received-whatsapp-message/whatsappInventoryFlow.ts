@@ -27,6 +27,23 @@ export function isInventoryCommand(text: string): boolean {
   return w === "estoque" || w === "inventario";
 }
 
+/**
+ * *nova* ou *nova contagem* — força novo link (membro com pendências).
+ * Não confundir com palavras como "novamente".
+ */
+export function isNovaInventoryCommand(text: string): boolean {
+  const parts = text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts[0] !== "nova") return false;
+  if (parts.length === 1) return true;
+  return parts[1] === "contagem";
+}
+
 function randomShortSlug(len = 8): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   const bytes = new Uint8Array(len);
@@ -73,6 +90,84 @@ async function ensureInventoryShortSlug(
   return null;
 }
 
+type PendingSessionRow = {
+  token: string;
+  created_at: string;
+  inventory_count_groups?: { name?: string | null } | null;
+  inventory_count_short_links?:
+    | { slug?: string | null }
+    | { slug?: string | null }[]
+    | null;
+};
+
+function shortLinkSlugFromRow(row: PendingSessionRow): string | null {
+  const raw = row.inventory_count_short_links;
+  if (!raw) return null;
+  if (Array.isArray(raw)) {
+    const s = raw[0]?.slug;
+    return typeof s === "string" && s ? s : null;
+  }
+  const s = raw.slug;
+  return typeof s === "string" && s ? s : null;
+}
+
+async function fetchPendingAssignedOpenSessions(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  memberId: string,
+): Promise<PendingSessionRow[]> {
+  const { data, error } = await supabase
+    .from("inventory_count_sessions")
+    .select(
+      `
+      token,
+      created_at,
+      inventory_count_groups ( name ),
+      inventory_count_short_links ( slug )
+    `,
+    )
+    .eq("company_id", companyId)
+    .eq("assigned_company_member_id", memberId)
+    .eq("status", "open")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[inventory-flow] fetch pending sessions:", error.message);
+    return [];
+  }
+  return (data ?? []) as PendingSessionRow[];
+}
+
+function formatPendingInventoryMessage(
+  rows: PendingSessionRow[],
+  base: string,
+): string {
+  const lines: string[] = [
+    "Você tem *contagens de estoque pendentes em seu nome* (ainda não enviadas):",
+    "",
+  ];
+  rows.forEach((row, i) => {
+    const slug = shortLinkSlugFromRow(row);
+    const url = slug
+      ? `${base}/i/${slug}`
+      : `${base}/contagem-estoque/${row.token}`;
+    const g = row.inventory_count_groups?.name?.trim();
+    const label = g ? `Grupo: *${g}*` : "Sem grupo definido";
+    lines.push(`${i + 1}) ${label}`);
+    lines.push(url);
+    lines.push("");
+  });
+  lines.push(
+    "Para abrir um *novo* link de contagem (além destes), responda *nova* ou *nova contagem*.",
+  );
+  return lines.join("\n");
+}
+
+export type SendInventoryCountLinkOptions = {
+  /** Ignora lista de pendentes e cria nova sessão (comando *nova*). */
+  forceNew?: boolean;
+};
+
 /**
  * Cria sessão de contagem e envia link curto /i/:slug (ou URL com token completo).
  */
@@ -81,7 +176,10 @@ export async function sendInventoryCountLink(
   auth: InventoryAuth,
   sendWhatsappMessage: SendWhatsappMessageFn,
   flowId?: string,
+  options?: SendInventoryCountLinkOptions,
 ): Promise<void> {
+  const forceNew = options?.forceNew === true;
+
   if (auth.role === "member") {
     if (!auth.companyMemberId) {
       await sendWhatsappMessage(
@@ -129,6 +227,35 @@ export async function sendInventoryCountLink(
       );
       return;
     }
+
+    if (!forceNew && auth.companyMemberId) {
+      const pending = await fetchPendingAssignedOpenSessions(
+        supabase,
+        auth.companyId,
+        auth.companyMemberId,
+      );
+      if (pending.length > 0) {
+        const base = publicAppAbsoluteBase();
+        if (!base) {
+          await sendWhatsappMessage(
+            auth.senderNormalized,
+            withFaroFlowFooter(
+              "Você tem contagens pendentes, mas o link público não está configurado (PUBLIC_APP_URL). Configure no painel ou use o link enviado antes.",
+            ),
+            "inventory_pendentes_sem_base_url",
+            flowId,
+          );
+          return;
+        }
+        await sendWhatsappMessage(
+          auth.senderNormalized,
+          withFaroFlowFooter(formatPendingInventoryMessage(pending, base)),
+          "inventory_lista_pendentes",
+          flowId,
+        );
+        return;
+      }
+    }
   }
 
   const { data: oneProduct, error: pe } = await supabase
@@ -169,6 +296,8 @@ export async function sendInventoryCountLink(
     .insert({
       company_id: auth.companyId,
       company_member_id: auth.companyMemberId,
+      assigned_company_member_id:
+        auth.role === "member" ? auth.companyMemberId : null,
       status: "open",
     })
     .select("id, token")

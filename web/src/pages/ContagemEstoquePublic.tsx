@@ -9,6 +9,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { ClipboardList, Loader2 } from "lucide-react";
@@ -50,11 +58,20 @@ type ProductLine = {
   current_quantity: number;
 };
 
+type GroupOption = { id: string; name: string };
+
 type LoadJson = {
   ok: boolean;
   error?: string;
   company_name?: string;
+  group_name?: string;
+  assigned_to_name?: string;
   products?: ProductLine[];
+  inventory_count_group_id?: string | null;
+  group_locked?: boolean;
+  requires_group_selection?: boolean;
+  needs_panel_group_setup?: boolean;
+  groups?: GroupOption[];
 };
 
 export function ContagemEstoquePublic() {
@@ -62,10 +79,17 @@ export function ContagemEstoquePublic() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [assignedToName, setAssignedToName] = useState("");
   const [products, setProducts] = useState<ProductLine[]>([]);
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+  const [groupLocked, setGroupLocked] = useState(false);
+  const [requiresGroupSelection, setRequiresGroupSelection] = useState(false);
+  const [needsPanelGroupSetup, setNeedsPanelGroupSetup] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -94,6 +118,22 @@ export function ContagemEstoquePublic() {
     }
     const list = row.products ?? [];
     setCompanyName(row.company_name ?? "");
+    setGroupName((row.group_name ?? "").trim());
+    setAssignedToName((row.assigned_to_name ?? "").trim());
+    setGroupLocked(row.group_locked === true);
+    setRequiresGroupSelection(row.requires_group_selection === true);
+    setNeedsPanelGroupSetup(row.needs_panel_group_setup === true);
+    const rawG = row.groups;
+    const parsed: GroupOption[] = Array.isArray(rawG)
+      ? rawG
+          .map((g) => ({
+            id: String((g as GroupOption).id ?? ""),
+            name: String((g as GroupOption).name ?? ""),
+          }))
+          .filter((g) => g.id)
+      : [];
+    setGroupOptions(parsed);
+    setSelectedGroupId("");
     setProducts(list);
     const initial: Record<string, string> = {};
     for (const p of list) {
@@ -106,8 +146,14 @@ export function ContagemEstoquePublic() {
     queueMicrotask(() => void load());
   }, [load]);
 
+  const submitBlocked =
+    needsPanelGroupSetup ||
+    (requiresGroupSelection && !selectedGroupId) ||
+    products.length === 0;
+
   const submit = async () => {
     if (!token) return;
+    if (submitBlocked && !done) return;
     const lines = products.map((p) => ({
       product_id: p.id,
       counted_qty: parseFloat(counts[p.id] ?? "0") || 0,
@@ -115,7 +161,14 @@ export function ContagemEstoquePublic() {
     setSubmitting(true);
     const { data: res, error: err } = await supabase.rpc(
       "submit_inventory_count_public",
-      { p_token: token, p_lines: lines },
+      {
+        p_token: token,
+        p_lines: lines,
+        p_inventory_count_group_id:
+          requiresGroupSelection && selectedGroupId
+            ? selectedGroupId
+            : null,
+      },
     );
     setSubmitting(false);
     if (err) {
@@ -127,7 +180,11 @@ export function ContagemEstoquePublic() {
       setError(
         row?.error === "already_submitted"
           ? "Esta contagem já foi enviada."
-          : "Não foi possível salvar.",
+          : row?.error === "group_required"
+            ? "Selecione o grupo de contagem antes de enviar."
+            : row?.error === "invalid_group"
+              ? "Grupo inválido. Recarregue a página e tente de novo."
+              : "Não foi possível salvar.",
       );
       return;
     }
@@ -184,18 +241,66 @@ export function ContagemEstoquePublic() {
             <ClipboardList className="h-5 w-5" />
             Contagem de estoque
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="space-y-1">
             {companyName ? (
-              <>
+              <p>
                 <span className="font-medium text-foreground">{companyName}</span>
-                {" — "}
-              </>
+              </p>
             ) : null}
-            Informe a quantidade física de cada item. O sistema calculará os
-            ajustes em relação ao saldo atual.
+            {groupLocked && groupName ? (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Grupo (definido no painel):</span>{" "}
+                <span className="font-medium text-foreground">{groupName}</span>
+              </p>
+            ) : null}
+            {!groupLocked && requiresGroupSelection ? (
+              <p className="text-sm text-muted-foreground">
+                Esta sessão não tem grupo fixo: escolha abaixo a qual grupo esta
+                contagem se refere.
+              </p>
+            ) : null}
+            {needsPanelGroupSetup ? (
+              <p className="text-sm text-amber-700 dark:text-amber-500">
+                Não há grupos de contagem cadastrados para esta empresa. Peça a
+                quem administra o Faro para cadastrar em Produtos → Contagem
+                antes de enviar a contagem.
+              </p>
+            ) : null}
+            {assignedToName ? (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Operador designado:</span>{" "}
+                <span className="font-medium text-foreground">
+                  {assignedToName}
+                </span>
+              </p>
+            ) : null}
+            <p>
+              Informe a quantidade física de cada item. O sistema calculará os
+              ajustes em relação ao saldo atual.
+            </p>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {!groupLocked && requiresGroupSelection && groupOptions.length > 0 ? (
+            <div className="space-y-2">
+              <Label htmlFor="count-group">Grupo da contagem *</Label>
+              <Select
+                value={selectedGroupId || ""}
+                onValueChange={setSelectedGroupId}
+              >
+                <SelectTrigger id="count-group" className="w-full">
+                  <SelectValue placeholder="Selecione o grupo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {groupOptions.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
           <div className="max-h-[min(60vh,480px)] space-y-3 overflow-y-auto pr-1">
             {products.map((p) => (
               <div
@@ -235,7 +340,7 @@ export function ContagemEstoquePublic() {
           <Button
             type="button"
             className="w-full"
-            disabled={submitting || products.length === 0}
+            disabled={submitting || submitBlocked}
             onClick={() => void submit()}
           >
             {submitting ? (
