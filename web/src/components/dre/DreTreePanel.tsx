@@ -7,6 +7,8 @@ interface DreTreePanelProps {
   valueClassName: string;
   /** Exibe valores como negativos (deduções/despesas). */
   displayNegative?: boolean;
+  /** Sem borda externa — use dentro de um contêiner que já define o painel (ex.: DRE Resultado financeiro). */
+  embedded?: boolean;
 }
 
 function Row({
@@ -53,16 +55,23 @@ export function DreTreePanel({
   nodes,
   valueClassName,
   displayNegative,
+  embedded,
 }: DreTreePanelProps) {
+  const panelClass = embedded
+    ? "px-2 py-1"
+    : "rounded-md border border-border/60 bg-background/50 px-2 py-1";
+
   if (nodes.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground py-2 pl-1">
+    const empty = (
+      <p className="py-2 pl-1 text-xs text-muted-foreground">
         Nenhuma categoria com movimento neste período.
       </p>
     );
+    if (embedded) return empty;
+    return <div className="rounded-md border border-border/60 bg-background/50 px-2 py-1">{empty}</div>;
   }
   return (
-    <ul className="rounded-md border border-border/60 bg-background/50 px-2 py-1">
+    <ul className={panelClass}>
       {nodes.map((n) => (
         <Row
           key={n.id}
