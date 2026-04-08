@@ -22,7 +22,12 @@ import {
   getLastCompanyStorageKey,
   useCompany,
 } from "@/contexts/CompanyContext";
-import { maskCpfCnpj } from "@/lib/masks";
+import { isValidCnpj } from "@/lib/cnpj";
+import {
+  hasDuplicateUnitNameInGroup,
+  mapCompanyUnitMutationError,
+} from "@/lib/companyUnitName";
+import { maskCpfCnpj, unmask } from "@/lib/masks";
 import { ROLE_LABELS } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -99,6 +104,16 @@ export function CompanySelector() {
   const handleCreateGroupAndFirstUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const docDigits = unmask(groupDocument);
+    if (!isValidCnpj(docDigits)) {
+      setError("Informe um CNPJ válido.");
+      return;
+    }
+    const trimmedFirstUnit = firstUnitName.trim();
+    if (!trimmedFirstUnit) {
+      setError("Informe o nome da primeira unidade.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -114,9 +129,9 @@ export function CompanySelector() {
       const { error: cErr } = await supabase.from("companies").insert({
         id: companyId,
         group_id: groupId,
-        name: firstUnitName,
-        document: (groupDocument || "").replace(/\D/g, "") || null,
-        email: groupEmail || null,
+        name: trimmedFirstUnit,
+        document: docDigits,
+        email: groupEmail.trim() || null,
       });
       if (cErr) throw cErr;
 
@@ -133,7 +148,7 @@ export function CompanySelector() {
       resetGroupForm();
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Erro ao criar grupo e unidade",
+        mapCompanyUnitMutationError(err, "Erro ao criar grupo e unidade"),
       );
     } finally {
       setLoading(false);
@@ -143,6 +158,26 @@ export function CompanySelector() {
   const handleCreateUnitInCurrentGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !currentCompany) return;
+    const docDigits = unmask(unitDocument);
+    if (!isValidCnpj(docDigits)) {
+      setError("Informe um CNPJ válido.");
+      return;
+    }
+    const trimmedUnit = unitName.trim();
+    if (!trimmedUnit) {
+      setError("Informe o nome da unidade.");
+      return;
+    }
+    if (
+      hasDuplicateUnitNameInGroup(
+        trimmedUnit,
+        currentCompany.group_id,
+        unitsInCurrentGroup,
+      )
+    ) {
+      setError("Já existe uma unidade com este nome neste grupo.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -150,9 +185,9 @@ export function CompanySelector() {
       const { error: companyError } = await supabase.from("companies").insert({
         id: companyId,
         group_id: currentCompany.group_id,
-        name: unitName,
-        document: (unitDocument || "").replace(/\D/g, "") || null,
-        email: unitEmail || null,
+        name: trimmedUnit,
+        document: docDigits,
+        email: unitEmail.trim() || null,
       });
 
       if (companyError) throw companyError;
@@ -172,7 +207,7 @@ export function CompanySelector() {
       setCreateUnitOpen(false);
       resetUnitForm();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Erro ao criar unidade");
+      setError(mapCompanyUnitMutationError(err, "Erro ao criar unidade"));
     } finally {
       setLoading(false);
     }
@@ -379,14 +414,17 @@ export function CompanySelector() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-group-document">CNPJ</Label>
+                <Label htmlFor="new-group-document">CNPJ *</Label>
                 <Input
                   id="new-group-document"
                   placeholder="00.000.000/0001-00"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={groupDocument}
                   onChange={(e) =>
                     setGroupDocument(maskCpfCnpj(e.target.value))
                   }
+                  required
                 />
               </div>
               <div className="space-y-2">
@@ -452,12 +490,15 @@ export function CompanySelector() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-unit-document">CNPJ</Label>
+                <Label htmlFor="new-unit-document">CNPJ *</Label>
                 <Input
                   id="new-unit-document"
                   placeholder="00.000.000/0001-00"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={unitDocument}
                   onChange={(e) => setUnitDocument(maskCpfCnpj(e.target.value))}
+                  required
                 />
               </div>
               <div className="space-y-2">

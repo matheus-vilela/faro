@@ -1,34 +1,12 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
-import { maskCpfCnpj } from '@/lib/masks'
-import { useAuth } from '@/contexts/AuthContext'
-import {
-  useCompany,
-  getLastCompanyStorageKey,
-} from '@/contexts/CompanyContext'
-import type { Company } from '@/contexts/CompanyContext'
-import type { CompanyGroup } from '@/types/companyGroup'
-import { ROLE_LABELS } from '@/lib/roles'
-import { PageHeader } from '@/components/PageHeader'
-import { PageShell } from '@/components/PageShell'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetFooter,
-} from '@/components/ui/sheet'
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -36,22 +14,54 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Building2, Pencil, Plus, Trash2 } from 'lucide-react'
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Company } from "@/contexts/CompanyContext";
+import {
+  getLastCompanyStorageKey,
+  useCompany,
+} from "@/contexts/CompanyContext";
+import { isValidCnpj } from "@/lib/cnpj";
+import {
+  hasDuplicateUnitNameInGroup,
+  mapCompanyUnitMutationError,
+} from "@/lib/companyUnitName";
+import { maskCpfCnpj, unmask } from "@/lib/masks";
+import { ROLE_LABELS } from "@/lib/roles";
+import { supabase } from "@/lib/supabase";
+import type { CompanyGroup } from "@/types/companyGroup";
+import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 export function Companies() {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const gestao = searchParams.get('gestao') === '1'
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const gestao = searchParams.get("gestao") === "1";
 
-  const { user } = useAuth()
+  const { user } = useAuth();
   const {
     groupsWithCompanies,
     currentCompany,
     setCurrentCompany,
     refetchCompanies,
     loading: companiesLoading,
-  } = useCompany()
+  } = useCompany();
 
   useEffect(() => {
     if (
@@ -60,7 +70,7 @@ export function Companies() {
       groupsWithCompanies.length > 0 &&
       currentCompany
     ) {
-      navigate('/app', { replace: true })
+      navigate("/app", { replace: true });
     }
   }, [
     gestao,
@@ -68,168 +78,256 @@ export function Companies() {
     groupsWithCompanies.length,
     currentCompany,
     navigate,
-  ])
+  ]);
 
-  const [showNewGroup, setShowNewGroup] = useState(false)
-  const [addUnitGroupId, setAddUnitGroupId] = useState<string | null>(null)
-  const [renameGroup, setRenameGroup] = useState<CompanyGroup | null>(null)
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [addUnitGroupId, setAddUnitGroupId] = useState<string | null>(null);
+  const [renameGroup, setRenameGroup] = useState<CompanyGroup | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
-    company: Company
-    groupName: string
-  } | null>(null)
+    company: Company;
+    groupName: string;
+  } | null>(null);
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDocument, setEditDocument] = useState("");
+  const [editEmail, setEditEmail] = useState("");
 
-  const [groupName, setGroupName] = useState('')
-  const [name, setName] = useState('')
-  const [document, setDocument] = useState('')
-  const [email, setEmail] = useState('')
-  const [renameValue, setRenameValue] = useState('')
+  const [groupName, setGroupName] = useState("");
+  const [name, setName] = useState("");
+  const [document, setDocument] = useState("");
+  const [email, setEmail] = useState("");
+  const [renameValue, setRenameValue] = useState("");
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const resetForm = () => {
-    setGroupName('')
-    setName('')
-    setDocument('')
-    setEmail('')
-    setError(null)
-  }
+    setGroupName("");
+    setName("");
+    setDocument("");
+    setEmail("");
+    setError(null);
+  };
 
   const isGroupOwner = (g: CompanyGroup) =>
-    !!user && g.owner_user_id === user.id
+    !!user && g.owner_user_id === user.id;
 
   const handleSelectCompany = (company: Company) => {
-    setCurrentCompany(company)
-    navigate('/app', { replace: true })
-  }
+    setCurrentCompany(company);
+    navigate("/app", { replace: true });
+  };
 
   const persistAndRefetch = async (companyId: string) => {
     if (user) {
-      localStorage.setItem(getLastCompanyStorageKey(user.id), companyId)
+      localStorage.setItem(getLastCompanyStorageKey(user.id), companyId);
     }
-    await refetchCompanies()
-  }
+    await refetchCompanies();
+  };
 
   const handleCreateGroupAndFirstUnit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user) return
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    if (!user) return;
+    const docDigits = unmask(document);
+    if (!isValidCnpj(docDigits)) {
+      setError("Informe um CNPJ válido.");
+      return;
+    }
+    const unitName = name.trim();
+    if (!unitName) {
+      setError("Informe o nome da primeira unidade.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
     try {
-      const groupId = crypto.randomUUID()
-      const companyId = crypto.randomUUID()
-      const { error: gErr } = await supabase.from('company_groups').insert({
+      const groupId = crypto.randomUUID();
+      const companyId = crypto.randomUUID();
+      const { error: gErr } = await supabase.from("company_groups").insert({
         id: groupId,
-        name: groupName.trim() || 'Default',
+        name: groupName.trim() || "Default",
         owner_user_id: user.id,
-      })
-      if (gErr) throw gErr
+      });
+      if (gErr) throw gErr;
 
-      const { error: cErr } = await supabase.from('companies').insert({
+      const { error: cErr } = await supabase.from("companies").insert({
         id: companyId,
         group_id: groupId,
-        name,
-        document: (document || '').replace(/\D/g, '') || null,
-        email: email || null,
-      })
-      if (cErr) throw cErr
+        name: unitName,
+        document: docDigits,
+        email: email.trim() || null,
+      });
+      if (cErr) throw cErr;
 
-      const { error: uErr } = await supabase.from('user_companies').insert({
+      const { error: uErr } = await supabase.from("user_companies").insert({
         user_id: user.id,
         company_id: companyId,
-        role: 'owner',
-      })
-      if (uErr) throw uErr
+        role: "owner",
+      });
+      if (uErr) throw uErr;
 
-      await persistAndRefetch(companyId)
-      setShowNewGroup(false)
-      resetForm()
-      if (!gestao) navigate('/app', { replace: true })
+      await persistAndRefetch(companyId);
+      setShowNewGroup(false);
+      resetForm();
+      if (!gestao) navigate("/app", { replace: true });
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : 'Erro ao criar grupo e unidade',
-      )
+        mapCompanyUnitMutationError(err, "Erro ao criar grupo e unidade"),
+      );
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleAddUnit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user || !addUnitGroupId) return
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    if (!user || !addUnitGroupId) return;
+    const docDigits = unmask(document);
+    if (!isValidCnpj(docDigits)) {
+      setError("Informe um CNPJ válido.");
+      return;
+    }
+    const unitName = name.trim();
+    if (!unitName) {
+      setError("Informe o nome da unidade.");
+      return;
+    }
+    const gwc = groupsWithCompanies.find((g) => g.group.id === addUnitGroupId);
+    if (
+      hasDuplicateUnitNameInGroup(unitName, addUnitGroupId, gwc?.companies ?? [])
+    ) {
+      setError("Já existe uma unidade com este nome neste grupo.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
     try {
-      const companyId = crypto.randomUUID()
-      const { error: cErr } = await supabase.from('companies').insert({
+      const companyId = crypto.randomUUID();
+      const { error: cErr } = await supabase.from("companies").insert({
         id: companyId,
         group_id: addUnitGroupId,
-        name,
-        document: (document || '').replace(/\D/g, '') || null,
-        email: email || null,
-      })
-      if (cErr) throw cErr
+        name: unitName,
+        document: docDigits,
+        email: email.trim() || null,
+      });
+      if (cErr) throw cErr;
 
-      const { error: uErr } = await supabase.from('user_companies').insert({
+      const { error: uErr } = await supabase.from("user_companies").insert({
         user_id: user.id,
         company_id: companyId,
-        role: 'owner',
-      })
-      if (uErr) throw uErr
+        role: "owner",
+      });
+      if (uErr) throw uErr;
 
-      await persistAndRefetch(companyId)
-      setAddUnitGroupId(null)
-      resetForm()
+      await persistAndRefetch(companyId);
+      setAddUnitGroupId(null);
+      resetForm();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erro ao criar unidade')
+      setError(mapCompanyUnitMutationError(err, "Erro ao criar unidade"));
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleRenameGroup = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!renameGroup) return
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    if (!renameGroup) return;
+    setLoading(true);
+    setError(null);
     try {
       const { error: uErr } = await supabase
-        .from('company_groups')
+        .from("company_groups")
         .update({ name: renameValue.trim() })
-        .eq('id', renameGroup.id)
-      if (uErr) throw uErr
-      await refetchCompanies()
-      setRenameGroup(null)
-      setRenameValue('')
+        .eq("id", renameGroup.id);
+      if (uErr) throw uErr;
+      await refetchCompanies();
+      setRenameGroup(null);
+      setRenameValue("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erro ao renomear grupo')
+      setError(err instanceof Error ? err.message : "Erro ao renomear grupo");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
+
+  const openEditCompany = (company: Company) => {
+    setEditingCompany(company);
+    setEditName(company.name);
+    setEditDocument(maskCpfCnpj(company.document ?? ""));
+    setEditEmail(company.email ?? "");
+    setError(null);
+  };
+
+  const handleUpdateUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCompany) return;
+    const docDigits = unmask(editDocument);
+    if (!isValidCnpj(docDigits)) {
+      setError("Informe um CNPJ válido.");
+      return;
+    }
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      setError("Informe o nome da unidade.");
+      return;
+    }
+    const gwcEdit = groupsWithCompanies.find(
+      (g) => g.group.id === editingCompany.group_id,
+    );
+    if (
+      hasDuplicateUnitNameInGroup(
+        trimmedName,
+        editingCompany.group_id,
+        gwcEdit?.companies ?? [],
+        editingCompany.id,
+      )
+    ) {
+      setError("Já existe uma unidade com este nome neste grupo.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: uErr } = await supabase
+        .from("companies")
+        .update({
+          name: trimmedName,
+          document: docDigits,
+          email: editEmail.trim() || null,
+        })
+        .eq("id", editingCompany.id);
+      if (uErr) throw uErr;
+      await refetchCompanies();
+      setEditingCompany(null);
+      setEditName("");
+      setEditDocument("");
+      setEditEmail("");
+    } catch (err: unknown) {
+      setError(mapCompanyUnitMutationError(err, "Erro ao atualizar unidade"));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDeleteCompany = async () => {
-    if (!deleteTarget) return
-    setLoading(true)
-    setError(null)
+    if (!deleteTarget) return;
+    setLoading(true);
+    setError(null);
     try {
       const { error: dErr } = await supabase
-        .from('companies')
+        .from("companies")
         .delete()
-        .eq('id', deleteTarget.company.id)
-      if (dErr) throw dErr
-      await refetchCompanies()
-      setDeleteTarget(null)
+        .eq("id", deleteTarget.company.id);
+      if (dErr) throw dErr;
+      await refetchCompanies();
+      setDeleteTarget(null);
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : 'Erro ao remover unidade',
-      )
+      setError(err instanceof Error ? err.message : "Erro ao remover unidade");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  if (!user) return null
+  if (!user) return null;
 
   if (companiesLoading) {
     return (
@@ -239,7 +337,7 @@ export function Companies() {
           Carregando empresas...
         </p>
       </div>
-    )
+    );
   }
 
   return (
@@ -248,13 +346,13 @@ export function Companies() {
         <PageHeader
           className="flex-col items-center text-center sm:flex-col sm:items-center"
           title="Grupos e unidades"
-          description="Cada grupo reúne uma ou mais empresas (unidades). Só o dono do grupo pode renomear o grupo e adicionar ou remover unidades."
+          description="Cada grupo reúne uma ou mais empresas (unidades)."
           icon={Building2}
         />
 
         <div className="grid gap-6">
           {groupsWithCompanies.map(({ group, companies: ucs }) => {
-            const owner = isGroupOwner(group)
+            const owner = isGroupOwner(group);
             return (
               <Card key={group.id}>
                 <CardHeader className="space-y-3">
@@ -277,9 +375,9 @@ export function Companies() {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setRenameGroup(group)
-                            setRenameValue(group.name)
-                            setError(null)
+                            setRenameGroup(group);
+                            setRenameValue(group.name);
+                            setError(null);
                           }}
                         >
                           <Pencil className="h-4 w-4 mr-1" />
@@ -290,9 +388,9 @@ export function Companies() {
                           variant="default"
                           size="sm"
                           onClick={() => {
-                            setAddUnitGroupId(group.id)
-                            resetForm()
-                            setError(null)
+                            setAddUnitGroupId(group.id);
+                            resetForm();
+                            setError(null);
                           }}
                         >
                           <Plus className="h-4 w-4 mr-1" />
@@ -321,43 +419,63 @@ export function Companies() {
                           </span>
                           {company.document && (
                             <span className="text-xs text-muted-foreground">
-                              CNPJ: {company.document}
+                              CNPJ: {maskCpfCnpj(company.document)}
                             </span>
                           )}
                         </button>
                         {owner && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0 text-destructive hover:text-destructive"
-                            title="Remover unidade"
-                            onClick={(ev) => {
-                              ev.stopPropagation()
-                              setDeleteTarget({
-                                company,
-                                groupName: group.name,
-                              })
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex shrink-0 gap-0.5">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="shrink-0"
+                                  aria-label="Editar unidade"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    openEditCompany(company);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">Editar</TooltipContent>
+                            </Tooltip>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="shrink-0 text-destructive hover:text-destructive"
+                              title="Remover unidade"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setDeleteTarget({
+                                  company,
+                                  groupName: group.name,
+                                });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
                 </CardHeader>
               </Card>
-            )
+            );
           })}
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
             onClick={() => {
-              setShowNewGroup(true)
-              resetForm()
-              setGroupName('')
+              setShowNewGroup(true);
+              resetForm();
+              setGroupName("");
             }}
             className="flex-1"
           >
@@ -376,8 +494,8 @@ export function Companies() {
       <Sheet
         open={showNewGroup}
         onOpenChange={(open) => {
-          setShowNewGroup(open)
-          if (!open) resetForm()
+          setShowNewGroup(open);
+          if (!open) resetForm();
         }}
       >
         <SheetContent>
@@ -388,7 +506,10 @@ export function Companies() {
               grupo.
             </SheetDescription>
           </SheetHeader>
-          <form onSubmit={handleCreateGroupAndFirstUnit} className="space-y-4 py-4">
+          <form
+            onSubmit={handleCreateGroupAndFirstUnit}
+            className="space-y-4 py-4"
+          >
             {error && (
               <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
                 {error}
@@ -415,12 +536,15 @@ export function Companies() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="document">CNPJ</Label>
+              <Label htmlFor="document">CNPJ *</Label>
               <Input
                 id="document"
                 placeholder="00.000.000/0001-00"
+                inputMode="numeric"
+                autoComplete="off"
                 value={document}
                 onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
+                required
               />
             </div>
             <div className="space-y-2">
@@ -438,14 +562,14 @@ export function Companies() {
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  setShowNewGroup(false)
-                  resetForm()
+                  setShowNewGroup(false);
+                  resetForm();
                 }}
               >
                 Cancelar
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Criando...' : 'Criar grupo'}
+                {loading ? "Criando..." : "Criar grupo"}
               </Button>
             </SheetFooter>
           </form>
@@ -456,8 +580,8 @@ export function Companies() {
         open={!!addUnitGroupId}
         onOpenChange={(open) => {
           if (!open) {
-            setAddUnitGroupId(null)
-            resetForm()
+            setAddUnitGroupId(null);
+            resetForm();
           }
         }}
       >
@@ -485,12 +609,15 @@ export function Companies() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="add-document">CNPJ</Label>
+              <Label htmlFor="add-document">CNPJ *</Label>
               <Input
                 id="add-document"
                 placeholder="00.000.000/0001-00"
+                inputMode="numeric"
+                autoComplete="off"
                 value={document}
                 onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
+                required
               />
             </div>
             <div className="space-y-2">
@@ -508,14 +635,93 @@ export function Companies() {
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  setAddUnitGroupId(null)
-                  resetForm()
+                  setAddUnitGroupId(null);
+                  resetForm();
                 }}
               >
                 Cancelar
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Criando...' : 'Criar unidade'}
+                {loading ? "Criando..." : "Criar unidade"}
+              </Button>
+            </SheetFooter>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={!!editingCompany}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingCompany(null);
+            setEditName("");
+            setEditDocument("");
+            setEditEmail("");
+            setError(null);
+          }
+        }}
+      >
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Editar unidade</SheetTitle>
+            <SheetDescription>
+              Atualize nome, CNPJ e e-mail da unidade. O CNPJ deve ser válido.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleUpdateUnit} className="space-y-4 py-4">
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+                {error}
+              </p>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="edit-unit-name">Nome da unidade *</Label>
+              <Input
+                id="edit-unit-name"
+                placeholder="Nome do bar/restaurante"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-document">CNPJ *</Label>
+              <Input
+                id="edit-document"
+                placeholder="00.000.000/0001-00"
+                inputMode="numeric"
+                autoComplete="off"
+                value={editDocument}
+                onChange={(e) => setEditDocument(maskCpfCnpj(e.target.value))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                placeholder="contato@estabelecimento.com"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
+            </div>
+            <SheetFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingCompany(null);
+                  setEditName("");
+                  setEditDocument("");
+                  setEditEmail("");
+                  setError(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? "Salvando..." : "Salvar"}
               </Button>
             </SheetFooter>
           </form>
@@ -526,9 +732,9 @@ export function Companies() {
         open={!!renameGroup}
         onOpenChange={(open) => {
           if (!open) {
-            setRenameGroup(null)
-            setRenameValue('')
-            setError(null)
+            setRenameGroup(null);
+            setRenameValue("");
+            setError(null);
           }
         }}
       >
@@ -559,14 +765,14 @@ export function Companies() {
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  setRenameGroup(null)
-                  setRenameValue('')
+                  setRenameGroup(null);
+                  setRenameValue("");
                 }}
               >
                 Cancelar
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Salvando...' : 'Salvar'}
+                {loading ? "Salvando..." : "Salvar"}
               </Button>
             </SheetFooter>
           </form>
@@ -576,14 +782,14 @@ export function Companies() {
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null)
+          if (!open) setDeleteTarget(null);
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remover unidade?</DialogTitle>
             <DialogDescription>
-              A unidade <strong>{deleteTarget?.company.name}</strong> do grupo{' '}
+              A unidade <strong>{deleteTarget?.company.name}</strong> do grupo{" "}
               <strong>{deleteTarget?.groupName}</strong> será excluída. Esta
               ação não pode ser desfeita se houver dados vinculados.
             </DialogDescription>
@@ -597,8 +803,8 @@ export function Companies() {
             <Button
               variant="outline"
               onClick={() => {
-                setDeleteTarget(null)
-                setError(null)
+                setDeleteTarget(null);
+                setError(null);
               }}
             >
               Cancelar
@@ -608,11 +814,11 @@ export function Companies() {
               disabled={loading}
               onClick={() => void handleDeleteCompany()}
             >
-              {loading ? 'Removendo...' : 'Remover'}
+              {loading ? "Removendo..." : "Remover"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }
