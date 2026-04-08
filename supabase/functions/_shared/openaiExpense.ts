@@ -10,6 +10,12 @@ export type ExtractedExpenseItem = {
   lineTotal: number;
 };
 
+/** Compra com itens (despesa) vs lançamento direto no fluxo de caixa (sem vínculo com despesa). */
+export type BusinessIntent =
+  | "compra_insumos"
+  | "conta_pagar"
+  | "conta_receber";
+
 export type ExtractedDocumentResult = {
   validDocument: boolean;
   invalidReason?: string;
@@ -29,36 +35,58 @@ export type ExtractedDocumentResult = {
   notes: string | null;
   likelyNotEffectivePurchase?: boolean;
   likelyNotPurchaseReason?: string | null;
+  /**
+   * compra_insumos = nota/romaneio de compra para estoque (fluxo Despesas).
+   * conta_pagar = fatura cartão, boleto, conta de consumo, filipeta — saída de caixa.
+   * conta_receber = cobrança a receber, duplicata, recebimento de cliente — entrada.
+   */
+  businessIntent?: BusinessIntent | null;
+  /** Vencimento para conta a pagar/receber (YYYY-MM-DD ou DD/MM/AAAA). */
+  dueDate?: string | null;
+  /** Título curto para o lançamento no fluxo de caixa (ex.: "Fatura Nubank 03/26"). */
+  boletoTitle?: string | null;
 };
 
-const SYSTEM_PROMPT = `Você é um assistente que analisa documentos fiscais brasileiros (nota fiscal, cupom fiscal, romaneio, recibo de compra) ou texto digitado que descreva uma compra.
+const SYSTEM_PROMPT = `Você é um assistente que analisa documentos financeiros brasileiros: compras (nota fiscal, cupom, romaneio), contas a pagar (fatura de cartão, boleto, conta de luz/água, filipeta, DDA, comprovante de cobrança) e contas a receber (cobrança emitida pela empresa, duplicata, borderô de recebíveis, PIX/TED a receber), ou texto que descreva um desses casos.
 
 Responda APENAS um JSON válido (sem markdown), com esta estrutura exata:
 {
   "validDocument": boolean,
   "invalidReason": string ou null,
   "documentKind": "nota_fiscal" | "cupom_fiscal" | "romaneio" | "recibo" | "outro" | null,
+  "businessIntent": "compra_insumos" | "conta_pagar" | "conta_receber",
   "supplierName": string ou null,
   "supplierDocument": string ou null (CNPJ/CPF só dígitos se visível),
   "invoiceNumber": string ou null (número do documento; em cupom fiscal/NFC-e costuma aparecer em frente ou ao lado do texto "NFC-e"),
   "invoiceSeries": string ou null (série da NF-e ou NFC-e quando impressa, ex. "1", "2"; null se não houver),
-  "totalAmount": number ou null (valor TOTAL do documento em BRL, número decimal),
+  "totalAmount": number ou null (valor TOTAL em BRL: total da fatura, do boleto, ou a pagar/receber),
+  "dueDate": string ou null (data de vencimento ou pagamento em AAAA-MM-DD; se só houver DD/MM/AAAA, converta para AAAA-MM-DD),
+  "boletoTitle": string ou null (título curto para identificar o lançamento, ex.: "Fatura cartão Visa — mar/26"),
   "items": [ { "productName": string, "quantity": number, "unitValue": number, "lineTotal": number } ],
   "notes": string ou null,
   "likelyNotEffectivePurchase": boolean,
   "likelyNotPurchaseReason": string ou null
 }
 
+Regras para businessIntent:
+- "compra_insumos": nota/romaneio/cupom de COMPRA de mercadorias com linhas de produto para controle de estoque, ou texto pedindo lançar compra com itens. É o padrão quando o documento lista produtos/serviços detalhados para essa finalidade.
+- "conta_pagar": fatura de cartão de crédito, boleto bancário ou concessionária, segunda via, filipeta, resumo de fatura, "total a pagar", conta de consumo — dinheiro que SAI (empresa paga). Pode não ter tabela de produtos; use items vazio ou um único item sintético com lineTotal = totalAmount se precisar.
+- "conta_receber": cobrança a favor da empresa, duplicata, nota de venda a receber, PIX recebido a classificar como entrada esperada, borderô — dinheiro que ENTRA. Pode não ter linhas de produto de estoque.
+
+Se o documento for claramente só fluxo de caixa (pagar/receber) e não compra para estoque, use conta_pagar ou conta_receber. Em dúvida entre compra e conta a pagar, prefira compra_insumos quando houver várias linhas de produtos de revenda/insumo.
+
 Regras:
-- likelyNotEffectivePurchase = true quando o documento for claramente orçamento, proposta comercial, pedido de cotação, simulação, pedido de compra ainda não faturado, ou similar SEM evidência de nota fiscal/cupom de venda concluída; descreva em likelyNotPurchaseReason em português (curto, uma frase).
-- likelyNotEffectivePurchase = false para NF-e, NFC-e, cupom fiscal emitido, romaneio de entrega, recibo de pagamento, ou compra claramente concluída.
-- validDocument = true somente se for claramente um documento de compra (nota, cupom, romaneio, recibo) OU texto estruturado com fornecedor, itens e valores; e houver pelo menos fornecedor ou identificação razoável E pelo menos um item com valores.
+- likelyNotEffectivePurchase = true quando o documento for claramente orçamento, proposta comercial, pedido de cotação, simulação, pedido de compra ainda não faturado, ou similar SEM evidência de nota fiscal/cupom de venda concluída; descreva em likelyNotPurchaseReason em português (curto, uma frase). Para businessIntent conta_pagar ou conta_receber, geralmente false.
+- likelyNotEffectivePurchase = false para NF-e, NFC-e, cupom fiscal emitido, romaneio de entrega, recibo de pagamento, fatura de cartão, boleto, ou compra claramente concluída.
+- validDocument = true para compra_insumos se for documento de compra com itens e valores coerentes OU texto com isso.
+- validDocument = true para conta_pagar ou conta_receber se houver totalAmount > 0 e o documento (ou texto) indicar claramente um pagamento/recebimento (mesmo sem linhas de produto); preencha dueDate e boletoTitle quando possível.
+- validDocument = false somente se ilegível, irrelevante ou sem valor nem contexto.
 - Se for foto ou PDF ilegível, borrado, sem contexto de compra, ou não for documento: validDocument = false e invalidReason explicando em português (curto).
 - Itens: lineTotal deve ser quantity * unitValue (aproximado). Use ponto como decimal nos números JSON.
 - totalAmount é o total geral impresso no documento (ou soma explícita se só houver itens).
 - Em cupom fiscal eletrônico (NFC-e), o número da nota geralmente aparece próximo ao rótulo "NFC-e"; extraia esse número em invoiceNumber e a série em invoiceSeries se visível.
 - supplierDocument: use sempre string (CNPJ/CPF com ou sem máscara). Se o JSON numérico for usado para CNPJ, pode perder zeros à esquerda — prefira string.
-- Se não tiver certeza que é documento de compra, validDocument = false.
+- Se não tiver certeza que é documento de compra nem conta a pagar/receber, validDocument = false.
 
 TABELAS, ROMANEIOS E DOCUMENTOS COM COLUNAS ALINHADAS (crítico):
 - Muitos documentos são tabelas: colunas como código, descrição do produto, quantidade, valor unitário, valor total da linha, etc. Leia SEMPRE no sentido natural de leitura: da esquerda para a direita em cada linha, e de cima para baixo entre linhas.
@@ -69,7 +97,7 @@ TABELAS, ROMANEIOS E DOCUMENTOS COM COLUNAS ALINHADAS (crítico):
 - Após montar cada item, verifique coerência: lineTotal deve bater com quantity × unitValue (aceite pequenas diferenças de arredondamento, ex. centavos). Se o documento mostrar total explícito na linha, use-o em lineTotal e ajuste unitValue ou quantity de forma consistente com o texto daquela linha.
 - Ordene "items" na mesma ordem em que as linhas aparecem no documento (de cima para baixo).`;
 
-const USER_PROMPT_IMAGE = `Esta imagem pode ser um documento com tabela ou colunas alinhadas (ex.: romaneio, nota, pedido).
+const USER_PROMPT_IMAGE = `Esta imagem pode ser nota/romaneio de compra, fatura de cartão, boleto, filipeta, ou outro documento financeiro.
 
 Extraia um único objeto JSON conforme o sistema. Regras essenciais:
 1) Percorra o bloco de itens LINHA POR LINHA, do topo ao rodapé. Para cada linha de produto, copie descrição, quantidades e valores que pertencem à MESMA linha — nunca misture células de linhas diferentes.
@@ -77,7 +105,7 @@ Extraia um único objeto JSON conforme o sistema. Regras essenciais:
 3) Inclua todas as linhas de item que conseguir ler; não descarte linhas no meio da lista por achar que são iguais sem verificar.
 4) Se a imagem não for um documento fiscal/compra legível, use validDocument: false e invalidReason em português.`;
 
-const USER_PROMPT_PDF = `Analise este arquivo PDF (nota fiscal, cupom, romaneio ou recibo de compra). Responda apenas com um json válido (um único objeto) conforme as instruções do sistema. Se não for documento de compra legível, marque validDocument false.
+const USER_PROMPT_PDF = `Analise este PDF (nota de compra, fatura, boleto, fatura de cartão ou conta a receber). Responda apenas com um json válido (um único objeto) conforme as instruções do sistema. Defina businessIntent: compra_insumos, conta_pagar ou conta_receber conforme o caso.
 
 Para a lista de itens: em tabelas e romaneios, extraia linha por linha — descrição, quantidade e valores da mesma linha física; não una dados de linhas diferentes; inclua todas as linhas de produto visíveis na ordem de cima para baixo.`;
 
@@ -309,6 +337,41 @@ export async function extractDocumentFromPdfBuffer(
   return runOpenAiPdfExtraction(apiKey, buf, filename || "documento.pdf", model);
 }
 
+const BUSINESS_INTENTS: readonly BusinessIntent[] = [
+  "compra_insumos",
+  "conta_pagar",
+  "conta_receber",
+];
+
+function parseBusinessIntent(v: unknown): BusinessIntent {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (BUSINESS_INTENTS.includes(s as BusinessIntent)) {
+    return s as BusinessIntent;
+  }
+  return "compra_insumos";
+}
+
+/** Normaliza data de vencimento para YYYY-MM-DD ou null. */
+export function normalizeExtractedDueDate(
+  raw: string | null | undefined,
+): string | null {
+  if (raw === null || raw === undefined) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = t.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})$/);
+  if (m) {
+    let d = Number.parseInt(m[1]!, 10);
+    let mo = Number.parseInt(m[2]!, 10);
+    let y = Number.parseInt(m[3]!, 10);
+    if (y < 100) y += 2000;
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100) {
+      return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+  return null;
+}
+
 function safeParseJson(s: string): ExtractedDocumentResult | null {
   try {
     const raw = JSON.parse(s) as Record<string, unknown>;
@@ -341,6 +404,14 @@ function safeParseJson(s: string): ExtractedDocumentResult | null {
       strOrNull(
         raw.likelyNotPurchaseReason ?? raw.likely_not_purchase_reason,
       ) ?? null;
+    o.businessIntent = parseBusinessIntent(
+      raw.businessIntent ?? raw.business_intent,
+    );
+    o.dueDate = normalizeExtractedDueDate(
+      strOrNull(raw.dueDate ?? raw.due_date) ?? undefined,
+    );
+    o.boletoTitle =
+      strOrNull(raw.boletoTitle ?? raw.boleto_title) ?? null;
     return o;
   } catch {
     return null;

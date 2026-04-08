@@ -38,6 +38,23 @@ async function enrichForCompany(
   resolvedSupplierId: string | null;
 }> {
   const ex0 = enrichExtractedWithTaxId(extracted);
+  const intent = ex0.businessIntent ?? "compra_insumos";
+  if (intent === "conta_pagar" || intent === "conta_receber") {
+    const data: ExtractedDocumentResult & {
+      _requiresProductConfirmation?: boolean;
+    } = {
+      ...ex0,
+      items: ex0.items ?? [],
+      _requiresProductConfirmation: false,
+    };
+    const resolvedSupplierId = await ensureSupplierFromExtracted(
+      supabase,
+      companyId,
+      data,
+      "Cadastrado automaticamente — leitura de comprovante no Faro",
+    );
+    return { data, resolvedSupplierId };
+  }
   const matchResult = await resolveProductMatches(supabase, companyId, ex0.items);
   const data: ExtractedDocumentResult & {
     _requiresProductConfirmation?: boolean;

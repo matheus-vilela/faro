@@ -8,6 +8,7 @@ import {
   type ExtractedDocumentResult,
   extractDocumentWithOpenAI,
   mapDocumentKindToExpenseType,
+  normalizeExtractedDueDate,
   scaleItemsToTotal,
   sumItems,
   totalsMatch,
@@ -69,6 +70,76 @@ async function findDuplicateExpenseIdForWhatsapp(
     return null;
   }
   return (data as string | null) ?? null;
+}
+
+function fallbackDueDateIso(flow: "payable" | "receivable"): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + (flow === "payable" ? 10 : 14));
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDueBr(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function buildWhatsappBoletoDescription(
+  data: ExtractedDocumentResult,
+  flow: "payable" | "receivable",
+): string {
+  const title = (data.boletoTitle ?? "").trim();
+  const sup = (data.supplierName ?? "").trim();
+  if (title) return title.slice(0, 2000);
+  if (flow === "payable") {
+    return (sup ? `Pagar: ${sup}` : "Conta a pagar (WhatsApp)").slice(0, 2000);
+  }
+  return (sup ? `Receber: ${sup}` : "Conta a receber (WhatsApp)").slice(0, 2000);
+}
+
+/**
+ * Lançamento direto em `boletos` (fluxo de caixa), sem despesa de estoque.
+ */
+async function insertBoletoFromWhatsappCashflow(
+  supabase: Supabase,
+  companyId: string,
+  data: ExtractedDocumentResult,
+  flow: "payable" | "receivable",
+): Promise<{ ok: true; dueDateIso: string } | { ok: false }> {
+  const total = Number(data.totalAmount ?? 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return { ok: false };
+  }
+  const dueIso =
+    normalizeExtractedDueDate(data.dueDate ?? undefined) ??
+    fallbackDueDateIso(flow);
+  const description = buildWhatsappBoletoDescription(data, flow);
+  const { data: row, error } = await supabase
+    .from("boletos")
+    .insert({
+      company_id: companyId,
+      expense_id: null,
+      description,
+      due_date: dueIso,
+      amount: Math.round(total * 100) / 100,
+      flow_type: flow,
+      payment_type: "boleto",
+      barcode: null,
+      provider: null,
+      status: "pending",
+      company_category_id: null,
+    })
+    .select("id")
+    .single();
+
+  if (error || !row) {
+    console.error(
+      "[whatsappExpenseFlow] insert boleto cashflow:",
+      error?.message,
+    );
+    return { ok: false };
+  }
+  return { ok: true, dueDateIso: dueIso };
 }
 
 function publicAppBaseUrl(): string {
@@ -1013,13 +1084,60 @@ export async function tryHandleIncomingExpenseDocument(
   if (!data.validDocument) {
     const reason =
       data.invalidReason?.trim() ||
-      "Não identifiquei um documento de compra legível.";
+      "Não identifiquei um documento legível (compra, fatura ou conta a receber).";
     await sendWhatsapp(
       auth.senderNormalized,
       withFaroFlowFooter(
-        `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, confira se é a nota completa. Se for texto, descreva fornecedor, itens e valores com clareza.`,
+        `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, envie o arquivo completo. Se for texto, descreva valores e vencimento com clareza.`,
       ),
       "despesa_whatsapp_invalida",
+      flowId,
+    );
+    return true;
+  }
+
+  const intent = data.businessIntent ?? "compra_insumos";
+
+  if (intent === "conta_pagar" || intent === "conta_receber") {
+    const totalDoc = Number(data.totalAmount ?? 0);
+    if (!Number.isFinite(totalDoc) || totalDoc <= 0) {
+      await sendWhatsapp(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Identifiquei um possível lançamento de fluxo de caixa, mas não consegui ler o *valor total*. Envie outra imagem ou descreva o valor (ex.: R$ 150,00).",
+        ),
+        "whatsapp_fluxo_sem_valor",
+        flowId,
+      );
+      return true;
+    }
+    const flowDb = intent === "conta_pagar" ? "payable" : "receivable";
+    const ins = await insertBoletoFromWhatsappCashflow(
+      supabase,
+      auth.companyId,
+      data,
+      flowDb,
+    );
+    if (!ins.ok) {
+      await sendWhatsapp(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Não consegui registrar no Fluxo de caixa. Abra o Faro em *Fluxo de caixa* e cadastre manualmente.",
+        ),
+        "whatsapp_fluxo_erro_insert",
+        flowId,
+      );
+      return true;
+    }
+    const dueLabel = formatDueBr(ins.dueDateIso);
+    const dir = intent === "conta_pagar" ? "pagar" : "receber";
+    await sendWhatsapp(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        `Conta a *${dir}* registrada: ${formatMoneyBrl(totalDoc)} · venc. *${dueLabel}*. Veja em *Fluxo de caixa* no Faro.`,
+        "registro",
+      ),
+      "whatsapp_fluxo_caixa_ok",
       flowId,
     );
     return true;

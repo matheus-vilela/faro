@@ -25,6 +25,11 @@ export type ExtractedExpenseItemWithMatch = ExtractedExpenseItem & {
   productMatch?: ItemProductMatch
 }
 
+export type BusinessIntent =
+  | 'compra_insumos'
+  | 'conta_pagar'
+  | 'conta_receber'
+
 export type ExtractedDocumentResult = {
   validDocument: boolean
   invalidReason?: string
@@ -36,6 +41,10 @@ export type ExtractedDocumentResult = {
     | 'recibo'
     | 'outro'
     | null
+  /** compra_insumos = despesa; conta_pagar / conta_receber = lançamento no fluxo de caixa (WhatsApp). */
+  businessIntent?: BusinessIntent | null
+  dueDate?: string | null
+  boletoTitle?: string | null
   supplierName: string | null
   supplierDocument: string | null
   invoiceNumber: string | null

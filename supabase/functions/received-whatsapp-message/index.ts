@@ -33,7 +33,7 @@ import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
  * Opcional (resposta WhatsApp): ZAPI_INSTANCE_ID, ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN
  * Opcional (links): PUBLIC_APP_URL ou SITE_URL (ex.: https://app.seudominio.com)
  *   — recebimentos (/c/, /s/), checklist (/checklist/:token ou /k/:slug), contagem estoque (/contagem-estoque/:token ou /i/:slug), rascunho despesa WhatsApp (/w/:token ou /e/:slug)
- * Opcional (despesa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
+ * Opcional (despesa / fluxo de caixa por foto/PDF/texto): OPENAI_API_KEY, OPENAI_EXPENSE_MODEL (default gpt-4o-mini).
  *   PDF: OPENAI_EXPENSE_PDF_MODEL (default gpt-4o) + Responses API; download de mídia Z-API usa o mesmo ZAPI_CLIENT_TOKEN.
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
@@ -701,7 +701,7 @@ function buildComandosWhatsappMessage(
   }
   lines.push(
     "",
-    "Você também pode *enviar uma foto* de nota, cupom ou recibo, ou colar um texto longo com os dados da compra, para registrar uma despesa (quando o serviço estiver ativo no servidor).",
+    "Você também pode *enviar uma foto ou PDF* de nota de compra, *fatura de cartão*, *boleto* ou *conta a receber* — o sistema tenta registrar em *Despesas* (compra) ou em *Fluxo de caixa* (pagar/receber), conforme o documento. Também pode colar um *texto longo* com os dados.",
   );
   return lines.join("\n");
 }
