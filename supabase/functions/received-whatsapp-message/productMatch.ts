@@ -560,7 +560,7 @@ export async function resolveProductMatches(
       thresholds,
       bestScore,
       invoiceU,
-      catalogU,
+      catalogU: catU,
       hasCandidate: true,
     });
 

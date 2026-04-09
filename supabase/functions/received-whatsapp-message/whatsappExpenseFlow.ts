@@ -1066,132 +1066,157 @@ export async function tryHandleIncomingExpenseDocument(
     );
   }
 
-  let result: Awaited<ReturnType<typeof extractDocumentWithOpenAI>>;
-  if (imageUrl) {
-    result = await extractDocumentWithOpenAI({
-      apiKey,
-      mode: "image",
-      imageUrl: imageDataUrlForAi ? undefined : imageUrl,
-      imageDataUrl: imageDataUrlForAi,
-    });
-  } else if (pdfUrl) {
-    result = await extractDocumentWithOpenAI({
-      apiKey,
-      mode: "pdf",
-      documentUrl: pdfUrl,
-    });
-  } else {
-    result = await extractDocumentWithOpenAI({
-      apiKey,
-      mode: "text",
-      text: text!,
-    });
-  }
+  try {
+    let result: Awaited<ReturnType<typeof extractDocumentWithOpenAI>>;
+    if (imageUrl) {
+      result = await extractDocumentWithOpenAI({
+        apiKey,
+        mode: "image",
+        imageUrl: imageDataUrlForAi ? undefined : imageUrl,
+        imageDataUrl: imageDataUrlForAi,
+      });
+    } else if (pdfUrl) {
+      result = await extractDocumentWithOpenAI({
+        apiKey,
+        mode: "pdf",
+        documentUrl: pdfUrl,
+      });
+    } else {
+      result = await extractDocumentWithOpenAI({
+        apiKey,
+        mode: "text",
+        text: text!,
+      });
+    }
 
-  if (!result.ok) {
-    await sendWhatsapp(
-      auth.senderNormalized,
-      withFaroFlowFooter(
-        "Não consegui ler o documento agora. Tente de novo em instantes.",
-      ),
-      "despesa_openai_erro",
-      flowId,
-    );
-    return true;
-  }
-
-  const data = result.data;
-
-  if (!data.validDocument) {
-    const reason =
-      data.invalidReason?.trim() ||
-      "Não identifiquei um documento legível (compra, fatura ou conta a receber).";
-    await sendWhatsapp(
-      auth.senderNormalized,
-      withFaroFlowFooter(
-        `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, envie o arquivo completo. Se for texto, descreva valores e vencimento com clareza.`,
-      ),
-      "despesa_whatsapp_invalida",
-      flowId,
-    );
-    return true;
-  }
-
-  const intent = data.businessIntent ?? "compra_insumos";
-
-  if (intent === "conta_pagar" || intent === "conta_receber") {
-    const totalDoc = Number(data.totalAmount ?? 0);
-    if (!Number.isFinite(totalDoc) || totalDoc <= 0) {
+    if (!result.ok) {
       await sendWhatsapp(
         auth.senderNormalized,
         withFaroFlowFooter(
-          "Identifiquei um possível lançamento de fluxo de caixa, mas não consegui ler o *valor total*. Envie outra imagem ou descreva o valor (ex.: R$ 150,00).",
+          "Não consegui ler o documento agora. Tente de novo em instantes.",
         ),
-        "whatsapp_fluxo_sem_valor",
+        "despesa_openai_erro",
         flowId,
       );
       return true;
     }
-    const flowDb = intent === "conta_pagar" ? "payable" : "receivable";
-    const ins = await insertBoletoFromWhatsappCashflow(
+
+    const data = result.data;
+
+    if (!data.validDocument) {
+      const reason =
+        data.invalidReason?.trim() ||
+        "Não identifiquei um documento legível (compra, fatura ou conta a receber).";
+      await sendWhatsapp(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          `${reason}\n\nSe for foto: mais luz, enquadre o documento inteiro e evite reflexo. Se for PDF, envie o arquivo completo. Se for texto, descreva valores e vencimento com clareza.`,
+        ),
+        "despesa_whatsapp_invalida",
+        flowId,
+      );
+      return true;
+    }
+
+    const intent = data.businessIntent ?? "compra_insumos";
+
+    if (intent === "conta_pagar" || intent === "conta_receber") {
+      const totalDoc = Number(data.totalAmount ?? 0);
+      if (!Number.isFinite(totalDoc) || totalDoc <= 0) {
+        await sendWhatsapp(
+          auth.senderNormalized,
+          withFaroFlowFooter(
+            "Identifiquei um possível lançamento de fluxo de caixa, mas não consegui ler o *valor total*. Envie outra imagem ou descreva o valor (ex.: R$ 150,00).",
+          ),
+          "whatsapp_fluxo_sem_valor",
+          flowId,
+        );
+        return true;
+      }
+      const flowDb = intent === "conta_pagar" ? "payable" : "receivable";
+      const ins = await insertBoletoFromWhatsappCashflow(
+        supabase,
+        auth.companyId,
+        data,
+        flowDb,
+      );
+      if (!ins.ok) {
+        await sendWhatsapp(
+          auth.senderNormalized,
+          withFaroFlowFooter(
+            "Não consegui registrar no Fluxo de caixa. Abra o Faro em *Fluxo de caixa* e cadastre manualmente.",
+          ),
+          "whatsapp_fluxo_erro_insert",
+          flowId,
+        );
+        return true;
+      }
+      const dueLabel = formatDueBr(ins.dueDateIso);
+      const dir = intent === "conta_pagar" ? "pagar" : "receber";
+      await sendWhatsapp(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          `Conta a *${dir}* registrada: ${formatMoneyBrl(totalDoc)} · venc. *${dueLabel}*. Veja em *Fluxo de caixa* no Faro.`,
+          "registro",
+        ),
+        "whatsapp_fluxo_caixa_ok",
+        flowId,
+      );
+      return true;
+    }
+
+    const items = data.items ?? [];
+    const totalDoc = Number(data.totalAmount ?? 0);
+    if (items.length === 0 || totalDoc <= 0) {
+      await sendWhatsapp(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Identifiquei o documento, mas faltam itens ou total. Envie outra foto/PDF ou complete o texto.",
+        ),
+        "despesa_whatsapp_incompleto",
+        flowId,
+      );
+      return true;
+    }
+
+    const matchResult = await resolveProductMatches(
       supabase,
       auth.companyId,
-      data,
-      flowDb,
+      items,
     );
-    if (!ins.ok) {
+    await processMatchedExpenseFlow(
+      supabase,
+      auth.companyId,
+      auth.senderNormalized,
+      data,
+      matchResult,
+      sendWhatsapp,
+      flowId,
+      sourceDocumentPath,
+    );
+    return true;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(
+      "[whatsappExpenseFlow] falha inesperada ao processar documento:",
+      msg,
+      e,
+    );
+    try {
       await sendWhatsapp(
         auth.senderNormalized,
         withFaroFlowFooter(
-          "Não consegui registrar no Fluxo de caixa. Abra o Faro em *Fluxo de caixa* e cadastre manualmente.",
+          "Não consegui concluir a leitura da nota agora. Tente de novo em instantes ou cadastre pelo app.",
         ),
-        "whatsapp_fluxo_erro_insert",
+        "despesa_whatsapp_excecao",
         flowId,
       );
-      return true;
+    } catch (sendErr) {
+      console.error(
+        "[whatsappExpenseFlow] ao enviar mensagem de erro (Z-API):",
+        sendErr,
+      );
     }
-    const dueLabel = formatDueBr(ins.dueDateIso);
-    const dir = intent === "conta_pagar" ? "pagar" : "receber";
-    await sendWhatsapp(
-      auth.senderNormalized,
-      withFaroFlowFooter(
-        `Conta a *${dir}* registrada: ${formatMoneyBrl(totalDoc)} · venc. *${dueLabel}*. Veja em *Fluxo de caixa* no Faro.`,
-        "registro",
-      ),
-      "whatsapp_fluxo_caixa_ok",
-      flowId,
-    );
     return true;
   }
-
-  const items = data.items ?? [];
-  const totalDoc = Number(data.totalAmount ?? 0);
-  if (items.length === 0 || totalDoc <= 0) {
-    await sendWhatsapp(
-      auth.senderNormalized,
-      withFaroFlowFooter(
-        "Identifiquei o documento, mas faltam itens ou total. Envie outra foto/PDF ou complete o texto.",
-      ),
-      "despesa_whatsapp_incompleto",
-      flowId,
-    );
-    return true;
-  }
-
-  const matchResult = await resolveProductMatches(
-    supabase,
-    auth.companyId,
-    items,
-  );
-  await processMatchedExpenseFlow(
-    supabase,
-    auth.companyId,
-    auth.senderNormalized,
-    data,
-    matchResult,
-    sendWhatsapp,
-    flowId,
-    sourceDocumentPath,
-  );
-  return true;
 }
