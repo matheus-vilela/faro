@@ -26,6 +26,8 @@ COMMENT ON TABLE public.company_product_import_settings IS
 
 ALTER TABLE public.company_product_import_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Company members manage import settings" ON public.company_product_import_settings;
+
 CREATE POLICY "Company members manage import settings"
   ON public.company_product_import_settings FOR ALL
   USING (
@@ -60,6 +62,8 @@ CREATE INDEX IF NOT EXISTS idx_product_import_equiv_company
   ON public.product_import_equivalences (company_id);
 
 ALTER TABLE public.product_import_equivalences ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Company members manage import equivalences" ON public.product_import_equivalences;
 
 CREATE POLICY "Company members manage import equivalences"
   ON public.product_import_equivalences FOR ALL
