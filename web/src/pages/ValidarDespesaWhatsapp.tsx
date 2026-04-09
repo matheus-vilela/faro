@@ -18,10 +18,12 @@ import {
   divergenceReasonLabel,
   itemLineNeedsProductReview,
 } from "@/lib/expenseDivergenceUi";
+import { refreshWhatsappDraftProductMatches } from "@/lib/refreshWhatsappDraftMatches";
 import { supabasePublic } from "@/lib/supabasePublic";
 import { cn } from "@/lib/utils";
+import { pickInvoiceUnitRaw } from "@/lib/productImport/consolidateItems";
+import { canonicalProductName } from "@/lib/productImport/canonicalName";
 import {
-  WHATSAPP_PRODUCT_AUTO_LINK_MIN,
   formatDecimalPtBrInput,
   parseDecimalPtBrInput,
   recalcLineTotal,
@@ -117,6 +119,10 @@ function coerceExtracted(raw: unknown): ExtractedDocumentResult {
         quantity: Number(r.quantity ?? 0),
         unitValue: Number(r.unitValue ?? 0),
         lineTotal: Number(r.lineTotal ?? 0),
+        unitCommercial: (r.unitCommercial as string | null | undefined) ?? null,
+        unitTax: (r.unitTax as string | null | undefined) ?? null,
+        ncm: (r.ncm as string | null | undefined) ?? null,
+        ean: (r.ean as string | null | undefined) ?? null,
         productId:
           (r.productId as string | undefined) ??
           (r.product_id as string | undefined) ??
@@ -183,17 +189,42 @@ function buildPayloadForFinalize(
     notes: extracted.notes,
     items: extracted.items.map((it, i) => {
       const b = bindings[i];
+      const m = it.productMatch;
+      const invoiceUnit = pickInvoiceUnitRaw(it) ?? "";
       const row: Record<string, unknown> = {
         productName: it.productName,
         quantity: it.quantity,
         unitValue: it.unitValue,
         lineTotal: it.lineTotal,
+        unitCommercial: it.unitCommercial ?? null,
+        unitTax: it.unitTax ?? null,
+        ncm: it.ncm ?? null,
+        ean: it.ean ?? null,
+        invoiceUnit: invoiceUnit || null,
+        matchScore: m?.suggestedScore ?? null,
+        matchDecisionReason: m?.matchReason ?? null,
+        stockQuantity: m?.stockQuantity ?? null,
+        conversionFactorApplied: m?.conversionFactorApplied ?? null,
+        resolutionSource: m?.resolutionSource ?? null,
+        normalizedInvoiceUnit: m?.invoiceUnitNormalized ?? null,
+        catalogUnitNormalized: m?.catalogUnitNormalized ?? null,
       };
       if (b?.createNew) {
         row.createProduct = true;
         row.newProductName = (b.newName || it.productName).trim() || "Produto";
+        row.productUnit = invoiceUnit.trim() || null;
+        row.canonicalName = canonicalProductName(
+          (b.newName || it.productName).trim() || "",
+        );
+        row.importResolutionStatus = "NEW_PRODUCT_CREATED";
       } else if (b?.productId) {
         row.productId = b.productId;
+        const keptAuto =
+          m?.resolutionStatus === "AUTO_MATCH" &&
+          b.productId === (it.productId ?? m?.resolvedProductId ?? null);
+        row.importResolutionStatus = keptAuto
+          ? "AUTO_MATCH"
+          : "USER_CONFIRMED_MATCH";
       }
       return row;
     }),
@@ -255,7 +286,9 @@ export function ValidarDespesaWhatsapp() {
       setError("Dados inválidos");
       return;
     }
-    const coerced = coerceExtracted(obj.extracted_json);
+    const refreshed = await refreshWhatsappDraftProductMatches(token);
+    const rawExtracted = refreshed ?? obj.extracted_json;
+    const coerced = coerceExtracted(rawExtracted);
     const tn0 = coerced.totalAmount ?? 0;
     const sm0 = sumItems(coerced.items);
     prevDivergeRef.current =
@@ -682,13 +715,12 @@ export function ValidarDespesaWhatsapp() {
               <h3 className="text-sm font-semibold">Itens</h3>
             </div>
             <p className="text-xs text-muted-foreground">
-              O vínculo automático só ocorre com similaridade ≥{" "}
-              {Math.round(WHATSAPP_PRODUCT_AUTO_LINK_MIN * 100)}% ao nome de um
-              produto já cadastrado (ou aprendido antes). Abaixo desse critério,
-              use o cadastro rápido com o nome da nota ou escolha um produto na
-              lista — o Faro memoriza o vínculo para a próxima compra. Use{" "}
-              <strong>Inserir item aqui</strong> entre duas linhas para manter a
-              mesma ordem da nota.
+              O vínculo automático usa similaridade alta (limiar configurável),
+              unidade compatível com o cadastro e, quando existirem, NCM/EAN. Se
+              a unidade da nota divergir da cadastrada, não há conversão
+              automática — confira e escolha vincular, criar novo ou ajustar.
+              Use <strong>Inserir item aqui</strong> entre duas linhas para
+              manter a ordem da nota.
             </p>
             <div className="space-y-2">
               <div className="flex items-center gap-2 py-1">
@@ -766,17 +798,42 @@ export function ValidarDespesaWhatsapp() {
                               updateItem(i, { productName: e.target.value })
                             }
                           />
-                          {m?.needsConfirmation &&
-                            (m.suggestedScore ?? 0) <
-                              WHATSAPP_PRODUCT_AUTO_LINK_MIN && (
-                              <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
-                                Nenhum produto do cadastro atingiu similaridade
-                                com este texto. Use{" "}
-                                <strong>Criar produto novo</strong> (nome já
-                                preenchido; edite se quiser) ou selecione um
-                                item na lista.
-                              </p>
-                            )}
+                          {(pickInvoiceUnitRaw(it) ||
+                            it.unitCommercial ||
+                            it.unitTax) && (
+                            <p className="text-xs text-muted-foreground">
+                              Unidade na nota:{" "}
+                              <span className="font-medium text-foreground">
+                                {pickInvoiceUnitRaw(it) ||
+                                  it.unitCommercial ||
+                                  it.unitTax}
+                              </span>
+                              {m?.catalogUnitNormalized != null &&
+                                m.catalogUnitNormalized !== "" && (
+                                  <>
+                                    {" "}
+                                    · cadastro sugerido:{" "}
+                                    <span className="font-medium text-foreground">
+                                      {String(m.catalogUnitNormalized)}
+                                    </span>
+                                  </>
+                                )}
+                            </p>
+                          )}
+                          {m?.needsConfirmation && (
+                            <p className="text-xs text-amber-900 dark:text-amber-100 rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5">
+                              {m.resolutionStatus === "UNIT_CONFLICT_PENDING"
+                                ? "Há produto semelhante, mas a unidade da nota difere da cadastrada — confirme o vínculo ou crie produto novo (sem conversão automática)."
+                                : m.resolutionStatus === "PENDING_USER_CONFIRM"
+                                  ? "Sugestão de produto no limiar intermediário — confirme o vínculo ou crie novo."
+                                  : "Confirme o vínculo com um produto do cadastro ou use criar produto novo."}
+                              {m.matchReason ? (
+                                <span className="block mt-1 opacity-90">
+                                  {m.matchReason}
+                                </span>
+                              ) : null}
+                            </p>
+                          )}
                           <div className="space-y-1">
                             <Label className="text-xs">Produto no Faro</Label>
                             {token ? (

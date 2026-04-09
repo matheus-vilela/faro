@@ -15,6 +15,7 @@ import {
 } from "../_shared/openaiExpense.ts";
 import { bytesToImageDataUrlSafe, optimizeExpenseImage } from "../_shared/optimizeExpenseImage.ts";
 import { fetchZApiMediaBytes } from "../_shared/zapiMedia.ts";
+import { pickInvoiceUnitRaw } from "../_shared/productImport/consolidateItems.ts";
 import {
   type ItemWithProductMatch,
   resolveProductMatches,
@@ -394,6 +395,26 @@ async function insertExpense(
       quantity: q,
       unit_value: uv,
     };
+    const invRaw = pickInvoiceUnitRaw(it);
+    if (invRaw) {
+      row.invoice_unit = invRaw;
+    }
+    const pm = it.productMatch;
+    if (pm) {
+      if (pm.stockQuantity != null) row.stock_quantity = pm.stockQuantity;
+      if (pm.conversionFactorApplied != null) {
+        row.conversion_factor_applied = pm.conversionFactorApplied;
+      }
+      if (pm.resolutionSource) row.resolution_source = pm.resolutionSource;
+      if (pm.invoiceUnitNormalized) {
+        row.normalized_invoice_unit = String(pm.invoiceUnitNormalized);
+      }
+      if (pm.resolutionStatus) {
+        row.import_resolution_status = pm.resolutionStatus;
+      }
+      if (pm.suggestedScore != null) row.match_score = pm.suggestedScore;
+      if (pm.matchReason) row.match_decision_reason = pm.matchReason;
+    }
     if (it.productId) {
       row.product_id = it.productId;
     }

@@ -67,11 +67,21 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     const quantity = Math.max(0.0001, num(prod.qCom ?? prod.qTrib));
     const unitValue = num(prod.vUnCom ?? prod.vUnTrib);
     const lineTotal = num(prod.vProd);
+    const uCom = str(prod.uCom);
+    const uTrib = str(prod.uTrib);
+    const ncm = str(prod.NCM ?? prod.ncm);
+    const ean =
+      str(prod.cEAN as string | undefined) ??
+      str(prod.cEANTrib as string | undefined);
     items.push({
       productName,
       quantity,
       unitValue,
       lineTotal: lineTotal > 0 ? lineTotal : quantity * unitValue,
+      unitCommercial: uCom,
+      unitTax: uTrib && uCom && uTrib !== uCom ? uTrib : null,
+      ncm,
+      ean: ean && ean !== "SEM GTIN" ? ean : null,
     });
   }
 

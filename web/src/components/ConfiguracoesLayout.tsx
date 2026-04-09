@@ -9,7 +9,14 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { canOwnerAccess } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { FolderTree, MessageCircle, Percent, Settings2, Users } from "lucide-react";
+import {
+  FolderTree,
+  MessageCircle,
+  PackageSearch,
+  Percent,
+  Settings2,
+  Users,
+} from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const SUB_LINKS = [
@@ -22,6 +29,11 @@ const SUB_LINKS = [
     to: "/app/configuracoes/whatsapp",
     label: "WhatsApp",
     icon: MessageCircle,
+  },
+  {
+    to: "/app/configuracoes/importacao-produtos",
+    label: "Importação de notas",
+    icon: PackageSearch,
   },
   {
     to: "/app/configuracoes/categorias",

@@ -26,6 +26,12 @@ export function getDocumentTitle(pathname: string): string {
   if (path.startsWith("/app/configuracoes/categorias")) {
     return tab("Categorias");
   }
+  if (path.startsWith("/app/configuracoes/importacao-produtos")) {
+    return tab("Importação de notas");
+  }
+  if (path.startsWith("/app/configuracoes/impostos-receita")) {
+    return tab("Impostos na receita");
+  }
   if (path.startsWith("/app/configuracoes/whatsapp")) {
     return tab("WhatsApp");
   }

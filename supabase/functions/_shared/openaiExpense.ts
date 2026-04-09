@@ -8,6 +8,14 @@ export type ExtractedExpenseItem = {
   quantity: number;
   unitValue: number;
   lineTotal: number;
+  /** Unidade comercial (NF-e: uCom) quando identificável. */
+  unitCommercial?: string | null;
+  /** Unidade tributável (NF-e: uTrib) quando diferente da comercial. */
+  unitTax?: string | null;
+  /** NCM da linha, se houver. */
+  ncm?: string | null;
+  /** EAN / código de barras do item, se houver. */
+  ean?: string | null;
 };
 
 /** Compra com itens (despesa) vs lançamento direto no fluxo de caixa (sem vínculo com despesa). */
@@ -62,7 +70,7 @@ Responda APENAS um JSON válido (sem markdown), com esta estrutura exata:
   "totalAmount": number ou null (valor TOTAL em BRL: total da fatura, do boleto, ou a pagar/receber),
   "dueDate": string ou null (data de vencimento ou pagamento em AAAA-MM-DD; se só houver DD/MM/AAAA, converta para AAAA-MM-DD),
   "boletoTitle": string ou null (título curto para identificar o lançamento, ex.: "Fatura cartão Visa — mar/26"),
-  "items": [ { "productName": string, "quantity": number, "unitValue": number, "lineTotal": number } ],
+  "items": [ { "productName": string, "quantity": number, "unitValue": number, "lineTotal": number, "unitCommercial": string ou null, "unitTax": string ou null, "ncm": string ou null, "ean": string ou null } ],
   "notes": string ou null,
   "likelyNotEffectivePurchase": boolean,
   "likelyNotPurchaseReason": string ou null
@@ -83,6 +91,8 @@ Regras:
 - validDocument = false somente se ilegível, irrelevante ou sem valor nem contexto.
 - Se for foto ou PDF ilegível, borrado, sem contexto de compra, ou não for documento: validDocument = false e invalidReason explicando em português (curto).
 - Itens: lineTotal deve ser quantity * unitValue (aproximado). Use ponto como decimal nos números JSON.
+- Quando o documento mostrar unidade de medida por linha (kg, un, cx, etc.), preencha unitCommercial; se houver unidade tributável explícita diferente, preencha unitTax; caso contrário null.
+- ncm: somente dígitos do NCM da linha, se visível; ean: código de barras/EAN do produto na linha, se visível.
 - totalAmount é o total geral impresso no documento (ou soma explícita se só houver itens).
 - Em cupom fiscal eletrônico (NFC-e), o número da nota geralmente aparece próximo ao rótulo "NFC-e"; extraia esse número em invoiceNumber e a série em invoiceSeries se visível.
 - supplierDocument: use sempre string (CNPJ/CPF com ou sem máscara). Se o JSON numérico for usado para CNPJ, pode perder zeros à esquerda — prefira string.
@@ -372,12 +382,40 @@ export function normalizeExtractedDueDate(
   return null;
 }
 
+function normalizeExtractedItem(
+  row: Record<string, unknown>,
+): ExtractedExpenseItem {
+  const productName = String(row.productName ?? row.product_name ?? "").trim() ||
+    "Item";
+  const quantity = Math.max(0.0001, Number(row.quantity ?? 0));
+  const unitValue = Number(row.unitValue ?? row.unit_value ?? 0);
+  const lineTotal = Number(row.lineTotal ?? row.line_total ?? quantity * unitValue);
+  const strOr = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    const t = String(v).trim();
+    return t.length ? t : null;
+  };
+  return {
+    productName,
+    quantity,
+    unitValue,
+    lineTotal,
+    unitCommercial: strOr(row.unitCommercial ?? row.unit_commercial),
+    unitTax: strOr(row.unitTax ?? row.unit_tax),
+    ncm: strOr(row.ncm ?? row.NCM),
+    ean: strOr(row.ean ?? row.cEAN ?? row.barcode),
+  };
+}
+
 function safeParseJson(s: string): ExtractedDocumentResult | null {
   try {
     const raw = JSON.parse(s) as Record<string, unknown>;
     if (typeof raw.validDocument !== "boolean") return null;
     const o = raw as unknown as ExtractedDocumentResult;
-    if (!Array.isArray(o.items)) o.items = [];
+    const itemsRaw = Array.isArray(raw.items) ? raw.items : [];
+    o.items = itemsRaw.map((it) =>
+      normalizeExtractedItem((it ?? {}) as Record<string, unknown>)
+    );
     if (o.invoiceSeries === undefined) o.invoiceSeries = null;
     o.supplierDocument =
       strOrNull(raw.supplierDocument ?? raw.supplier_document) ??

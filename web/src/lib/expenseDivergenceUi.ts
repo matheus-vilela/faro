@@ -1,7 +1,4 @@
-import {
-  WHATSAPP_PRODUCT_AUTO_LINK_MIN,
-  type ExtractedExpenseItemWithMatch,
-} from "@/lib/whatsappExtractedExpense";
+import type { ExtractedExpenseItemWithMatch } from "@/lib/whatsappExtractedExpense";
 
 /** Motivos comuns quando total da nota ≠ soma das linhas importadas. */
 export const EXPENSE_DIVERGENCE_REASONS = [
@@ -30,14 +27,16 @@ export function valuesDivergeCents(
   );
 }
 
-/** Linha cuja descrição não teve match automático forte o suficiente no catálogo. */
+/** Linha que ainda precisa de conferência humana (vínculo, unidade ou novo produto). */
 export function itemLineNeedsProductReview(
   it: ExtractedExpenseItemWithMatch,
 ): boolean {
-  const m = it.productMatch;
+  if (it.productId) {
+    const m = it.productMatch;
+    if (m?.needsConfirmation === false) return false;
+  }
   return (
-    !!m?.needsConfirmation &&
-    (m.suggestedScore ?? 0) < WHATSAPP_PRODUCT_AUTO_LINK_MIN
+    !it.productId || it.productMatch?.needsConfirmation === true
   );
 }
 

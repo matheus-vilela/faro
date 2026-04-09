@@ -34,3 +34,6 @@ verify_jwt = false
 
 [functions.parse-expense-document]
 verify_jwt = false
+
+[functions.refresh-whatsapp-draft-matches]
+verify_jwt = false

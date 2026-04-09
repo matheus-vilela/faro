@@ -5,20 +5,34 @@ export type ExtractedExpenseItem = {
   quantity: number
   unitValue: number
   lineTotal: number
+  unitCommercial?: string | null
+  unitTax?: string | null
+  ncm?: string | null
+  ean?: string | null
 }
 
 /** Metadados de vínculo com catálogo (edge / rascunho WhatsApp). */
 export type ItemProductMatch = {
+  /** Produto já resolvido automaticamente (id). */
   resolvedProductId?: string | null
-  /** Só preenchido se similaridade ≥ 95% (caso contrário prefira cadastro novo). */
+  /** Preenchido quando score ≥ limiar de confirmação (caso contrário prefira cadastro novo). */
   suggestedProductId?: string | null
   suggestedProductName?: string | null
+  /** 0–100 */
   suggestedScore?: number
   needsConfirmation?: boolean
+  resolutionStatus?: string
+  matchReason?: string
+  invoiceUnitNormalized?: string
+  catalogUnitNormalized?: string
+  unitConvertible?: boolean
+  stockQuantity?: number
+  conversionFactorApplied?: number
+  resolutionSource?: string
 }
 
-/** Mesmo limiar da edge: vínculo automático por texto só ≥ 95%. */
-export const WHATSAPP_PRODUCT_AUTO_LINK_MIN = 0.95
+/** Alinhado à edge: escala 0–1 para checagens legadas (92% = 0.92). */
+export const WHATSAPP_PRODUCT_AUTO_LINK_MIN = 0.92
 
 export type ExtractedExpenseItemWithMatch = ExtractedExpenseItem & {
   productId?: string | null
