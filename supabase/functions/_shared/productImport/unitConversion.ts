@@ -13,7 +13,7 @@ import {
   unitsAreEqual,
   unitsAreConvertible,
   type NormalizedUnitCode,
-} from "./unitNormalize";
+} from "./unitNormalize.ts";
 
 /** Origem rastreável da decisão de conversão (alinhado ao prompt de negócio). */
 export type ResolutionSource =

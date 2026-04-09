@@ -1,5 +1,5 @@
-import { canonicalProductName } from "./canonicalName"
-import { normalizeUnitLabel, type NormalizedUnitCode } from "./unitNormalize"
+import { canonicalProductName } from "./canonicalName.ts"
+import { normalizeUnitLabel, type NormalizedUnitCode } from "./unitNormalize.ts"
 
 /** Campos mínimos de linha + metadados de NF (unidade, NCM, EAN). */
 export type InvoiceItemFields = {

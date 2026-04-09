@@ -1,4 +1,4 @@
-import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName"
+import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName.ts"
 
 function levenshtein(a: string, b: string): number {
   const m = a.length
