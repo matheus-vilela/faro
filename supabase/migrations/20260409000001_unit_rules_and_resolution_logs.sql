@@ -31,6 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_product_unit_rules_company_product
 
 ALTER TABLE public.product_unit_rules ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Company members manage product unit rules" ON public.product_unit_rules;
+
 CREATE POLICY "Company members manage product unit rules"
   ON public.product_unit_rules FOR ALL
   USING (
@@ -77,6 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_expense_resolution_logs_expense
   ON public.expense_resolution_logs (expense_id);
 
 ALTER TABLE public.expense_resolution_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Company members read expense resolution logs" ON public.expense_resolution_logs;
+DROP POLICY IF EXISTS "Company members insert expense resolution logs" ON public.expense_resolution_logs;
 
 CREATE POLICY "Company members read expense resolution logs"
   ON public.expense_resolution_logs FOR SELECT
