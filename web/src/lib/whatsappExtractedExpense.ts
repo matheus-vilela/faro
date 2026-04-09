@@ -117,6 +117,15 @@ export function formatDecimalPtBrInput(n: number, maxFrac = 4): string {
   }).format(n)
 }
 
+/** Valor unitário / moeda: sempre 2 casas decimais (ex.: 7,7 → 7,70). */
+export function formatCurrencyPtBrInput(n: number): string {
+  if (!Number.isFinite(n)) return ''
+  return new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)
+}
+
 /**
  * Interpreta texto digitado (pt-BR: vírgula decimal, ponto opcional).
  * Retorna null se vazio ou inválido.

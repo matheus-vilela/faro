@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { pickInvoiceUnitRaw } from "@/lib/productImport/consolidateItems";
 import { canonicalProductName } from "@/lib/productImport/canonicalName";
 import {
+  formatCurrencyPtBrInput,
   formatDecimalPtBrInput,
   parseDecimalPtBrInput,
   recalcLineTotal,
@@ -169,7 +170,7 @@ function lineItemInputStringsFromItems(items: ExtractedExpenseItem[]): {
 } {
   return {
     qty: items.map((it) => formatDecimalPtBrInput(it.quantity, 4)),
-    unit: items.map((it) => formatDecimalPtBrInput(it.unitValue, 4)),
+    unit: items.map((it) => formatCurrencyPtBrInput(it.unitValue)),
   };
 }
 
@@ -289,12 +290,22 @@ export function ValidarDespesaWhatsapp() {
     const refreshed = await refreshWhatsappDraftProductMatches(token);
     const rawExtracted = refreshed ?? obj.extracted_json;
     const coerced = coerceExtracted(rawExtracted);
-    const tn0 = coerced.totalAmount ?? 0;
-    const sm0 = sumItems(coerced.items);
+    const coercedWithCurrencyUnits = {
+      ...coerced,
+      items: coerced.items.map((it) => {
+        const uv = Math.round(Number(it.unitValue) * 100) / 100;
+        return recalcLineTotal({
+          ...it,
+          unitValue: uv,
+        }) as ExtractedExpenseItemWithMatch;
+      }),
+    };
+    const tn0 = coercedWithCurrencyUnits.totalAmount ?? 0;
+    const sm0 = sumItems(coercedWithCurrencyUnits.items);
     prevDivergeRef.current =
       Math.abs(Math.round(tn0 * 100) - Math.round(sm0 * 100)) > 2;
-    setExtracted(coerced);
-    const baseBindings = initLineBindings(coerced);
+    setExtracted(coercedWithCurrencyUnits);
+    const baseBindings = initLineBindings(coercedWithCurrencyUnits);
     const idsMissingLabel = [
       ...new Set(
         baseBindings
@@ -321,10 +332,12 @@ export function ValidarDespesaWhatsapp() {
     } else {
       setLineBindings(baseBindings);
     }
-    const str = lineItemInputStringsFromItems(coerced.items);
+    const str = lineItemInputStringsFromItems(
+      coercedWithCurrencyUnits.items,
+    );
     setQtyInputs(str.qty);
     setUnitInputs(str.unit);
-    setItemRowIds(coerced.items.map(() => crypto.randomUUID()));
+    setItemRowIds(coercedWithCurrencyUnits.items.map(() => crypto.randomUUID()));
     setExpiresAt(obj.expires_at ?? null);
     setError(null);
   }, [token]);
@@ -442,7 +455,7 @@ export function ValidarDespesaWhatsapp() {
     setUnitInputs((prev) => {
       const idx = resolveIdx(prev.length);
       const next = [...prev];
-      next.splice(idx, 0, formatDecimalPtBrInput(0, 4));
+      next.splice(idx, 0, formatCurrencyPtBrInput(0));
       return next;
     });
     setItemRowIds((prev) => {
@@ -920,101 +933,127 @@ export function ValidarDespesaWhatsapp() {
                           )}
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        <div>
-                          <Label className="text-xs">Qtd</Label>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            autoComplete="off"
-                            value={
-                              qtyInputs[i] !== undefined
-                                ? qtyInputs[i]
-                                : formatDecimalPtBrInput(it.quantity, 4)
-                            }
-                            onChange={(e) => {
-                              const raw = sanitizeDecimalPtBrTyping(
-                                e.target.value,
-                              );
-                              setQtyInputs((prev) => {
-                                const next = [...prev];
-                                next[i] = raw;
-                                return next;
-                              });
-                              const p = parseDecimalPtBrInput(raw);
-                              if (p !== null && p > 0) {
-                                updateItem(i, { quantity: p });
+                      <div className="flex gap-2">
+                        <div className="w-4 shrink-0" aria-hidden />
+                        <div className="min-w-0 flex-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <div className="min-w-0 space-y-1">
+                            <Label className="text-xs">Qtd</Label>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0"
+                              autoComplete="off"
+                              value={
+                                qtyInputs[i] !== undefined
+                                  ? qtyInputs[i]
+                                  : formatDecimalPtBrInput(it.quantity, 4)
                               }
-                            }}
-                            onBlur={(e) => {
-                              const raw = sanitizeDecimalPtBrTyping(
-                                e.target.value,
-                              );
-                              const p = parseDecimalPtBrInput(raw);
-                              const cur = extracted.items[i];
-                              setQtyInputs((prev) => {
-                                const next = [...prev];
-                                next[i] =
-                                  p !== null && p > 0
-                                    ? formatDecimalPtBrInput(p, 4)
-                                    : formatDecimalPtBrInput(cur.quantity, 4);
-                                return next;
-                              });
-                              if (p !== null && p > 0) {
-                                updateItem(i, { quantity: p });
-                              }
-                            }}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Valor unit.</Label>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0,00"
-                            autoComplete="off"
-                            value={
-                              unitInputs[i] !== undefined
-                                ? unitInputs[i]
-                                : formatDecimalPtBrInput(it.unitValue, 4)
-                            }
-                            onChange={(e) => {
-                              const raw = sanitizeDecimalPtBrTyping(
-                                e.target.value,
-                              );
-                              setUnitInputs((prev) => {
-                                const next = [...prev];
-                                next[i] = raw;
-                                return next;
-                              });
-                              const p = parseDecimalPtBrInput(raw);
-                              if (p !== null && p > 0) {
-                                updateItem(i, { unitValue: p });
-                              }
-                            }}
-                            onBlur={(e) => {
-                              const raw = sanitizeDecimalPtBrTyping(
-                                e.target.value,
-                              );
-                              const p = parseDecimalPtBrInput(raw);
-                              const cur = extracted.items[i];
-                              setUnitInputs((prev) => {
-                                const next = [...prev];
-                                next[i] =
-                                  p !== null && p > 0
-                                    ? formatDecimalPtBrInput(p, 4)
-                                    : formatDecimalPtBrInput(cur.unitValue, 4);
-                                return next;
-                              });
-                              if (p !== null && p > 0) {
-                                updateItem(i, { unitValue: p });
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="col-span-2 sm:col-span-2 flex items-end text-sm text-muted-foreground">
-                          Subtotal: {formatBrl(it.lineTotal)}
+                              onChange={(e) => {
+                                const raw = sanitizeDecimalPtBrTyping(
+                                  e.target.value,
+                                );
+                                setQtyInputs((prev) => {
+                                  const next = [...prev];
+                                  next[i] = raw;
+                                  return next;
+                                });
+                                const p = parseDecimalPtBrInput(raw);
+                                if (p !== null && p > 0) {
+                                  updateItem(i, { quantity: p });
+                                }
+                              }}
+                              onBlur={(e) => {
+                                const raw = sanitizeDecimalPtBrTyping(
+                                  e.target.value,
+                                );
+                                const p = parseDecimalPtBrInput(raw);
+                                const cur = extracted.items[i];
+                                setQtyInputs((prev) => {
+                                  const next = [...prev];
+                                  next[i] =
+                                    p !== null && p > 0
+                                      ? formatDecimalPtBrInput(p, 4)
+                                      : formatDecimalPtBrInput(cur.quantity, 4);
+                                  return next;
+                                });
+                                if (p !== null && p > 0) {
+                                  updateItem(i, { quantity: p });
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="min-w-0 space-y-1">
+                            <Label className="text-xs">Valor unit.</Label>
+                            <div
+                              className={cn(
+                                "flex h-9 w-full min-w-0 items-center gap-1 rounded-md border border-input bg-transparent px-3 py-1 shadow-xs transition-[color,box-shadow] dark:bg-input/30",
+                                "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+                              )}
+                            >
+                              <span
+                                className="shrink-0 text-sm text-muted-foreground tabular-nums"
+                                aria-hidden
+                              >
+                                R$
+                              </span>
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0,00"
+                                autoComplete="off"
+                                aria-label="Valor unitário em reais"
+                                className="h-7 flex-1 min-w-0 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                value={
+                                  unitInputs[i] !== undefined
+                                    ? unitInputs[i]
+                                    : formatCurrencyPtBrInput(it.unitValue)
+                                }
+                                onChange={(e) => {
+                                  const raw = sanitizeDecimalPtBrTyping(
+                                    e.target.value,
+                                  );
+                                  setUnitInputs((prev) => {
+                                    const next = [...prev];
+                                    next[i] = raw;
+                                    return next;
+                                  });
+                                  const p = parseDecimalPtBrInput(raw);
+                                  if (p !== null && p > 0) {
+                                    updateItem(i, { unitValue: p });
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const raw = sanitizeDecimalPtBrTyping(
+                                    e.target.value,
+                                  );
+                                  const p = parseDecimalPtBrInput(raw);
+                                  const cur = extracted.items[i];
+                                  if (p !== null && p > 0) {
+                                    const rounded =
+                                      Math.round(p * 100) / 100;
+                                    setUnitInputs((prev) => {
+                                      const next = [...prev];
+                                      next[i] =
+                                        formatCurrencyPtBrInput(rounded);
+                                      return next;
+                                    });
+                                    updateItem(i, { unitValue: rounded });
+                                  } else {
+                                    setUnitInputs((prev) => {
+                                      const next = [...prev];
+                                      next[i] = formatCurrencyPtBrInput(
+                                        cur.unitValue,
+                                      );
+                                      return next;
+                                    });
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className="col-span-2 sm:col-span-2 flex min-h-9 items-end text-sm text-muted-foreground">
+                            Subtotal: {formatBrl(it.lineTotal)}
+                          </div>
                         </div>
                       </div>
                     </div>
