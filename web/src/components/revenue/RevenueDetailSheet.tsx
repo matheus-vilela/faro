@@ -318,7 +318,6 @@ export function RevenueDetailSheet({
     if (effectiveGross <= 0) return false;
     if (entryMode === "product_sale") {
       if (!productId || qtyNum <= 0) return false;
-      if (!selectedProduct?.cmv_category_id) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
       if (!stockOk) return false;
@@ -338,7 +337,6 @@ export function RevenueDetailSheet({
     unitNum,
     grossNum,
     stockOk,
-    selectedProduct?.cmv_category_id,
   ]);
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -729,15 +727,6 @@ export function RevenueDetailSheet({
                           onChange={(e) => setTitle(e.target.value)}
                         />
                       </div>
-                      {selectedProduct && !selectedProduct.cmv_category_id && (
-                        <div
-                          role="alert"
-                          className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-                        >
-                          Este produto não tem categoria de CMV no cadastro.
-                          Defina em Produtos e estoque antes de salvar.
-                        </div>
-                      )}
                       {selectedProduct && !stockOk && (
                         <div
                           role="alert"

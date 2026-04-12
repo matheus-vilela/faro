@@ -1,8 +1,10 @@
 import * as XLSX from "xlsx";
 
+import { SYSTEM_PRODUCT_UNITS } from "@/lib/companyUnits/systemUnits";
+
 export type ParsedProductRow = {
   name: string;
-  /** un, kg, g, l, ml, cx, pct — mesmo conjunto do cadastro manual */
+  /** Código da unidade — catálogo fixo do sistema (igual ao cadastro manual). */
   unit: string;
   current_quantity: number;
   min_quantity: number;
@@ -114,7 +116,9 @@ type ColMap = {
   price: number | null;
 };
 
-const ALLOWED_UNITS = new Set(["un", "kg", "g", "l", "ml", "cx", "pct"]);
+const ALLOWED_UNITS = new Set(
+  SYSTEM_PRODUCT_UNITS.map((u) => u.code.toLowerCase()),
+);
 
 export function normalizeImportUnit(raw: string): string {
   const s = raw
@@ -126,12 +130,33 @@ export function normalizeImportUnit(raw: string): string {
   if (!s) return "un";
   if (ALLOWED_UNITS.has(s)) return s;
   if (s === "lt" || s.includes("litro")) return "l";
-  if (s.includes("kg") || s === "quilograma" || s === "quilo") return "kg";
-  if (s.includes("grama") && !s.includes("kg")) return "g";
-  if (s.includes("ml")) return "ml";
+  if (
+    s.includes("kg") ||
+    s === "quilograma" ||
+    s === "kilograma" ||
+    s === "quilo"
+  )
+    return "kg";
+  if (s.includes("miligrama") || s === "mgr") return "mg";
+  if ((s.includes("grama") || s === "gr") && !s.includes("miligrama")) return "g";
+  if (s.includes("mililitro") || s.includes("ml")) return "ml";
   if (s.includes("caixa")) return "cx";
-  if (s.includes("pacote")) return "pct";
+  if (s.includes("pacote") || s.includes("pct")) return "pct";
   if (s === "unidade" || s === "und" || s === "u") return "un";
+  if (s.includes("lata")) return "lata";
+  if (s.includes("garrafa")) return "garrafa";
+  if (s.includes("frasco")) return "frasco";
+  if (s.includes("galão") || s.includes("galao")) return "galao";
+  if (s.includes("pote")) return "pote";
+  if (s.includes("rolo")) return "rolo";
+  if (s.includes("saco")) return "saco";
+  if (s.includes("barrica")) return "barrica";
+  if (s.includes("tambor")) return "tambor";
+  if (s.includes("fardo")) return "fardo";
+  if (s.includes("bisnaga")) return "bisnaga";
+  if (s.includes("maço") || s.includes("maco")) return "maco";
+  if (s.includes("bandeja") || s.includes("bandeija")) return "bandeja";
+  if (s.includes("peça") || s.includes("peca") || s === "pc") return "pc";
   return "un";
 }
 

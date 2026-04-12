@@ -57,6 +57,7 @@ import type {
   PapelReceitaDre,
   TipoCategoria,
 } from "@/types/category";
+import { ConfiguracoesCategoriasProdutosPanel } from "@/pages/ConfiguracoesCategoriasProdutosPanel";
 import {
   Check,
   ChevronDown,
@@ -64,6 +65,7 @@ import {
   ChevronsUpDown,
   FolderTree,
   Loader2,
+  Package,
   Pencil,
   Plus,
   Search,
@@ -109,6 +111,9 @@ export function ConfiguracoesCategorias() {
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [parentSearch, setParentSearch] = useState("");
   const [editWarningOpen, setEditWarningOpen] = useState(false);
+  const [configTab, setConfigTab] = useState<"financeiras" | "produtos">(
+    "financeiras",
+  );
 
   const load = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -540,16 +545,63 @@ export function ConfiguracoesCategorias() {
     <PageShell className="space-y-6">
       <PageHeader
         icon={FolderTree}
-        title="Categorias financeiras"
-        description="Mantenha sua estrutura financeira clara e fácil de usar. Crie categorias principais e, quando fizer sentido, adicione subcategorias para detalhar melhor seus lançamentos."
+        title="Categorias"
+        description="Gerencie categorias financeiras (receitas, despesas, CMV no DRE) e categorias de produtos (organização do catálogo e etiquetas)."
         action={
-          <Button onClick={openCreateRoot} disabled={!isOwner || loading}>
-            <Plus className="mr-1 h-4 w-4" />
-            Nova categoria principal
-          </Button>
+          configTab === "financeiras" ? (
+            <Button onClick={openCreateRoot} disabled={!isOwner || loading}>
+              <Plus className="mr-1 h-4 w-4" />
+              Nova categoria principal
+            </Button>
+          ) : undefined
         }
       />
 
+      <div
+        className="flex flex-wrap gap-2 border-b border-border pb-px"
+        role="tablist"
+        aria-label="Tipo de categorias"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={configTab === "financeiras"}
+          onClick={() => setConfigTab("financeiras")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            configTab === "financeiras"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+        >
+          <FolderTree className="h-4 w-4 shrink-0" />
+          Categorias financeiras
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={configTab === "produtos"}
+          onClick={() => setConfigTab("produtos")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            configTab === "produtos"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+        >
+          <Package className="h-4 w-4 shrink-0" />
+          Categorias de produtos
+        </button>
+      </div>
+
+      {configTab === "produtos" && currentCompany?.id ? (
+        <ConfiguracoesCategoriasProdutosPanel
+          companyId={currentCompany.id}
+          isOwner={isOwner}
+        />
+      ) : null}
+
+      {configTab === "financeiras" ? (
       <div className="grid gap-4">
         <Card className="shadow-sm">
           <CardHeader>
@@ -607,6 +659,7 @@ export function ConfiguracoesCategorias() {
           </CardContent>
         </Card>
       </div>
+      ) : null}
 
       <Sheet open={sheetOpen} onOpenChange={(o) => !saving && setSheetOpen(o)}>
         <SheetContent className="flex flex-col sm:max-w-md">
