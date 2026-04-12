@@ -1314,9 +1314,9 @@ export function Produtos() {
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Quantidade
                               </p>
-                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
+                              <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
                                 {qtyStr}
-                                <span className="ml-1 text-sm font-medium text-muted-foreground sm:text-base">
+                                <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
                                   {p.unit}
                                 </span>
                               </p>
@@ -1325,10 +1325,10 @@ export function Produtos() {
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Estoque mínimo
                               </p>
-                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
+                              <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
                                 {minStr}
                                 {p.min_quantity > 0 ? (
-                                  <span className="ml-1 text-sm font-medium text-muted-foreground sm:text-base">
+                                  <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
                                     {p.unit}
                                   </span>
                                 ) : null}
@@ -1338,21 +1338,25 @@ export function Produtos() {
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Preço unitário
                               </p>
-                              <p className="mt-2 text-lg font-semibold tabular-nums leading-snug text-foreground sm:text-xl">
+                              <p className="mt-2 text-sm font-semibold tabular-nums leading-tight text-foreground sm:text-base">
                                 {cmv != null ? (
-                                  <>
-                                    {formatCurrency(cmv)}
-                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
+                                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+                                    <span className="whitespace-nowrap">
+                                      {formatCurrency(cmv)}
+                                    </span>
+                                    <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
                                       /{p.unit} · médio
                                     </span>
-                                  </>
+                                  </span>
                                 ) : last != null ? (
-                                  <>
-                                    {formatCurrency(last)}
-                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
+                                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+                                    <span className="whitespace-nowrap">
+                                      {formatCurrency(last)}
+                                    </span>
+                                    <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
                                       /{p.unit} · último
                                     </span>
-                                  </>
+                                  </span>
                                 ) : (
                                   <span className="text-muted-foreground">—</span>
                                 )}
@@ -1371,7 +1375,7 @@ export function Produtos() {
                               </p>
                               <p
                                 className={cn(
-                                  "mt-2 text-lg font-bold tabular-nums leading-snug sm:text-xl",
+                                  "mt-2 text-base font-bold tabular-nums leading-snug sm:text-lg",
                                   stockLineValue != null && unitCost != null
                                     ? "text-foreground"
                                     : "text-muted-foreground",
