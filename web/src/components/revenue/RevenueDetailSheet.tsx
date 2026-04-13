@@ -33,13 +33,20 @@ import {
   tipoBadge,
 } from "@/lib/companyCategoryLabels";
 import {
-  parseQuantityForUnit,
-  quantityInputPropsForUnit,
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
+import {
+  parseSaleQuantity,
+  quantityInputPropsForSaleUnit,
+  roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
+import type { RecipeListItem } from "@/types/recipe";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   computeRevenueTaxDeduction,
   type RevenueEntry,
@@ -59,6 +66,7 @@ const REVENUE_TYPE_LABEL: Record<string, string> = {
 const ENTRY_MODE_LABEL: Record<string, string> = {
   manual: "Manual",
   product_sale: "Venda de produto",
+  recipe_sale: "Venda por receita (ficha)",
 };
 
 export interface RevenueDetailSheetProps {
@@ -80,6 +88,10 @@ export function RevenueDetailSheet({
     [],
   );
   const [products, setProducts] = useState<Product[]>([]);
+  const [recipes, setRecipes] = useState<RecipeListItem[]>([]);
+  const [productConversions, setProductConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [loading, setLoading] = useState(false);
 
   const [detailEditMode, setDetailEditMode] = useState(false);
@@ -87,9 +99,9 @@ export function RevenueDetailSheet({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const [entryMode, setEntryMode] = useState<"manual" | "product_sale">(
-    "manual",
-  );
+  const [entryMode, setEntryMode] = useState<
+    "manual" | "product_sale" | "recipe_sale"
+  >("manual");
   const [revenueType, setRevenueType] = useState<
     "operational" | "non_operational"
   >("operational");
@@ -97,6 +109,8 @@ export function RevenueDetailSheet({
   const [title, setTitle] = useState("");
   const [categoryLeafId, setCategoryLeafId] = useState("");
   const [productId, setProductId] = useState("");
+  const [recipeId, setRecipeId] = useState("");
+  const [saleUnitCode, setSaleUnitCode] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [pricingMode, setPricingMode] = useState<"unit" | "total">("unit");
   const [unitValue, setUnitValue] = useState("");
@@ -118,7 +132,9 @@ export function RevenueDetailSheet({
   );
 
   const tipoFilter = useMemo((): "OPERACIONAL" | "NAO_OPERACIONAL" => {
-    if (entryMode === "product_sale") return "OPERACIONAL";
+    if (entryMode === "product_sale" || entryMode === "recipe_sale") {
+      return "OPERACIONAL";
+    }
     return revenueType === "operational" ? "OPERACIONAL" : "NAO_OPERACIONAL";
   }, [entryMode, revenueType]);
 
@@ -172,21 +188,94 @@ export function RevenueDetailSheet({
     ? products.find((p) => p.id === productId)
     : undefined;
 
+  const selectedRecipe = recipeId
+    ? recipes.find((r) => r.id === recipeId)
+    : undefined;
+
+  const productById = useMemo(
+    () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+  const conversionsByProduct = useMemo(() => {
+    const out = new Map<string, ProductUnitConversionDraft[]>();
+    for (const row of productConversions) {
+      if (!row.product_id) continue;
+      const prev = out.get(row.product_id) ?? [];
+      prev.push(row);
+      out.set(row.product_id, prev);
+    }
+    return out;
+  }, [productConversions]);
+  const allowedUnitsForProduct = useCallback(
+    (pid: string): string[] => {
+      const product = productById.get(pid);
+      if (!product) return [];
+      const base = product.unit;
+      const allowed = new Set<string>([base]);
+      const convs = conversionsByProduct.get(pid) ?? [];
+      for (const c of convs) {
+        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+          allowed.add(c.secondary_unit_code);
+        }
+      }
+      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
+        if (getLockedSystemSecondaryQty(1, base, candidate) != null) {
+          allowed.add(candidate);
+        }
+      }
+      return [...allowed];
+    },
+    [conversionsByProduct, productById],
+  );
+  const toStockQty = useCallback(
+    (pid: string, qty: number, fromUnit: string): number | null => {
+      const product = productById.get(pid);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(pid) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      const raw = convertQuantityForProduct(
+        qty,
+        fromUnit,
+        product.unit,
+        product.unit,
+        convs,
+      );
+      return raw == null ? null : roundHubQuantityForStock(raw);
+    },
+    [conversionsByProduct, productById],
+  );
+
   const qtyNum = useMemo(() => {
-    if (entryMode === "product_sale" && selectedProduct) {
-      return parseQuantityForUnit(quantity, selectedProduct.unit);
+    if (entryMode === "recipe_sale") return 1;
+    if (entryMode === "product_sale" && selectedProduct && saleUnitCode) {
+      return parseSaleQuantity(quantity, saleUnitCode, selectedProduct.unit);
     }
     return parseFloat(quantity.replace(",", ".")) || 0;
-  }, [entryMode, quantity, selectedProduct]);
+  }, [entryMode, quantity, selectedProduct, saleUnitCode]);
+
+  const stockQtyNum = useMemo(() => {
+    if (entryMode !== "product_sale" || !selectedProduct || !saleUnitCode) {
+      return 0;
+    }
+    return toStockQty(selectedProduct.id, qtyNum, saleUnitCode) ?? 0;
+  }, [entryMode, selectedProduct, saleUnitCode, qtyNum, toStockQty]);
 
   const computedGrossProduct = useMemo(() => {
-    if (entryMode !== "product_sale") return grossNum;
+    if (entryMode !== "product_sale" && entryMode !== "recipe_sale") {
+      return grossNum;
+    }
     if (pricingMode === "unit") return Math.round(qtyNum * unitNum * 100) / 100;
     return grossNum;
   }, [entryMode, pricingMode, qtyNum, unitNum, grossNum]);
 
   const effectiveGross =
-    entryMode === "product_sale" && pricingMode === "unit"
+    (entryMode === "product_sale" || entryMode === "recipe_sale") &&
+    pricingMode === "unit"
       ? computedGrossProduct
       : grossNum;
 
@@ -200,10 +289,14 @@ export function RevenueDetailSheet({
     entryMode !== "product_sale" ||
     !selectedProduct ||
     qtyNum <= 0 ||
-    Number(selectedProduct.current_quantity) >= qtyNum;
+    stockQtyNum <= 0 ||
+    Number(selectedProduct.current_quantity) >= stockQtyNum;
 
-  const quantityFieldProps = quantityInputPropsForUnit(
-    entryMode === "product_sale" ? selectedProduct?.unit : undefined,
+  const quantityFieldProps = quantityInputPropsForSaleUnit(
+    entryMode === "product_sale"
+      ? saleUnitCode || selectedProduct?.unit
+      : undefined,
+    selectedProduct?.unit,
   );
 
   const load = useCallback(async () => {
@@ -212,28 +305,38 @@ export function RevenueDetailSheet({
       return;
     }
     setLoading(true);
-    const [entryRes, catRes, prodRes, taxRes] = await Promise.all([
-      supabase
-        .from("revenue_entries")
-        .select("*")
-        .eq("id", revenueEntryId)
-        .single(),
-      supabase
-        .from("company_categories")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("ordem", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("name"),
-      supabase
-        .from("company_revenue_category_tax_settings")
-        .select("category_id, tax_type, tax_value")
-        .eq("company_id", companyId),
-    ]);
+    const [entryRes, catRes, prodRes, recipeRes, convRes, taxRes] =
+      await Promise.all([
+        supabase
+          .from("revenue_entries")
+          .select("*")
+          .eq("id", revenueEntryId)
+          .single(),
+        supabase
+          .from("company_categories")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("ordem", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("recipes")
+          .select("id, name, batch_yield, active")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("product_unit_conversions")
+          .select("*")
+          .eq("company_id", companyId),
+        supabase
+          .from("company_revenue_category_tax_settings")
+          .select("category_id, tax_type, tax_value")
+          .eq("company_id", companyId),
+      ]);
     setLoading(false);
 
     if (entryRes.error || !entryRes.data) {
@@ -246,6 +349,8 @@ export function RevenueDetailSheet({
     setDetail(entryRes.data as RevenueEntry);
     setCompanyCategories((catRes.data as CompanyCategory[]) ?? []);
     setProducts((prodRes.data as Product[]) ?? []);
+    setRecipes((recipeRes.data as RecipeListItem[]) ?? []);
+    setProductConversions((convRes.data as ProductUnitConversionDraft[]) ?? []);
     setCategoryTaxSettings(
       (taxRes.data ?? []) as Pick<
         CompanyRevenueCategoryTaxSetting,
@@ -268,10 +373,19 @@ export function RevenueDetailSheet({
   }, [revenueEntryId]);
 
   useEffect(() => {
-    if (entryMode === "product_sale") {
+    if (entryMode === "product_sale" || entryMode === "recipe_sale") {
       queueMicrotask(() => setRevenueType("operational"));
     }
   }, [entryMode]);
+
+  useEffect(() => {
+    if (!detailEditMode || entryMode !== "product_sale") return;
+    if (!selectedProduct) {
+      setSaleUnitCode("");
+      return;
+    }
+    setSaleUnitCode((prev) => prev || selectedProduct.unit);
+  }, [detailEditMode, entryMode, selectedProduct]);
 
   useEffect(() => {
     if (!detailEditMode) return;
@@ -298,7 +412,18 @@ export function RevenueDetailSheet({
     setTitle(detail.title);
     setCategoryLeafId(detail.subcategory_id);
     setProductId(detail.product_id ?? "");
-    setQuantity(detail.quantity != null ? String(detail.quantity) : "1");
+    const saleProd = detail.product_id
+      ? products.find((p) => p.id === detail.product_id)
+      : undefined;
+    setSaleUnitCode(saleProd?.unit ?? "");
+    setRecipeId(detail.recipe_id ?? "");
+    setQuantity(
+      detail.entry_mode === "recipe_sale"
+        ? "1"
+        : detail.quantity != null
+          ? String(detail.quantity)
+          : "1",
+    );
     setPricingMode(detail.pricing_mode ?? "unit");
     setUnitValue(detail.unit_value != null ? String(detail.unit_value) : "");
     setGrossInput(String(detail.gross_amount));
@@ -314,13 +439,24 @@ export function RevenueDetailSheet({
     if (!entryDate) return false;
     if (!title.trim()) return false;
     if (entryMode === "manual" && !categoryLeafId) return false;
-    if (entryMode === "product_sale" && !categoryLeafId) return false;
+    if (
+      (entryMode === "product_sale" || entryMode === "recipe_sale") &&
+      !categoryLeafId
+    ) {
+      return false;
+    }
     if (effectiveGross <= 0) return false;
     if (entryMode === "product_sale") {
-      if (!productId || qtyNum <= 0) return false;
+      if (!productId || qtyNum <= 0 || !saleUnitCode) return false;
+      if (toStockQty(productId, qtyNum, saleUnitCode) == null) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
       if (!stockOk) return false;
+    }
+    if (entryMode === "recipe_sale") {
+      if (!recipeId) return false;
+      if (pricingMode === "unit" && unitNum < 0) return false;
+      if (pricingMode === "total" && grossNum <= 0) return false;
     }
     return true;
   }, [
@@ -332,11 +468,14 @@ export function RevenueDetailSheet({
     categoryLeafId,
     effectiveGross,
     productId,
+    recipeId,
+    saleUnitCode,
     qtyNum,
     pricingMode,
     unitNum,
     grossNum,
     stockOk,
+    toStockQty,
   ]);
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -344,7 +483,8 @@ export function RevenueDetailSheet({
     if (!companyId || !detail || !canSubmit || editSaving) return;
 
     const grossPayload =
-      entryMode === "product_sale" && pricingMode === "unit"
+      (entryMode === "product_sale" || entryMode === "recipe_sale") &&
+      pricingMode === "unit"
         ? computedGrossProduct
         : effectiveGross;
 
@@ -355,7 +495,10 @@ export function RevenueDetailSheet({
       entry_date: entryDate,
       title: title.trim(),
       entry_mode: entryMode,
-      revenue_type: entryMode === "product_sale" ? "operational" : revenueType,
+      revenue_type:
+        entryMode === "product_sale" || entryMode === "recipe_sale"
+          ? "operational"
+          : revenueType,
       category_id: revenueLeaf?.parent_id ?? null,
       subcategory_id: categoryLeafId,
       gross_amount: grossPayload,
@@ -363,12 +506,22 @@ export function RevenueDetailSheet({
 
     if (entryMode === "manual") {
       payload.product_id = null;
+      payload.recipe_id = null;
       payload.quantity = null;
       payload.pricing_mode = null;
       payload.unit_value = null;
-    } else {
+    } else if (entryMode === "product_sale") {
+      const hubQty = toStockQty(productId, qtyNum, saleUnitCode);
+      if (hubQty == null) return;
       payload.product_id = productId;
-      payload.quantity = qtyNum;
+      payload.recipe_id = null;
+      payload.quantity = hubQty;
+      payload.pricing_mode = pricingMode;
+      payload.unit_value = pricingMode === "unit" ? unitNum : null;
+    } else {
+      payload.product_id = null;
+      payload.recipe_id = recipeId;
+      payload.quantity = 1;
       payload.pricing_mode = pricingMode;
       payload.unit_value = pricingMode === "unit" ? unitNum : null;
     }
@@ -440,17 +593,24 @@ export function RevenueDetailSheet({
       : "Taxa (R$)";
 
   const displayTax =
-    entryMode === "product_sale" && pricingMode === "unit"
+    (entryMode === "product_sale" || entryMode === "recipe_sale") &&
+    pricingMode === "unit"
       ? productTaxNet.taxAmount
       : taxAmount;
   const displayNet =
-    entryMode === "product_sale" && pricingMode === "unit"
+    (entryMode === "product_sale" || entryMode === "recipe_sale") &&
+    pricingMode === "unit"
       ? productTaxNet.netAmount
       : netAmount;
 
   const productNameById = useMemo(
     () => new Map(products.map((p) => [p.id, p.name])),
     [products],
+  );
+
+  const recipeNameById = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r.name])),
+    [recipes],
   );
 
   if (!companyId) return null;
@@ -502,9 +662,21 @@ export function RevenueDetailSheet({
                     <Label>Modo de lançamento</Label>
                     <Select
                       value={entryMode}
-                      onValueChange={(v) =>
-                        setEntryMode(v as "manual" | "product_sale")
-                      }
+                      onValueChange={(v) => {
+                        const m = v as "manual" | "product_sale" | "recipe_sale";
+                        setEntryMode(m);
+                        if (m === "manual") {
+                          setProductId("");
+                          setRecipeId("");
+                          setSaleUnitCode("");
+                        } else if (m === "product_sale") {
+                          setRecipeId("");
+                        } else {
+                          setProductId("");
+                          setSaleUnitCode("");
+                          setQuantity("1");
+                        }
+                      }}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue />
@@ -514,7 +686,10 @@ export function RevenueDetailSheet({
                           Lançamento por período
                         </SelectItem>
                         <SelectItem value="product_sale">
-                          Venda pontual
+                          Venda de produto
+                        </SelectItem>
+                        <SelectItem value="recipe_sale">
+                          Venda por receita (ficha)
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -544,9 +719,10 @@ export function RevenueDetailSheet({
                     </div>
                   )}
 
-                  {entryMode === "product_sale" && (
+                  {(entryMode === "product_sale" ||
+                    entryMode === "recipe_sale") && (
                     <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
-                      Venda pontual é receita{" "}
+                      Este lançamento é receita{" "}
                       <span className="font-medium text-foreground">
                         operacional
                       </span>
@@ -554,8 +730,17 @@ export function RevenueDetailSheet({
                       <span className="font-medium text-foreground">
                         categoria da venda
                       </span>{" "}
-                      classifica a receita no DRE; o produto define estoque e
-                      CMV.
+                      classifica no DRE.{" "}
+                      {entryMode === "product_sale" ? (
+                        <>
+                          O produto define estoque e CMV.
+                        </>
+                      ) : (
+                        <>
+                          A receita (ficha) baixa os ingredientes; quantidade
+                          fixa em 1 porção.
+                        </>
+                      )}
                     </p>
                   )}
 
@@ -614,6 +799,7 @@ export function RevenueDetailSheet({
                             const id = v === "__none__" ? "" : v;
                             setProductId(id);
                             const p = products.find((x) => x.id === id);
+                            setSaleUnitCode(p?.unit ?? "");
                             setTitle(p ? `Venda — ${p.name}` : "");
                           }}
                         >
@@ -630,6 +816,9 @@ export function RevenueDetailSheet({
                                   {p.sku ? ` (${p.sku})` : ""} — Est.:{" "}
                                   {Number(p.current_quantity).toLocaleString(
                                     "pt-BR",
+                                    {
+                                      maximumFractionDigits: 4,
+                                    },
                                   )}{" "}
                                   {p.unit}
                                 </SelectItem>
@@ -676,6 +865,32 @@ export function RevenueDetailSheet({
                               setQuantity(String(n));
                             }}
                           />
+                        </div>
+                        <div>
+                          <Label>Unidade</Label>
+                          <Select
+                            value={saleUnitCode || "__none__"}
+                            onValueChange={(v) =>
+                              setSaleUnitCode(v === "__none__" ? "" : v)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Unidade" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Selecione</SelectItem>
+                              {productId
+                                ? allowedUnitsForProduct(productId).map((u) => (
+                                    <SelectItem
+                                      key={`${productId}-${u}`}
+                                      value={u}
+                                    >
+                                      {u}
+                                    </SelectItem>
+                                  ))
+                                : null}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div>
                           <Label>Preço</Label>
@@ -735,10 +950,127 @@ export function RevenueDetailSheet({
                           Estoque insuficiente. Disponível:{" "}
                           {Number(
                             selectedProduct.current_quantity,
-                          ).toLocaleString("pt-BR")}{" "}
+                          ).toLocaleString("pt-BR", {
+                            maximumFractionDigits: 4,
+                          })}{" "}
                           {selectedProduct.unit}.
                         </div>
                       )}
+                    </>
+                  )}
+
+                  {entryMode === "recipe_sale" && (
+                    <>
+                      <div>
+                        <Label>Receita (ficha)</Label>
+                        <Select
+                          value={recipeId || "__none__"}
+                          onValueChange={(v) => {
+                            const id = v === "__none__" ? "" : v;
+                            setRecipeId(id);
+                            const r = recipes.find((x) => x.id === id);
+                            setTitle(r ? `Venda — ${r.name}` : "");
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a receita" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Selecione</SelectItem>
+                            {recipes
+                              .filter((r) => r.active !== false)
+                              .map((r) => (
+                                <SelectItem key={r.id} value={r.id}>
+                                  {r.name}
+                                  {r.batch_yield != null
+                                    ? ` · rend. ${r.batch_yield}`
+                                    : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Categoria da venda *</Label>
+                        <Select
+                          value={categoryLeafId || "__none__"}
+                          onValueChange={(v) =>
+                            setCategoryLeafId(v === "__none__" ? "" : v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a categoria da receita" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Selecione</SelectItem>
+                            {leafCategoryOptions.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {categoryPathLabel(c.id, categoriesById)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          1 porção
+                        </span>{" "}
+                        — ingredientes conforme a ficha
+                        {selectedRecipe?.batch_yield != null
+                          ? ` (rendimento ${selectedRecipe.batch_yield}).`
+                          : "."}
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>Preço</Label>
+                          <Select
+                            value={pricingMode}
+                            onValueChange={(v) =>
+                              setPricingMode(v as "unit" | "total")
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unit">
+                                Valor por porção
+                              </SelectItem>
+                              <SelectItem value="total">Valor total</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      {pricingMode === "unit" ? (
+                        <div>
+                          <Label>Valor por porção (R$)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={unitValue}
+                            onChange={(e) => setUnitValue(e.target.value)}
+                          />
+                        </div>
+                      ) : (
+                        <div>
+                          <Label>Valor total da venda (R$)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={grossInput}
+                            onChange={(e) => setGrossInput(e.target.value)}
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <Label>Título do lançamento</Label>
+                        <Input
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                        />
+                      </div>
                     </>
                   )}
 
@@ -862,11 +1194,27 @@ export function RevenueDetailSheet({
                         {detail.quantity != null ? (
                           <>
                             {" "}
-                            · {String(detail.quantity)}{" "}
+                            ·{" "}
+                            {Number(detail.quantity).toLocaleString("pt-BR", {
+                              maximumFractionDigits: 4,
+                            })}{" "}
                             {products.find((p) => p.id === detail.product_id)
                               ?.unit ?? ""}
                           </>
                         ) : null}
+                      </div>
+                    ) : null}
+                    {detail.entry_mode === "recipe_sale" && detail.recipe_id ? (
+                      <div>
+                        <span className="text-muted-foreground">
+                          Receita (ficha):
+                        </span>{" "}
+                        {recipeNameById.get(detail.recipe_id) ??
+                          detail.recipe_id}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · 1 porção
+                        </span>
                       </div>
                     ) : null}
                     {categoriesById.get(detail.subcategory_id) ? (
@@ -918,7 +1266,8 @@ export function RevenueDetailSheet({
             <DialogDescription>
               Tem certeza que deseja excluir esta receita? Os boletos a receber
               vinculados serão removidos. Em venda de produto, a quantidade
-              voltará ao estoque.
+              voltará ao estoque; em venda por receita (ficha), os ingredientes
+              são estornados.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

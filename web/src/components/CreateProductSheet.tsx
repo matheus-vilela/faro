@@ -24,10 +24,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { convertQuantityForProduct } from '@/lib/companyUnits/convert'
+import {
+  getLockedSystemSecondaryQty,
+  convertUnitPriceForProduct,
+  convertQuantityForProduct,
+  rebaseProductConversionsToHub,
+} from '@/lib/companyUnits/convert'
 import {
   defaultProductStockUnitCode,
-  getSystemProductUnitSelectOptions,
+  getSystemProductUnitSelectOptionsWithLegacy,
 } from '@/lib/companyUnits/productUnitOptions'
 import { supabase } from '@/lib/supabase'
 import type { CompanyProductCategory } from '@/types/companyProductCategory'
@@ -61,11 +66,31 @@ export function CreateProductSheet({
   companyId,
   onSuccess,
 }: CreateProductSheetProps) {
+  const roundUnitPrice = (value: number) =>
+    Math.round((value + Number.EPSILON) * 1e8) / 1e8
+  const formatCurrencyInput = (raw: string) => {
+    const digits = raw.replace(/\D/g, '')
+    if (!digits) return ''
+    const cents = Number(digits) / 100
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(cents)
+  }
+  const parseCurrencyInput = (raw: string): number | null => {
+    const digits = raw.replace(/\D/g, '')
+    if (!digits) return null
+    return Number(digits) / 100
+  }
+
   const [name, setName] = useState('')
   const [sku, setSku] = useState('')
   const [unit, setUnit] = useState('un')
   const [minQuantity, setMinQuantity] = useState('')
   const [lastUnitValue, setLastUnitValue] = useState('')
+  const [lastUnitValueUnitCode, setLastUnitValueUnitCode] = useState('un')
   const [barcode, setBarcode] = useState('')
   const [composesCmv, setComposesCmv] = useState(true)
   const [companyProductCategories, setCompanyProductCategories] = useState<
@@ -96,11 +121,31 @@ export function CreateProductSheet({
     if (!open || !companyId) return
     void loadCompanyProductCategories()
     setUnit(defaultProductStockUnitCode())
+    setLastUnitValueUnitCode(defaultProductStockUnitCode())
     setComposesCmv(true)
     setPendingConversions([])
   }, [open, companyId, loadCompanyProductCategories])
 
-  const unitOptions = useMemo(() => getSystemProductUnitSelectOptions(), [])
+  const unitOptions = useMemo(
+    () => getSystemProductUnitSelectOptionsWithLegacy(unit),
+    [unit],
+  )
+  const lastUnitValueUnitOptions = useMemo(() => {
+    const allowed = new Set<string>([unit])
+    for (const r of pendingConversions) {
+      if (r.primary_unit_code.trim().toLowerCase() === unit.trim().toLowerCase()) {
+        allowed.add(r.secondary_unit_code)
+      }
+    }
+    for (const candidate of ['mg', 'g', 'kg', 'ml', 'l']) {
+      if (candidate.toLowerCase() === unit.trim().toLowerCase()) continue
+      if (getLockedSystemSecondaryQty(1, unit, candidate) != null) {
+        allowed.add(candidate)
+      }
+    }
+    const base = getSystemProductUnitSelectOptionsWithLegacy(lastUnitValueUnitCode)
+    return base.filter((o) => allowed.has(o.value))
+  }, [lastUnitValueUnitCode, pendingConversions, unit])
 
   const handleUnitChange = (next: string) => {
     const prev = unit
@@ -117,13 +162,20 @@ export function CreateProductSheet({
     const cm = mOk
       ? convertQuantityForProduct(m, prev, next, prev, convRows)
       : null
+    const rebasedConversions = rebaseProductConversionsToHub(convRows, prev, next)
     setUnit(next)
-    if (pendingConversions.length > 0) {
-      toast.message(
-        'As conversões em rascunho foram limpas ao trocar a unidade.',
-      )
+    if (pendingConversions.length > 0 && rebasedConversions.length === 0) {
+      toast.message('Não foi possível reaproveitar as conversões com a nova unidade.')
     }
-    setPendingConversions([])
+    setPendingConversions(
+      rebasedConversions.map((r) => ({
+        company_id: companyId,
+        primary_qty: r.primary_qty,
+        primary_unit_code: next,
+        secondary_qty: r.secondary_qty,
+        secondary_unit_code: r.secondary_unit_code,
+      })),
+    )
     if (cm != null) {
       setMinQuantity(String(cm))
     }
@@ -134,14 +186,27 @@ export function CreateProductSheet({
     if (!companyId || !name.trim()) return
     setLoading(true)
     const finalSku = sku.trim() || generateRandomSku()
-    const parsedLast = parseFloat(
-      lastUnitValue.trim().replace(/\s/g, '').replace(',', '.'),
-    )
+    const parsedLast = parseCurrencyInput(lastUnitValue)
     const lastUnitValueToSave =
-      lastUnitValue.trim() !== '' &&
-      !Number.isNaN(parsedLast) &&
-      parsedLast >= 0
+      parsedLast != null && !Number.isNaN(parsedLast) && parsedLast >= 0
         ? parsedLast
+        : null
+    const lastUnitValueStockToSave =
+      lastUnitValueToSave != null
+        ? roundUnitPrice(
+            convertUnitPriceForProduct(
+              lastUnitValueToSave,
+              lastUnitValueUnitCode || unit,
+              unit,
+              unit,
+              pendingConversions.map((r) => ({
+                primary_unit_code: r.primary_unit_code,
+                secondary_unit_code: r.secondary_unit_code,
+                primary_qty: Number(r.primary_qty),
+                secondary_qty: Number(r.secondary_qty),
+              })),
+            ) ?? lastUnitValueToSave,
+          )
         : null
     const { data, error } = await supabase
       .from('products')
@@ -155,7 +220,12 @@ export function CreateProductSheet({
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
         ...(lastUnitValueToSave != null
-          ? { last_unit_value: lastUnitValueToSave }
+          ? {
+              last_unit_value: lastUnitValueToSave,
+              last_unit_value_unit_code: lastUnitValueUnitCode || unit,
+              last_unit_value_stock: lastUnitValueStockToSave,
+              average_cost: lastUnitValueStockToSave,
+            }
           : {}),
       })
       .select()
@@ -204,6 +274,7 @@ export function CreateProductSheet({
     setName('')
     setSku('')
     setUnit(defaultProductStockUnitCode())
+    setLastUnitValueUnitCode(defaultProductStockUnitCode())
     setMinQuantity('')
     setLastUnitValue('')
     setBarcode('')
@@ -340,24 +411,44 @@ export function CreateProductSheet({
                     disabled={loading}
                   />
                 </div>
-                <div className="mt-4">
-                  <Label htmlFor="create-last-unit">
-                    Último valor pago (opcional)
-                  </Label>
-                  <Input
-                    id="create-last-unit"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    inputMode="decimal"
-                    value={lastUnitValue}
-                    onChange={(e) => setLastUnitValue(e.target.value)}
-                    placeholder="Ex.: último preço por unidade"
-                    className={PRODUCT_SHEET_INPUT}
-                  />
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="create-last-unit">
+                      Último valor pago (opcional)
+                    </Label>
+                    <Input
+                      id="create-last-unit"
+                      type="text"
+                      inputMode="numeric"
+                      value={lastUnitValue}
+                      onChange={(e) =>
+                        setLastUnitValue(formatCurrencyInput(e.target.value))
+                      }
+                      placeholder="Ex.: R$ 25,00"
+                      className={PRODUCT_SHEET_INPUT}
+                    />
+                  </div>
+                  <div>
+                    <Label>Unidade do valor</Label>
+                    <Select
+                      value={lastUnitValueUnitCode}
+                      onValueChange={setLastUnitValueUnitCode}
+                    >
+                      <SelectTrigger className={PRODUCT_SHEET_SELECT}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {lastUnitValueUnitOptions.map((u) => (
+                          <SelectItem key={u.value} value={u.value}>
+                            {u.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Referência manual por {unit}. Compras recebidas com preço nas
-                    notas atualizam o último valor e o preço médio ponderado.
+                    Referência manual por {lastUnitValueUnitCode}. O sistema
+                    converte internamente para manter o valor total do estoque.
                   </p>
                 </div>
               </div>

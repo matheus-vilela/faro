@@ -47,6 +47,11 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import {
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
+import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
+import {
   countLinesNeedingProductReview,
   divergenceReasonLabel,
   valuesDivergeCents,
@@ -71,6 +76,7 @@ import {
   type PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
   CheckCircle2,
@@ -168,6 +174,9 @@ export function Despesas() {
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productConversions, setProductConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [loading, setLoading] = useState(true);
 
   // Form state
@@ -226,6 +235,63 @@ export function Despesas() {
     () => new Map(companyCategories.map((c) => [c.id, c])),
     [companyCategories],
   );
+  const productById = useMemo(
+    () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+  const conversionsByProduct = useMemo(() => {
+    const out = new Map<string, ProductUnitConversionDraft[]>();
+    for (const row of productConversions) {
+      if (!row.product_id) continue;
+      const prev = out.get(row.product_id) ?? [];
+      prev.push(row);
+      out.set(row.product_id, prev);
+    }
+    return out;
+  }, [productConversions]);
+  const allowedUnitsForProduct = useCallback(
+    (productId: string): string[] => {
+      const product = productById.get(productId);
+      if (!product) return [];
+      const base = product.unit;
+      const allowed = new Set<string>([base]);
+      const convs = conversionsByProduct.get(productId) ?? [];
+      for (const c of convs) {
+        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+          allowed.add(c.secondary_unit_code);
+        }
+      }
+      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
+        if (getLockedSystemSecondaryQty(1, base, candidate) != null) {
+          allowed.add(candidate);
+        }
+      }
+      return [...allowed];
+    },
+    [conversionsByProduct, productById],
+  );
+  const toStockQty = useCallback(
+    (productId: string, qty: number, fromUnit: string): number | null => {
+      const product = productById.get(productId);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(productId) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      const raw = convertQuantityForProduct(
+        qty,
+        fromUnit,
+        product.unit,
+        product.unit,
+        convs,
+      );
+      return raw == null ? null : roundHubQuantityForStock(raw);
+    },
+    [conversionsByProduct, productById],
+  );
 
   const fetchData = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -272,21 +338,28 @@ export function Despesas() {
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    const { data: sup } = await supabase
-      .from("suppliers")
-      .select("*")
-      .eq("company_id", currentCompany.id)
-      .order("name");
-    const { data: prod } = await supabase
-      .from("products")
-      .select("*")
-      .eq("company_id", currentCompany.id)
-      .order("name");
+    const [{ data: sup }, { data: prod }, { data: conv }] = await Promise.all([
+      supabase
+        .from("suppliers")
+        .select("*")
+        .eq("company_id", currentCompany.id)
+        .order("name"),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", currentCompany.id)
+        .order("name"),
+      supabase
+        .from("product_unit_conversions")
+        .select("*")
+        .eq("company_id", currentCompany.id),
+    ]);
     setExpenses((ex as Expense[]) ?? []);
     setExpensesCount(count ?? 0);
     setBoletos((bo as Boleto[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
     setProducts((prod as Product[]) ?? []);
+    setProductConversions((conv as ProductUnitConversionDraft[]) ?? []);
     setLoading(false);
   }, [
     currentCompany,
@@ -321,7 +394,13 @@ export function Despesas() {
   const addItem = () =>
     setItems((prev) => [
       ...prev,
-      { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
+      {
+        product_name: "",
+        quantity: 1,
+        unit_value: 0,
+        product_id: undefined,
+        invoice_unit: undefined,
+      },
     ]);
   const removeItem = (i: number) =>
     setItems((prev) => prev.filter((_, ix) => ix !== i));
@@ -341,7 +420,8 @@ export function Despesas() {
       (it) =>
         it.product_name.trim() !== "" &&
         Number(it.quantity) > 0 &&
-        Number(it.unit_value) >= 0,
+        Number(it.unit_value) >= 0 &&
+        (!it.product_id || !!it.invoice_unit?.trim()),
     ) &&
     (supplierId !== "" || supplierName.trim() !== "") &&
     (type !== "nota_fiscal" || invoiceNumber.trim() !== "");
@@ -439,12 +519,19 @@ export function Despesas() {
       }
     }
     for (const it of items) {
+      const invoiceUnit = it.invoice_unit?.trim() || null;
+      const stockQty =
+        it.product_id && invoiceUnit
+          ? toStockQty(it.product_id, Number(it.quantity), invoiceUnit)
+          : null;
       await supabase.from("expense_items").insert({
         expense_id: exp.id,
         product_name: it.product_name,
         quantity: it.quantity,
         unit_value: it.unit_value,
         product_id: it.product_id || null,
+        invoice_unit: invoiceUnit,
+        stock_quantity: stockQty,
         stock_added: false,
       });
     }
@@ -464,7 +551,13 @@ export function Despesas() {
     setImportProductReviewLineCount(0);
     setDivergenceReasonValue("");
     setItems([
-      { product_name: "", quantity: 1, unit_value: 0, product_id: undefined },
+      {
+        product_name: "",
+        quantity: 1,
+        unit_value: 0,
+        product_id: undefined,
+        invoice_unit: undefined,
+      },
     ]);
     setExpenseAttachmentFile(null);
     setExpenseSheetOpen(false);
@@ -606,6 +699,7 @@ export function Despesas() {
           product_name: it.productName,
           quantity: it.quantity,
           unit_value: it.unitValue,
+          invoice_unit: it.unitCommercial ?? undefined,
           product_id:
             it.productId ?? it.productMatch?.resolvedProductId ?? undefined,
         })),
@@ -1205,9 +1299,16 @@ export function Despesas() {
                           <Select
                             value={it.product_id ?? "__none__"}
                             onValueChange={(v) =>
-                              updateItem(i, {
-                                product_id: v === "__none__" ? undefined : v,
-                              })
+                              updateItem(i, (() => {
+                                const productId = v === "__none__" ? undefined : v;
+                                const product = productId
+                                  ? products.find((p) => p.id === productId)
+                                  : undefined;
+                                return {
+                                  product_id: productId,
+                                  invoice_unit: product?.unit ?? undefined,
+                                };
+                              })())
                             }
                           >
                             <SelectTrigger>
@@ -1239,6 +1340,31 @@ export function Despesas() {
                             recebimento for confirmado
                           </p>
                         </div>
+                        {it.product_id && (
+                          <div>
+                            <Label className="text-xs">Unidade de medida</Label>
+                            <Select
+                              value={it.invoice_unit ?? "__none__"}
+                              onValueChange={(v) =>
+                                updateItem(i, {
+                                  invoice_unit: v === "__none__" ? undefined : v,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione a unidade" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">Selecione</SelectItem>
+                                {allowedUnitsForProduct(it.product_id).map((u) => (
+                                  <SelectItem key={`${it.product_id}-${u}`} value={u}>
+                                    {u}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

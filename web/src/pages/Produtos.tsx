@@ -54,7 +54,12 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { convertQuantityForProduct } from "@/lib/companyUnits/convert";
+import {
+  getLockedSystemSecondaryQty,
+  convertUnitPriceForProduct,
+  convertQuantityForProduct,
+  rebaseProductConversionsToHub,
+} from "@/lib/companyUnits/convert";
 import { getSystemProductUnitSelectOptionsWithLegacy } from "@/lib/companyUnits/productUnitOptions";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
@@ -108,10 +113,11 @@ function productComposesCmv(p: Pick<Product, "composes_cmv">): boolean {
 function productPriceFields(p: Product | null): {
   average: number | null;
   last: number | null;
+  lastUnitCode: string | null;
   lineUnit: number | null;
 } {
   if (!p) {
-    return { average: null, last: null, lineUnit: null };
+    return { average: null, last: null, lastUnitCode: null, lineUnit: null };
   }
   const average =
     p.average_cost != null && p.average_cost > 0
@@ -121,8 +127,17 @@ function productPriceFields(p: Product | null): {
     p.last_unit_value != null && p.last_unit_value > 0
       ? Number(p.last_unit_value)
       : null;
-  const lineUnit = average ?? last ?? null;
-  return { average, last, lineUnit };
+  const lastStock =
+    p.last_unit_value_stock != null && p.last_unit_value_stock > 0
+      ? Number(p.last_unit_value_stock)
+      : last;
+  const lineUnit = average ?? lastStock ?? null;
+  return {
+    average,
+    last,
+    lastUnitCode: p.last_unit_value_unit_code ?? p.unit ?? null,
+    lineUnit,
+  };
 }
 
 const SHEET_SECTION = PRODUCT_SHEET_SECTION;
@@ -184,6 +199,25 @@ async function fetchProductCatalogMap(
 }
 
 export function Produtos() {
+  const roundUnitPrice = (value: number) =>
+    Math.round((value + Number.EPSILON) * 1e8) / 1e8;
+  const formatCurrencyInput = (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    const cents = Number(digits) / 100;
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(cents);
+  };
+  const parseCurrencyInput = (raw: string): number | null => {
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return null;
+    return Number(digits) / 100;
+  };
+
   const { currentCompany } = useCompany();
   const [searchParams] = useSearchParams();
   const lowStockOnly = searchParams.get("estoque") === "baixo";
@@ -225,6 +259,7 @@ export function Produtos() {
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockLastUnitValue, setStockLastUnitValue] = useState("");
+  const [stockLastUnitValueUnitCode, setStockLastUnitValueUnitCode] = useState("un");
   const [stockIsActive, setStockIsActive] = useState(true);
   const [stockComposesCmv, setStockComposesCmv] = useState(true);
   const [companyProductCategories, setCompanyProductCategories] = useState<
@@ -268,6 +303,26 @@ export function Produtos() {
     () => getSystemProductUnitSelectOptionsWithLegacy(stockUnit),
     [stockUnit],
   );
+  const lastUnitValueUnitOptions = useMemo(() => {
+    const allowed = new Set<string>([stockUnit]);
+    for (const r of stockProductConversions) {
+      if (
+        r.primary_unit_code.trim().toLowerCase() === stockUnit.trim().toLowerCase()
+      ) {
+        allowed.add(r.secondary_unit_code);
+      }
+    }
+    for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+      if (candidate.toLowerCase() === stockUnit.trim().toLowerCase()) continue;
+      if (getLockedSystemSecondaryQty(1, stockUnit, candidate) != null) {
+        allowed.add(candidate);
+      }
+    }
+    const base = getSystemProductUnitSelectOptionsWithLegacy(
+      stockLastUnitValueUnitCode,
+    );
+    return base.filter((o) => allowed.has(o.value));
+  }, [stockLastUnitValueUnitCode, stockProductConversions, stockUnit]);
 
   const handleStockUnitChange = (next: string) => {
     const prev = stockUnit;
@@ -288,8 +343,18 @@ export function Produtos() {
     const cm = mOk
       ? convertQuantityForProduct(m, prev, next, prev, convRows)
       : null;
+    const rebasedConversions = rebaseProductConversionsToHub(
+      convRows,
+      prev,
+      next,
+    );
     setStockUnit(next);
-    setStockProductConversions([]);
+    setStockProductConversions(
+      rebasedConversions.map((r) => ({
+        ...r,
+        company_id: currentCompany?.id ?? "",
+      })),
+    );
     if (cq != null) {
       setStockQuantity(String(cq));
     } else if (qOk) {
@@ -300,9 +365,9 @@ export function Produtos() {
     if (cm != null) {
       setStockMinQuantity(String(cm));
     }
-    if (stockProductConversions.length > 0) {
+    if (stockProductConversions.length > 0 && rebasedConversions.length === 0) {
       toast.message(
-        "As conversões específicas deste produto foram limpas ao trocar a unidade.",
+        "Não foi possível reaproveitar as conversões com a nova unidade.",
       );
     }
   };
@@ -591,8 +656,12 @@ export function Produtos() {
       p.last_unit_value != null && p.last_unit_value > 0
         ? Number(p.last_unit_value)
         : null;
-    const unit = cmv ?? last ?? null;
-    return { cmv, last, unit };
+    const lastStock =
+      p.last_unit_value_stock != null && p.last_unit_value_stock > 0
+        ? Number(p.last_unit_value_stock)
+        : last;
+    const unit = cmv ?? lastStock ?? null;
+    return { cmv, last, unit, lastUnitCode: p.last_unit_value_unit_code ?? p.unit };
   };
 
   const stockPricePresentation = useMemo(
@@ -615,8 +684,16 @@ export function Produtos() {
     setStockMinQuantity(String(p.min_quantity ?? 0));
     setStockLastUnitValue(
       p.last_unit_value != null && !Number.isNaN(Number(p.last_unit_value))
-        ? String(Number(p.last_unit_value))
+        ? new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: "BRL",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(Number(p.last_unit_value))
         : "",
+    );
+    setStockLastUnitValueUnitCode(
+      p.last_unit_value_unit_code?.trim() || p.unit || "un",
     );
     setStockIsActive(p.is_active !== false);
     setStockComposesCmv(productComposesCmv(p));
@@ -684,17 +761,11 @@ export function Produtos() {
     const composesCmvChanged =
       productComposesCmv(stockProduct) !== stockComposesCmv;
 
-    const rawLast = stockLastUnitValue.trim();
-    let resolvedLastUnit: number | null = null;
-    if (rawLast !== "") {
-      const parsedLast = parseFloat(
-        rawLast.replace(/\s/g, "").replace(",", "."),
-      );
-      if (Number.isNaN(parsedLast) || parsedLast < 0) {
-        return;
-      }
-      resolvedLastUnit = parsedLast;
-    }
+    const parsedLast = parseCurrencyInput(stockLastUnitValue);
+    const resolvedLastUnit =
+      parsedLast != null && !Number.isNaN(parsedLast) && parsedLast >= 0
+        ? parsedLast
+        : null;
     const currentLastUnit =
       stockProduct.last_unit_value != null &&
       !Number.isNaN(Number(stockProduct.last_unit_value))
@@ -706,6 +777,10 @@ export function Produtos() {
         : resolvedLastUnit === null || currentLastUnit === null
           ? true
           : Math.abs(resolvedLastUnit - currentLastUnit) > 1e-6;
+    const currentLastUnitCode =
+      stockProduct.last_unit_value_unit_code?.trim() || stockProduct.unit || "un";
+    const lastUnitValueUnitChanged =
+      (stockLastUnitValueUnitCode || stockUnit) !== currentLastUnitCode;
 
     const categoryIdsSnapshot = stockProductCategoryIdsRef.current;
     const categoriesChanged = !sameCategorySelection(
@@ -727,6 +802,7 @@ export function Produtos() {
       !barcodeChanged &&
       !composesCmvChanged &&
       !lastUnitValueChanged &&
+      !lastUnitValueUnitChanged &&
       !categoriesChanged &&
       !conversionsChanged
     ) {
@@ -758,6 +834,9 @@ export function Produtos() {
       barcode?: string | null;
       composes_cmv?: boolean;
       last_unit_value?: number | null;
+      last_unit_value_unit_code?: string | null;
+      last_unit_value_stock?: number | null;
+      average_cost?: number | null;
     } = {};
     if (nameChanged) updates.name = newName;
     if (unitChanged) {
@@ -773,8 +852,70 @@ export function Produtos() {
     if (composesCmvChanged) {
       updates.composes_cmv = stockComposesCmv;
     }
-    if (lastUnitValueChanged) {
+    if (lastUnitValueChanged || lastUnitValueUnitChanged) {
       updates.last_unit_value = resolvedLastUnit;
+      updates.last_unit_value_unit_code = stockLastUnitValueUnitCode || stockUnit;
+      if (resolvedLastUnit == null) {
+        updates.last_unit_value_stock = null;
+        updates.average_cost = null;
+      } else {
+        const convRows = stockProductConversions.map((r) => ({
+          primary_unit_code: r.primary_unit_code,
+          secondary_unit_code: r.secondary_unit_code,
+          primary_qty: Number(r.primary_qty),
+          secondary_qty: Number(r.secondary_qty),
+        }));
+        const stockLast = convertUnitPriceForProduct(
+          resolvedLastUnit,
+          stockLastUnitValueUnitCode || stockUnit,
+          stockUnit,
+          stockUnit,
+          convRows,
+        );
+        const stockCost = roundUnitPrice(stockLast ?? resolvedLastUnit);
+        updates.last_unit_value_stock = stockCost;
+        // Mantém a base de valorização de estoque alinhada ao preço manual informado.
+        updates.average_cost = stockCost;
+      }
+    }
+    if (unitChanged) {
+      const currentAverageCost =
+        stockProduct.average_cost != null &&
+        Number.isFinite(Number(stockProduct.average_cost))
+          ? Number(stockProduct.average_cost)
+          : null;
+      if (
+        currentAverageCost != null &&
+        Number.isFinite(currentQty) &&
+        currentQty > 0 &&
+        Number.isFinite(newQty) &&
+        newQty > 0
+      ) {
+        updates.average_cost = roundUnitPrice(
+          (currentQty * currentAverageCost) / newQty,
+        );
+      }
+      if (!lastUnitValueChanged && !lastUnitValueUnitChanged) {
+        const currentStockLast =
+          stockProduct.last_unit_value_stock != null &&
+          Number.isFinite(Number(stockProduct.last_unit_value_stock))
+            ? Number(stockProduct.last_unit_value_stock)
+            : stockProduct.last_unit_value != null &&
+                Number.isFinite(Number(stockProduct.last_unit_value))
+              ? Number(stockProduct.last_unit_value)
+              : null;
+        if (
+          currentStockLast != null &&
+          Number.isFinite(currentQty) &&
+          currentQty > 0 &&
+          Number.isFinite(newQty) &&
+          newQty > 0
+        ) {
+          updates.last_unit_value_stock = roundUnitPrice(
+            (currentQty * currentStockLast) / newQty,
+          );
+        }
+      }
     }
     if (Object.keys(updates).length > 0) {
       const { error } = await supabase
@@ -1197,7 +1338,7 @@ export function Produtos() {
                   p.min_quantity > 0
                     ? Number(p.min_quantity).toLocaleString("pt-BR")
                     : "—";
-                const { cmv, last, unit: unitCost } = unitCostParts(p);
+                const { cmv, last, unit: unitCost, lastUnitCode } = unitCostParts(p);
                 const stockLineValue =
                   unitCost != null
                     ? Number(p.current_quantity) * unitCost
@@ -1354,7 +1495,7 @@ export function Produtos() {
                                       {formatCurrency(last)}
                                     </span>
                                     <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
-                                      /{p.unit} · último
+                                      /{lastUnitCode ?? p.unit} · último
                                     </span>
                                   </span>
                                 ) : (
@@ -1593,7 +1734,9 @@ export function Produtos() {
                                   {formatCurrency(stockPricePresentation.last)}
                                   <span className="text-xs font-normal text-muted-foreground">
                                     {" "}
-                                    por {stockProduct.unit}
+                                    por{" "}
+                                    {stockPricePresentation.lastUnitCode ??
+                                      stockProduct.unit}
                                   </span>
                                 </p>
                               </div>
@@ -1609,7 +1752,9 @@ export function Produtos() {
                             <p>
                               {formatCurrency(stockPricePresentation.last)}
                               <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
-                                por {stockProduct.unit}
+                                por{" "}
+                                {stockPricePresentation.lastUnitCode ??
+                                  stockProduct.unit}
                               </span>
                             </p>
                           ) : (
@@ -1838,23 +1983,43 @@ export function Produtos() {
                         disabled={stockSaving}
                       />
                     </div>
-                    <div className="mt-4">
-                      <Label htmlFor="stock-last-unit">Último valor pago (opcional)</Label>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="stock-last-unit">Último valor pago (opcional)</Label>
                       <Input
                         id="stock-last-unit"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        inputMode="decimal"
+                        type="text"
+                        inputMode="numeric"
                         value={stockLastUnitValue}
-                        onChange={(e) => setStockLastUnitValue(e.target.value)}
-                        placeholder="Ex.: último preço por unidade"
+                        onChange={(e) =>
+                          setStockLastUnitValue(formatCurrencyInput(e.target.value))
+                        }
+                        placeholder="Ex.: R$ 25,00"
                         className={SHEET_INPUT}
                       />
+                      </div>
+                      <div>
+                        <Label>Unidade do valor</Label>
+                        <Select
+                          value={stockLastUnitValueUnitCode}
+                          onValueChange={setStockLastUnitValueUnitCode}
+                        >
+                          <SelectTrigger className={SHEET_SELECT}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {lastUnitValueUnitOptions.map((u) => (
+                              <SelectItem key={u.value} value={u.value}>
+                                {u.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <p className="mt-1.5 text-xs text-muted-foreground">
-                        Referência manual por {stockUnit}. Ao receber compras com valor
-                        unitário nas notas, o sistema acumula esses preços e calcula o
-                        preço médio ponderado do estoque.
+                        Referência manual por {stockLastUnitValueUnitCode}. Esse valor
+                        de referência não muda ao trocar a unidade principal do produto;
+                        o sistema converte internamente só para manter o total correto.
                       </p>
                     </div>
                   </div>
@@ -2014,7 +2179,13 @@ export function Produtos() {
         <EstoquePerdasPanel companyId={currentCompany.id} />
       )}
       {currentCompany?.id && estoqueTab === "receitas" && (
-        <EstoqueReceitasPanel companyId={currentCompany.id} />
+        <EstoqueReceitasPanel
+          companyId={currentCompany.id}
+          onStockChanged={() => {
+            void fetchProducts();
+            void fetchLowStockCount();
+          }}
+        />
       )}
     </PageShell>
   );

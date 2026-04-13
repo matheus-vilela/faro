@@ -16,6 +16,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -32,6 +37,11 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
+import {
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
 import {
   buildChildrenMap,
   categoryPathLabel,
@@ -39,21 +49,31 @@ import {
   tipoBadge,
 } from "@/lib/companyCategoryLabels";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
+import type { RecipeListItem } from "@/types/recipe";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   computeRevenueTaxDeduction,
   type RevenueEntry,
   type RevenueTaxType,
 } from "@/types/revenue";
 import {
-  parseQuantityForUnit,
-  quantityInputPropsForUnit,
+  parseSaleQuantity,
+  quantityInputPropsForSaleUnit,
+  roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
-import { CircleDollarSign, FileText, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ChevronsUpDown,
+  CircleDollarSign,
+  FileText,
+  Plus,
+  Search,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -65,7 +85,18 @@ const REVENUE_TYPE_LABEL: Record<string, string> = {
 const ENTRY_MODE_LABEL: Record<string, string> = {
   manual: "Manual",
   product_sale: "Venda de produto",
+  recipe_sale: "Venda por receita (ficha)",
 };
+
+type LaunchMode = "manual" | "pontual";
+
+function parsePontualRef(
+  ref: string,
+): { kind: "product" | "recipe"; id: string } | null {
+  if (ref.startsWith("p:")) return { kind: "product", id: ref.slice(2) };
+  if (ref.startsWith("r:")) return { kind: "recipe", id: ref.slice(2) };
+  return null;
+}
 
 function endOfMonthDate(month: number, year: number): string {
   const d = new Date(year, month, 0);
@@ -77,6 +108,216 @@ function endOfMonthDate(month: number, year: number): string {
 function startOfMonthDate(month: number, year: number): string {
   const mm = String(month).padStart(2, "0");
   return `${year}-${mm}-01`;
+}
+
+function PontualProductRecipePicker({
+  products,
+  recipes,
+  value,
+  onChange,
+}: {
+  products: Product[];
+  recipes: RecipeListItem[];
+  value: string;
+  onChange: (ref: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"products" | "recipes">("products");
+  const [q, setQ] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  usePopoverListScrollFix(open, listRef);
+
+  const parsed = useMemo(() => parsePontualRef(value), [value]);
+
+  const activeProducts = useMemo(
+    () => products.filter((p) => p.is_active !== false),
+    [products],
+  );
+  const activeRecipes = useMemo(
+    () => recipes.filter((r) => r.active !== false),
+    [recipes],
+  );
+
+  const selectedProduct =
+    parsed?.kind === "product"
+      ? products.find((p) => p.id === parsed.id)
+      : null;
+  const selectedRecipe =
+    parsed?.kind === "recipe"
+      ? recipes.find((r) => r.id === parsed.id)
+      : null;
+
+  const triggerLabel = !parsed
+    ? "Selecione produto ou receita"
+    : parsed.kind === "product" && selectedProduct
+      ? `${selectedProduct.name}${selectedProduct.sku ? ` (${selectedProduct.sku})` : ""}`
+      : parsed.kind === "recipe" && selectedRecipe
+        ? selectedRecipe.name
+        : "Selecione produto ou receita";
+
+  const filteredProducts = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return activeProducts;
+    return activeProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(t) ||
+        !!(p.sku && p.sku.toLowerCase().includes(t)),
+    );
+  }, [activeProducts, q]);
+
+  const filteredRecipes = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return activeRecipes;
+    return activeRecipes.filter((r) => r.name.toLowerCase().includes(t));
+  }, [activeRecipes, q]);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
+          setQ("");
+          setTab(parsed?.kind === "recipe" ? "recipes" : "products");
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate text-left">{triggerLabel}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <div className="flex border-b border-border">
+          <button
+            type="button"
+            className={cn(
+              "flex-1 px-3 py-2.5 text-sm font-medium transition-colors",
+              tab === "products"
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setTab("products")}
+          >
+            Produtos
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "flex-1 px-3 py-2.5 text-sm font-medium transition-colors",
+              tab === "recipes"
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setTab("recipes")}
+          >
+            Receitas (ficha)
+          </button>
+        </div>
+        <div className="border-b border-border p-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={
+                tab === "products" ? "Buscar produto…" : "Buscar receita…"
+              }
+              className="h-9 pl-8"
+            />
+          </div>
+        </div>
+        <div
+          ref={listRef}
+          className="max-h-64 overflow-y-auto p-1"
+        >
+          <button
+            type="button"
+            className="w-full rounded-sm px-2 py-2 text-left text-sm text-muted-foreground hover:bg-accent"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            Limpar seleção
+          </button>
+          {tab === "products" ? (
+            filteredProducts.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">
+                Nenhum produto encontrado.
+              </p>
+            ) : (
+              filteredProducts.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={cn(
+                    "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                    parsed?.kind === "product" &&
+                      parsed.id === p.id &&
+                      "bg-accent/80",
+                  )}
+                  onClick={() => {
+                    onChange(`p:${p.id}`);
+                    setOpen(false);
+                  }}
+                >
+                  <div className="font-medium">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {p.sku ? `${p.sku} · ` : ""}
+                    Est.:{" "}
+                    {Number(p.current_quantity).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 4,
+                    })}{" "}
+                    {p.unit}
+                  </div>
+                </button>
+              ))
+            )
+          ) : filteredRecipes.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">
+              {activeRecipes.length === 0
+                ? "Nenhuma receita ativa."
+                : "Nenhuma receita encontrada."}
+            </p>
+          ) : (
+            filteredRecipes.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={cn(
+                  "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                  parsed?.kind === "recipe" &&
+                    parsed.id === r.id &&
+                    "bg-accent/80",
+                )}
+                onClick={() => {
+                  onChange(`r:${r.id}`);
+                  setOpen(false);
+                }}
+              >
+                <div className="font-medium">{r.name}</div>
+                {r.batch_yield != null ? (
+                  <div className="text-xs text-muted-foreground">
+                    Rend. {r.batch_yield}
+                  </div>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export function Receitas() {
@@ -95,14 +336,17 @@ export function Receitas() {
     [],
   );
   const [products, setProducts] = useState<Product[]>([]);
+  const [recipes, setRecipes] = useState<RecipeListItem[]>([]);
+  const [productConversions, setProductConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [detailRevenueId, setDetailRevenueId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [entryMode, setEntryMode] = useState<"manual" | "product_sale">(
-    "manual",
-  );
+  const [baseMode, setBaseMode] = useState<LaunchMode>("manual");
+  const [pontualRef, setPontualRef] = useState("");
   const [revenueType, setRevenueType] = useState<
     "operational" | "non_operational"
   >("operational");
@@ -113,7 +357,7 @@ export function Receitas() {
   const [title, setTitle] = useState("");
   /** Folha de receita (ex.: "Receita Operacional › Vendas de produtos") */
   const [categoryLeafId, setCategoryLeafId] = useState<string>("");
-  const [productId, setProductId] = useState<string>("");
+  const [saleUnitCode, setSaleUnitCode] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("1");
   const [pricingMode, setPricingMode] = useState<"unit" | "total">("unit");
   const [unitValue, setUnitValue] = useState<string>("");
@@ -153,11 +397,76 @@ export function Receitas() {
     () => new Map(products.map((p) => [p.id, p.name])),
     [products],
   );
+  const productById = useMemo(
+    () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+
+  const isPontual = baseMode === "pontual";
+  const pontualParsed = useMemo(() => parsePontualRef(pontualRef), [pontualRef]);
+  const isProductSale = isPontual && pontualParsed?.kind === "product";
+  const isRecipeSale = isPontual && pontualParsed?.kind === "recipe";
+  const productId = isProductSale && pontualParsed ? pontualParsed.id : "";
+  const recipeId = isRecipeSale && pontualParsed ? pontualParsed.id : "";
+
+  const conversionsByProduct = useMemo(() => {
+    const out = new Map<string, ProductUnitConversionDraft[]>();
+    for (const row of productConversions) {
+      if (!row.product_id) continue;
+      const prev = out.get(row.product_id) ?? [];
+      prev.push(row);
+      out.set(row.product_id, prev);
+    }
+    return out;
+  }, [productConversions]);
+  const allowedUnitsForProduct = useCallback(
+    (pid: string): string[] => {
+      const product = productById.get(pid);
+      if (!product) return [];
+      const base = product.unit;
+      const allowed = new Set<string>([base]);
+      const convs = conversionsByProduct.get(pid) ?? [];
+      for (const c of convs) {
+        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+          allowed.add(c.secondary_unit_code);
+        }
+      }
+      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
+        if (getLockedSystemSecondaryQty(1, base, candidate) != null) {
+          allowed.add(candidate);
+        }
+      }
+      return [...allowed];
+    },
+    [conversionsByProduct, productById],
+  );
+  const toStockQty = useCallback(
+    (pid: string, qty: number, fromUnit: string): number | null => {
+      const product = productById.get(pid);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(pid) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      const raw = convertQuantityForProduct(
+        qty,
+        fromUnit,
+        product.unit,
+        product.unit,
+        convs,
+      );
+      return raw == null ? null : roundHubQuantityForStock(raw);
+    },
+    [conversionsByProduct, productById],
+  );
 
   const tipoFilter = useMemo((): "OPERACIONAL" | "NAO_OPERACIONAL" => {
-    if (entryMode === "product_sale") return "OPERACIONAL";
+    if (isPontual) return "OPERACIONAL";
     return revenueType === "operational" ? "OPERACIONAL" : "NAO_OPERACIONAL";
-  }, [entryMode, revenueType]);
+  }, [isPontual, revenueType]);
 
   const receitaCategories = useMemo(
     () =>
@@ -197,21 +506,39 @@ export function Receitas() {
     ? products.find((p) => p.id === productId)
     : undefined;
 
+  const selectedRecipe = recipeId
+    ? recipes.find((r) => r.id === recipeId)
+    : undefined;
+
+  const recipeNameById = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r.name])),
+    [recipes],
+  );
+
   const qtyNum = useMemo(() => {
-    if (entryMode === "product_sale" && selectedProduct) {
-      return parseQuantityForUnit(quantity, selectedProduct.unit);
+    if (isRecipeSale) return 1;
+    if (isProductSale && saleUnitCode && selectedProduct) {
+      return parseSaleQuantity(
+        quantity,
+        saleUnitCode,
+        selectedProduct.unit,
+      );
     }
     return parseFloat(quantity.replace(",", ".")) || 0;
-  }, [entryMode, quantity, selectedProduct]);
+  }, [isRecipeSale, isProductSale, quantity, saleUnitCode, selectedProduct]);
+  const stockQtyNum = useMemo(() => {
+    if (!isProductSale || !selectedProduct || !saleUnitCode) return 0;
+    return toStockQty(selectedProduct.id, qtyNum, saleUnitCode) ?? 0;
+  }, [isProductSale, selectedProduct, saleUnitCode, qtyNum, toStockQty]);
 
   const computedGrossProduct = useMemo(() => {
-    if (entryMode !== "product_sale") return grossNum;
+    if (!isProductSale && !isRecipeSale) return grossNum;
     if (pricingMode === "unit") return Math.round(qtyNum * unitNum * 100) / 100;
     return grossNum;
-  }, [entryMode, pricingMode, qtyNum, unitNum, grossNum]);
+  }, [isProductSale, isRecipeSale, pricingMode, qtyNum, unitNum, grossNum]);
 
   const effectiveGross =
-    entryMode === "product_sale" && pricingMode === "unit"
+    (isProductSale || isRecipeSale) && pricingMode === "unit"
       ? computedGrossProduct
       : grossNum;
 
@@ -222,13 +549,14 @@ export function Receitas() {
   });
 
   const stockOk =
-    entryMode !== "product_sale" ||
+    !isProductSale ||
     !selectedProduct ||
     qtyNum <= 0 ||
-    Number(selectedProduct.current_quantity) >= qtyNum;
+    Number(selectedProduct.current_quantity) >= stockQtyNum;
 
-  const quantityFieldProps = quantityInputPropsForUnit(
-    entryMode === "product_sale" ? selectedProduct?.unit : undefined,
+  const quantityFieldProps = quantityInputPropsForSaleUnit(
+    isProductSale ? saleUnitCode || selectedProduct?.unit : undefined,
+    selectedProduct?.unit,
   );
 
   const fetchData = useCallback(async () => {
@@ -268,6 +596,16 @@ export function Receitas() {
       .select("*")
       .eq("company_id", currentCompany.id)
       .order("name");
+    const { data: convRows } = await supabase
+      .from("product_unit_conversions")
+      .select("*")
+      .eq("company_id", currentCompany.id);
+
+    const { data: recipeRows } = await supabase
+      .from("recipes")
+      .select("id, name, batch_yield, active")
+      .eq("company_id", currentCompany.id)
+      .order("name");
 
     const { data: taxRows } = await supabase
       .from("company_revenue_category_tax_settings")
@@ -276,6 +614,8 @@ export function Receitas() {
 
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     setProducts((prodRows as Product[]) ?? []);
+    setRecipes((recipeRows as RecipeListItem[]) ?? []);
+    setProductConversions((convRows as ProductUnitConversionDraft[]) ?? []);
     setCategoryTaxSettings(
       (taxRows ?? []) as Pick<
         CompanyRevenueCategoryTaxSetting,
@@ -307,24 +647,33 @@ export function Receitas() {
   useEffect(() => {
     if (!sheetOpen) return;
     setCategoryLeafId("");
-  }, [tipoFilter, sheetOpen, entryMode]);
+  }, [tipoFilter, sheetOpen, baseMode]);
 
   useEffect(() => {
-    if (!productId) return;
+    if (!isProductSale || !productId) return;
     setQuantity("1");
-  }, [productId]);
+  }, [isProductSale, productId]);
+  useEffect(() => {
+    if (!selectedProduct) {
+      setSaleUnitCode("");
+      return;
+    }
+    setSaleUnitCode((prev) => prev || selectedProduct.unit);
+  }, [selectedProduct]);
 
   useEffect(() => {
-    if (entryMode === "product_sale") {
+    if (isPontual) {
       setRevenueType("operational");
     }
-  }, [entryMode]);
+  }, [isPontual]);
 
   useEffect(() => {
-    if (entryMode === "product_sale" && selectedProduct) {
+    if (isRecipeSale && selectedRecipe) {
+      setTitle(`Venda — ${selectedRecipe.name}`);
+    } else if (isProductSale && selectedProduct) {
       setTitle(`Venda — ${selectedProduct.name}`);
     }
-  }, [entryMode, productId, selectedProduct?.name]);
+  }, [isRecipeSale, isProductSale, selectedRecipe?.name, selectedProduct?.name]);
 
   useEffect(() => {
     if (!categoryLeafId) {
@@ -346,10 +695,11 @@ export function Receitas() {
     const t = new Date();
     setEntryDate(t.toISOString().slice(0, 10));
     setTitle("");
-    setEntryMode("manual");
+    setBaseMode("manual");
+    setPontualRef("");
     setRevenueType("operational");
     setCategoryLeafId("");
-    setProductId("");
+    setSaleUnitCode("");
     setQuantity("1");
     setPricingMode("unit");
     setUnitValue("");
@@ -367,28 +717,44 @@ export function Receitas() {
     if (!currentCompany?.id) return false;
     if (!entryDate) return false;
     if (!title.trim()) return false;
-    if (entryMode === "manual" && !categoryLeafId) return false;
-    if (entryMode === "product_sale" && !categoryLeafId) return false;
+    if (baseMode === "manual" && !categoryLeafId) return false;
+    if (isPontual) {
+      if (!pontualParsed) return false;
+      if (!categoryLeafId) return false;
+    }
     if (effectiveGross <= 0) return false;
-    if (entryMode === "product_sale") {
-      if (!productId || qtyNum <= 0) return false;
+    if (isProductSale) {
+      if (!productId || qtyNum <= 0 || !saleUnitCode) return false;
+      if (toStockQty(productId, qtyNum, saleUnitCode) == null) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
       if (!stockOk) return false;
+    }
+    if (isRecipeSale) {
+      if (!recipeId) return false;
+      if (pricingMode === "unit" && unitNum < 0) return false;
+      if (pricingMode === "total" && grossNum <= 0) return false;
     }
     return true;
   }, [
     currentCompany?.id,
     entryDate,
     title,
-    entryMode,
+    baseMode,
+    isPontual,
+    pontualParsed,
     categoryLeafId,
     effectiveGross,
+    isProductSale,
+    isRecipeSale,
     productId,
+    recipeId,
     qtyNum,
     pricingMode,
     unitNum,
     grossNum,
+    saleUnitCode,
+    toStockQty,
     stockOk,
   ]);
 
@@ -396,8 +762,15 @@ export function Receitas() {
     e.preventDefault();
     if (!currentCompany?.id || !canSubmit || saving) return;
 
+    const rpcEntryMode =
+      baseMode === "manual"
+        ? "manual"
+        : isRecipeSale
+          ? "recipe_sale"
+          : "product_sale";
+
     const grossPayload =
-      entryMode === "product_sale" && pricingMode === "unit"
+      (isProductSale || isRecipeSale) && pricingMode === "unit"
         ? computedGrossProduct
         : effectiveGross;
 
@@ -406,22 +779,29 @@ export function Receitas() {
       company_id: currentCompany.id,
       entry_date: entryDate,
       title: title.trim(),
-      entry_mode: entryMode,
-      revenue_type:
-        entryMode === "product_sale" ? "operational" : revenueType,
+      entry_mode: rpcEntryMode,
+      revenue_type: isPontual ? "operational" : revenueType,
       category_id: revenueLeaf?.parent_id ?? null,
       subcategory_id: categoryLeafId,
       gross_amount: grossPayload,
     };
 
-    if (entryMode === "manual") {
+    if (rpcEntryMode === "manual") {
       payload.product_id = null;
+      payload.recipe_id = null;
       payload.quantity = null;
       payload.pricing_mode = null;
       payload.unit_value = null;
-    } else {
+    } else if (rpcEntryMode === "product_sale") {
       payload.product_id = productId;
-      payload.quantity = qtyNum;
+      payload.recipe_id = null;
+      payload.quantity = toStockQty(productId, qtyNum, saleUnitCode) ?? qtyNum;
+      payload.pricing_mode = pricingMode;
+      payload.unit_value = pricingMode === "unit" ? unitNum : null;
+    } else {
+      payload.product_id = null;
+      payload.recipe_id = recipeId;
+      payload.quantity = 1;
       payload.pricing_mode = pricingMode;
       payload.unit_value = pricingMode === "unit" ? unitNum : null;
     }
@@ -467,12 +847,14 @@ export function Receitas() {
       ? `Taxa (${taxValNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`
       : "Taxa (R$)";
 
-  const displayTax = entryMode === "product_sale" && pricingMode === "unit"
-    ? productTaxNet.taxAmount
-    : taxAmount;
-  const displayNet = entryMode === "product_sale" && pricingMode === "unit"
-    ? productTaxNet.netAmount
-    : netAmount;
+  const displayTax =
+    (isProductSale || isRecipeSale) && pricingMode === "unit"
+      ? productTaxNet.taxAmount
+      : taxAmount;
+  const displayNet =
+    (isProductSale || isRecipeSale) && pricingMode === "unit"
+      ? productTaxNet.netAmount
+      : netAmount;
 
   return (
     <PageShell className="space-y-8 pb-0" narrow>
@@ -499,37 +881,48 @@ export function Receitas() {
       />
 
       <Sheet open={sheetOpen} onOpenChange={handleOpenSheet}>
-        <SheetContent className="overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <CircleDollarSign className="h-5 w-5" />
-              Nova receita
-            </SheetTitle>
-            <SheetDescription>
-              Lançamento por período ou venda pontual de produto com impostos e
-              DRE.
-            </SheetDescription>
+        <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-xl">
+          <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
+                <CircleDollarSign className="h-6 w-6 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1 pr-6">
+                <SheetTitle className="text-xl font-semibold sm:text-2xl">
+                  Nova receita
+                </SheetTitle>
+                <SheetDescription>
+                  Lançamento por período ou venda pontual com estoque, impostos e
+                  DRE.
+                </SheetDescription>
+              </div>
+            </div>
           </SheetHeader>
-          <form onSubmit={handleSubmit} className="space-y-5 py-4">
-            <div>
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+              <div className="space-y-4 p-6">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+              <div>
               <Label>Modo de lançamento</Label>
               <Select
-                value={entryMode}
-                onValueChange={(v) =>
-                  setEntryMode(v as "manual" | "product_sale")
-                }
+                value={baseMode}
+                onValueChange={(v) => {
+                  const m = v as LaunchMode;
+                  setBaseMode(m);
+                  if (m === "manual") setPontualRef("");
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="manual">Lançamento por período</SelectItem>
-                  <SelectItem value="product_sale">Venda pontual</SelectItem>
+                  <SelectItem value="pontual">Venda pontual</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {entryMode === "manual" && (
+            {baseMode === "manual" && (
               <div>
                 <Label>Tipo da receita</Label>
                 <Select
@@ -551,11 +944,13 @@ export function Receitas() {
               </div>
             )}
 
-            {entryMode === "product_sale" && (
+            {isPontual && (
               <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
                 Venda pontual é receita{" "}
                 <span className="font-medium text-foreground">operacional</span>.
-                Escolha a <span className="font-medium text-foreground">categoria da venda</span> para o DRE; o produto define apenas estoque e CMV.
+                Escolha a <span className="font-medium text-foreground">categoria da venda</span> para o DRE.{" "}
+                <span className="font-medium text-foreground">Produto</span>: baixa um item;{" "}
+                <span className="font-medium text-foreground">receita (ficha)</span>: baixa os ingredientes conforme o rendimento cadastrado (sempre 1 porção neste lançamento).
               </p>
             )}
 
@@ -568,9 +963,10 @@ export function Receitas() {
                 required
               />
             </div>
+            </div>
 
-            {entryMode === "manual" && (
-              <>
+            {baseMode === "manual" && (
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
                 <div>
                   <Label>Título</Label>
                   <Input
@@ -608,39 +1004,19 @@ export function Receitas() {
                     </p>
                   )}
                 </div>
-              </>
+              </div>
             )}
 
-            {entryMode === "product_sale" && (
-              <>
-                <div>
-                  <Label>Produto</Label>
-                  <Select
-                    value={productId || "__none__"}
-                    onValueChange={(v) => {
-                      const id = v === "__none__" ? "" : v;
-                      setProductId(id);
-                      const p = products.find((x) => x.id === id);
-                      setTitle(p ? `Venda — ${p.name}` : "");
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Selecione</SelectItem>
-                      {products
-                        .filter((p) => p.is_active !== false)
-                        .map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                            {p.sku ? ` (${p.sku})` : ""} — Est.:{" "}
-                            {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
-                            {p.unit}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+            {isPontual && (
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+                <div className="space-y-2">
+                  <Label>Produto ou receita (ficha)</Label>
+                  <PontualProductRecipePicker
+                    products={products}
+                    recipes={recipes}
+                    value={pontualRef}
+                    onChange={setPontualRef}
+                  />
                 </div>
 
                 <div>
@@ -671,26 +1047,74 @@ export function Receitas() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Quantidade</Label>
-                    <Input
-                      type="number"
-                      step={quantityFieldProps.step}
-                      min={quantityFieldProps.min}
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      onBlur={() => {
-                        if (!quantityFieldProps.integerOnly) return;
-                        const n = Math.max(
-                          1,
-                          Math.round(parseFloat(quantity) || 0),
-                        );
-                        setQuantity(String(n));
-                      }}
-                    />
-                  </div>
-                  <div>
+                {isRecipeSale && (
+                  <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
+                    <span className="font-medium text-foreground">1 porção</span>{" "}
+                    neste lançamento. Os ingredientes são baixados conforme as quantidades da ficha
+                    {selectedRecipe?.batch_yield != null
+                      ? ` (rendimento ${selectedRecipe.batch_yield}).`
+                      : "."}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  {isProductSale ? (
+                    <>
+                      <div>
+                        <Label>Quantidade</Label>
+                        <Input
+                          type="number"
+                          step={quantityFieldProps.step}
+                          min={quantityFieldProps.min}
+                          value={quantity}
+                          onChange={(e) => setQuantity(e.target.value)}
+                          onBlur={() => {
+                            if (!quantityFieldProps.integerOnly) return;
+                            const n = Math.max(
+                              1,
+                              Math.round(parseFloat(quantity) || 0),
+                            );
+                            setQuantity(String(n));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label>Unidade</Label>
+                        <Select
+                          value={saleUnitCode || "__none__"}
+                          onValueChange={(v) =>
+                            setSaleUnitCode(v === "__none__" ? "" : v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unidade" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Selecione</SelectItem>
+                            {productId
+                              ? allowedUnitsForProduct(productId).map((u) => (
+                                  <SelectItem key={`${productId}-${u}`} value={u}>
+                                    {u}
+                                  </SelectItem>
+                                ))
+                              : null}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  ) : isRecipeSale ? (
+                    <div className="col-span-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2 sm:col-span-1">
+                      <p className="text-xs text-muted-foreground">Quantidade</p>
+                      <p className="text-sm font-medium text-foreground">1 porção</p>
+                    </div>
+                  ) : null}
+                  <div
+                    className={
+                      isRecipeSale
+                        ? "col-span-2 sm:col-span-1"
+                        : undefined
+                    }
+                  >
                     <Label>Preço</Label>
                     <Select
                       value={pricingMode}
@@ -700,7 +1124,9 @@ export function Receitas() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unit">Valor unitário</SelectItem>
+                        <SelectItem value="unit">
+                          {isRecipeSale ? "Valor por porção" : "Valor unitário"}
+                        </SelectItem>
                         <SelectItem value="total">Valor total</SelectItem>
                       </SelectContent>
                     </Select>
@@ -709,7 +1135,11 @@ export function Receitas() {
 
                 {pricingMode === "unit" ? (
                   <div>
-                    <Label>Valor unitário (R$)</Label>
+                    <Label>
+                      {isRecipeSale
+                        ? "Valor por porção (R$)"
+                        : "Valor unitário (R$)"}
+                    </Label>
                     <Input
                       type="number"
                       step="0.01"
@@ -738,7 +1168,11 @@ export function Receitas() {
                   <Input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Gerado a partir do produto"
+                    placeholder={
+                      isRecipeSale
+                        ? "Gerado a partir da receita"
+                        : "Gerado a partir do produto"
+                    }
                   />
                 </div>
 
@@ -750,15 +1184,16 @@ export function Receitas() {
                     Estoque insuficiente. Disponível:{" "}
                     {Number(selectedProduct.current_quantity).toLocaleString(
                       "pt-BR",
+                      { maximumFractionDigits: 4 },
                     )}{" "}
                     {selectedProduct.unit}.
                   </div>
                 )}
-              </>
+              </div>
             )}
 
-            {entryMode === "manual" && (
-              <div>
+            {baseMode === "manual" && (
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                 <Label>Valor bruto (R$)</Label>
                 <Input
                   type="number"
@@ -772,7 +1207,7 @@ export function Receitas() {
               </div>
             )}
 
-            <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-3 text-sm space-y-2">
+            <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium text-foreground">
                   Taxa / imposto (por categoria)
@@ -798,7 +1233,7 @@ export function Receitas() {
               )}
             </div>
 
-            <div className="rounded-lg border bg-muted/30 px-3 py-3 text-sm space-y-1.5">
+            <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-1.5">
               <p className="font-medium text-foreground">Resumo financeiro</p>
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Valor bruto</span>
@@ -823,8 +1258,9 @@ export function Receitas() {
                 <span>{formatCurrency(displayTax)}</span>
               </div>
             </div>
-
-            <SheetFooter className="flex-col-reverse sm:flex-row gap-2 pt-2">
+              </div>
+            </div>
+            <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
@@ -896,6 +1332,12 @@ export function Receitas() {
                         <p className="text-xs text-muted-foreground truncate">
                           Produto:{" "}
                           {productNameById.get(r.product_id) ?? r.product_id}
+                        </p>
+                      ) : null}
+                      {r.entry_mode === "recipe_sale" && r.recipe_id ? (
+                        <p className="text-xs text-muted-foreground truncate">
+                          Receita (ficha):{" "}
+                          {recipeNameById.get(r.recipe_id) ?? r.recipe_id}
                         </p>
                       ) : null}
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
