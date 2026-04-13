@@ -1,4 +1,4 @@
-export type RevenueEntryMode = "manual" | "product_sale";
+export type RevenueEntryMode = "manual" | "product_sale" | "recipe_sale";
 
 export type RevenueTypeFilter = "operational" | "non_operational";
 
@@ -18,6 +18,7 @@ export interface RevenueEntry {
   category_id: string | null;
   subcategory_id: string;
   product_id: string | null;
+  recipe_id: string | null;
   quantity: number | null;
   pricing_mode: ProductSalePricingMode | null;
   unit_value: number | null;

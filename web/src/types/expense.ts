@@ -12,6 +12,8 @@ export interface ExpenseItem {
   product_name: string
   quantity: number
   unit_value: number
+  invoice_unit?: string | null
+  stock_quantity?: number | null
   products?: { id: string; name: string; current_quantity: number; min_quantity: number } | null
 }
 

@@ -9,12 +9,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
+import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import {
   Sheet,
   SheetContent,
@@ -23,12 +33,23 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
-import { ChefHat, Loader2, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import {
+  ChefHat,
+  ChevronsUpDown,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-type IngRow = { product_id: string; quantity: string };
+type IngRow = { product_id: string; quantity: string; unit_code: string };
 
 type RecipeRow = {
   id: string;
@@ -40,21 +61,107 @@ type RecipeRow = {
     id: string;
     product_id: string;
     quantity: number;
+    input_quantity?: number | null;
+    input_unit_code?: string | null;
     products: { name: string; unit: string } | null;
   }[];
 };
 
-export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
+function ProductPicker({
+  products,
+  value,
+  onChange,
+  placeholder = "Produto",
+}: {
+  products: Product[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  usePopoverListScrollFix(open, listRef);
+  const selected = products.find((p) => p.id === value);
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return products;
+    return products.filter((p) => p.name.toLowerCase().includes(t));
+  }, [products, q]);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="w-full justify-between font-normal">
+          <span className="truncate text-left">
+            {selected ? selected.name : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <div className="border-b p-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar produto..."
+              className="h-9 pl-8"
+            />
+          </div>
+        </div>
+        <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={cn(
+                "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                value === p.id && "bg-accent/80",
+              )}
+              onClick={() => {
+                onChange(p.id);
+                setOpen(false);
+              }}
+            >
+              {p.name}
+            </button>
+          ))}
+          {filtered.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">Nenhum produto encontrado.</p>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function EstoqueReceitasPanel({
+  companyId,
+  onStockChanged,
+}: {
+  companyId: string;
+  onStockChanged?: () => void;
+}) {
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
+  const [productConversions, setProductConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
+  const [sheetMode, setSheetMode] = useState<"summary" | "edit">("edit");
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [batchYield, setBatchYield] = useState("1");
   const [outputId, setOutputId] = useState<string>("");
   const [ings, setIngs] = useState<IngRow[]>([
-    { product_id: "", quantity: "1" },
+    { product_id: "", quantity: "1", unit_code: "" },
   ]);
   const [consumeRecipe, setConsumeRecipe] = useState<string>("");
   const [portions, setPortions] = useState("1");
@@ -62,7 +169,7 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, r] = await Promise.all([
+    const [p, r, c] = await Promise.all([
       supabase
         .from("products")
         .select("*")
@@ -72,15 +179,99 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
       supabase
         .from("recipes")
         .select(
-          "id, name, batch_yield, active, output_product_id, recipe_ingredients(id, product_id, quantity, products(name, unit))",
+          "id, name, batch_yield, active, output_product_id, recipe_ingredients(id, product_id, quantity, input_quantity, input_unit_code, products(name, unit))",
         )
         .eq("company_id", companyId)
         .order("name"),
+      supabase.from("product_unit_conversions").select("*").eq("company_id", companyId),
     ]);
     setLoading(false);
     setProducts((p.data ?? []) as Product[]);
     setRecipes((r.data ?? []) as unknown as RecipeRow[]);
+    setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
   }, [companyId]);
+
+  const productById = useMemo(
+    () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+
+  const conversionsByProduct = useMemo(() => {
+    const out = new Map<string, ProductUnitConversionDraft[]>();
+    for (const row of productConversions) {
+      if (!row.product_id) continue;
+      const prev = out.get(row.product_id) ?? [];
+      prev.push(row);
+      out.set(row.product_id, prev);
+    }
+    return out;
+  }, [productConversions]);
+
+  const allowedUnitsForProduct = useCallback(
+    (productId: string): string[] => {
+      const product = productById.get(productId);
+      if (!product) return [];
+      const base = product.unit;
+      const allowed = new Set<string>([base]);
+      const convs = conversionsByProduct.get(productId) ?? [];
+      for (const c of convs) {
+        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+          allowed.add(c.secondary_unit_code);
+        }
+      }
+      // Inclui conversões travadas do sistema (kg/g/mg e l/ml), quando compatível.
+      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
+        const q = getLockedSystemSecondaryQty(1, base, candidate);
+        if (q != null) allowed.add(candidate);
+      }
+      return [...allowed];
+    },
+    [conversionsByProduct, productById],
+  );
+
+  const toBaseQty = useCallback(
+    (productId: string, qty: number, fromUnit: string): number | null => {
+      const product = productById.get(productId);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(productId) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      const raw = convertQuantityForProduct(
+        qty,
+        fromUnit,
+        product.unit,
+        product.unit,
+        convs,
+      );
+      return raw == null ? null : roundHubQuantityForStock(raw);
+    },
+    [conversionsByProduct, productById],
+  );
+
+  const fromBaseQty = useCallback(
+    (productId: string, qty: number, toUnit: string): number | null => {
+      const product = productById.get(productId);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(productId) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      return convertQuantityForProduct(qty, product.unit, toUnit, product.unit, convs);
+    },
+    [conversionsByProduct, productById],
+  );
+
+  const formatQtyHint = (value: number) =>
+    value.toLocaleString("pt-BR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -97,58 +288,162 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
       toast.error("Rendimento da receita inválido.");
       return;
     }
-    const validIngs = ings.filter(
-      (x) =>
-        x.product_id &&
-        parseFloat(x.quantity) > 0 &&
-        !Number.isNaN(parseFloat(x.quantity)),
-    );
+    const validIngs = ings.filter((x) => x.product_id && x.unit_code && x.quantity.trim() !== "");
     if (validIngs.length === 0) {
       toast.error("Adicione ao menos um ingrediente.");
       return;
     }
 
-    setSaving(true);
-    const { data: rec, error: re } = await supabase
-      .from("recipes")
-      .insert({
-        company_id: companyId,
-        name: t,
-        batch_yield: y,
-        output_product_id: outputId || null,
-        active: true,
-      })
-      .select("id")
-      .single();
+    const preparedRows: {
+      recipe_id: string;
+      product_id: string;
+      quantity: number;
+      input_quantity: number;
+      input_unit_code: string;
+    }[] = [];
 
-    if (re || !rec?.id) {
-      console.error(re);
-      toast.error("Não foi possível salvar a receita.");
+    for (const x of validIngs) {
+      const parsed = parseFloat(x.quantity.replace(",", "."));
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.error("Quantidade do ingrediente inválida.");
+        return;
+      }
+      const allowedUnits = allowedUnitsForProduct(x.product_id).map((u) =>
+        u.trim().toLowerCase(),
+      );
+      if (!allowedUnits.includes(x.unit_code.trim().toLowerCase())) {
+        toast.error("Selecione uma unidade válida para o ingrediente.");
+        return;
+      }
+      const baseQty = toBaseQty(x.product_id, parsed, x.unit_code);
+      if (baseQty == null || !Number.isFinite(baseQty) || baseQty <= 0) {
+        toast.error("Não foi possível converter a unidade do ingrediente.");
+        return;
+      }
+      preparedRows.push({
+        recipe_id: "",
+        product_id: x.product_id,
+        quantity: baseQty,
+        input_quantity: parsed,
+        input_unit_code: x.unit_code,
+      });
+    }
+
+    setSaving(true);
+    let rid = editingRecipeId;
+    if (editingRecipeId) {
+      const { error: upErr } = await supabase
+        .from("recipes")
+        .update({
+          name: t,
+          batch_yield: y,
+          output_product_id: outputId || null,
+          active: true,
+        })
+        .eq("id", editingRecipeId);
+      if (upErr) {
+        console.error(upErr);
+        toast.error("Não foi possível atualizar a receita.");
+        setSaving(false);
+        return;
+      }
+      const { error: delIngErr } = await supabase
+        .from("recipe_ingredients")
+        .delete()
+        .eq("recipe_id", editingRecipeId);
+      if (delIngErr) {
+        console.error(delIngErr);
+        toast.error("Não foi possível atualizar os ingredientes.");
+        setSaving(false);
+        return;
+      }
+    } else {
+      const { data: rec, error: re } = await supabase
+        .from("recipes")
+        .insert({
+          company_id: companyId,
+          name: t,
+          batch_yield: y,
+          output_product_id: outputId || null,
+          active: true,
+        })
+        .select("id")
+        .single();
+
+      if (re || !rec?.id) {
+        console.error(re);
+        toast.error("Não foi possível salvar a receita.");
+        setSaving(false);
+        return;
+      }
+      rid = rec.id as string;
+    }
+    if (!rid) {
+      toast.error("Receita inválida.");
       setSaving(false);
       return;
     }
-
-    const rid = rec.id as string;
-    const rows = validIngs.map((x) => ({
+    const rows = preparedRows.map((x) => ({
+      ...x,
       recipe_id: rid,
-      product_id: x.product_id,
-      quantity: parseFloat(x.quantity),
     }));
 
     const { error: ie } = await supabase.from("recipe_ingredients").insert(rows);
     setSaving(false);
     if (ie) {
       console.error(ie);
-      await supabase.from("recipes").delete().eq("id", rid);
+      if (!editingRecipeId) {
+        await supabase.from("recipes").delete().eq("id", rid);
+      }
       toast.error("Falha ao salvar ingredientes.");
       return;
     }
-    toast.success("Receita criada.");
+    toast.success(editingRecipeId ? "Receita atualizada." : "Receita criada.");
     setSheetOpen(false);
+    setEditingRecipeId(null);
     setName("");
     setBatchYield("1");
     setOutputId("");
-    setIngs([{ product_id: "", quantity: "1" }]);
+    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    void load();
+  };
+
+  const openEditRecipe = (r: RecipeRow) => {
+    setEditingRecipeId(r.id);
+    setName(r.name);
+    setBatchYield(String(r.batch_yield));
+    setOutputId(r.output_product_id ?? "");
+    setIngs(
+      (r.recipe_ingredients ?? []).map((i) => ({
+        product_id: i.product_id,
+        quantity: String(i.input_quantity ?? i.quantity),
+        unit_code:
+          i.input_unit_code ??
+          products.find((p) => p.id === i.product_id)?.unit ??
+          "",
+      })),
+    );
+    setSheetMode("summary");
+    setSheetOpen(true);
+  };
+
+  const deleteRecipe = async () => {
+    if (!editingRecipeId) return;
+    setSaving(true);
+    const { error } = await supabase.from("recipes").delete().eq("id", editingRecipeId);
+    setSaving(false);
+    if (error) {
+      console.error(error);
+      toast.error("Não foi possível excluir a receita.");
+      return;
+    }
+    toast.success("Receita excluída.");
+    setSheetOpen(false);
+    setEditingRecipeId(null);
+    setName("");
+    setBatchYield("1");
+    setOutputId("");
+    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
     void load();
   };
 
@@ -168,16 +463,40 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
       p_portions: n,
     });
     setConsuming(false);
-    const row = data as { ok?: boolean; error?: string };
-    if (error || !row?.ok) {
-      toast.error(
-        row?.error === "forbidden"
-          ? "Sem permissão."
-          : "Não foi possível baixar o estoque (verifique saldos).",
-      );
+    const row = data as {
+      ok?: boolean;
+      error?: string;
+      need?: number;
+      have?: number;
+      product_id?: string;
+    };
+    if (error) {
+      toast.error(error.message || "Não foi possível baixar o estoque.");
+      return;
+    }
+    if (!row?.ok) {
+      if (row?.error === "forbidden") {
+        toast.error("Sem permissão.");
+        return;
+      }
+      if (row?.error === "missing_conversion") {
+        toast.error(
+          "Falta conversão de unidade para um ingrediente (cadastre no produto ou ajuste a unidade na receita).",
+        );
+        return;
+      }
+      if (row?.error === "insufficient_stock") {
+        const need = row.need != null ? Number(row.need).toFixed(4) : "?";
+        const have = row.have != null ? Number(row.have).toFixed(4) : "?";
+        toast.error(`Estoque insuficiente (precisa ${need} un. de estoque; há ${have}).`);
+        return;
+      }
+      toast.error("Não foi possível baixar o estoque (verifique saldos).");
       return;
     }
     toast.success("Estoque dos ingredientes atualizado.");
+    void load();
+    onStockChanged?.();
   };
 
   return (
@@ -194,7 +513,19 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
               por porções para descontar insumos do estoque conforme o preparo.
             </CardDescription>
           </div>
-          <Button type="button" size="sm" onClick={() => setSheetOpen(true)}>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setEditingRecipeId(null);
+              setSheetMode("edit");
+              setName("");
+              setBatchYield("1");
+              setOutputId("");
+              setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+              setSheetOpen(true);
+            }}
+          >
             <Plus className="mr-1.5 h-4 w-4" />
             Nova receita
           </Button>
@@ -214,20 +545,31 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
               {recipes.map((r) => (
                 <li
                   key={r.id}
-                  className="rounded-lg border border-border/80 p-3 text-sm"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openEditRecipe(r)}
+                  onKeyDown={(e) => e.key === "Enter" && openEditRecipe(r)}
+                  className="cursor-pointer rounded-2xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-4 text-sm shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
                 >
-                  <p className="font-medium">{r.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Rendimento base: {Number(r.batch_yield).toLocaleString("pt-BR")}{" "}
-                    porção(ões)
-                    {!r.active ? " · inativa" : ""}
-                  </p>
-                  <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-foreground">{r.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Rendimento base:{" "}
+                        {Number(r.batch_yield).toLocaleString("pt-BR")} porção(ões)
+                        {!r.active ? " · inativa" : ""}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {r.recipe_ingredients?.length ?? 0} itens
+                    </span>
+                  </div>
+                  <ul className="mt-3 list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
                     {r.recipe_ingredients?.map((i) => (
                       <li key={i.id}>
                         {i.products?.name ?? "—"}:{" "}
-                        {Number(i.quantity).toLocaleString("pt-BR")}{" "}
-                        {i.products?.unit} / lote
+                        {Number(i.input_quantity ?? i.quantity).toLocaleString("pt-BR")}{" "}
+                        {i.input_unit_code ?? i.products?.unit} / lote
                       </li>
                     ))}
                   </ul>
@@ -295,11 +637,96 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
       </Card>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>Nova receita</SheetTitle>
+        <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-lg lg:max-w-xl">
+          <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
+                <ChefHat className="h-6 w-6 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1 pr-6">
+                <SheetTitle className="text-xl font-semibold sm:text-2xl">
+                  {editingRecipeId
+                    ? sheetMode === "summary"
+                      ? "Resumo da receita"
+                      : "Editar receita"
+                    : "Nova receita"}
+                </SheetTitle>
+              </div>
+              {editingRecipeId ? (
+                <div className="flex shrink-0 gap-2">
+                  {sheetMode === "summary" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSheetMode("edit")}
+                    >
+                      <Pencil className="mr-1.5 h-4 w-4" />
+                      Editar
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSheetMode("summary")}
+                    >
+                      Voltar
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    disabled={saving}
+                    onClick={() => void deleteRecipe()}
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" />
+                    Excluir
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           </SheetHeader>
-          <div className="flex flex-1 flex-col gap-4 px-4 pb-2">
+          {editingRecipeId && sheetMode === "summary" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+              <div className="space-y-4 p-6">
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Receita
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">{name}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Rendimento: {Number(batchYield || 0).toLocaleString("pt-BR")} porções
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Ingredientes por lote
+                  </p>
+                  <ul className="mt-3 space-y-2 text-sm">
+                    {ings.map((row, idx) => {
+                      const p = products.find((x) => x.id === row.product_id);
+                      return (
+                        <li
+                          key={`${row.product_id}-${idx}`}
+                          className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
+                        >
+                          <p className="font-medium">{p?.name ?? "—"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {Number(row.quantity || 0).toLocaleString("pt-BR")}{" "}
+                            {row.unit_code || p?.unit || ""}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+            <div className="space-y-4 p-6">
             <div className="space-y-2">
               <Label>Nome</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -316,63 +743,89 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
             </div>
             <div className="space-y-2">
               <Label>Produto de saída (opcional)</Label>
-              <Select
-                value={outputId || "__none__"}
-                onValueChange={(v) =>
-                  setOutputId(v === "__none__" ? "" : v)
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="—" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Nenhum</SelectItem>
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <ProductPicker
+                  products={products}
+                  value={outputId}
+                  onChange={(id) => setOutputId(id)}
+                  placeholder="Selecionar produto de saída"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setOutputId("")}
+                >
+                  Limpar seleção
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Ingredientes (por lote)</Label>
               {ings.map((row, i) => (
-                <div key={i} className="flex gap-2">
-                  <Select
-                    value={row.product_id || "__"}
-                    onValueChange={(v) => {
-                      const n = [...ings];
-                      n[i] = { ...n[i]!, product_id: v === "__" ? "" : v };
-                      setIngs(n);
-                    }}
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__">—</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    className="w-24"
-                    type="number"
-                    step="0.0001"
-                    min="0"
-                    placeholder="Qtd"
-                    value={row.quantity}
-                    onChange={(e) => {
-                      const n = [...ings];
-                      n[i] = { ...n[i]!, quantity: e.target.value };
-                      setIngs(n);
-                    }}
-                  />
-                  <Button
+                <div key={i} className="space-y-1.5">
+                  <div className="flex gap-2">
+                    <div className="w-full space-y-1">
+                    <Label className="text-xs text-muted-foreground">Produto</Label>
+                    <ProductPicker
+                      products={products}
+                      value={row.product_id}
+                      onChange={(pid) => {
+                        const n = [...ings];
+                        const product = productById.get(pid) ?? null;
+                        n[i] = {
+                          ...n[i]!,
+                          product_id: pid,
+                          quantity: "1",
+                          unit_code: product?.unit ?? "",
+                        };
+                        setIngs(n);
+                      }}
+                    />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-36 space-y-1">
+                      <Label className="text-xs text-muted-foreground">Unidade</Label>
+                      <Select
+                        value={row.unit_code || "__"}
+                        onValueChange={(v) => {
+                          const n = [...ings];
+                          n[i] = { ...n[i]!, unit_code: v === "__" ? "" : v };
+                          setIngs(n);
+                        }}
+                      >
+                        <SelectTrigger className="w-36">
+                          <SelectValue placeholder="Unid." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__">—</SelectItem>
+                          {allowedUnitsForProduct(row.product_id).map((u) => (
+                            <SelectItem key={`${row.product_id}-${u}`} value={u}>
+                              {u}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-32 space-y-1">
+                      <Label className="text-xs text-muted-foreground">Quantidade</Label>
+                      <Input
+                        className="w-32"
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        placeholder="Qtd"
+                        value={row.quantity}
+                        onChange={(e) => {
+                          const n = [...ings];
+                          n[i] = { ...n[i]!, quantity: e.target.value };
+                          setIngs(n);
+                        }}
+                      />
+                    </div>
+                    <Button
                     type="button"
                     variant="ghost"
                     size="icon"
@@ -380,6 +833,29 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                  </div>
+                  {(() => {
+                    const product = productById.get(row.product_id);
+                    if (!product || !row.unit_code) return null;
+                    const isBase =
+                      row.unit_code.trim().toLowerCase() ===
+                      product.unit.trim().toLowerCase();
+                    if (isBase) {
+                      return (
+                        <p className="text-[11px] text-muted-foreground">
+                          Quantidade na unidade de estoque do produto ({product.unit}).
+                        </p>
+                      );
+                    }
+                    const oneInSelected = fromBaseQty(row.product_id, 1, row.unit_code);
+                    if (oneInSelected == null) return null;
+                    return (
+                      <p className="text-[11px] text-muted-foreground">
+                        {formatQtyHint(oneInSelected)} {row.unit_code} equivalem a 1{" "}
+                        {product.unit}.
+                      </p>
+                    );
+                  })()}
                 </div>
               ))}
               <Button
@@ -387,22 +863,28 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  setIngs((p) => [...p, { product_id: "", quantity: "1" }])
+                  setIngs((p) => [...p, { product_id: "", quantity: "1", unit_code: "" }])
                 }
               >
                 <Plus className="mr-1 h-4 w-4" />
                 Ingrediente
               </Button>
             </div>
+            </div>
           </div>
-          <SheetFooter className="gap-2 border-t pt-4">
+          )}
+          <SheetFooter className="shrink-0 gap-2 border-t border-border bg-card px-6 py-4">
             <Button
               type="button"
               variant="outline"
-              onClick={() => setSheetOpen(false)}
+              onClick={() => {
+                setSheetOpen(false);
+                setEditingRecipeId(null);
+              }}
             >
               Cancelar
             </Button>
+            {editingRecipeId && sheetMode === "summary" ? null : (
             <Button
               type="button"
               disabled={saving}
@@ -411,9 +893,10 @@ export function EstoqueReceitasPanel({ companyId }: { companyId: string }) {
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                "Salvar"
+                editingRecipeId ? "Salvar alterações" : "Salvar"
               )}
             </Button>
+            )}
           </SheetFooter>
         </SheetContent>
       </Sheet>
