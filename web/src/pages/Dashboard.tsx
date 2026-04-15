@@ -190,6 +190,9 @@ export function Dashboard() {
       />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
+        <section aria-label="Acesso rápido" className="min-w-0">
+          <DashboardQuickLinks role={currentRole} />
+        </section>
         <section aria-label="Resumo do dia e alertas" className="min-w-0">
           <DashboardOperationalPulse
             role={currentRole}
@@ -202,9 +205,6 @@ export function Dashboard() {
             totalAlerts={totalAlerts}
             formatCurrency={formatCurrency}
           />
-        </section>
-        <section aria-label="Acesso rápido" className="min-w-0">
-          <DashboardQuickLinks role={currentRole} />
         </section>
       </div>
 
