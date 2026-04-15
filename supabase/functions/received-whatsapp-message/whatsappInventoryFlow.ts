@@ -94,6 +94,7 @@ type PendingSessionRow = {
   token: string;
   created_at: string;
   inventory_count_groups?: { name?: string | null } | null;
+  inventory_count_listings?: { name?: string | null } | null;
   inventory_count_short_links?:
     | { slug?: string | null }
     | { slug?: string | null }[]
@@ -123,6 +124,7 @@ async function fetchPendingAssignedOpenSessions(
       token,
       created_at,
       inventory_count_groups ( name ),
+      inventory_count_listings ( name ),
       inventory_count_short_links ( slug )
     `,
     )
@@ -152,7 +154,14 @@ function formatPendingInventoryMessage(
       ? `${base}/i/${slug}`
       : `${base}/contagem-estoque/${row.token}`;
     const g = row.inventory_count_groups?.name?.trim();
-    const label = g ? `Grupo: *${g}*` : "Sem grupo definido";
+    const l = row.inventory_count_listings?.name?.trim();
+    const label = g
+      ? l
+        ? `Grupo: *${g}* · Lista: *${l}*`
+        : `Grupo: *${g}*`
+      : l
+        ? `Lista: *${l}*`
+        : "Sem grupo/lista definida";
     lines.push(`${i + 1}) ${label}`);
     lines.push(url);
     lines.push("");

@@ -89,6 +89,27 @@ const ENTRY_MODE_LABEL: Record<string, string> = {
 };
 
 type LaunchMode = "manual" | "pontual";
+type PontualSaleDraft = {
+  id: string;
+  ref: string;
+  saleUnitCode: string;
+  quantity: string;
+  pricingMode: "unit" | "total";
+  unitValue: string;
+  grossInput: string;
+};
+
+function createPontualSaleDraft(): PontualSaleDraft {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    ref: "",
+    saleUnitCode: "",
+    quantity: "1",
+    pricingMode: "unit",
+    unitValue: "",
+    grossInput: "",
+  };
+}
 
 function parsePontualRef(
   ref: string,
@@ -346,7 +367,9 @@ export function Receitas() {
   const [saving, setSaving] = useState(false);
 
   const [baseMode, setBaseMode] = useState<LaunchMode>("manual");
-  const [pontualRef, setPontualRef] = useState("");
+  const [pontualItems, setPontualItems] = useState<PontualSaleDraft[]>([
+    createPontualSaleDraft(),
+  ]);
   const [revenueType, setRevenueType] = useState<
     "operational" | "non_operational"
   >("operational");
@@ -357,10 +380,6 @@ export function Receitas() {
   const [title, setTitle] = useState("");
   /** Folha de receita (ex.: "Receita Operacional › Vendas de produtos") */
   const [categoryLeafId, setCategoryLeafId] = useState<string>("");
-  const [saleUnitCode, setSaleUnitCode] = useState<string>("");
-  const [quantity, setQuantity] = useState<string>("1");
-  const [pricingMode, setPricingMode] = useState<"unit" | "total">("unit");
-  const [unitValue, setUnitValue] = useState<string>("");
   const [grossInput, setGrossInput] = useState<string>("");
   const [taxType, setTaxType] = useState<RevenueTaxType>("percentage");
   const [taxValue, setTaxValue] = useState<string>("0");
@@ -403,11 +422,6 @@ export function Receitas() {
   );
 
   const isPontual = baseMode === "pontual";
-  const pontualParsed = useMemo(() => parsePontualRef(pontualRef), [pontualRef]);
-  const isProductSale = isPontual && pontualParsed?.kind === "product";
-  const isRecipeSale = isPontual && pontualParsed?.kind === "recipe";
-  const productId = isProductSale && pontualParsed ? pontualParsed.id : "";
-  const recipeId = isRecipeSale && pontualParsed ? pontualParsed.id : "";
 
   const conversionsByProduct = useMemo(() => {
     const out = new Map<string, ProductUnitConversionDraft[]>();
@@ -500,64 +514,91 @@ export function Receitas() {
     taxValue: taxValNum,
   });
 
-  const unitNum = parseFloat(unitValue.replace(",", ".")) || 0;
+  const pontualItemStates = useMemo(
+    () =>
+      pontualItems.map((item) => {
+        const parsed = parsePontualRef(item.ref);
+        const isProductSale = parsed?.kind === "product";
+        const isRecipeSale = parsed?.kind === "recipe";
+        const productId = isProductSale ? parsed.id : "";
+        const recipeId = isRecipeSale ? parsed.id : "";
+        const selectedProduct = productId ? productById.get(productId) : undefined;
+        const selectedRecipe = recipeId
+          ? recipes.find((r) => r.id === recipeId)
+          : undefined;
+        const quantityFieldProps = quantityInputPropsForSaleUnit(
+          isProductSale ? item.saleUnitCode || selectedProduct?.unit : undefined,
+          selectedProduct?.unit,
+        );
+        const qtyNum = isRecipeSale
+          ? 1
+          : isProductSale && item.saleUnitCode && selectedProduct
+            ? parseSaleQuantity(
+                item.quantity,
+                item.saleUnitCode,
+                selectedProduct.unit,
+              )
+            : parseFloat(item.quantity.replace(",", ".")) || 0;
+        const stockQtyNum =
+          isProductSale && selectedProduct && item.saleUnitCode
+            ? (toStockQty(selectedProduct.id, qtyNum, item.saleUnitCode) ?? 0)
+            : 0;
+        const stockOk =
+          !isProductSale ||
+          !selectedProduct ||
+          qtyNum <= 0 ||
+          Number(selectedProduct.current_quantity) >= stockQtyNum;
+        const unitNum = parseFloat(item.unitValue.replace(",", ".")) || 0;
+        const grossNumItem = parseFloat(item.grossInput.replace(",", ".")) || 0;
+        const computedGross =
+          item.pricingMode === "unit" ? Math.round(qtyNum * unitNum * 100) / 100 : 0;
+        const effectiveGross =
+          item.pricingMode === "unit" ? computedGross : grossNumItem;
+        const title =
+          isRecipeSale && selectedRecipe
+            ? `Venda — ${selectedRecipe.name}`
+            : isProductSale && selectedProduct
+              ? `Venda — ${selectedProduct.name}`
+              : "Venda pontual";
+        return {
+          ...item,
+          parsed,
+          isProductSale,
+          isRecipeSale,
+          productId,
+          recipeId,
+          selectedProduct,
+          selectedRecipe,
+          quantityFieldProps,
+          qtyNum,
+          stockQtyNum,
+          stockOk,
+          unitNum,
+          grossNumItem,
+          effectiveGross,
+          title,
+        };
+      }),
+    [pontualItems, productById, recipes, toStockQty],
+  );
 
-  const selectedProduct = productId
-    ? products.find((p) => p.id === productId)
-    : undefined;
-
-  const selectedRecipe = recipeId
-    ? recipes.find((r) => r.id === recipeId)
-    : undefined;
+  const pontualGrossTotal = useMemo(
+    () => pontualItemStates.reduce((sum, item) => sum + item.effectiveGross, 0),
+    [pontualItemStates],
+  );
 
   const recipeNameById = useMemo(
     () => new Map(recipes.map((r) => [r.id, r.name])),
     [recipes],
   );
 
-  const qtyNum = useMemo(() => {
-    if (isRecipeSale) return 1;
-    if (isProductSale && saleUnitCode && selectedProduct) {
-      return parseSaleQuantity(
-        quantity,
-        saleUnitCode,
-        selectedProduct.unit,
-      );
-    }
-    return parseFloat(quantity.replace(",", ".")) || 0;
-  }, [isRecipeSale, isProductSale, quantity, saleUnitCode, selectedProduct]);
-  const stockQtyNum = useMemo(() => {
-    if (!isProductSale || !selectedProduct || !saleUnitCode) return 0;
-    return toStockQty(selectedProduct.id, qtyNum, saleUnitCode) ?? 0;
-  }, [isProductSale, selectedProduct, saleUnitCode, qtyNum, toStockQty]);
+  const effectiveGross = isPontual ? pontualGrossTotal : grossNum;
 
-  const computedGrossProduct = useMemo(() => {
-    if (!isProductSale && !isRecipeSale) return grossNum;
-    if (pricingMode === "unit") return Math.round(qtyNum * unitNum * 100) / 100;
-    return grossNum;
-  }, [isProductSale, isRecipeSale, pricingMode, qtyNum, unitNum, grossNum]);
-
-  const effectiveGross =
-    (isProductSale || isRecipeSale) && pricingMode === "unit"
-      ? computedGrossProduct
-      : grossNum;
-
-  const productTaxNet = computeRevenueTaxDeduction({
+  const summaryTaxNet = computeRevenueTaxDeduction({
     gross: effectiveGross,
     taxType,
     taxValue: taxValNum,
   });
-
-  const stockOk =
-    !isProductSale ||
-    !selectedProduct ||
-    qtyNum <= 0 ||
-    Number(selectedProduct.current_quantity) >= stockQtyNum;
-
-  const quantityFieldProps = quantityInputPropsForSaleUnit(
-    isProductSale ? saleUnitCode || selectedProduct?.unit : undefined,
-    selectedProduct?.unit,
-  );
 
   const fetchData = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -650,30 +691,10 @@ export function Receitas() {
   }, [tipoFilter, sheetOpen, baseMode]);
 
   useEffect(() => {
-    if (!isProductSale || !productId) return;
-    setQuantity("1");
-  }, [isProductSale, productId]);
-  useEffect(() => {
-    if (!selectedProduct) {
-      setSaleUnitCode("");
-      return;
-    }
-    setSaleUnitCode((prev) => prev || selectedProduct.unit);
-  }, [selectedProduct]);
-
-  useEffect(() => {
     if (isPontual) {
       setRevenueType("operational");
     }
   }, [isPontual]);
-
-  useEffect(() => {
-    if (isRecipeSale && selectedRecipe) {
-      setTitle(`Venda — ${selectedRecipe.name}`);
-    } else if (isProductSale && selectedProduct) {
-      setTitle(`Venda — ${selectedProduct.name}`);
-    }
-  }, [isRecipeSale, isProductSale, selectedRecipe?.name, selectedProduct?.name]);
 
   useEffect(() => {
     if (!categoryLeafId) {
@@ -696,13 +717,9 @@ export function Receitas() {
     setEntryDate(t.toISOString().slice(0, 10));
     setTitle("");
     setBaseMode("manual");
-    setPontualRef("");
+    setPontualItems([createPontualSaleDraft()]);
     setRevenueType("operational");
     setCategoryLeafId("");
-    setSaleUnitCode("");
-    setQuantity("1");
-    setPricingMode("unit");
-    setUnitValue("");
     setGrossInput("");
     setTaxType("percentage");
     setTaxValue("0");
@@ -716,25 +733,32 @@ export function Receitas() {
   const canSubmit = useMemo(() => {
     if (!currentCompany?.id) return false;
     if (!entryDate) return false;
-    if (!title.trim()) return false;
+    if (!isPontual && !title.trim()) return false;
     if (baseMode === "manual" && !categoryLeafId) return false;
     if (isPontual) {
-      if (!pontualParsed) return false;
       if (!categoryLeafId) return false;
+      if (pontualItemStates.length === 0) return false;
+      for (const item of pontualItemStates) {
+        if (!item.parsed) return false;
+        if (item.effectiveGross <= 0) return false;
+        if (item.isProductSale) {
+          if (!item.productId || item.qtyNum <= 0 || !item.saleUnitCode) return false;
+          if (toStockQty(item.productId, item.qtyNum, item.saleUnitCode) == null) {
+            return false;
+          }
+          if (item.pricingMode === "unit" && item.unitNum < 0) return false;
+          if (item.pricingMode === "total" && item.grossNumItem <= 0) return false;
+          if (!item.stockOk) return false;
+        }
+        if (item.isRecipeSale) {
+          if (!item.recipeId) return false;
+          if (item.pricingMode === "unit" && item.unitNum < 0) return false;
+          if (item.pricingMode === "total" && item.grossNumItem <= 0) return false;
+        }
+      }
+      return true;
     }
     if (effectiveGross <= 0) return false;
-    if (isProductSale) {
-      if (!productId || qtyNum <= 0 || !saleUnitCode) return false;
-      if (toStockQty(productId, qtyNum, saleUnitCode) == null) return false;
-      if (pricingMode === "unit" && unitNum < 0) return false;
-      if (pricingMode === "total" && grossNum <= 0) return false;
-      if (!stockOk) return false;
-    }
-    if (isRecipeSale) {
-      if (!recipeId) return false;
-      if (pricingMode === "unit" && unitNum < 0) return false;
-      if (pricingMode === "total" && grossNum <= 0) return false;
-    }
     return true;
   }, [
     currentCompany?.id,
@@ -742,88 +766,93 @@ export function Receitas() {
     title,
     baseMode,
     isPontual,
-    pontualParsed,
+    pontualItemStates,
     categoryLeafId,
     effectiveGross,
-    isProductSale,
-    isRecipeSale,
-    productId,
-    recipeId,
-    qtyNum,
-    pricingMode,
-    unitNum,
-    grossNum,
-    saleUnitCode,
     toStockQty,
-    stockOk,
   ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentCompany?.id || !canSubmit || saving) return;
 
-    const rpcEntryMode =
-      baseMode === "manual"
-        ? "manual"
-        : isRecipeSale
-          ? "recipe_sale"
-          : "product_sale";
-
-    const grossPayload =
-      (isProductSale || isRecipeSale) && pricingMode === "unit"
-        ? computedGrossProduct
-        : effectiveGross;
-
     const revenueLeaf = categoriesById.get(categoryLeafId);
-    const payload: Record<string, unknown> = {
-      company_id: currentCompany.id,
-      entry_date: entryDate,
-      title: title.trim(),
-      entry_mode: rpcEntryMode,
-      revenue_type: isPontual ? "operational" : revenueType,
-      category_id: revenueLeaf?.parent_id ?? null,
-      subcategory_id: categoryLeafId,
-      gross_amount: grossPayload,
-    };
-
-    if (rpcEntryMode === "manual") {
-      payload.product_id = null;
-      payload.recipe_id = null;
-      payload.quantity = null;
-      payload.pricing_mode = null;
-      payload.unit_value = null;
-    } else if (rpcEntryMode === "product_sale") {
-      payload.product_id = productId;
-      payload.recipe_id = null;
-      payload.quantity = toStockQty(productId, qtyNum, saleUnitCode) ?? qtyNum;
-      payload.pricing_mode = pricingMode;
-      payload.unit_value = pricingMode === "unit" ? unitNum : null;
-    } else {
-      payload.product_id = null;
-      payload.recipe_id = recipeId;
-      payload.quantity = 1;
-      payload.pricing_mode = pricingMode;
-      payload.unit_value = pricingMode === "unit" ? unitNum : null;
-    }
-
     setSaving(true);
-    const { data, error } = await supabase.rpc("create_revenue_entry", {
-      p_payload: payload,
-    });
-    setSaving(false);
+    if (baseMode === "manual") {
+      const payload: Record<string, unknown> = {
+        company_id: currentCompany.id,
+        entry_date: entryDate,
+        title: title.trim(),
+        entry_mode: "manual",
+        revenue_type: revenueType,
+        category_id: revenueLeaf?.parent_id ?? null,
+        subcategory_id: categoryLeafId,
+        gross_amount: effectiveGross,
+        product_id: null,
+        recipe_id: null,
+        quantity: null,
+        pricing_mode: null,
+        unit_value: null,
+      };
+      const { data, error } = await supabase.rpc("create_revenue_entry", {
+        p_payload: payload,
+      });
+      setSaving(false);
 
-    if (error) {
-      console.error(error);
-      toast.error(error.message || "Não foi possível criar a receita.");
-      return;
+      if (error) {
+        console.error(error);
+        toast.error(error.message || "Não foi possível criar a receita.");
+        return;
+      }
+      if (!data) {
+        toast.error("Resposta inválida ao criar receita.");
+        return;
+      }
+      toast.success("Receita criada.");
+    } else {
+      let createdCount = 0;
+      for (const item of pontualItemStates) {
+        const payload: Record<string, unknown> = {
+          company_id: currentCompany.id,
+          entry_date: entryDate,
+          title: item.title,
+          entry_mode: item.isRecipeSale ? "recipe_sale" : "product_sale",
+          revenue_type: "operational",
+          category_id: revenueLeaf?.parent_id ?? null,
+          subcategory_id: categoryLeafId,
+          gross_amount: item.effectiveGross,
+          product_id: item.isProductSale ? item.productId : null,
+          recipe_id: item.isRecipeSale ? item.recipeId : null,
+          quantity: item.isProductSale
+            ? (toStockQty(item.productId, item.qtyNum, item.saleUnitCode) ??
+              item.qtyNum)
+            : 1,
+          pricing_mode: item.pricingMode,
+          unit_value: item.pricingMode === "unit" ? item.unitNum : null,
+        };
+        const { data, error } = await supabase.rpc("create_revenue_entry", {
+          p_payload: payload,
+        });
+        if (error) {
+          setSaving(false);
+          console.error(error);
+          toast.error(error.message || "Não foi possível criar a receita.");
+          return;
+        }
+        if (!data) {
+          setSaving(false);
+          toast.error("Resposta inválida ao criar receita.");
+          return;
+        }
+        createdCount += 1;
+      }
+      setSaving(false);
+      toast.success(
+        createdCount > 1
+          ? `${createdCount} receitas criadas.`
+          : "Receita criada.",
+      );
     }
-
-    if (!data) {
-      toast.error("Resposta inválida ao criar receita.");
-      return;
-    }
-
-    toast.success("Receita criada.");
     setSheetOpen(false);
     resetForm();
     fetchData();
@@ -847,14 +876,8 @@ export function Receitas() {
       ? `Taxa (${taxValNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`
       : "Taxa (R$)";
 
-  const displayTax =
-    (isProductSale || isRecipeSale) && pricingMode === "unit"
-      ? productTaxNet.taxAmount
-      : taxAmount;
-  const displayNet =
-    (isProductSale || isRecipeSale) && pricingMode === "unit"
-      ? productTaxNet.netAmount
-      : netAmount;
+  const displayTax = isPontual ? summaryTaxNet.taxAmount : taxAmount;
+  const displayNet = isPontual ? summaryTaxNet.netAmount : netAmount;
 
   return (
     <PageShell className="space-y-8 pb-0" narrow>
@@ -909,7 +932,10 @@ export function Receitas() {
                 onValueChange={(v) => {
                   const m = v as LaunchMode;
                   setBaseMode(m);
-                  if (m === "manual") setPontualRef("");
+                  if (m === "manual") setPontualItems([createPontualSaleDraft()]);
+                  if (m === "pontual" && pontualItems.length === 0) {
+                    setPontualItems([createPontualSaleDraft()]);
+                  }
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -942,16 +968,6 @@ export function Receitas() {
                   </SelectContent>
                 </Select>
               </div>
-            )}
-
-            {isPontual && (
-              <p className="text-sm text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2">
-                Venda pontual é receita{" "}
-                <span className="font-medium text-foreground">operacional</span>.
-                Escolha a <span className="font-medium text-foreground">categoria da venda</span> para o DRE.{" "}
-                <span className="font-medium text-foreground">Produto</span>: baixa um item;{" "}
-                <span className="font-medium text-foreground">receita (ficha)</span>: baixa os ingredientes conforme o rendimento cadastrado (sempre 1 porção neste lançamento).
-              </p>
             )}
 
             <div>
@@ -1009,16 +1025,6 @@ export function Receitas() {
 
             {isPontual && (
               <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
-                <div className="space-y-2">
-                  <Label>Produto ou receita (ficha)</Label>
-                  <PontualProductRecipePicker
-                    products={products}
-                    recipes={recipes}
-                    value={pontualRef}
-                    onChange={setPontualRef}
-                  />
-                </div>
-
                 <div>
                   <Label>Categoria da venda *</Label>
                   <Select
@@ -1047,148 +1053,243 @@ export function Receitas() {
                   )}
                 </div>
 
-                {isRecipeSale && (
-                  <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
-                    <span className="font-medium text-foreground">1 porção</span>{" "}
-                    neste lançamento. Os ingredientes são baixados conforme as quantidades da ficha
-                    {selectedRecipe?.batch_yield != null
-                      ? ` (rendimento ${selectedRecipe.batch_yield}).`
-                      : "."}
-                  </p>
-                )}
+                {pontualItemStates.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-border/70 bg-muted/20 p-3 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Produto ou receita (ficha) #{index + 1}</Label>
+                      {pontualItems.length > 1 ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setPontualItems((prev) =>
+                              prev.filter((x) => x.id !== item.id),
+                            )
+                          }
+                        >
+                          Remover
+                        </Button>
+                      ) : null}
+                    </div>
+                    <PontualProductRecipePicker
+                      products={products}
+                      recipes={recipes}
+                      value={item.ref}
+                      onChange={(ref) => {
+                        const parsedRef = parsePontualRef(ref);
+                        const defaultUnit =
+                          parsedRef?.kind === "product"
+                            ? (productById.get(parsedRef.id)?.unit ?? "")
+                            : "";
+                        setPontualItems((prev) =>
+                          prev.map((x) =>
+                            x.id === item.id
+                              ? {
+                                  ...x,
+                                  ref,
+                                  quantity: "1",
+                                  saleUnitCode: defaultUnit,
+                                }
+                              : x,
+                          ),
+                        );
+                      }}
+                    />
 
-                <div className="grid grid-cols-2 gap-2">
-                  {isProductSale ? (
-                    <>
-                      <div>
-                        <Label>Quantidade</Label>
-                        <Input
-                          type="number"
-                          step={quantityFieldProps.step}
-                          min={quantityFieldProps.min}
-                          value={quantity}
-                          onChange={(e) => setQuantity(e.target.value)}
-                          onBlur={() => {
-                            if (!quantityFieldProps.integerOnly) return;
-                            const n = Math.max(
-                              1,
-                              Math.round(parseFloat(quantity) || 0),
-                            );
-                            setQuantity(String(n));
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <Label>Unidade</Label>
+                    {item.isRecipeSale && (
+                      <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
+                        <span className="font-medium text-foreground">1 porção</span>{" "}
+                        neste lançamento. Os ingredientes são baixados conforme as
+                        quantidades da ficha
+                        {item.selectedRecipe?.batch_yield != null
+                          ? ` (rendimento ${item.selectedRecipe.batch_yield}).`
+                          : "."}
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {item.isProductSale ? (
+                        <>
+                          <div>
+                            <Label>Quantidade</Label>
+                            <Input
+                              type="number"
+                              step={item.quantityFieldProps.step}
+                              min={item.quantityFieldProps.min}
+                              value={item.quantity}
+                              onChange={(e) =>
+                                setPontualItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id
+                                      ? { ...x, quantity: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              onBlur={() => {
+                                if (!item.quantityFieldProps.integerOnly) return;
+                                const n = Math.max(
+                                  1,
+                                  Math.round(parseFloat(item.quantity) || 0),
+                                );
+                                setPontualItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id
+                                      ? { ...x, quantity: String(n) }
+                                      : x,
+                                  ),
+                                );
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label>Unidade</Label>
+                            <Select
+                              value={item.saleUnitCode || "__none__"}
+                              onValueChange={(v) =>
+                                setPontualItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id
+                                      ? {
+                                          ...x,
+                                          saleUnitCode: v === "__none__" ? "" : v,
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Unidade" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">Selecione</SelectItem>
+                                {item.productId
+                                  ? allowedUnitsForProduct(item.productId).map((u) => (
+                                      <SelectItem
+                                        key={`${item.productId}-${u}`}
+                                        value={u}
+                                      >
+                                        {u}
+                                      </SelectItem>
+                                    ))
+                                  : null}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      ) : item.isRecipeSale ? (
+                        <div className="col-span-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2 sm:col-span-1">
+                          <p className="text-xs text-muted-foreground">Quantidade</p>
+                          <p className="text-sm font-medium text-foreground">
+                            1 porção
+                          </p>
+                        </div>
+                      ) : null}
+                      <div className={item.isRecipeSale ? "col-span-2 sm:col-span-1" : undefined}>
+                        <Label>Preço</Label>
                         <Select
-                          value={saleUnitCode || "__none__"}
+                          value={item.pricingMode}
                           onValueChange={(v) =>
-                            setSaleUnitCode(v === "__none__" ? "" : v)
+                            setPontualItems((prev) =>
+                              prev.map((x) =>
+                                x.id === item.id
+                                  ? { ...x, pricingMode: v as "unit" | "total" }
+                                  : x,
+                              ),
+                            )
                           }
                         >
                           <SelectTrigger>
-                            <SelectValue placeholder="Unidade" />
+                            <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {productId
-                              ? allowedUnitsForProduct(productId).map((u) => (
-                                  <SelectItem key={`${productId}-${u}`} value={u}>
-                                    {u}
-                                  </SelectItem>
-                                ))
-                              : null}
+                            <SelectItem value="unit">
+                              {item.isRecipeSale ? "Valor por porção" : "Valor unitário"}
+                            </SelectItem>
+                            <SelectItem value="total">Valor total</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
-                    </>
-                  ) : isRecipeSale ? (
-                    <div className="col-span-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2 sm:col-span-1">
-                      <p className="text-xs text-muted-foreground">Quantidade</p>
-                      <p className="text-sm font-medium text-foreground">1 porção</p>
                     </div>
-                  ) : null}
-                  <div
-                    className={
-                      isRecipeSale
-                        ? "col-span-2 sm:col-span-1"
-                        : undefined
-                    }
-                  >
-                    <Label>Preço</Label>
-                    <Select
-                      value={pricingMode}
-                      onValueChange={(v) => setPricingMode(v as "unit" | "total")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unit">
-                          {isRecipeSale ? "Valor por porção" : "Valor unitário"}
-                        </SelectItem>
-                        <SelectItem value="total">Valor total</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
 
-                {pricingMode === "unit" ? (
-                  <div>
-                    <Label>
-                      {isRecipeSale
-                        ? "Valor por porção (R$)"
-                        : "Valor unitário (R$)"}
-                    </Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={unitValue}
-                      onChange={(e) => setUnitValue(e.target.value)}
-                      placeholder="0,00"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <Label>Valor total da venda (R$)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={grossInput}
-                      onChange={(e) => setGrossInput(e.target.value)}
-                      placeholder="0,00"
-                    />
-                  </div>
-                )}
+                    {item.pricingMode === "unit" ? (
+                      <div>
+                        <Label>
+                          {item.isRecipeSale
+                            ? "Valor por porção (R$)"
+                            : "Valor unitário (R$)"}
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.unitValue}
+                          onChange={(e) =>
+                            setPontualItems((prev) =>
+                              prev.map((x) =>
+                                x.id === item.id
+                                  ? { ...x, unitValue: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                          placeholder="0,00"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <Label>Valor total da venda (R$)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.grossInput}
+                          onChange={(e) =>
+                            setPontualItems((prev) =>
+                              prev.map((x) =>
+                                x.id === item.id
+                                  ? { ...x, grossInput: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                          placeholder="0,00"
+                        />
+                      </div>
+                    )}
 
-                <div>
-                  <Label>Título do lançamento</Label>
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={
-                      isRecipeSale
-                        ? "Gerado a partir da receita"
-                        : "Gerado a partir do produto"
-                    }
-                  />
-                </div>
-
-                {selectedProduct && !stockOk && (
-                  <div
-                    role="alert"
-                    className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-                  >
-                    Estoque insuficiente. Disponível:{" "}
-                    {Number(selectedProduct.current_quantity).toLocaleString(
-                      "pt-BR",
-                      { maximumFractionDigits: 4 },
-                    )}{" "}
-                    {selectedProduct.unit}.
+                    {item.selectedProduct && !item.stockOk && (
+                      <div
+                        role="alert"
+                        className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+                      >
+                        Estoque insuficiente. Disponível:{" "}
+                        {Number(item.selectedProduct.current_quantity).toLocaleString(
+                          "pt-BR",
+                          { maximumFractionDigits: 4 },
+                        )}{" "}
+                        {item.selectedProduct.unit}.
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() =>
+                    setPontualItems((prev) => [...prev, createPontualSaleDraft()])
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Adicionar produto ou receita
+                </Button>
               </div>
             )}
 

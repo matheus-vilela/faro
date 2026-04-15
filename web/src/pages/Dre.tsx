@@ -246,12 +246,10 @@ export function Dre() {
 
               <DreExpandableLine
                 accordionValue="cmv"
-                label="CMV (custo das mercadorias vendidas)"
+                label="CMV"
                 amount={-computed.cmv}
                 tone="despesa"
                 prefix="(−)"
-                tree={trees?.cmv ?? []}
-                treeDisplayNegative
               />
 
               <div className="py-3">
