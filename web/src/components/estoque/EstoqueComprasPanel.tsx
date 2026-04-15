@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -6,6 +7,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,6 +46,7 @@ import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
+  AlertTriangle,
   ChevronsUpDown,
   Loader2,
   Pencil,
@@ -49,6 +59,15 @@ import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+type OrderItemRow = {
+  id: string;
+  product_id: string;
+  quantity: number;
+  unit_value: number | null;
+  input_quantity: number | null;
+  input_unit_code: string | null;
+};
+
 type OrderRow = {
   id: string;
   supplier_id: string | null;
@@ -57,7 +76,63 @@ type OrderRow = {
   notes: string | null;
   created_at: string;
   suppliers: { name: string } | null;
+  purchase_order_items?: OrderItemRow[];
 };
+
+const OPEN_PO_STATUSES = new Set(["draft", "ordered"]);
+
+function orderItemsLineTotal(it: OrderItemRow): number {
+  const uv = it.unit_value != null ? Number(it.unit_value) : NaN;
+  if (!Number.isFinite(uv) || uv === 0) return 0;
+  const q = Number(it.input_quantity ?? it.quantity ?? 0);
+  if (!Number.isFinite(q)) return 0;
+  return q * uv;
+}
+
+function orderListSummary(o: OrderRow): {
+  itemCount: number;
+  totalValue: number;
+  hasPricedLines: boolean;
+} {
+  const items = o.purchase_order_items ?? [];
+  let totalValue = 0;
+  let hasPricedLines = false;
+  for (const it of items) {
+    const uv = it.unit_value != null ? Number(it.unit_value) : NaN;
+    if (Number.isFinite(uv) && uv > 0) {
+      hasPricedLines = true;
+      totalValue += orderItemsLineTotal(it);
+    }
+  }
+  return { itemCount: items.length, totalValue, hasPricedLines };
+}
+
+function productStockSortKey(p: Product): number {
+  const q = Number(p.current_quantity);
+  const min = Number(p.min_quantity ?? 0);
+  const isZero = p.stock_is_zero ?? q <= 0;
+  if (isZero) return 0;
+  const belowMin =
+    p.stock_below_min_positive ?? (min > 0 && q > 0 && q <= min);
+  if (belowMin) return 1;
+  return 2;
+}
+
+/** Alinhado ao catálogo: zerado tem prioridade sobre “abaixo do mínimo”. */
+function productStockFlags(p: Product): {
+  stockIsZero: boolean;
+  stockBelowMinPositive: boolean;
+} {
+  const q = Number(p.current_quantity);
+  const min = Number(p.min_quantity ?? 0);
+  const stockIsZero = p.stock_is_zero ?? q <= 0;
+  const stockBelowMinPositive =
+    p.stock_below_min_positive ?? (min > 0 && q > 0 && q <= min);
+  return {
+    stockIsZero,
+    stockBelowMinPositive: !stockIsZero && stockBelowMinPositive,
+  };
+}
 
 type LineDraft = {
   product_id: string;
@@ -71,11 +146,13 @@ function ProductPicker({
   value,
   onChange,
   placeholder = "Produto",
+  showOpenOrderHint,
 }: {
   products: Product[];
   value: string;
   onChange: (id: string) => void;
   placeholder?: string;
+  showOpenOrderHint?: (productId: string) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -114,22 +191,52 @@ function ProductPicker({
           </div>
         </div>
         <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
-          {filtered.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={cn(
-                "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
-                value === p.id && "bg-accent/80",
-              )}
-              onClick={() => {
-                onChange(p.id);
-                setOpen(false);
-              }}
-            >
-              {p.name}
-            </button>
-          ))}
+          {filtered.map((p) => {
+            const { stockIsZero, stockBelowMinPositive } = productStockFlags(p);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className={cn(
+                  "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                  value === p.id && "bg-accent/80",
+                )}
+                onClick={() => {
+                  onChange(p.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="block font-medium leading-snug">{p.name}</span>
+                {(stockIsZero || stockBelowMinPositive) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {stockIsZero ? (
+                      <Badge
+                        variant="destructive"
+                        className="h-5 gap-0.5 px-1.5 py-0 text-[0.65rem] font-normal"
+                      >
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        Sem estoque
+                      </Badge>
+                    ) : null}
+                    {stockBelowMinPositive ? (
+                      <Badge
+                        variant="secondary"
+                        className="h-5 gap-0.5 border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-[0.65rem] font-normal text-amber-950 dark:text-amber-50"
+                      >
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        Abaixo do mínimo
+                      </Badge>
+                    ) : null}
+                  </div>
+                )}
+                {showOpenOrderHint?.(p.id) ? (
+                  <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+                    Já em outro pedido em andamento
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
           {filtered.length === 0 ? (
             <p className="px-2 py-3 text-sm text-muted-foreground">Nenhum produto encontrado.</p>
           ) : null}
@@ -175,13 +282,32 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
   const [lines, setLines] = useState<LineDraft[]>([
     { product_id: "", quantity: "1", unit_value: "", unit_code: "" },
   ]);
+  const [duplicateDialog, setDuplicateDialog] = useState<string[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const [o, p, s, c] = await Promise.all([
       supabase
         .from("purchase_orders")
-        .select("id, supplier_id, status, expected_date, notes, created_at, suppliers(name)")
+        .select(
+          `
+          id,
+          supplier_id,
+          status,
+          expected_date,
+          notes,
+          created_at,
+          suppliers(name),
+          purchase_order_items(
+            id,
+            product_id,
+            quantity,
+            unit_value,
+            input_quantity,
+            input_unit_code
+          )
+        `,
+        )
         .eq("company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(50),
@@ -205,6 +331,14 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
     setSuppliers((s.data ?? []) as { id: string; name: string }[]);
     setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
   }, [companyId]);
+
+  const formatBRL = (n: number) =>
+    new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
 
   const productById = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
@@ -264,6 +398,55 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
     [conversionsByProduct, productById],
   );
 
+  const productsSortedForPicker = useMemo(() => {
+    return [...products].sort((a, b) => {
+      const ka = productStockSortKey(a);
+      const kb = productStockSortKey(b);
+      if (ka !== kb) return ka - kb;
+      return a.name.localeCompare(b.name, "pt-BR");
+    });
+  }, [products]);
+
+  const { zeroStockCount, alertStockCount, openPurchaseOrderCount } = useMemo(() => {
+    let zero = 0;
+    let alert = 0;
+    for (const p of products) {
+      const q = Number(p.current_quantity);
+      const min = Number(p.min_quantity ?? 0);
+      const isZero = p.stock_is_zero ?? q <= 0;
+      const belowMinPos =
+        p.stock_below_min_positive ?? (min > 0 && q > 0 && q <= min);
+      if (isZero) zero++;
+      else if (belowMinPos) alert++;
+    }
+    const openPurchaseOrderCount = orders.filter((o) =>
+      OPEN_PO_STATUSES.has(o.status),
+    ).length;
+    return { zeroStockCount: zero, alertStockCount: alert, openPurchaseOrderCount };
+  }, [products, orders]);
+
+  const openOrdersByProduct = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const o of orders) {
+      if (!OPEN_PO_STATUSES.has(o.status)) continue;
+      for (const it of o.purchase_order_items ?? []) {
+        const pid = it.product_id;
+        const arr = m.get(pid) ?? [];
+        arr.push(o.id);
+        m.set(pid, arr);
+      }
+    }
+    return m;
+  }, [orders]);
+
+  const productHasOtherOpenOrder = useCallback(
+    (productId: string) => {
+      const ids = openOrdersByProduct.get(productId) ?? [];
+      return ids.some((oid) => oid !== editingOrderId);
+    },
+    [openOrdersByProduct, editingOrderId],
+  );
+
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
@@ -278,11 +461,32 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
     return m[s] ?? s;
   };
 
-  const saveOrder = async () => {
+  const collectDuplicateProductNames = (validLines: LineDraft[]) => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const l of validLines) {
+      if (!l.product_id || !productHasOtherOpenOrder(l.product_id)) continue;
+      if (seen.has(l.product_id)) continue;
+      seen.add(l.product_id);
+      names.push(productById.get(l.product_id)?.name ?? "Produto");
+    }
+    return names;
+  };
+
+  const saveOrder = async (opts?: { skipDuplicateCheck?: boolean }) => {
     const validLines = lines.filter((l) => l.product_id && l.unit_code && l.quantity.trim() !== "");
     if (validLines.length === 0) {
       toast.error("Adicione ao menos um item com produto e quantidade.");
       return;
+    }
+    if (!opts?.skipDuplicateCheck) {
+      const dups = collectDuplicateProductNames(validLines);
+      if (dups.length > 0) {
+        setDuplicateDialog(dups);
+        return;
+      }
+    } else {
+      setDuplicateDialog(null);
     }
     setSaving(true);
     let oid = editingOrderId;
@@ -362,6 +566,7 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
       return;
     }
     toast.success(editingOrderId ? "Pedido atualizado." : "Pedido de compra registrado.");
+    setDuplicateDialog(null);
     setSheetOpen(false);
     setEditingOrderId(null);
     setSupplierId("");
@@ -451,7 +656,44 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
           Novo pedido
         </Button>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {!loading ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/[0.07] px-4 py-3 shadow-sm dark:bg-red-500/[0.12]">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-red-900/80 dark:text-red-100/85">
+                Sem estoque
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-red-950 dark:text-red-50">
+                {zeroStockCount}
+              </p>
+              <p className="mt-0.5 text-xs text-red-900/70 dark:text-red-100/70">
+                Produtos zerados
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.08] px-4 py-3 shadow-sm dark:bg-amber-500/[0.12]">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-amber-950/80 dark:text-amber-50/90">
+                Em alerta
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-amber-950 dark:text-amber-50">
+                {alertStockCount}
+              </p>
+              <p className="mt-0.5 text-xs text-amber-950/70 dark:text-amber-50/75">
+                Abaixo do mínimo (com estoque)
+              </p>
+            </div>
+            <div className="rounded-xl border border-blue-500/35 bg-blue-500/[0.07] px-4 py-3 shadow-sm dark:bg-blue-500/[0.14]">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-blue-950/80 dark:text-blue-50/90">
+                Pedidos em andamento
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-blue-950 dark:text-blue-50">
+                {openPurchaseOrderCount}
+              </p>
+              <p className="mt-0.5 text-xs text-blue-950/70 dark:text-blue-50/75">
+                Rascunho ou pedido enviado
+              </p>
+            </div>
+          </div>
+        ) : null}
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -463,7 +705,12 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
           </p>
         ) : (
           <ul className="space-y-3">
-            {orders.map((o) => (
+            {orders.map((o) => {
+              const { itemCount, totalValue, hasPricedLines } = orderListSummary(o);
+              const prevLabel = o.expected_date
+                ? new Date(o.expected_date + "T12:00:00").toLocaleDateString("pt-BR")
+                : null;
+              return (
               <li
                 key={o.id}
                 role="button"
@@ -472,26 +719,50 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
                 onKeyDown={(e) => e.key === "Enter" && void openEditOrder(o)}
                 className="cursor-pointer rounded-2xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-4 text-sm shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
               >
-                <div className="flex w-full items-start justify-between gap-3">
-                  <div>
-                  <p className="font-semibold">
-                    {o.suppliers?.name ?? "Sem fornecedor"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {statusLabel(o.status)}
-                    {o.expected_date
-                      ? ` · prev. ${new Date(o.expected_date + "T12:00:00").toLocaleDateString("pt-BR")}`
-                      : ""}
-                    {" · "}
-                    {new Date(o.created_at).toLocaleDateString("pt-BR")}
-                  </p>
+                <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-semibold leading-snug">
+                      {o.suppliers?.name ?? "Sem fornecedor"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {statusLabel(o.status)}
+                      {" · "}
+                      Criado em {new Date(o.created_at).toLocaleDateString("pt-BR")}
+                    </p>
                   </div>
-                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <span className="shrink-0 self-start rounded-full border border-border bg-background px-2.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                     {statusLabel(o.status)}
                   </span>
                 </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Valor estimado
+                    </p>
+                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                      {hasPricedLines ? formatBRL(totalValue) : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Itens
+                    </p>
+                    <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                      {itemCount}
+                    </p>
+                  </div>
+                  <div className="col-span-2 rounded-lg border border-border/60 bg-background/60 px-3 py-2 sm:col-span-1">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Previsão
+                    </p>
+                    <p className="mt-0.5 text-base font-semibold text-foreground">
+                      {prevLabel ?? "—"}
+                    </p>
+                  </div>
+                </div>
               </li>
-            ))}
+            );
+            })}
           </ul>
         )}
       </CardContent>
@@ -644,8 +915,9 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
                     <div className="flex-1 space-y-1">
                       <Label className="text-xs text-muted-foreground">Produto</Label>
                       <ProductPicker
-                        products={products}
+                        products={productsSortedForPicker}
                         value={l.product_id}
+                        showOpenOrderHint={productHasOtherOpenOrder}
                         onChange={(id) => {
                           const next = [...lines];
                           const p = products.find((x) => x.id === id);
@@ -783,6 +1055,46 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={duplicateDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setDuplicateDialog(null);
+        }}
+      >
+        <DialogContent
+          className="z-[100] sm:max-w-md"
+          overlayClassName="z-[100]"
+          showCloseButton
+        >
+          <DialogHeader>
+            <DialogTitle>Produto já em pedido em andamento</DialogTitle>
+            <DialogDescription>
+              Já existe pedido em aberto (rascunho ou enviado) com estes itens.
+              Você pode voltar para ajustar ou registrar este pedido mesmo assim.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+            {(duplicateDialog ?? []).map((n, i) => (
+              <li key={`${n}-${i}`}>{n}</li>
+            ))}
+          </ul>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setDuplicateDialog(null)}>
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                void saveOrder({ skipDuplicateCheck: true });
+              }}
+            >
+              Criar pedido assim mesmo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

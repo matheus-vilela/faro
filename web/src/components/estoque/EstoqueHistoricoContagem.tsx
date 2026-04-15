@@ -20,8 +20,10 @@ type SessionRow = {
   company_member_id: string | null;
   created_by_user_id: string | null;
   inventory_count_group_id: string | null;
+  inventory_count_listing_id: string | null;
   assigned_company_member_id: string | null;
   inventory_count_groups: { name: string } | null;
+  inventory_count_listings: { name: string } | null;
   initiator_member: { name: string } | null;
   assigned_member: { name: string } | null;
   profiles: { full_name: string | null } | null;
@@ -104,8 +106,10 @@ export function EstoqueHistoricoContagem({
         company_member_id,
         created_by_user_id,
         inventory_count_group_id,
+        inventory_count_listing_id,
         assigned_company_member_id,
         inventory_count_groups ( name ),
+        inventory_count_listings ( name ),
         initiator_member:company_members!inventory_count_sessions_company_member_id_fkey ( name ),
         assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name ),
         profiles!inventory_count_sessions_created_by_user_id_fkey ( full_name ),
@@ -147,6 +151,7 @@ export function EstoqueHistoricoContagem({
         ? "Painel"
         : "WhatsApp (proprietário)";
     const groupName = r.inventory_count_groups?.name?.trim() || "—";
+    const listingName = r.inventory_count_listings?.name?.trim() || "—";
     const assigned = r.assigned_member?.name?.trim() || "—";
     const link = buildSessionLink(r);
     const dateLabel =
@@ -171,6 +176,7 @@ export function EstoqueHistoricoContagem({
           )}
         </td>
         <td className="p-2 text-muted-foreground">{groupName}</td>
+        <td className="p-2 text-muted-foreground">{listingName}</td>
         <td className="p-2 text-muted-foreground">{assigned}</td>
         <td className="p-2 font-medium">{initiatorLabel(r)}</td>
         <td className="p-2 text-muted-foreground">{origin}</td>
@@ -197,7 +203,7 @@ export function EstoqueHistoricoContagem({
         </CardTitle>
         <CardDescription>
           Pendentes (link gerado e ainda não enviado) e concluídas: grupo,
-          operador designado, quem iniciou e datas.
+          listagem, operador designado, quem iniciou e datas.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -224,6 +230,7 @@ export function EstoqueHistoricoContagem({
                         <th className="p-2 font-medium">Gerada em</th>
                         <th className="p-2 font-medium">Situação</th>
                         <th className="p-2 font-medium">Grupo</th>
+                        <th className="p-2 font-medium">Listagem</th>
                         <th className="p-2 font-medium">Operador</th>
                         <th className="p-2 font-medium">Iniciada por</th>
                         <th className="p-2 font-medium">Origem</th>
@@ -248,6 +255,7 @@ export function EstoqueHistoricoContagem({
                         <th className="p-2 font-medium">Enviada em</th>
                         <th className="p-2 font-medium">Situação</th>
                         <th className="p-2 font-medium">Grupo</th>
+                        <th className="p-2 font-medium">Listagem</th>
                         <th className="p-2 font-medium">Operador</th>
                         <th className="p-2 font-medium">Iniciada por</th>
                         <th className="p-2 font-medium">Origem</th>

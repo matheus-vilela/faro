@@ -69,11 +69,14 @@ import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   AlertTriangle,
   ChefHat,
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Loader2,
   Coins,
   Download,
   FileSpreadsheet,
@@ -170,6 +173,32 @@ function sameProductConversions(
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
+type StockMovementRow = {
+  id: string;
+  quantity: number;
+  type: string;
+  reference_type: string | null;
+  created_at: string;
+  unit_cost: number | null;
+};
+
+const STOCK_REF_LABEL: Record<string, string> = {
+  inventory_count: "Contagem",
+  expense: "Despesa",
+  expense_item: "Despesa",
+  recebimento: "Recebimento",
+  recipe: "Receita",
+  revenue_entry: "Venda",
+  waste: "Perda",
+  adjustment: "Ajuste",
+  purchase_order: "Compra",
+};
+
+function stockRefLabel(type: string | null): string {
+  if (!type) return "—";
+  return STOCK_REF_LABEL[type] ?? type;
+}
+
 async function fetchProductCatalogMap(
   companyId: string,
   productIds: string[],
@@ -196,6 +225,37 @@ async function fetchProductCatalogMap(
     out[row.product_id] = list;
   }
   return out;
+}
+
+/** Quantidades em unidade de estoque somadas nos pedidos draft/ordered. */
+async function loadPendingPurchaseQuantities(
+  companyId: string,
+): Promise<Record<string, number>> {
+  const { data: orders, error: oErr } = await supabase
+    .from("purchase_orders")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("status", ["draft", "ordered"]);
+  if (oErr) {
+    console.error(oErr);
+    return {};
+  }
+  const orderIds = (orders ?? []).map((o) => o.id as string);
+  if (orderIds.length === 0) return {};
+  const { data: items, error: iErr } = await supabase
+    .from("purchase_order_items")
+    .select("product_id, quantity")
+    .in("order_id", orderIds);
+  if (iErr) {
+    console.error(iErr);
+    return {};
+  }
+  const acc: Record<string, number> = {};
+  for (const row of items ?? []) {
+    const pid = row.product_id as string;
+    acc[pid] = (acc[pid] ?? 0) + Number(row.quantity);
+  }
+  return acc;
 }
 
 export function Produtos() {
@@ -281,10 +341,17 @@ export function Produtos() {
   const [productCatalogMap, setProductCatalogMap] = useState<
     Record<string, { id: string; name: string }[]>
   >({});
+  const [pendingPurchaseByProduct, setPendingPurchaseByProduct] = useState<
+    Record<string, number>
+  >({});
   const [stockSaving, setStockSaving] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
   >([]);
+  const [stockMovementRows, setStockMovementRows] = useState<StockMovementRow[]>(
+    [],
+  );
+  const [stockMovementLoading, setStockMovementLoading] = useState(false);
   const [initialStockProductConversions, setInitialStockProductConversions] =
     useState<ProductUnitConversionDraft[]>([]);
   type EstoqueTab =
@@ -392,6 +459,14 @@ export function Produtos() {
     void loadCompanyProductCategories();
   }, [currentCompany?.id, loadCompanyProductCategories]);
 
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    if (estoqueTab !== "catalogo") return;
+    void loadPendingPurchaseQuantities(currentCompany.id).then(
+      setPendingPurchaseByProduct,
+    );
+  }, [currentCompany?.id, estoqueTab]);
+
   const loadAssignmentsForProduct = useCallback(async (productId: string) => {
     const { data } = await supabase
       .from("product_category_assignments")
@@ -426,6 +501,7 @@ export function Produtos() {
           setProducts([]);
           setProductsCount(0);
           setProductCatalogMap({});
+          setPendingPurchaseByProduct({});
           return;
         }
       }
@@ -487,12 +563,15 @@ export function Produtos() {
       const rows = (data ?? []) as Product[];
       setProducts(rows);
       setProductsCount(count ?? 0);
-      setProductCatalogMap(
-        await fetchProductCatalogMap(
+      const [catalogMap, pendingMap] = await Promise.all([
+        fetchProductCatalogMap(
           currentCompany.id,
           rows.map((p) => p.id),
         ),
-      );
+        loadPendingPurchaseQuantities(currentCompany.id),
+      ]);
+      setProductCatalogMap(catalogMap);
+      setPendingPurchaseByProduct(pendingMap);
     } finally {
       setLoading(false);
     }
@@ -640,6 +719,36 @@ export function Produtos() {
     };
   }, [stockProduct?.id, productSheetView, currentCompany?.id]);
 
+  useEffect(() => {
+    const productId = stockProduct?.id;
+    if (!productId) {
+      setStockMovementRows([]);
+      setStockMovementLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setStockMovementLoading(true);
+    void (async () => {
+      const { data, error } = await supabase
+        .from("stock_movements")
+        .select("id, quantity, type, reference_type, created_at, unit_cost")
+        .eq("product_id", productId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (cancelled) return;
+      setStockMovementLoading(false);
+      if (error) {
+        console.error(error);
+        setStockMovementRows([]);
+        return;
+      }
+      setStockMovementRows((data ?? []) as StockMovementRow[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stockProduct?.id]);
+
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
       style: "currency",
@@ -735,6 +844,8 @@ export function Produtos() {
     stockProductCategoryIdsRef.current = [];
     setStockProductConversions([]);
     setInitialStockProductConversions([]);
+    setStockMovementRows([]);
+    setStockMovementLoading(false);
   };
 
   const handleStockSave = async () => {
@@ -1351,6 +1462,8 @@ export function Produtos() {
                   catalogTags && catalogTags.length > 0
                     ? [...catalogTags.map((c) => c.name), composesLabel]
                     : [composesLabel];
+                const pendingPurchaseQty =
+                  pendingPurchaseByProduct[p.id] ?? 0;
                 return (
                   <li key={p.id}>
                     <div
@@ -1415,6 +1528,15 @@ export function Produtos() {
                                     Abaixo do mínimo
                                   </Badge>
                                 )}
+                                {pendingPurchaseQty > 0 && (
+                                  <Badge
+                                    variant="outline"
+                                    className="h-6 gap-1 border-blue-500/35 bg-blue-500/[0.08] px-2 text-[0.7rem] font-normal text-blue-950 dark:border-blue-400/35 dark:bg-blue-500/15 dark:text-blue-50"
+                                  >
+                                    <ShoppingCart className="h-3 w-3" />
+                                    Compra em andamento
+                                  </Badge>
+                                )}
                               </div>
 
                               {catSegments.length > 0 ? (
@@ -1456,10 +1578,19 @@ export function Produtos() {
                                 Quantidade
                               </p>
                               <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
-                                {qtyStr}
-                                <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
-                                  {p.unit}
+                                <span className="inline-flex flex-wrap items-baseline gap-x-1">
+                                  <span>{qtyStr}</span>
+                                  <span className="text-xs font-medium text-muted-foreground sm:text-sm">
+                                    {p.unit}
+                                  </span>
                                 </span>
+                                {pendingPurchaseQty > 0 ? (
+                                  <span className="mt-1.5 block text-xs font-normal tabular-nums leading-snug text-blue-700 dark:text-blue-300">
+                                    +
+                                    {pendingPurchaseQty.toLocaleString("pt-BR")}{" "}
+                                    {p.unit} em pedido de compra
+                                  </span>
+                                ) : null}
                               </p>
                             </div>
                             <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
@@ -1556,6 +1687,21 @@ export function Produtos() {
           {stockProduct && productSheetView === "summary" && (
             <>
               <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+                <div className="mb-4 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      productSheetViewRef.current = "edit";
+                      syncStockFormFromProduct(stockProduct);
+                      setProductSheetView("edit");
+                    }}
+                  >
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Editar
+                  </Button>
+                </div>
                 <div className="flex items-start gap-4">
                   <div
                     className={cn(
@@ -1792,6 +1938,83 @@ export function Produtos() {
                     </div>
                   </div>
 
+                  <div className={SHEET_SECTION}>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Histórico de movimentação
+                      </p>
+                      <span className="text-xs text-muted-foreground">
+                        Últimos 20 registros
+                      </span>
+                    </div>
+                    {stockMovementLoading ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Carregando movimentações...
+                      </div>
+                    ) : stockMovementRows.length === 0 ? (
+                      <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
+                        Nenhuma movimentação registrada para este produto.
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-border bg-background shadow-sm">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                              <th className="px-3 py-2 font-medium">Data</th>
+                              <th className="px-3 py-2 font-medium">Tipo</th>
+                              <th className="px-3 py-2 font-medium">Quantidade</th>
+                              <th className="px-3 py-2 font-medium">Origem</th>
+                              <th className="px-3 py-2 font-medium">Custo un.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stockMovementRows.map((row) => {
+                              const isIn = row.type === "in";
+                              return (
+                                <tr key={row.id} className="border-b border-border/60 last:border-b-0">
+                                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                                    {new Date(row.created_at).toLocaleString("pt-BR", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Badge
+                                      variant={isIn ? "secondary" : "outline"}
+                                      className="gap-1 font-normal"
+                                    >
+                                      {isIn ? (
+                                        <ArrowDownLeft className="h-3 w-3" />
+                                      ) : (
+                                        <ArrowUpRight className="h-3 w-3" />
+                                      )}
+                                      {isIn ? "Entrada" : "Saída"}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-3 py-2 tabular-nums">
+                                    {Number(row.quantity).toLocaleString("pt-BR")}{" "}
+                                    {stockProduct.unit}
+                                  </td>
+                                  <td className="px-3 py-2 text-muted-foreground">
+                                    {stockRefLabel(row.reference_type)}
+                                  </td>
+                                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                                    {row.unit_cost != null
+                                      ? formatCurrency(Number(row.unit_cost))
+                                      : "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
                   <div className={cn(SHEET_SECTION, "flex flex-wrap items-center justify-between gap-3")}>
                     <div>
                       <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1838,18 +2061,6 @@ export function Produtos() {
                   onClick={closeStockSheet}
                 >
                   Fechar
-                </Button>
-                <Button
-                  type="button"
-                  className="w-full sm:w-auto"
-                  onClick={() => {
-                    productSheetViewRef.current = "edit";
-                    syncStockFormFromProduct(stockProduct);
-                    setProductSheetView("edit");
-                  }}
-                >
-                  <Pencil className="h-4 w-4 mr-2" />
-                  Editar
                 </Button>
               </SheetFooter>
             </>

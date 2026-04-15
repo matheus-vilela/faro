@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 import {
   FolderTree,
   MessageCircle,
-  PackageSearch,
   Percent,
   Settings2,
   Users,
@@ -29,11 +28,6 @@ const SUB_LINKS = [
     to: "/app/configuracoes/whatsapp",
     label: "WhatsApp",
     icon: MessageCircle,
-  },
-  {
-    to: "/app/configuracoes/importacao-produtos",
-    label: "Importação de notas",
-    icon: PackageSearch,
   },
   {
     to: "/app/configuracoes/categorias",

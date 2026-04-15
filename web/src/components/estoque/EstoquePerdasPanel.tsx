@@ -16,10 +16,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
+import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import { Loader2, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 type WasteRow = {
@@ -33,15 +39,100 @@ type WasteRow = {
 export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [rows, setRows] = useState<WasteRow[]>([]);
+  const [productConversions, setProductConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [productId, setProductId] = useState("");
   const [qty, setQty] = useState("");
+  const [unitCode, setUnitCode] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const productById = useMemo(
+    () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+  const conversionsByProduct = useMemo(() => {
+    const out = new Map<string, ProductUnitConversionDraft[]>();
+    for (const row of productConversions) {
+      if (!row.product_id) continue;
+      const prev = out.get(row.product_id) ?? [];
+      prev.push(row);
+      out.set(row.product_id, prev);
+    }
+    return out;
+  }, [productConversions]);
+
+  const allowedUnitsForProduct = useCallback(
+    (pid: string): string[] => {
+      const product = productById.get(pid);
+      if (!product) return [];
+      const base = product.unit;
+      const allowed = new Set<string>([base]);
+      const convs = conversionsByProduct.get(pid) ?? [];
+      for (const c of convs) {
+        if (
+          c.primary_unit_code?.trim().toLowerCase() ===
+          base.trim().toLowerCase()
+        ) {
+          allowed.add(c.secondary_unit_code);
+        }
+      }
+      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
+        if (getLockedSystemSecondaryQty(1, base, candidate) != null) {
+          allowed.add(candidate);
+        }
+      }
+      return [...allowed];
+    },
+    [conversionsByProduct, productById],
+  );
+
+  const toBaseQty = useCallback(
+    (pid: string, quantity: number, fromUnit: string): number | null => {
+      const product = productById.get(pid);
+      if (!product) return null;
+      const convs = (conversionsByProduct.get(pid) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+      const raw = convertQuantityForProduct(
+        quantity,
+        fromUnit,
+        product.unit,
+        product.unit,
+        convs,
+      );
+      return raw == null ? null : roundHubQuantityForStock(raw);
+    },
+    [conversionsByProduct, productById],
+  );
+
+  useEffect(() => {
+    if (!productId) {
+      setUnitCode("");
+      return;
+    }
+    const product = productById.get(productId);
+    if (!product) {
+      setUnitCode("");
+      return;
+    }
+    const allowed = allowedUnitsForProduct(productId);
+    if (
+      !allowed.some((u) => u.trim().toLowerCase() === unitCode.trim().toLowerCase())
+    ) {
+      setUnitCode(product.unit);
+    }
+  }, [allowedUnitsForProduct, productById, productId, unitCode]);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, w] = await Promise.all([
+    const [p, w, c] = await Promise.all([
       supabase
         .from("products")
         .select("*")
@@ -56,10 +147,12 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
         .eq("products.company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(80),
+      supabase.from("product_unit_conversions").select("*").eq("company_id", companyId),
     ]);
     setLoading(false);
     setProducts((p.data ?? []) as Product[]);
     setRows((w.data ?? []) as unknown as WasteRow[]);
+    setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
   }, [companyId]);
 
   useEffect(() => {
@@ -71,9 +164,27 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
       toast.error("Selecione o produto.");
       return;
     }
-    const q = parseFloat(qty);
+    const q = parseFloat(qty.replace(",", "."));
     if (Number.isNaN(q) || q <= 0) {
       toast.error("Informe uma quantidade válida.");
+      return;
+    }
+    const product = productById.get(productId);
+    if (!product) {
+      toast.error("Produto inválido.");
+      return;
+    }
+    const allowedUnits = allowedUnitsForProduct(productId).map((u) =>
+      u.trim().toLowerCase(),
+    );
+    const selectedUnit = unitCode.trim();
+    if (!selectedUnit || !allowedUnits.includes(selectedUnit.toLowerCase())) {
+      toast.error("Selecione uma unidade válida para o produto.");
+      return;
+    }
+    const baseQty = toBaseQty(productId, q, selectedUnit);
+    if (baseQty == null || !Number.isFinite(baseQty) || baseQty <= 0) {
+      toast.error("Não foi possível converter a unidade selecionada.");
       return;
     }
     setSaving(true);
@@ -82,7 +193,7 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
       .insert({
         company_id: companyId,
         product_id: productId,
-        quantity: q,
+        quantity: baseQty,
         reason: reason.trim() || null,
       })
       .select("id")
@@ -98,7 +209,7 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
     const wid = w.id as string;
     const { error: ae } = await supabase.rpc("adjust_product_stock", {
       p_product_id: productId,
-      p_delta: -q,
+      p_delta: -baseQty,
       p_type: "out",
       p_reference_type: "waste",
       p_reference_id: wid,
@@ -136,7 +247,15 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
         <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
           <div className="space-y-2 sm:col-span-2">
             <Label>Produto</Label>
-            <Select value={productId || "__"} onValueChange={(v) => setProductId(v === "__" ? "" : v)}>
+            <Select
+              value={productId || "__"}
+              onValueChange={(v) => {
+                const pid = v === "__" ? "" : v;
+                setProductId(pid);
+                const product = productById.get(pid);
+                setUnitCode(product?.unit ?? "");
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Selecionar" />
               </SelectTrigger>
@@ -159,6 +278,25 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
               value={qty}
               onChange={(e) => setQty(e.target.value)}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Unidade</Label>
+            <Select
+              value={unitCode || "__"}
+              onValueChange={(v) => setUnitCode(v === "__" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecionar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__">—</SelectItem>
+                {allowedUnitsForProduct(productId).map((u) => (
+                  <SelectItem key={`${productId}-${u}`} value={u}>
+                    {u}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2 sm:col-span-2">
             <Label>Motivo (opcional)</Label>

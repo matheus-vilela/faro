@@ -23,8 +23,10 @@ type Row = {
 const REF_LABEL: Record<string, string> = {
   inventory_count: "Contagem",
   expense: "Despesa",
+  expense_item: "Despesa",
   recebimento: "Recebimento",
   recipe: "Receita",
+  revenue_entry: "Venda",
   waste: "Perda",
   adjustment: "Ajuste",
   purchase_order: "Compra",
