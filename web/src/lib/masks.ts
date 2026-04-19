@@ -33,6 +33,13 @@ export function maskPhone(value: string): string {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
 }
 
+/** CEP: 00000-000 */
+export function maskCep(value: string): string {
+  const digits = onlyDigits(value).slice(0, 8)
+  if (digits.length <= 5) return digits
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`
+}
+
 /** Remove formatação (apenas dígitos) */
 export function unmask(value: string): string {
   return onlyDigits(value)

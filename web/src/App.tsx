@@ -4,10 +4,12 @@ import { RouteDocumentTitle } from "@/components/RouteDocumentTitle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { CompanyProvider } from "@/contexts/CompanyContext";
+import { UnitSetupModalProvider } from "@/contexts/UnitSetupModalContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
 import { Alertas } from "@/pages/Alertas";
 import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
+import { UnitSetupLegacyOpen } from "@/pages/UnitSetupLegacyOpen";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
@@ -56,9 +58,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AuthenticatedLayout() {
   return (
     <CompanyProvider>
-      <Routes>
-        <Route path="/empresas" element={<Companies />} />
-        <Route path="/app" element={<AppLayout />}>
+      <UnitSetupModalProvider>
+        <Routes>
+          <Route path="/empresas" element={<Companies />} />
+          <Route
+            path="/empresas/unidade/setup"
+            element={<UnitSetupLegacyOpen />}
+          />
+          <Route
+            path="/empresas/unidade/setup/:companyId"
+            element={<UnitSetupLegacyOpen />}
+          />
+          <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="despesas" element={<Despesas />} />
           <Route path="receitas" element={<Receitas />} />
@@ -93,7 +104,8 @@ function AuthenticatedLayout() {
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />
-      </Routes>
+        </Routes>
+      </UnitSetupModalProvider>
     </CompanyProvider>
   );
 }

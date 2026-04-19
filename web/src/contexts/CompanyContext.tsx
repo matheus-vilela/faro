@@ -17,6 +17,11 @@ export interface Company {
   group_id: string
   created_at: string
   updated_at: string
+  /** Maps JSON persistidos pelo assistente de configuração (quando existirem). */
+  empresa?: Record<string, unknown> | null
+  endereco_principal?: Record<string, unknown> | null
+  focusnfe?: Record<string, unknown> | null
+  setup?: Record<string, unknown> | null
 }
 
 export interface UserCompany {

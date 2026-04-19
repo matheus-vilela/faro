@@ -32,10 +32,8 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Company } from "@/contexts/CompanyContext";
-import {
-  getLastCompanyStorageKey,
-  useCompany,
-} from "@/contexts/CompanyContext";
+import { useCompany } from "@/contexts/CompanyContext";
+import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import { isValidCnpj } from "@/lib/cnpj";
 import {
   hasDuplicateUnitNameInGroup,
@@ -62,6 +60,7 @@ export function Companies() {
     refetchCompanies,
     loading: companiesLoading,
   } = useCompany();
+  const { openModal } = useUnitSetupModal();
 
   useEffect(() => {
     if (
@@ -80,8 +79,6 @@ export function Companies() {
     navigate,
   ]);
 
-  const [showNewGroup, setShowNewGroup] = useState(false);
-  const [addUnitGroupId, setAddUnitGroupId] = useState<string | null>(null);
   const [renameGroup, setRenameGroup] = useState<CompanyGroup | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     company: Company;
@@ -92,22 +89,10 @@ export function Companies() {
   const [editDocument, setEditDocument] = useState("");
   const [editEmail, setEditEmail] = useState("");
 
-  const [groupName, setGroupName] = useState("");
-  const [name, setName] = useState("");
-  const [document, setDocument] = useState("");
-  const [email, setEmail] = useState("");
   const [renameValue, setRenameValue] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const resetForm = () => {
-    setGroupName("");
-    setName("");
-    setDocument("");
-    setEmail("");
-    setError(null);
-  };
 
   const isGroupOwner = (g: CompanyGroup) =>
     !!user && g.owner_user_id === user.id;
@@ -115,117 +100,6 @@ export function Companies() {
   const handleSelectCompany = (company: Company) => {
     setCurrentCompany(company);
     navigate("/app", { replace: true });
-  };
-
-  const persistAndRefetch = async (companyId: string) => {
-    if (user) {
-      localStorage.setItem(getLastCompanyStorageKey(user.id), companyId);
-    }
-    await refetchCompanies();
-  };
-
-  const handleCreateGroupAndFirstUnit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    const docDigits = unmask(document);
-    if (!isValidCnpj(docDigits)) {
-      setError("Informe um CNPJ válido.");
-      return;
-    }
-    const unitName = name.trim();
-    if (!unitName) {
-      setError("Informe o nome da primeira unidade.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const groupId = crypto.randomUUID();
-      const companyId = crypto.randomUUID();
-      const { error: gErr } = await supabase.from("company_groups").insert({
-        id: groupId,
-        name: groupName.trim() || "Default",
-        owner_user_id: user.id,
-      });
-      if (gErr) throw gErr;
-
-      const { error: cErr } = await supabase.from("companies").insert({
-        id: companyId,
-        group_id: groupId,
-        name: unitName,
-        document: docDigits,
-        email: email.trim() || null,
-      });
-      if (cErr) throw cErr;
-
-      const { error: uErr } = await supabase.from("user_companies").insert({
-        user_id: user.id,
-        company_id: companyId,
-        role: "owner",
-      });
-      if (uErr) throw uErr;
-
-      await persistAndRefetch(companyId);
-      setShowNewGroup(false);
-      resetForm();
-      if (!gestao) navigate("/app", { replace: true });
-    } catch (err: unknown) {
-      setError(
-        mapCompanyUnitMutationError(err, "Erro ao criar grupo e unidade"),
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAddUnit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !addUnitGroupId) return;
-    const docDigits = unmask(document);
-    if (!isValidCnpj(docDigits)) {
-      setError("Informe um CNPJ válido.");
-      return;
-    }
-    const unitName = name.trim();
-    if (!unitName) {
-      setError("Informe o nome da unidade.");
-      return;
-    }
-    const gwc = groupsWithCompanies.find((g) => g.group.id === addUnitGroupId);
-    if (
-      hasDuplicateUnitNameInGroup(unitName, addUnitGroupId, gwc?.companies ?? [])
-    ) {
-      setError("Já existe uma unidade com este nome neste grupo.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const companyId = crypto.randomUUID();
-      const { error: cErr } = await supabase.from("companies").insert({
-        id: companyId,
-        group_id: addUnitGroupId,
-        name: unitName,
-        document: docDigits,
-        email: email.trim() || null,
-      });
-      if (cErr) throw cErr;
-
-      const { error: uErr } = await supabase.from("user_companies").insert({
-        user_id: user.id,
-        company_id: companyId,
-        role: "owner",
-      });
-      if (uErr) throw uErr;
-
-      await persistAndRefetch(companyId);
-      setAddUnitGroupId(null);
-      resetForm();
-    } catch (err: unknown) {
-      setError(mapCompanyUnitMutationError(err, "Erro ao criar unidade"));
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleRenameGroup = async (e: React.FormEvent) => {
@@ -388,9 +262,7 @@ export function Companies() {
                           variant="default"
                           size="sm"
                           onClick={() => {
-                            setAddUnitGroupId(group.id);
-                            resetForm();
-                            setError(null);
+                            openModal({ kind: "add_unit", groupId: group.id });
                           }}
                         >
                           <Plus className="h-4 w-4 mr-1" />
@@ -472,11 +344,7 @@ export function Companies() {
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
-            onClick={() => {
-              setShowNewGroup(true);
-              resetForm();
-              setGroupName("");
-            }}
+            onClick={() => openModal({ kind: "new_group" })}
             className="flex-1"
           >
             Novo grupo
@@ -490,164 +358,6 @@ export function Companies() {
           </Button>
         </div>
       </PageShell>
-
-      <Sheet
-        open={showNewGroup}
-        onOpenChange={(open) => {
-          setShowNewGroup(open);
-          if (!open) resetForm();
-        }}
-      >
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Novo grupo</SheetTitle>
-            <SheetDescription>
-              Crie um grupo e a primeira unidade (empresa). Você será o dono do
-              grupo.
-            </SheetDescription>
-          </SheetHeader>
-          <form
-            onSubmit={handleCreateGroupAndFirstUnit}
-            className="space-y-4 py-4"
-          >
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                {error}
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="group-name">Nome do grupo *</Label>
-              <Input
-                id="group-name"
-                placeholder="Ex.: Rede Centro"
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="unit-name">Nome da primeira unidade *</Label>
-              <Input
-                id="unit-name"
-                placeholder="Nome do bar/restaurante"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="document">CNPJ *</Label>
-              <Input
-                id="document"
-                placeholder="00.000.000/0001-00"
-                inputMode="numeric"
-                autoComplete="off"
-                value={document}
-                onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="contato@estabelecimento.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <SheetFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setShowNewGroup(false);
-                  resetForm();
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "Criando..." : "Criar grupo"}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
-        open={!!addUnitGroupId}
-        onOpenChange={(open) => {
-          if (!open) {
-            setAddUnitGroupId(null);
-            resetForm();
-          }
-        }}
-      >
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Nova unidade</SheetTitle>
-            <SheetDescription>
-              Cadastre outra empresa neste mesmo grupo.
-            </SheetDescription>
-          </SheetHeader>
-          <form onSubmit={handleAddUnit} className="space-y-4 py-4">
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                {error}
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="add-unit-name">Nome da unidade *</Label>
-              <Input
-                id="add-unit-name"
-                placeholder="Nome do bar/restaurante"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="add-document">CNPJ *</Label>
-              <Input
-                id="add-document"
-                placeholder="00.000.000/0001-00"
-                inputMode="numeric"
-                autoComplete="off"
-                value={document}
-                onChange={(e) => setDocument(maskCpfCnpj(e.target.value))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="add-email">Email</Label>
-              <Input
-                id="add-email"
-                type="email"
-                placeholder="contato@estabelecimento.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <SheetFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setAddUnitGroupId(null);
-                  resetForm();
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "Criando..." : "Criar unidade"}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet>
 
       <Sheet
         open={!!editingCompany}

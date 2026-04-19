@@ -213,14 +213,6 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     });
   }, [productSearch, products]);
 
-  const listingCountByGroup = useMemo(() => {
-    const out = new Map<string, number>();
-    for (const l of listings) {
-      out.set(l.inventory_count_group_id, (out.get(l.inventory_count_group_id) ?? 0) + 1);
-    }
-    return out;
-  }, [listings]);
-
   const productCountByListing = useMemo(() => {
     const out = new Map<string, number>();
     for (const row of listingProductRows) {
