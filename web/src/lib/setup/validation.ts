@@ -1,6 +1,13 @@
 import { isValidCnpj } from "@/lib/cnpj";
 import { unmask } from "@/lib/masks";
-import type { EmpresaMap, FocusNfeMap } from "@/types/companySetup";
+import type {
+  EmpresaMap,
+  EnderecoPrincipalMap,
+  FocusNfeMap,
+  SetupCertificateState,
+  SetupEpocState,
+  SetupXmlZipImportState,
+} from "@/types/companySetup";
 import {
   FOCUS_NFE_MODELO_NFCE,
   FOCUS_NFE_MODELO_NFE,
@@ -51,4 +58,85 @@ export function validateStep3FocusNfe(f: FocusNfeMap): string | null {
     }
   }
   return null;
+}
+
+function hasText(v: unknown): boolean {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+export function isStep1EmpresaComplete(e: EmpresaMap): boolean {
+  return validateStep1Empresa(e) == null;
+}
+
+/** Regra solicitada: etapa só conclui com todos os campos preenchidos. */
+export function isStep2EnderecoComplete(e: EnderecoPrincipalMap): boolean {
+  return (
+    hasText(e.cep) &&
+    hasText(e.logradouro) &&
+    hasText(e.numero) &&
+    hasText(e.complemento) &&
+    hasText(e.bairro) &&
+    hasText(e.municipio) &&
+    hasText(e.uf) &&
+    hasText(e.ibge_cidade)
+  );
+}
+
+/** Regra solicitada: etapa só conclui com todos os campos da etapa preenchidos. */
+export function isStep3FocusNfeComplete(f: FocusNfeMap): boolean {
+  const modelo = (f.modelo ?? "").trim();
+  if (modelo !== FOCUS_NFE_MODELO_NFCE && modelo !== FOCUS_NFE_MODELO_NFE) {
+    return false;
+  }
+  const baseFilled =
+    hasText(f.serie) &&
+    hasText(f.proximoNumeroNfce) &&
+    hasText(f.token_homologacao) &&
+    hasText(f.token_producao);
+  if (!baseFilled) return false;
+  if (modelo === FOCUS_NFE_MODELO_NFCE) {
+    return (
+      hasText(f.csc_nfce_producao) &&
+      hasText(f.id_token_nfce_producao) &&
+      hasText(f.csc_nfce_homologacao) &&
+      hasText(f.id_token_nfce_homologacao)
+    );
+  }
+  return true;
+}
+
+export function isStep4CertificateComplete(
+  cert: SetupCertificateState | undefined,
+): boolean {
+  return cert?.status === "valid";
+}
+
+/** Concluído apenas quando importação terminar. */
+export function isStep5XmlZipComplete(
+  xmlZip: SetupXmlZipImportState | undefined,
+): boolean {
+  return xmlZip?.phase === "done";
+}
+
+/**
+ * EPOC:
+ * - "no" => ignorado/concluído
+ * - credenciais => usuário+senha
+ * - excel => arquivo enviado
+ */
+export function getStep6EpocState(
+  epoc: SetupEpocState | undefined,
+): { completed: boolean; skipped: boolean } {
+  const mode = epoc?.mode ?? "undecided";
+  if (mode === "no") return { completed: true, skipped: true };
+  if (mode === "credentials") {
+    return {
+      completed: hasText(epoc?.username) && hasText(epoc?.password),
+      skipped: false,
+    };
+  }
+  if (mode === "excel") {
+    return { completed: hasText(epoc?.excel_storage_path), skipped: false };
+  }
+  return { completed: false, skipped: false };
 }

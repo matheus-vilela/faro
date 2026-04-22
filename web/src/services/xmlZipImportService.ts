@@ -11,7 +11,7 @@ export type XmlZipProcessCallbacks = {
  */
 export async function processXmlZipImport(
   _companyId: string,
-  _file: File,
+  file: File,
   callbacks: XmlZipProcessCallbacks,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
@@ -20,7 +20,7 @@ export async function processXmlZipImport(
     callbacks.onPhase("parsing");
     await delay(700);
     const fakeLog: XmlZipFileLogEntry[] = [
-      { name: "exemplo-nfe.xml", ok: true, message: "Registrado (simulação)" },
+      { name: file.name, ok: true, message: "Arquivo processado (simulação)" },
     ];
     callbacks.onLog(fakeLog);
     callbacks.onPhase("preview");

@@ -6,11 +6,17 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { maskCpfCnpj } from "@/lib/masks";
 import {
   getNextPendingStep,
-  markStepCompleted,
-  markStepSkipped,
   mergeSetupPatch,
 } from "@/lib/setup/setupProgress";
-import { validateStep1Empresa, validateStep3FocusNfe } from "@/lib/setup/validation";
+import {
+  getStep6EpocState,
+  isStep1EmpresaComplete,
+  isStep2EnderecoComplete,
+  isStep3FocusNfeComplete,
+  isStep4CertificateComplete,
+  isStep5XmlZipComplete,
+  validateStep1Empresa,
+} from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
 import { fetchAddressByCep } from "@/services/addressLookupService";
 import { validateCertificateWithFocusNfe, syncFocusNfeCompanyProfile } from "@/services/focusNfeService";
@@ -56,6 +62,13 @@ function emptyEndereco(): EnderecoPrincipalMap {
 
 function emptyFocus(): FocusNfeMap {
   return {};
+}
+
+function upsertStep(list: number[], step: SetupStepNumber, include: boolean): number[] {
+  const s = new Set(list);
+  if (include) s.add(step);
+  else s.delete(step);
+  return [...s].sort((a, b) => a - b);
 }
 
 export function UnitSetupWizard({
@@ -131,6 +144,34 @@ export function UnitSetupWizard({
     queueMicrotask(() => void load());
   }, [load]);
 
+  const syncCompletionState = useCallback(
+    (base: CompanySetupMap, overrides?: Partial<CompanySetupMap>): CompanySetupMap => {
+      const merged = mergeSetupPatch(base, overrides ?? {});
+      const s1 = isStep1EmpresaComplete(empresa);
+      const s2 = isStep2EnderecoComplete(endereco);
+      const s3 = isStep3FocusNfeComplete(focusnfe);
+      const s4 = isStep4CertificateComplete(merged.certificate);
+      const s5 = isStep5XmlZipComplete(merged.xml_zip_import);
+      const s6 = getStep6EpocState(merged.epoc);
+
+      let completed = merged.completed_steps ?? [];
+      let skipped = merged.skipped_steps ?? [];
+      completed = upsertStep(completed, 1, s1);
+      completed = upsertStep(completed, 2, s2);
+      completed = upsertStep(completed, 3, s3);
+      completed = upsertStep(completed, 4, s4);
+      completed = upsertStep(completed, 5, s5);
+      completed = upsertStep(completed, 6, s6.completed);
+      skipped = upsertStep(skipped, 6, s6.skipped);
+
+      return mergeSetupPatch(merged, {
+        completed_steps: completed,
+        skipped_steps: skipped,
+      });
+    },
+    [empresa, endereco, focusnfe],
+  );
+
   const handleCepBlur = useCallback(async () => {
     const digits = (endereco.cep ?? "").replace(/\D/g, "");
     if (digits.length !== 8) return;
@@ -150,7 +191,7 @@ export function UnitSetupWizard({
     setSaving(true);
     try {
       if (companyId) {
-        const paused = buildPausedSetup(setup);
+        const paused = buildPausedSetup(syncCompletionState(setup));
         await patchCompanyMaps(companyId, {
           empresa,
           endereco_principal: endereco,
@@ -230,14 +271,12 @@ export function UnitSetupWizard({
     const phoneDigits = (empresa.telefone ?? "").replace(/\D/g, "");
     const displayName =
       (empresa.nome_fantasia ?? "").trim() || (empresa.nome_razao_social ?? "").trim();
-    const nextSetup = markStepCompleted(setup, 1);
+    const nextSetup = syncCompletionState(
+      mergeSetupPatch(setup, { current_step: 2 }),
+    );
     const res = await patchCompanyMaps(companyId, {
       empresa: { ...empresa, cnpj_cpf: docDigits, telefone: phoneDigits },
-      setup: {
-        ...nextSetup,
-        current_step: 2,
-        updated_at: new Date().toISOString(),
-      },
+      setup: nextSetup,
       name: displayName,
       document: docDigits,
       email: (empresa.email ?? "").trim() || null,
@@ -273,8 +312,9 @@ export function UnitSetupWizard({
 
     if (activeStep === 2) {
       setSaving(true);
-      let nextSetup = markStepCompleted(setup, 2);
-      nextSetup = mergeSetupPatch(nextSetup, { current_step: 3 });
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 3 }),
+      );
       const res = await patchCompanyMaps(companyId, {
         endereco_principal: endereco,
         setup: nextSetup,
@@ -290,14 +330,10 @@ export function UnitSetupWizard({
     }
 
     if (activeStep === 3) {
-      const v = validateStep3FocusNfe(focusnfe);
-      if (v) {
-        setStepError(v);
-        return;
-      }
       setSaving(true);
-      let nextSetup = markStepCompleted(setup, 3);
-      nextSetup = mergeSetupPatch(nextSetup, { current_step: 4 });
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 4 }),
+      );
       const res = await patchCompanyMaps(companyId, {
         focusnfe,
         setup: nextSetup,
@@ -345,11 +381,12 @@ export function UnitSetupWizard({
         }));
       }
       setSaving(true);
-      let nextSetup = markStepCompleted(setup, 4);
-      nextSetup = mergeSetupPatch(nextSetup, {
-        current_step: 5,
-        certificate: certOut,
-      });
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, {
+          current_step: 5,
+          certificate: certOut,
+        }),
+      );
       const res = await patchCompanyMaps(companyId, {
         focusnfe: nextFocus,
         setup: nextSetup,
@@ -366,8 +403,9 @@ export function UnitSetupWizard({
 
     if (activeStep === 5) {
       setSaving(true);
-      let nextSetup = markStepCompleted(setup, 5);
-      nextSetup = mergeSetupPatch(nextSetup, { current_step: 6 });
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 6 }),
+      );
       const res = await patchCompanyMaps(companyId, {
         setup: nextSetup,
       });
@@ -383,38 +421,27 @@ export function UnitSetupWizard({
 
     if (activeStep === 6) {
       const ep = setup.epoc ?? { mode: "undecided" as const };
-      if (ep.mode === "undecided") {
-        setStepError("Indique se haverá integração EPOC.");
-        return;
-      }
       setSaving(true);
-      let nextSetup: CompanySetupMap;
-      if (ep.mode === "no") {
-        nextSetup = markStepSkipped(
-          mergeSetupPatch(setup, { epoc: { ...ep, mode: "no" } }),
-          6,
-        );
-      } else {
-        nextSetup = markStepCompleted(mergeSetupPatch(setup, { epoc: ep }), 6);
-        if (ep.mode === "credentials" && ep.username?.trim()) {
-          await supabase.from("company_integrations").upsert(
-            {
-              company_id: companyId,
-              provider: "epoc",
-              enabled: true,
-              settings: {
-                username: ep.username,
-                password: ep.password,
-                base_url: ep.base_url,
-                codigo_filial: ep.codigo_filial,
-                ambiente: "producao",
-              },
+      if (ep.mode === "credentials" && ep.username?.trim()) {
+        await supabase.from("company_integrations").upsert(
+          {
+            company_id: companyId,
+            provider: "epoc",
+            enabled: true,
+            settings: {
+              username: ep.username,
+              password: ep.password,
+              base_url: ep.base_url,
+              codigo_filial: ep.codigo_filial,
+              ambiente: "producao",
             },
-            { onConflict: "company_id,provider" },
-          );
-        }
+          },
+          { onConflict: "company_id,provider" },
+        );
       }
-      nextSetup = mergeSetupPatch(nextSetup, { current_step: 7 });
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 7, epoc: ep }),
+      );
       await patchCompanyMaps(companyId, {
         setup: nextSetup,
         focusnfe,
@@ -490,7 +517,12 @@ export function UnitSetupWizard({
     const path = `${companyId}/imports/xml/${Date.now()}_${file.name}`;
     const { error } = await supabase.storage
       .from("company-setup")
-      .upload(path, file, { upsert: true });
+      .upload(path, file, {
+        upsert: true,
+        // Em Windows, arquivos ZIP podem vir como application/x-zip-compressed.
+        // Forçamos application/zip para compatibilizar com bucket e parser.
+        contentType: "application/zip",
+      });
     if (error) {
       setXmlBusy(false);
       toast.error(error.message);
@@ -524,9 +556,12 @@ export function UnitSetupWizard({
       phase: "done",
       updated_at: new Date().toISOString(),
     };
-    setSetup((s) => mergeSetupPatch(s, { xml_zip_import: xmlState }));
+    const nextSetup = syncCompletionState(
+      mergeSetupPatch(setup, { xml_zip_import: xmlState }),
+    );
+    setSetup(nextSetup);
     await patchCompanyMaps(companyId, {
-      setup: mergeSetupPatch(setup, { xml_zip_import: xmlState }),
+      setup: nextSetup,
     });
     setXmlBusy(false);
     toast.message("Importação simulada concluída.");
@@ -548,9 +583,10 @@ export function UnitSetupWizard({
       excel_storage_path: path,
       updated_at: new Date().toISOString(),
     };
-    setSetup((s) => mergeSetupPatch(s, { epoc: ep }));
+    const nextSetup = syncCompletionState(mergeSetupPatch(setup, { epoc: ep }));
+    setSetup(nextSetup);
     await patchCompanyMaps(companyId, {
-      setup: mergeSetupPatch(setup, { epoc: ep }),
+      setup: nextSetup,
     });
     toast.success("Planilha enviada.");
   };

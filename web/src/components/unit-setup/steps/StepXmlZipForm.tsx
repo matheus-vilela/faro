@@ -44,7 +44,7 @@ export function StepXmlZipForm({
           Selecionar .zip
           <input
             type="file"
-            accept=".zip,application/zip"
+            accept=".zip,application/zip,application/x-zip-compressed"
             className="sr-only"
             onChange={(e) => {
               const f = e.target.files?.[0];

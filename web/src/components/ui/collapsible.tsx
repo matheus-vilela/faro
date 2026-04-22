@@ -24,7 +24,10 @@ function CollapsibleContent({
   return (
     <CollapsiblePrimitive.Content
       data-slot="collapsible-content"
-      className={cn("overflow-hidden", className)}
+      className={cn(
+        "collapsible-content-animated overflow-hidden",
+        className,
+      )}
       {...props}
     />
   );
