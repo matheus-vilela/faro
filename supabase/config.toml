@@ -40,3 +40,6 @@ verify_jwt = false
 
 [functions.focus-consulta-cnpj]
 verify_jwt = false
+
+[functions.focus-cria-empresa]
+verify_jwt = false
