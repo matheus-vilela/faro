@@ -1,3 +1,4 @@
+import { EstoqueHistoricoContagem } from "@/components/estoque/EstoqueHistoricoContagem";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -29,15 +30,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { EstoqueHistoricoContagem } from "@/components/estoque/EstoqueHistoricoContagem";
 import { randomShortSlug } from "@/lib/randomSlug";
 import { supabase } from "@/lib/supabase";
 import type { CompanyMember } from "@/types/companyMember";
-import type { Product } from "@/types/product";
 import type {
   InventoryCountGroup,
   InventoryCountListing,
 } from "@/types/inventoryCount";
+import type { Product } from "@/types/product";
 import {
   ClipboardList,
   Copy,
@@ -76,9 +76,12 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   const [listingDialogOpen, setListingDialogOpen] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
   const [newListingName, setNewListingName] = useState("");
-  const [newListingAssignedMemberId, setNewListingAssignedMemberId] = useState("");
+  const [newListingAssignedMemberId, setNewListingAssignedMemberId] =
+    useState("");
   const [productSearch, setProductSearch] = useState("");
-  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [savingListing, setSavingListing] = useState(false);
   const [deletingListingId, setDeletingListingId] = useState<string>("");
   const [listingSheetOpen, setListingSheetOpen] = useState(false);
@@ -91,9 +94,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   const [editListingAssignedMemberId, setEditListingAssignedMemberId] =
     useState("");
   const [editListingProductSearch, setEditListingProductSearch] = useState("");
-  const [editListingProductIds, setEditListingProductIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [editListingProductIds, setEditListingProductIds] = useState<
+    Set<string>
+  >(new Set());
   const [savingListingEdit, setSavingListingEdit] = useState(false);
 
   const [linkTarget, setLinkTarget] = useState<"group" | "listing">("group");
@@ -140,7 +143,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     setListings((li.data ?? []) as InventoryCountListing[]);
     setMembers((mem.data ?? []) as CompanyMember[]);
     setProducts((prod.data ?? []) as Product[]);
-    setListingProductRows((lprod.data ?? []) as { listing_id: string; product_id: string }[]);
+    setListingProductRows(
+      (lprod.data ?? []) as { listing_id: string; product_id: string }[],
+    );
     setLoadingMeta(false);
   }, [companyId]);
 
@@ -159,7 +164,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     if (linkTarget === "listing" && !targetListingId) {
-      const list = listings.find((l) => l.inventory_count_group_id === targetGroupId);
+      const list = listings.find(
+        (l) => l.inventory_count_group_id === targetGroupId,
+      );
       if (list?.id) setTargetListingId(list.id);
     }
   }, [linkTarget, listings, targetGroupId, targetListingId]);
@@ -213,14 +220,6 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     });
   }, [productSearch, products]);
 
-  const listingCountByGroup = useMemo(() => {
-    const out = new Map<string, number>();
-    for (const l of listings) {
-      out.set(l.inventory_count_group_id, (out.get(l.inventory_count_group_id) ?? 0) + 1);
-    }
-    return out;
-  }, [listings]);
-
   const productCountByListing = useMemo(() => {
     const out = new Map<string, number>();
     for (const row of listingProductRows) {
@@ -236,7 +235,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       );
       if (groupListings.length === 0) return true;
       if (groupListings.length === 1) {
-        return groupListings[0]!.name.trim().toLowerCase() === "lista principal";
+        return (
+          groupListings[0]!.name.trim().toLowerCase() === "lista principal"
+        );
       }
       return false;
     },
@@ -282,11 +283,19 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     const listingId = data.id as string;
     const { error: itemsError } = await supabase
       .from("inventory_count_listing_products")
-      .insert(productIds.map((productId) => ({ listing_id: listingId, product_id: productId })));
+      .insert(
+        productIds.map((productId) => ({
+          listing_id: listingId,
+          product_id: productId,
+        })),
+      );
     setSavingListing(false);
     if (itemsError) {
       console.error(itemsError);
-      await supabase.from("inventory_count_listings").delete().eq("id", listingId);
+      await supabase
+        .from("inventory_count_listings")
+        .delete()
+        .eq("id", listingId);
       toast.error("Não foi possível vincular produtos à listagem.");
       return;
     }
@@ -460,58 +469,61 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     await loadMeta();
   };
 
-  const createOneLink = useCallback(async (params: {
-    inventory_count_group_id: string | null;
-    inventory_count_listing_id: string | null;
-    assigned_company_member_id: string | null;
-  }) => {
-    const { data: userData } = await supabase.auth.getUser();
-    const uid = userData.user?.id ?? null;
+  const createOneLink = useCallback(
+    async (params: {
+      inventory_count_group_id: string | null;
+      inventory_count_listing_id: string | null;
+      assigned_company_member_id: string | null;
+    }) => {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id ?? null;
 
-    const { data: sess, error: se } = await supabase
-      .from("inventory_count_sessions")
-      .insert({
-        company_id: companyId,
-        status: "open",
-        created_by_user_id: uid,
-        inventory_count_group_id: params.inventory_count_group_id,
-        inventory_count_listing_id: params.inventory_count_listing_id,
-        assigned_company_member_id: params.assigned_company_member_id,
-      })
-      .select("id, token")
-      .single();
-
-    if (se || !sess?.id || !sess?.token) {
-      throw new Error(se?.message ?? "Falha ao criar sessão.");
-    }
-
-    let slug: string | null = null;
-    for (let i = 0; i < 15; i++) {
-      const s = randomShortSlug(8);
-      const { error: le } = await supabase
-        .from("inventory_count_short_links")
+      const { data: sess, error: se } = await supabase
+        .from("inventory_count_sessions")
         .insert({
-          slug: s,
-          session_id: sess.id,
-          token: sess.token,
-        });
-      if (!le) {
-        slug = s;
-        break;
-      }
-      const code = (le as { code?: string }).code;
-      if (code !== "23505") {
-        throw new Error(le.message);
-      }
-    }
+          company_id: companyId,
+          status: "open",
+          created_by_user_id: uid,
+          inventory_count_group_id: params.inventory_count_group_id,
+          inventory_count_listing_id: params.inventory_count_listing_id,
+          assigned_company_member_id: params.assigned_company_member_id,
+        })
+        .select("id, token")
+        .single();
 
-    const base = window.location.origin.replace(/\/$/, "");
-    const url = slug
-      ? `${base}/i/${slug}`
-      : `${base}/contagem-estoque/${sess.token}`;
+      if (se || !sess?.id || !sess?.token) {
+        throw new Error(se?.message ?? "Falha ao criar sessão.");
+      }
 
-    return url;
-  }, [companyId]);
+      let slug: string | null = null;
+      for (let i = 0; i < 15; i++) {
+        const s = randomShortSlug(8);
+        const { error: le } = await supabase
+          .from("inventory_count_short_links")
+          .insert({
+            slug: s,
+            session_id: sess.id,
+            token: sess.token,
+          });
+        if (!le) {
+          slug = s;
+          break;
+        }
+        const code = (le as { code?: string }).code;
+        if (code !== "23505") {
+          throw new Error(le.message);
+        }
+      }
+
+      const base = window.location.origin.replace(/\/$/, "");
+      const url = slug
+        ? `${base}/i/${slug}`
+        : `${base}/contagem-estoque/${sess.token}`;
+
+      return url;
+    },
+    [companyId],
+  );
 
   const createLinks = useCallback(async () => {
     setLoading(true);
@@ -602,8 +614,8 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               </CardTitle>
               <CardDescription>
                 Cadastre rótulos para organizar contagens por setor, depósito ou
-                campanha. Cada grupo pode ter uma ou mais listagens de
-                contagem, com operador e produtos próprios.
+                campanha. Cada grupo pode ter uma ou mais listagens de contagem,
+                com operador e produtos próprios.
               </CardDescription>
             </div>
           </div>
@@ -623,7 +635,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                 <div className="flex-1">
                   <Select
                     value={selectedGroupId || "__none__"}
-                    onValueChange={(v) => setSelectedGroupId(v === "__none__" ? "" : v)}
+                    onValueChange={(v) =>
+                      setSelectedGroupId(v === "__none__" ? "" : v)
+                    }
                   >
                     <SelectTrigger className="border-primary/30 bg-background">
                       <SelectValue placeholder="Selecione o grupo" />
@@ -650,7 +664,11 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   type="button"
                   variant="destructive"
                   size="icon"
-                  disabled={!selectedGroupId || deletingGroup || !canDeleteGroup(selectedGroupId)}
+                  disabled={
+                    !selectedGroupId ||
+                    deletingGroup ||
+                    !canDeleteGroup(selectedGroupId)
+                  }
                   onClick={() => void deleteSelectedGroup(selectedGroupId)}
                   title={
                     !selectedGroupId || canDeleteGroup(selectedGroupId)
@@ -685,7 +703,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   </div>
                   <ul className="space-y-2 rounded-md border p-2 text-sm">
                     {listings
-                      .filter((l) => l.inventory_count_group_id === selectedGroupId)
+                      .filter(
+                        (l) => l.inventory_count_group_id === selectedGroupId,
+                      )
                       .map((l) => (
                         <li key={l.id} className="rounded border p-2">
                           <button
@@ -693,19 +713,23 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                             className="w-full text-left"
                             onClick={() => openListingSheet(l.id)}
                           >
-                            <p className="font-medium text-foreground">{l.name}</p>
+                            <p className="font-medium text-foreground">
+                              {l.name}
+                            </p>
                             <p className="text-xs text-muted-foreground">
                               Operador:{" "}
-                              {members.find((m) => m.id === l.assigned_company_member_id)?.name ??
-                                "Qualquer"}
+                              {members.find(
+                                (m) => m.id === l.assigned_company_member_id,
+                              )?.name ?? "Qualquer"}
                               {" · "}
                               Produtos: {productCountByListing.get(l.id) ?? 0}
                             </p>
                           </button>
                         </li>
                       ))}
-                    {listings.filter((l) => l.inventory_count_group_id === selectedGroupId).length ===
-                    0 ? (
+                    {listings.filter(
+                      (l) => l.inventory_count_group_id === selectedGroupId,
+                    ).length === 0 ? (
                       <li className="text-xs text-muted-foreground">
                         Nenhuma listagem neste grupo.
                       </li>
@@ -742,7 +766,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="group">Grupo (todas as listagens)</SelectItem>
+                  <SelectItem value="group">
+                    Grupo (todas as listagens)
+                  </SelectItem>
                   <SelectItem value="listing">Listagem específica</SelectItem>
                 </SelectContent>
               </Select>
@@ -751,7 +777,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               <Label>Grupo</Label>
               <Select
                 value={targetGroupId || "__none__"}
-                onValueChange={(v) => setTargetGroupId(v === "__none__" ? "" : v)}
+                onValueChange={(v) =>
+                  setTargetGroupId(v === "__none__" ? "" : v)
+                }
                 disabled={loadingMeta}
               >
                 <SelectTrigger>
@@ -776,7 +804,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               </Label>
               <Select
                 value={targetListingId || "__none__"}
-                onValueChange={(v) => setTargetListingId(v === "__none__" ? "" : v)}
+                onValueChange={(v) =>
+                  setTargetListingId(v === "__none__" ? "" : v)
+                }
                 disabled={loadingMeta}
               >
                 <SelectTrigger>
@@ -787,10 +817,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   {listings
                     .filter((l) => l.inventory_count_group_id === targetGroupId)
                     .map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -813,15 +843,30 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           {links.length > 0 && (
             <div className="space-y-2">
               {links.map((row) => (
-                <div key={row.url} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Input readOnly value={row.url} className="font-mono text-sm" />
-                  <Button type="button" variant="outline" onClick={() => copy(row.url)}>
+                <div
+                  key={row.url}
+                  className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                >
+                  <Input
+                    readOnly
+                    value={row.url}
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => copy(row.url)}
+                  >
                     <Copy className="mr-2 h-4 w-4" />
                     Copiar
                   </Button>
                 </div>
               ))}
-              <Button type="button" variant="outline" onClick={copyWhatsappMessage}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={copyWhatsappMessage}
+              >
                 <Users className="mr-2 h-4 w-4" />
                 Copiar mensagem para WhatsApp
               </Button>
@@ -881,7 +926,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               <Label>Grupo</Label>
               <Select
                 value={selectedGroupId || "__none__"}
-                onValueChange={(v) => setSelectedGroupId(v === "__none__" ? "" : v)}
+                onValueChange={(v) =>
+                  setSelectedGroupId(v === "__none__" ? "" : v)
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o grupo" />
@@ -912,13 +959,17 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               </Label>
               <Select
                 value={newListingAssignedMemberId || "__none__"}
-                onValueChange={(v) => setNewListingAssignedMemberId(v === "__none__" ? "" : v)}
+                onValueChange={(v) =>
+                  setNewListingAssignedMemberId(v === "__none__" ? "" : v)
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Qualquer pessoa com o link" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Qualquer pessoa com o link</SelectItem>
+                  <SelectItem value="__none__">
+                    Qualquer pessoa com o link
+                  </SelectItem>
                   {members.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.name}
@@ -947,7 +998,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                       className="flex cursor-pointer items-center justify-between gap-2 rounded border p-2 text-sm"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate font-medium">{p.name}</span>
+                        <span className="block truncate font-medium">
+                          {p.name}
+                        </span>
                         <span className="text-xs text-muted-foreground">
                           {p.unit}
                           {p.sku ? ` · ${p.sku}` : ""}
@@ -972,7 +1025,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   );
                 })}
                 {filteredProducts.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Nenhum produto encontrado.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum produto encontrado.
+                  </p>
                 ) : null}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -1045,8 +1100,12 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   type="button"
                   size="sm"
                   variant="destructive"
-                  disabled={!activeListing || deletingListingId === activeListing.id}
-                  onClick={() => activeListing && void deleteListing(activeListing.id)}
+                  disabled={
+                    !activeListing || deletingListingId === activeListing.id
+                  }
+                  onClick={() =>
+                    activeListing && void deleteListing(activeListing.id)
+                  }
                 >
                   {activeListing && deletingListingId === activeListing.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1063,21 +1122,25 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                 <p>
                   <span className="text-muted-foreground">Grupo:</span>{" "}
                   <span className="font-medium">
-                    {groups.find((g) => g.id === activeListing?.inventory_count_group_id)?.name ??
-                      "—"}
+                    {groups.find(
+                      (g) => g.id === activeListing?.inventory_count_group_id,
+                    )?.name ?? "—"}
                   </span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Operador:</span>{" "}
                   <span className="font-medium">
-                    {members.find((m) => m.id === activeListing?.assigned_company_member_id)
-                      ?.name ?? "Qualquer"}
+                    {members.find(
+                      (m) => m.id === activeListing?.assigned_company_member_id,
+                    )?.name ?? "Qualquer"}
                   </span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Produtos:</span>{" "}
                   <span className="font-medium">
-                    {activeListing ? (productCountByListing.get(activeListing.id) ?? 0) : 0}
+                    {activeListing
+                      ? (productCountByListing.get(activeListing.id) ?? 0)
+                      : 0}
                   </span>
                 </p>
               </div>
@@ -1087,10 +1150,17 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   {(activeListing
                     ? listingProductRows
                         .filter((r) => r.listing_id === activeListing.id)
-                        .map((r) => products.find((p) => p.id === r.product_id)?.name ?? "—")
+                        .map(
+                          (r) =>
+                            products.find((p) => p.id === r.product_id)?.name ??
+                            "—",
+                        )
                     : []
                   ).map((name, idx) => (
-                    <li key={`${name}-${idx}`} className="rounded border px-2 py-1">
+                    <li
+                      key={`${name}-${idx}`}
+                      className="rounded border px-2 py-1"
+                    >
                       {name}
                     </li>
                   ))}
@@ -1159,7 +1229,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                     <Input
                       className="pl-8"
                       value={editListingProductSearch}
-                      onChange={(e) => setEditListingProductSearch(e.target.value)}
+                      onChange={(e) =>
+                        setEditListingProductSearch(e.target.value)
+                      }
                       placeholder="Buscar por nome ou SKU..."
                     />
                   </div>
@@ -1172,7 +1244,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                           className="flex cursor-pointer items-center justify-between gap-2 rounded border p-2 text-sm"
                         >
                           <span className="min-w-0">
-                            <span className="block truncate font-medium">{p.name}</span>
+                            <span className="block truncate font-medium">
+                              {p.name}
+                            </span>
                             <span className="text-xs text-muted-foreground">
                               {p.unit}
                               {p.sku ? ` · ${p.sku}` : ""}
