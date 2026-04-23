@@ -37,3 +37,6 @@ verify_jwt = false
 
 [functions.refresh-whatsapp-draft-matches]
 verify_jwt = false
+
+[functions.focus-consulta-cnpj]
+verify_jwt = false
