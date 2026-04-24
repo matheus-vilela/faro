@@ -1,3 +1,5 @@
+import type { EpocAmbiente } from "@/types/companyIntegration";
+
 /** Status do assistente de configuração persistido em companies.setup */
 export type CompanySetupStatus =
   | "not_started"
@@ -5,8 +7,8 @@ export type CompanySetupStatus =
   | "paused"
   | "completed";
 
-/** Passos 1–6 do wizard */
-export type SetupStepNumber = 1 | 2 | 3 | 4 | 5 | 6;
+/** Passos 1–5 do wizard (empresa, endereço, certificado, XML/ZIP, PDV). */
+export type SetupStepNumber = 1 | 2 | 3 | 4 | 5;
 
 export type EmpresaMap = {
   nome_razao_social?: string;
@@ -17,6 +19,11 @@ export type EmpresaMap = {
   email?: string;
   telefone?: string;
   photo_base64?: string;
+  /** Preenchidos pela consulta CNPJ Focus (persistidos). */
+  situacao_cadastral?: string;
+  cnae_principal?: string;
+  optante_simples_nacional?: boolean;
+  optante_mei?: boolean;
 };
 
 export type EnderecoPrincipalMap = {
@@ -28,6 +35,26 @@ export type EnderecoPrincipalMap = {
   municipio?: string;
   uf?: string;
   ibge_cidade?: string;
+  codigo_municipio?: string;
+  codigo_siafi?: string;
+};
+
+/** Representante legal (opcional; preenchido pela API CNPJ quando existir). */
+export type RepresentanteLegalMap = {
+  nome_responsavel?: string;
+  /** Apenas dígitos */
+  cpf_responsavel?: string;
+  /** ISO YYYY-MM-DD */
+  data_nascimento?: string;
+};
+
+/** Campos bloqueados após consulta CNPJ bem-sucedida (até o CNPJ mudar). */
+export type FocusCnpjLockState = {
+  validated_cnpj_digits: string;
+  validated_at: string;
+  locked_empresa_keys: string[];
+  locked_endereco_keys: string[];
+  locked_representante_keys: string[];
 };
 
 /** Alinhado ao schema pedido; valores opcionais até o usuário preencher */
@@ -43,7 +70,14 @@ export type FocusNfeMap = {
   certificado_validade?: string;
   token_homologacao?: string;
   token_producao?: string;
+  /** Id da empresa na API Focus NFe (preenchido após `focus-cria-empresa`). */
   id_empresa?: number;
+  /**
+   * Uso apenas em memória / body para APIs Focus — **nunca** persistir em `companies.focusnfe`.
+   */
+  arquivo_certificado_base64?: string;
+  /** Idem: só fluxo de request; não gravar no banco. */
+  senha_certificado?: string;
 };
 
 export type CertificateUploadStatus =
@@ -73,6 +107,7 @@ export type XmlZipImportPhase =
 export type XmlZipFileLogEntry = {
   name: string;
   ok: boolean;
+  status?: "success" | "duplicate" | "read_error" | "validation_error" | "needs_review";
   message?: string;
 };
 
@@ -85,21 +120,29 @@ export type SetupXmlZipImportState = {
   updated_at?: string;
 };
 
-export type EpocWizardMode = "undecided" | "no" | "credentials" | "excel";
+export type EpocWizardMode = "undecided" | "no" | "credentials";
 
 export type SetupEpocState = {
   mode: EpocWizardMode;
   /** Rascunho local antes de gravar em company_integrations */
+  enabled?: boolean;
   username?: string;
   password?: string;
   base_url?: string;
   codigo_filial?: string;
-  excel_storage_path?: string;
+  ambiente?: EpocAmbiente;
+  /** Indica que já existe senha salva em company_integrations (não vem no estado por segurança). */
+  password_on_server?: boolean;
   updated_at?: string;
 };
 
 export type CompanySetupMap = {
   status: CompanySetupStatus;
+  /**
+   * 2 = assistente com 5 passos (certificado fiscal = passo 3).
+   * Ausente ou &lt; 2: formato antigo (6 passos com representante no 3) — migrar ao normalizar.
+   */
+  setup_schema_version?: number;
   current_step: number;
   completed_steps: number[];
   skipped_steps: number[];
@@ -108,6 +151,8 @@ export type CompanySetupMap = {
   updated_at?: string;
   completed_at?: string;
   last_paused_at?: string;
+  /** Estado da última validação de CNPJ via Focus (bloqueios de edição). */
+  focus_cnpj_lock?: FocusCnpjLockState;
   certificate?: SetupCertificateState;
   xml_zip_import?: SetupXmlZipImportState;
   epoc?: SetupEpocState;

@@ -16,6 +16,16 @@ function str(v: unknown): string | null {
   return t.length ? t : null;
 }
 
+function normalizeDateOnly(v: unknown): string | null {
+  const s = str(v);
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return null;
+}
+
 /** Aceita nfeProc, NFe sem wrapper, ou XML com namespace */
 export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult | null {
   const trimmed = xmlText.trim();
@@ -49,6 +59,9 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   const ide = infNFe.ide as Record<string, unknown> | undefined;
   const invoiceNumber = str(ide?.nNF);
   const invoiceSeries = str(ide?.serie);
+  const emissionDate = normalizeDateOnly(ide?.dhEmi ?? ide?.dEmi);
+  const infNFeId = str((infNFe as Record<string, unknown>)["@_Id"]);
+  const nfeAccessKey = infNFeId?.startsWith("NFe") ? infNFeId.slice(3) : infNFeId;
 
   const total = infNFe.total as Record<string, unknown> | undefined;
   const icmsTot = total?.ICMSTot as Record<string, unknown> | undefined;
@@ -73,11 +86,13 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     const ean =
       str(prod.cEAN as string | undefined) ??
       str(prod.cEANTrib as string | undefined);
+    const productCode = str(prod.cProd);
     items.push({
       productName,
       quantity,
       unitValue,
       lineTotal: lineTotal > 0 ? lineTotal : quantity * unitValue,
+      productCode,
       unitCommercial: uCom,
       unitTax: uTrib && uCom && uTrib !== uCom ? uTrib : null,
       ncm,
@@ -97,6 +112,8 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     supplierDocument,
     invoiceNumber,
     invoiceSeries,
+    nfeAccessKey: nfeAccessKey ?? null,
+    emissionDate: emissionDate ?? null,
     totalAmount: totalAmount > 0 ? totalAmount : null,
     items,
     notes: "Importado de XML NF-e",

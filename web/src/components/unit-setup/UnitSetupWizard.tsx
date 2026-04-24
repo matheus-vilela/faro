@@ -3,16 +3,23 @@ import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
-import { maskCpfCnpj } from "@/lib/masks";
+import {
+  applyFocusCnpjConsulta,
+  buildFocusCnpjConsultaRecord,
+  clearFocusCnpjFilledFields,
+  resolveFocusCnpjLockForResume,
+} from "@/lib/focusCnpjApply";
+import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
+import { maskCpfCnpj, unmask } from "@/lib/masks";
 import {
   getNextPendingStep,
   mergeSetupPatch,
 } from "@/lib/setup/setupProgress";
 import {
-  getStep6EpocState,
+  getStep5EpocState,
   isStep1EmpresaComplete,
   isStep2EnderecoComplete,
-  isStep3FocusNfeComplete,
+  isStep3CertificatePayloadComplete,
   isStep4CertificateComplete,
   isStep5XmlZipComplete,
   validateStep1Empresa,
@@ -28,13 +35,28 @@ import {
   normalizeSetupMap,
   patchCompanyMaps,
 } from "@/services/unitSetupService";
+import {
+  focusAtualizarCertificado,
+  hasFocusNfeEmpresaId,
+} from "@/services/focusAtualizarCertificadoService";
+import {
+  buildFocusCriaEmpresaBody,
+  focusCriaEmpresa,
+  fileToPureBase64,
+  parseFocusCriaEmpresaIdFromResponse,
+} from "@/services/focusCriaEmpresaService";
+import { consultarCnpjNaFocus } from "@/services/focusConsultaCnpjService";
 import { processXmlZipImport } from "@/services/xmlZipImportService";
+import {
+  parseEpocSettings,
+  type EpocIntegrationSettings,
+} from "@/types/companyIntegration";
 import type {
   EmpresaMap,
   EnderecoPrincipalMap,
   FocusNfeMap,
   CompanySetupMap,
-  SetupEpocState,
+  RepresentanteLegalMap,
   SetupXmlZipImportState,
   SetupStepNumber,
 } from "@/types/companySetup";
@@ -45,8 +67,7 @@ import { SetupStepper } from "./SetupStepper";
 import { StepAddressForm } from "./steps/StepAddressForm";
 import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
-import { StepEpocForm } from "./steps/StepEpocForm";
-import { StepFiscalForm } from "./steps/StepFiscalForm";
+import { StepPdvForm } from "./steps/StepPdvForm";
 import { StepXmlZipForm } from "./steps/StepXmlZipForm";
 import { Building2, Loader2 } from "lucide-react";
 
@@ -61,6 +82,10 @@ function emptyEndereco(): EnderecoPrincipalMap {
 }
 
 function emptyFocus(): FocusNfeMap {
+  return {};
+}
+
+function emptyRepresentante(): RepresentanteLegalMap {
   return {};
 }
 
@@ -105,19 +130,31 @@ export function UnitSetupWizard({
   const [empresa, setEmpresa] = useState<EmpresaMap>(emptyEmpresa);
   const [endereco, setEndereco] = useState<EnderecoPrincipalMap>(emptyEndereco);
   const [focusnfe, setFocusnfe] = useState<FocusNfeMap>(emptyFocus);
+  const [representanteLegal, setRepresentanteLegal] =
+    useState<RepresentanteLegalMap>(emptyRepresentante);
+  const [focusConsultaRecord, setFocusConsultaRecord] = useState<
+    Record<string, unknown>
+  >({});
   const [setup, setSetup] = useState<CompanySetupMap>(() =>
     normalizeSetupMap({}),
   );
 
   const [certPassword, setCertPassword] = useState("");
+  /** Base64 do A1 só em memória — não vai para `companies.focusnfe`. */
+  const [certFileBase64, setCertFileBase64] = useState("");
   const [cepLoading, setCepLoading] = useState(false);
   const [cepError, setCepError] = useState<string | null>(null);
   const [xmlBusy, setXmlBusy] = useState(false);
   const [certBusy, setCertBusy] = useState(false);
+  const [cnpjValidating, setCnpjValidating] = useState(false);
 
   const [loading, setLoading] = useState(!!resumeCompanyId);
   const [saving, setSaving] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+
+  /** Unidade já criada na Faro e assistente além do certificado: não reabrir passos 1–3. */
+  const lockStepsOneToThree =
+    !!companyId && (setup.current_step ?? 1) >= 4;
 
   const load = useCallback(async () => {
     if (!resumeCompanyId) return;
@@ -128,15 +165,67 @@ export function UnitSetupWizard({
       toast.error(row.error);
       return;
     }
-    const c = row.company;
+    const c = row.company as typeof row.company & {
+      representante_legal?: Record<string, unknown> | null;
+      focus_cnpj_consulta?: Record<string, unknown> | null;
+    };
     setCompanyId(c.id);
     setEmpresa((c.empresa ?? {}) as EmpresaMap);
     setEndereco((c.endereco_principal ?? {}) as EnderecoPrincipalMap);
-    setFocusnfe((c.focusnfe ?? {}) as FocusNfeMap);
-    const su = normalizeSetupMap(c.setup ?? {});
+    setFocusnfe(stripFocusnfeSecrets((c.focusnfe ?? {}) as FocusNfeMap));
+    setCertFileBase64("");
+    setCertPassword("");
+    setRepresentanteLegal((c.representante_legal ?? {}) as RepresentanteLegalMap);
+    const consultaRec =
+      c.focus_cnpj_consulta && typeof c.focus_cnpj_consulta === "object"
+        ? (c.focus_cnpj_consulta as Record<string, unknown>)
+        : {};
+    setFocusConsultaRecord(consultaRec);
+    let su = normalizeSetupMap(c.setup ?? {});
+
+    const empresaRow = (c.empresa ?? {}) as EmpresaMap;
+    const docFromRow =
+      String(empresaRow.cnpj_cpf ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 14) ||
+      String(c.document ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 14);
+    const resolvedLock = resolveFocusCnpjLockForResume(
+      su.focus_cnpj_lock,
+      consultaRec,
+      docFromRow,
+    );
+    su = mergeSetupPatch(su, { focus_cnpj_lock: resolvedLock });
+
+    const { data: integRow } = await supabase
+      .from("company_integrations")
+      .select("*")
+      .eq("company_id", resumeCompanyId)
+      .eq("provider", "epoc")
+      .maybeSingle();
+
+    if (integRow && su.epoc?.mode !== "no") {
+      const s = parseEpocSettings(
+        (integRow.settings ?? {}) as Record<string, unknown>,
+      );
+      su = mergeSetupPatch(su, {
+        epoc: {
+          mode: "credentials",
+          enabled: integRow.enabled,
+          username: s.username,
+          password: "",
+          base_url: s.base_url ?? "",
+          codigo_filial: s.codigo_filial ?? "",
+          ambiente: s.ambiente ?? "producao",
+          password_on_server: !!(s.password && s.password.length > 0),
+        },
+      });
+    }
+
     setSetup(su);
     setActiveStep(
-      Math.min(6, Math.max(1, su.current_step ?? getNextPendingStep(su))),
+      Math.min(5, Math.max(1, su.current_step ?? getNextPendingStep(su))),
     );
   }, [resumeCompanyId]);
 
@@ -145,34 +234,131 @@ export function UnitSetupWizard({
   }, [load]);
 
   const syncCompletionState = useCallback(
-    (base: CompanySetupMap, overrides?: Partial<CompanySetupMap>): CompanySetupMap => {
+    (
+      base: CompanySetupMap,
+      overrides?: Partial<CompanySetupMap>,
+      certSecrets?: { certBase64: string; certPassword: string },
+    ): CompanySetupMap => {
       const merged = mergeSetupPatch(base, overrides ?? {});
-      const s1 = isStep1EmpresaComplete(empresa);
+      const s1 = isStep1EmpresaComplete(empresa, {
+        requireFocusCnpjValidation: true,
+        focusCnpjLock: merged.focus_cnpj_lock,
+      });
       const s2 = isStep2EnderecoComplete(endereco);
-      const s3 = isStep3FocusNfeComplete(focusnfe);
-      const s4 = isStep4CertificateComplete(merged.certificate);
-      const s5 = isStep5XmlZipComplete(merged.xml_zip_import);
-      const s6 = getStep6EpocState(merged.epoc);
+      const sec = certSecrets ?? {
+        certBase64: certFileBase64,
+        certPassword,
+      };
+      const s3cert = companyId
+        ? isStep4CertificateComplete(merged.certificate)
+        : isStep3CertificatePayloadComplete(merged.certificate, sec);
+      const s4xml = isStep5XmlZipComplete(merged.xml_zip_import);
+      const s5ep = getStep5EpocState(merged.epoc);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
       completed = upsertStep(completed, 1, s1);
       completed = upsertStep(completed, 2, s2);
-      completed = upsertStep(completed, 3, s3);
-      completed = upsertStep(completed, 4, s4);
-      completed = upsertStep(completed, 5, s5);
-      completed = upsertStep(completed, 6, s6.completed);
-      skipped = upsertStep(skipped, 6, s6.skipped);
+      completed = upsertStep(completed, 3, s3cert);
+      completed = upsertStep(completed, 4, s4xml);
+      completed = upsertStep(completed, 5, s5ep.completed);
+      skipped = upsertStep(skipped, 5, s5ep.skipped);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
         skipped_steps: skipped,
       });
     },
-    [empresa, endereco, focusnfe],
+    [companyId, empresa, endereco, certFileBase64, certPassword],
   );
 
+  const applyEmpresaPatch = useCallback(
+    (patch: Partial<EmpresaMap>) => {
+      const nextDigits =
+        patch.cnpj_cpf !== undefined
+          ? String(patch.cnpj_cpf).replace(/\D/g, "").slice(0, 14)
+          : unmask(empresa.cnpj_cpf ?? "");
+      const validated = setup.focus_cnpj_lock?.validated_cnpj_digits;
+      if (
+        patch.cnpj_cpf !== undefined &&
+        validated &&
+        validated !== nextDigits
+      ) {
+        const cleared = clearFocusCnpjFilledFields(
+          empresa,
+          endereco,
+          representanteLegal,
+          setup.focus_cnpj_lock,
+        );
+        setEmpresa({ ...cleared.empresa, cnpj_cpf: nextDigits });
+        setEndereco(cleared.endereco);
+        setRepresentanteLegal(cleared.representante);
+        setSetup((s) => mergeSetupPatch(s, { focus_cnpj_lock: undefined }));
+        setFocusConsultaRecord({});
+        return;
+      }
+      setEmpresa((prev) => ({ ...prev, ...patch }));
+    },
+    [empresa, endereco, representanteLegal, setup.focus_cnpj_lock],
+  );
+
+  const handleValidarCnpj = useCallback(async () => {
+    const digits = unmask(empresa.cnpj_cpf ?? "");
+    if (digits.length !== 14) {
+      toast.error("Informe o CNPJ completo (14 dígitos) antes de validar.");
+      return;
+    }
+    setCnpjValidating(true);
+    try {
+      const res = await consultarCnpjNaFocus(digits);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      const applied = applyFocusCnpjConsulta(res.data, empresa.nome_fantasia);
+      const raw = buildFocusCnpjConsultaRecord(res.data);
+      setFocusConsultaRecord(raw);
+      const nextEmpresa = { ...empresa, ...applied.empresa, cnpj_cpf: digits };
+      const nextEndereco = { ...endereco, ...applied.endereco };
+      const nextRep = { ...representanteLegal, ...applied.representante };
+      const nextSetup = mergeSetupPatch(setup, { focus_cnpj_lock: applied.lock });
+      setEmpresa(nextEmpresa);
+      setEndereco(nextEndereco);
+      setRepresentanteLegal(nextRep);
+      setSetup(nextSetup);
+      if (companyId) {
+        const patchRes = await patchCompanyMaps(companyId, {
+          empresa: {
+            ...nextEmpresa,
+            telefone: (nextEmpresa.telefone ?? "").replace(/\D/g, ""),
+          },
+          endereco_principal: nextEndereco,
+          representante_legal: nextRep,
+          focus_cnpj_consulta: raw,
+          setup: nextSetup,
+          document: digits,
+        });
+        if (patchRes.error) {
+          toast.error(patchRes.error);
+          return;
+        }
+      }
+      toast.success("CNPJ validado. Dados da empresa e endereço foram preenchidos.");
+    } finally {
+      setCnpjValidating(false);
+    }
+  }, [
+    empresa,
+    endereco,
+    representanteLegal,
+    setup,
+    companyId,
+  ]);
+
   const handleCepBlur = useCallback(async () => {
+    if ((setup.focus_cnpj_lock?.locked_endereco_keys ?? []).length > 0) {
+      return;
+    }
     const digits = (endereco.cep ?? "").replace(/\D/g, "");
     if (digits.length !== 8) return;
     setCepLoading(true);
@@ -184,27 +370,33 @@ export function UnitSetupWizard({
       return;
     }
     setEndereco((prev) => ({ ...prev, ...res.data }));
-  }, [endereco.cep]);
+  }, [endereco.cep, setup.focus_cnpj_lock?.locked_endereco_keys]);
 
   const handlePause = async () => {
     if (!user) return;
+    if (!companyId) {
+      toast.error(
+        "Conclua o passo 3 com sucesso na Focus para salvar a unidade na Faro e poder pausar.",
+      );
+      return;
+    }
     setSaving(true);
     try {
-      if (companyId) {
-        const paused = buildPausedSetup(syncCompletionState(setup));
-        await patchCompanyMaps(companyId, {
-          empresa,
-          endereco_principal: endereco,
-          focusnfe,
-          setup: paused,
-          name: (empresa.nome_fantasia ?? "").trim() || empresa.nome_razao_social?.trim() || undefined,
-          document: (empresa.cnpj_cpf ?? "").replace(/\D/g, "") || undefined,
-          email: (empresa.email ?? "").trim() || null,
-          phone: (empresa.telefone ?? "").replace(/\D/g, "") || null,
-        });
-        setSetup(paused);
-        await refetchCompanies();
-      }
+      const paused = buildPausedSetup(syncCompletionState(setup));
+      await patchCompanyMaps(companyId, {
+        empresa,
+        endereco_principal: endereco,
+        representante_legal: representanteLegal,
+        focus_cnpj_consulta: focusConsultaRecord,
+        focusnfe,
+        setup: paused,
+        name: (empresa.nome_fantasia ?? "").trim() || empresa.nome_razao_social?.trim() || undefined,
+        document: (empresa.cnpj_cpf ?? "").replace(/\D/g, "") || undefined,
+        email: (empresa.email ?? "").trim() || null,
+        phone: (empresa.telefone ?? "").replace(/\D/g, "") || null,
+      });
+      setSetup(paused);
+      await refetchCompanies();
       toast.message("Setup pausado. Você pode retomar pelo início.");
       exitApp();
     } finally {
@@ -212,9 +404,12 @@ export function UnitSetupWizard({
     }
   };
 
-  const runStep1Create = async (): Promise<boolean> => {
-    if (!user) return false;
-    const err = validateStep1Empresa(empresa);
+  /** Passo 1 sem `companyId`: só valida; a unidade na Faro é criada após sucesso na Focus (passo 3). */
+  const runAdvanceStep1Local = (): boolean => {
+    const err = validateStep1Empresa(empresa, {
+      requireFocusCnpjValidation: true,
+      focusCnpjLock: setup.focus_cnpj_lock,
+    });
     if (err) {
       setStepError(err);
       return false;
@@ -227,40 +422,88 @@ export function UnitSetupWizard({
       setStepError("Grupo inválido.");
       return false;
     }
-    setSaving(true);
+    return true;
+  };
+
+  const runCreateCompanyAfterFocusSuccess = async (
+    focusnfeForDb: FocusNfeMap,
+  ): Promise<boolean> => {
+    if (!user) return false;
+    const docDigits = (empresa.cnpj_cpf ?? "").replace(/\D/g, "");
+    const phoneDigits = (empresa.telefone ?? "").replace(/\D/g, "");
+    const empresaPayload: EmpresaMap = {
+      ...empresa,
+      cnpj_cpf: docDigits,
+      telefone: phoneDigits,
+    };
+    const certOut = {
+      status: "valid" as const,
+      file_name: setup.certificate?.file_name,
+      updated_at: new Date().toISOString(),
+    };
     const created = await createCompanyFromSetupStep1(
       createNewGroup
         ? {
             mode: "new_group",
             ownerUserId: user.id,
             groupName: groupName.trim(),
-            empresa,
+            empresa: empresaPayload,
+            endereco_principal: endereco,
+            representante_legal: representanteLegal,
+            focus_cnpj_consulta: focusConsultaRecord,
+            afterFocusCriaSuccess: true,
+            focusnfe: focusnfeForDb,
+            setupExtension: {
+              focus_cnpj_lock: setup.focus_cnpj_lock,
+              certificate: certOut,
+            },
           }
         : {
             mode: "existing_group",
             ownerUserId: user.id,
             groupId: newUnitGroupId!,
-            empresa,
+            empresa: empresaPayload,
+            endereco_principal: endereco,
+            representante_legal: representanteLegal,
+            focus_cnpj_consulta: focusConsultaRecord,
+            afterFocusCriaSuccess: true,
+            focusnfe: focusnfeForDb,
+            setupExtension: {
+              focus_cnpj_lock: setup.focus_cnpj_lock,
+              certificate: certOut,
+            },
           },
     );
-    setSaving(false);
     if ("error" in created) {
       toast.error(created.error);
       return false;
     }
     setCompanyId(created.companyId);
+    setCertFileBase64("");
+    setCertPassword("");
+    setFocusnfe(stripFocusnfeSecrets(focusnfeForDb));
+    const nextSetup = syncCompletionState(
+      mergeSetupPatch(setup, {
+        current_step: 4,
+        certificate: certOut,
+      }),
+    );
+    setSetup(nextSetup);
     await refetchCompanies();
     if (!isModal) {
       navigate(`/empresas/unidade/setup/${created.companyId}`, {
         replace: true,
       });
     }
-    toast.success("Unidade criada. Continue o cadastro.");
+    toast.success("Unidade criada na Faro e cadastrada na Focus.");
     return true;
   };
 
   const runStep1Patch = async (): Promise<boolean> => {
-    const err = validateStep1Empresa(empresa);
+    const err = validateStep1Empresa(empresa, {
+      requireFocusCnpjValidation: true,
+      focusCnpjLock: setup.focus_cnpj_lock,
+    });
     if (err) {
       setStepError(err);
       return false;
@@ -276,6 +519,9 @@ export function UnitSetupWizard({
     );
     const res = await patchCompanyMaps(companyId, {
       empresa: { ...empresa, cnpj_cpf: docDigits, telefone: phoneDigits },
+      endereco_principal: endereco,
+      representante_legal: representanteLegal,
+      focus_cnpj_consulta: focusConsultaRecord,
       setup: nextSetup,
       name: displayName,
       document: docDigits,
@@ -296,8 +542,8 @@ export function UnitSetupWizard({
 
     if (activeStep === 1) {
       if (!companyId) {
-        const ok = await runStep1Create();
-        if (ok) setActiveStep(2);
+        if (!runAdvanceStep1Local()) return;
+        setActiveStep(2);
         return;
       }
       const ok = await runStep1Patch();
@@ -305,18 +551,25 @@ export function UnitSetupWizard({
       return;
     }
 
-    if (!companyId) {
-      toast.error("Conclua o passo 1 antes de avançar.");
-      return;
-    }
-
     if (activeStep === 2) {
+      if (!isStep2EnderecoComplete(endereco)) {
+        setStepError(
+          "Preencha todos os campos de endereço obrigatórios antes de avançar.",
+        );
+        return;
+      }
+      if (!companyId) {
+        setActiveStep(3);
+        return;
+      }
       setSaving(true);
       const nextSetup = syncCompletionState(
         mergeSetupPatch(setup, { current_step: 3 }),
       );
       const res = await patchCompanyMaps(companyId, {
         endereco_principal: endereco,
+        representante_legal: representanteLegal,
+        focus_cnpj_consulta: focusConsultaRecord,
         setup: nextSetup,
       });
       setSaving(false);
@@ -330,60 +583,146 @@ export function UnitSetupWizard({
     }
 
     if (activeStep === 3) {
-      setSaving(true);
-      const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 4 }),
-      );
-      const res = await patchCompanyMaps(companyId, {
-        focusnfe,
-        setup: nextSetup,
-      });
-      setSaving(false);
-      if (res.error) {
-        toast.error(res.error);
+      if (!companyId) {
+        const err1 = validateStep1Empresa(empresa, {
+          requireFocusCnpjValidation: true,
+          focusCnpjLock: setup.focus_cnpj_lock,
+        });
+        if (err1) {
+          setStepError(err1);
+          return;
+        }
+        if (!isStep2EnderecoComplete(endereco)) {
+          setStepError(
+            "Preencha todos os campos de endereço obrigatórios antes de avançar.",
+          );
+          return;
+        }
+        if (
+          !isStep3CertificatePayloadComplete(setup.certificate, {
+            certBase64: certFileBase64,
+            certPassword,
+          })
+        ) {
+          setStepError(
+            "Envie o certificado A1 (PFX/P12), informe a senha e aguarde o carregamento em base64.",
+          );
+          return;
+        }
+        const docDigits = (empresa.cnpj_cpf ?? "").replace(/\D/g, "");
+        const phoneDigits = (empresa.telefone ?? "").replace(/\D/g, "");
+        const empresaPayload: EmpresaMap = {
+          ...empresa,
+          cnpj_cpf: docDigits,
+          telefone: phoneDigits,
+        };
+        const body = buildFocusCriaEmpresaBody({
+          empresa: empresaPayload,
+          endereco,
+          arquivo_certificado_base64: certFileBase64.trim(),
+          senha_certificado: certPassword.trim(),
+        });
+        setSaving(true);
+        const foc = await focusCriaEmpresa(body);
+        if (!foc.ok) {
+          setSaving(false);
+          setStepError(foc.error);
+          toast.error(foc.error);
+          return;
+        }
+        const idEmpresaFocus =
+          parseFocusCriaEmpresaIdFromResponse(foc.data) ??
+          parseFocusCriaEmpresaIdFromResponse(foc.envelope);
+        if (idEmpresaFocus == null) {
+          toast.warning(
+            "Empresa criada na Focus, mas o id não veio na resposta. Confira a edge ou cadastre o id manualmente em focusnfe.id_empresa.",
+            { duration: 8000 },
+          );
+        }
+        const focusnfeForDb: FocusNfeMap = {
+          ...stripFocusnfeSecrets(focusnfe),
+          ...(idEmpresaFocus != null ? { id_empresa: idEmpresaFocus } : {}),
+        };
+        const okCreate = await runCreateCompanyAfterFocusSuccess(focusnfeForDb);
+        setSaving(false);
+        if (!okCreate) return;
+        setActiveStep(4);
         return;
       }
-      setSetup(nextSetup);
-      setActiveStep(4);
-      return;
-    }
 
-    if (activeStep === 4) {
-      let nextFocus = { ...focusnfe };
+      let nextFocus = stripFocusnfeSecrets(focusnfe);
       const cert = setup.certificate;
       let certOut = cert;
-      if (
-        cert?.storage_path &&
-        certPassword &&
-        cert.status !== "invalid"
-      ) {
+      const pwd = certPassword.trim();
+      const b64 = certFileBase64.trim();
+      const alreadyValid =
+        cert?.status === "valid" && pwd.length === 0 && b64.length === 0;
+
+      if (!alreadyValid) {
+        if (!pwd) {
+          setStepError("Informe a senha do certificado para validar.");
+          return;
+        }
+        if (!cert?.file_name) {
+          setStepError("Envie o arquivo do certificado (PFX/P12).");
+          return;
+        }
+        if (!b64 && !cert?.storage_path) {
+          setStepError("Aguarde o carregamento do arquivo ou envie novamente.");
+          return;
+        }
+        if (cert?.status === "invalid") {
+          setStepError("Certificado inválido. Envie outro arquivo.");
+          return;
+        }
+
         setCertBusy(true);
         const val = await validateCertificateWithFocusNfe({
           companyId,
-          storagePath: cert.storage_path,
-          password: certPassword,
+          password: pwd,
+          certBase64: b64 || undefined,
+          storagePath: cert?.storage_path || undefined,
         });
         setCertBusy(false);
+        if (val.status !== "valid") {
+          setStepError(
+            val.error_message ?? "Não foi possível validar o certificado.",
+          );
+          toast.error(val.error_message ?? "Certificado inválido.");
+          return;
+        }
+        if (hasFocusNfeEmpresaId(focusnfe) && b64) {
+          const fx = await focusAtualizarCertificado({
+            companyId,
+            removeCertificate: false,
+            arquivo_certificado_base64: b64,
+            senha_certificado: pwd,
+          });
+          if (!fx.ok) {
+            setStepError(fx.error);
+            toast.error(fx.error);
+            return;
+          }
+        }
         nextFocus = {
           ...nextFocus,
-          certificado_ativo: val.status === "valid",
+          certificado_ativo: true,
           certificado_validade: val.certificado_validade,
         };
-        setFocusnfe(nextFocus);
         certOut = {
           ...cert,
           status: val.status,
           updated_at: new Date().toISOString(),
         };
-        setSetup((s) => ({
-          ...s,
-          certificate: certOut,
-        }));
+        setCertPassword("");
+        setCertFileBase64("");
       }
+
+      setFocusnfe(nextFocus);
       setSaving(true);
       const nextSetup = syncCompletionState(
         mergeSetupPatch(setup, {
-          current_step: 5,
+          current_step: 4,
           certificate: certOut,
         }),
       );
@@ -397,14 +736,18 @@ export function UnitSetupWizard({
         return;
       }
       setSetup(nextSetup);
-      setActiveStep(5);
+      setActiveStep(4);
       return;
     }
 
-    if (activeStep === 5) {
+    if (activeStep === 4) {
+      if (!companyId) {
+        toast.error("Conclua o passo 3 para criar a unidade.");
+        return;
+      }
       setSaving(true);
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 6 }),
+        mergeSetupPatch(setup, { current_step: 5 }),
       );
       const res = await patchCompanyMaps(companyId, {
         setup: nextSetup,
@@ -415,36 +758,78 @@ export function UnitSetupWizard({
         return;
       }
       setSetup(nextSetup);
-      setActiveStep(6);
+      setActiveStep(5);
       return;
     }
 
-    if (activeStep === 6) {
+    if (activeStep === 5) {
+      if (!companyId) {
+        toast.error("Conclua o passo 3 para criar a unidade.");
+        return;
+      }
       const ep = setup.epoc ?? { mode: "undecided" as const };
       setSaving(true);
-      if (ep.mode === "credentials" && ep.username?.trim()) {
-        await supabase.from("company_integrations").upsert(
-          {
-            company_id: companyId,
-            provider: "epoc",
-            enabled: true,
-            settings: {
-              username: ep.username,
-              password: ep.password,
-              base_url: ep.base_url,
-              codigo_filial: ep.codigo_filial,
-              ambiente: "producao",
+      if (ep.mode === "credentials") {
+        const u = (ep.username ?? "").trim();
+        const enabled = ep.enabled ?? false;
+        const pwdInput = (ep.password ?? "").trim();
+        let pwdFinal = pwdInput;
+        if (enabled && !pwdFinal && ep.password_on_server) {
+          const { data: existingRow } = await supabase
+            .from("company_integrations")
+            .select("settings")
+            .eq("company_id", companyId)
+            .eq("provider", "epoc")
+            .maybeSingle();
+          if (existingRow?.settings) {
+            const prev = parseEpocSettings(
+              existingRow.settings as Record<string, unknown>,
+            );
+            if (prev.password) pwdFinal = prev.password;
+          }
+        }
+
+        if (u && (!enabled || pwdFinal)) {
+          const settings: EpocIntegrationSettings = {
+            username: u,
+            base_url: (ep.base_url ?? "").trim() || undefined,
+            codigo_filial: (ep.codigo_filial ?? "").trim() || undefined,
+            ambiente: ep.ambiente ?? "producao",
+          };
+          if (pwdFinal) settings.password = pwdFinal;
+          else if (!enabled) {
+            const { data: existingRow } = await supabase
+              .from("company_integrations")
+              .select("settings")
+              .eq("company_id", companyId)
+              .eq("provider", "epoc")
+              .maybeSingle();
+            if (existingRow?.settings) {
+              const prev = parseEpocSettings(
+                existingRow.settings as Record<string, unknown>,
+              );
+              if (prev.password) settings.password = prev.password;
+            }
+          }
+
+          await supabase.from("company_integrations").upsert(
+            {
+              company_id: companyId,
+              provider: "epoc",
+              enabled,
+              settings: settings as unknown as Record<string, unknown>,
+              updated_at: new Date().toISOString(),
             },
-          },
-          { onConflict: "company_id,provider" },
-        );
+            { onConflict: "company_id,provider" },
+          );
+        }
       }
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 7, epoc: ep }),
+        mergeSetupPatch(setup, { current_step: 6, epoc: ep }),
       );
       await patchCompanyMaps(companyId, {
         setup: nextSetup,
-        focusnfe,
+        focusnfe: stripFocusnfeSecrets(focusnfe),
       });
       setSetup(nextSetup);
       setSaving(false);
@@ -460,7 +845,7 @@ export function UnitSetupWizard({
     if (!companyId) return;
     await syncFocusNfeCompanyProfile(companyId, focus);
     const pending = getNextPendingStep(lastSetup);
-    const allDone = pending > 6;
+    const allDone = pending > 5;
     const completed = buildCompletedSetup(lastSetup, {
       allApplicableDone: allDone,
     });
@@ -472,43 +857,112 @@ export function UnitSetupWizard({
 
   const handleBack = () => {
     if (activeStep <= 1) return;
+    const target = activeStep - 1;
+    if (
+      lockStepsOneToThree &&
+      target >= 1 &&
+      target <= 3
+    ) {
+      toast.message(
+        "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
+      );
+      return;
+    }
     setActiveStep((s) => s - 1);
   };
 
-  const goToStep = useCallback((step: SetupStepNumber) => {
-    if (step < 1 || step > 6) return;
-    if (step > 1 && !companyId) return;
-    setStepError(null);
-    setActiveStep(step);
-  }, [companyId]);
+  const goToStep = useCallback(
+    (step: SetupStepNumber) => {
+      if (step < 1 || step > 5) return;
+      if (step > 1 && !companyId && step > 3) return;
+      if (
+        lockStepsOneToThree &&
+        step >= 1 &&
+        step <= 3
+      ) {
+        toast.message(
+          "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
+        );
+        return;
+      }
+      setStepError(null);
+      setActiveStep(step);
+    },
+    [companyId, lockStepsOneToThree],
+  );
 
-  const handleCertFile = async (file: File) => {
-    if (!companyId) return;
-    setCertBusy(true);
-    const path = `${companyId}/cert/${Date.now()}_${file.name}`;
-    const { error } = await supabase.storage
-      .from("company-setup")
-      .upload(path, file, { upsert: true });
-    setCertBusy(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+  const handleRemoveCertificate = useCallback(async () => {
+    const path = setup.certificate?.storage_path;
+    if (path && companyId) {
+      const { error } = await supabase.storage.from("company-setup").remove([path]);
+      if (error) toast.error(error.message);
     }
-    const certState = {
-      status: "uploaded" as const,
-      storage_path: path,
-      file_name: file.name,
+    if (companyId && hasFocusNfeEmpresaId(focusnfe)) {
+      const fx = await focusAtualizarCertificado({
+        companyId,
+        removeCertificate: true,
+      });
+      if (!fx.ok) {
+        toast.error(fx.error);
+        return;
+      }
+    }
+    setCertFileBase64("");
+    setCertPassword("");
+    const cleared = {
+      status: "not_sent" as const,
       updated_at: new Date().toISOString(),
     };
-    setSetup((s) =>
-      mergeSetupPatch(s, {
-        certificate: certState,
-      }),
+    const nextFocus = {
+      ...stripFocusnfeSecrets(focusnfe),
+      certificado_ativo: false,
+      certificado_validade: undefined,
+    };
+    const nextSetup = syncCompletionState(
+      mergeSetupPatch(setup, { certificate: cleared }),
+      undefined,
+      { certBase64: "", certPassword: "" },
     );
-    await patchCompanyMaps(companyId, {
-      setup: mergeSetupPatch(setup, { certificate: certState }),
-    });
-    toast.success("Certificado enviado.");
+    setFocusnfe(nextFocus);
+    setSetup(nextSetup);
+    if (companyId) {
+      const res = await patchCompanyMaps(companyId, {
+        setup: nextSetup,
+        focusnfe: nextFocus,
+      });
+      if (res.error) toast.error(res.error);
+    }
+  }, [companyId, focusnfe, setup, syncCompletionState]);
+
+  const handleCertFile = async (file: File) => {
+    setCertBusy(true);
+    try {
+      const base64 = await fileToPureBase64(file);
+      const certStateBase = {
+        status: "uploaded" as const,
+        file_name: file.name,
+        updated_at: new Date().toISOString(),
+      };
+      setCertFileBase64(base64);
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { certificate: certStateBase }),
+        undefined,
+        { certBase64: base64, certPassword },
+      );
+      setSetup(nextSetup);
+      if (companyId) {
+        const res = await patchCompanyMaps(companyId, { setup: nextSetup });
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Certificado carregado. Informe a senha e avançe para validar.");
+      } else {
+        toast.success("Certificado carregado — informe a senha para concluir o passo.");
+      }
+    } finally {
+      setCertBusy(false);
+    }
   };
 
   const handleXmlFile = async (file: File) => {
@@ -535,7 +989,7 @@ export function UnitSetupWizard({
       file_log: [],
     };
     setSetup((s) => mergeSetupPatch(s, { xml_zip_import: xmlState }));
-    await processXmlZipImport(companyId, file, {
+    const proc = await processXmlZipImport(companyId, file, {
       onPhase: (ph) => {
         xmlState = { ...xmlState, phase: ph };
         setSetup((s) =>
@@ -551,6 +1005,24 @@ export function UnitSetupWizard({
         );
       },
     });
+    if (!proc.ok) {
+      xmlState = {
+        ...xmlState,
+        phase: "error",
+        error_message: proc.error ?? "Falha ao importar arquivo ZIP.",
+        updated_at: new Date().toISOString(),
+      };
+      const nextSetupError = syncCompletionState(
+        mergeSetupPatch(setup, { xml_zip_import: xmlState }),
+      );
+      setSetup(nextSetupError);
+      await patchCompanyMaps(companyId, {
+        setup: nextSetupError,
+      });
+      setXmlBusy(false);
+      toast.error(proc.error ?? "Falha ao importar XML/ZIP.");
+      return;
+    }
     xmlState = {
       ...xmlState,
       phase: "done",
@@ -564,31 +1036,7 @@ export function UnitSetupWizard({
       setup: nextSetup,
     });
     setXmlBusy(false);
-    toast.message("Importação simulada concluída.");
-  };
-
-  const handleEpocExcel = async (file: File) => {
-    if (!companyId) return;
-    const path = `${companyId}/imports/epoc/${Date.now()}_${file.name}`;
-    const { error } = await supabase.storage
-      .from("company-setup")
-      .upload(path, file, { upsert: true });
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    const ep: SetupEpocState = {
-      ...(setup.epoc ?? { mode: "excel" }),
-      mode: "excel",
-      excel_storage_path: path,
-      updated_at: new Date().toISOString(),
-    };
-    const nextSetup = syncCompletionState(mergeSetupPatch(setup, { epoc: ep }));
-    setSetup(nextSetup);
-    await patchCompanyMaps(companyId, {
-      setup: nextSetup,
-    });
-    toast.success("Planilha enviada.");
+    toast.success("Importação de XML/ZIP concluída.");
   };
 
   const loadingMinH = isModal ? "min-h-[200px]" : "min-h-[50vh]";
@@ -647,12 +1095,6 @@ export function UnitSetupWizard({
             </p>
           </div>
           <div>
-            <p className="font-medium">Fiscal</p>
-            <p className="text-muted-foreground">
-              Modelo: {focusnfe.modelo ?? "—"}
-            </p>
-          </div>
-          <div>
             <p className="font-medium">Certificado</p>
             <p className="text-muted-foreground">
               {setup.certificate?.status === "valid"
@@ -666,10 +1108,14 @@ export function UnitSetupWizard({
               XML/ZIP: {setup.xml_zip_import?.phase ?? "—"}
             </p>
             <p className="text-muted-foreground">
-              EPOC:{" "}
+              PDV:{" "}
               {setup.epoc?.mode === "no"
                 ? "Sem integração"
-                : setup.epoc?.mode ?? "—"}
+                : setup.epoc?.mode === "credentials"
+                  ? setup.epoc?.enabled
+                    ? "Integração ativa"
+                    : "Credenciais salvas (inativa)"
+                  : setup.epoc?.mode ?? "—"}
             </p>
           </div>
           <p className="pt-2 font-semibold">
@@ -690,7 +1136,7 @@ export function UnitSetupWizard({
     <>
       <PageHeader
         title="Configurar unidade"
-        description="Assistente em etapas. O passo 1 cria a unidade; os demais podem ser concluídos depois."
+        description="Assistente em cinco etapas. O passo 1 cria a unidade; os demais podem ser concluídos depois."
         icon={Building2}
         className={isModal ? "pb-2" : undefined}
       />
@@ -699,6 +1145,7 @@ export function UnitSetupWizard({
         activeStep={activeStep}
         setup={setup}
         companyId={companyId}
+        lockStepsOneToThree={lockStepsOneToThree}
         onStepClick={goToStep}
       />
 
@@ -719,9 +1166,10 @@ export function UnitSetupWizard({
               cnpj_cpf: empresa.cnpj_cpf ?? "",
               telefone: empresa.telefone ?? "",
             }}
-            onEmpresaChange={(patch) =>
-              setEmpresa((prev) => ({ ...prev, ...patch }))
-            }
+            onEmpresaChange={applyEmpresaPatch}
+            lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
+            cnpjValidating={cnpjValidating}
+            onValidarCnpj={() => void handleValidarCnpj()}
           />
         ) : null}
         {activeStep === 2 ? (
@@ -733,30 +1181,37 @@ export function UnitSetupWizard({
             cepLoading={cepLoading}
             cepError={cepError}
             onCepBlur={() => void handleCepBlur()}
+            lockedEnderecoKeys={setup.focus_cnpj_lock?.locked_endereco_keys}
           />
         ) : null}
         {activeStep === 3 ? (
-          <StepFiscalForm focusnfe={focusnfe} onChange={(p) => setFocusnfe((x) => ({ ...x, ...p }))} />
-        ) : null}
-        {activeStep === 4 ? (
           <StepCertificateForm
             companyId={companyId}
             cert={setup.certificate}
             password={certPassword}
-            onPasswordChange={setCertPassword}
+            onPasswordChange={(v) => {
+              setCertPassword(v);
+              setSetup((s) =>
+                syncCompletionState(s, undefined, {
+                  certBase64: certFileBase64,
+                  certPassword: v,
+                }),
+              );
+            }}
             onPickFile={(f) => void handleCertFile(f)}
+            onRemoveCertificate={() => void handleRemoveCertificate()}
             busy={certBusy}
           />
         ) : null}
-        {activeStep === 5 ? (
+        {activeStep === 4 ? (
           <StepXmlZipForm
             state={setup.xml_zip_import}
             onPickFile={(f) => void handleXmlFile(f)}
             busy={xmlBusy}
           />
         ) : null}
-        {activeStep === 6 ? (
-          <StepEpocForm
+        {activeStep === 5 ? (
+          <StepPdvForm
             epoc={setup.epoc}
             onEpocChange={(patch) =>
               setSetup((s) =>
@@ -765,7 +1220,6 @@ export function UnitSetupWizard({
                 }),
               )
             }
-            onPickExcel={(f) => void handleEpocExcel(f)}
           />
         ) : null}
       </div>
@@ -784,7 +1238,11 @@ export function UnitSetupWizard({
             type="button"
             variant="secondary"
             onClick={handleBack}
-            disabled={activeStep <= 1 || saving}
+            disabled={
+              activeStep <= 1 ||
+              saving ||
+              (lockStepsOneToThree && activeStep === 4)
+            }
           >
             Voltar
           </Button>
@@ -798,7 +1256,7 @@ export function UnitSetupWizard({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Salvando…
               </>
-            ) : activeStep === 6 ? (
+            ) : activeStep === 5 ? (
               "Concluir"
             ) : (
               "Próximo"

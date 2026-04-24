@@ -3,6 +3,7 @@ import { unmask } from "@/lib/masks";
 import type {
   EmpresaMap,
   EnderecoPrincipalMap,
+  FocusCnpjLockState,
   FocusNfeMap,
   SetupCertificateState,
   SetupEpocState,
@@ -20,9 +21,24 @@ export function isValidEmail(email: string): boolean {
   return t.length > 0 && EMAIL_RE.test(t);
 }
 
-export function validateStep1Empresa(e: EmpresaMap): string | null {
+export type ValidateStep1EmpresaOpts = {
+  /** No onboarding da unidade, exige validação Focus do CNPJ antes de avançar. */
+  requireFocusCnpjValidation?: boolean;
+  focusCnpjLock?: FocusCnpjLockState | null;
+};
+
+export function validateStep1Empresa(
+  e: EmpresaMap,
+  opts?: ValidateStep1EmpresaOpts,
+): string | null {
   const cnpj = unmask(e.cnpj_cpf ?? "");
   if (!isValidCnpj(cnpj)) return "Informe um CNPJ válido.";
+  if (opts?.requireFocusCnpjValidation) {
+    const lock = opts.focusCnpjLock;
+    if (!lock?.validated_cnpj_digits || lock.validated_cnpj_digits !== cnpj) {
+      return "Valide o CNPJ pelo botão «Validar» antes de avançar.";
+    }
+  }
   const razao = (e.nome_razao_social ?? "").trim();
   if (!razao) return "Informe a razão social.";
   const fantasia = (e.nome_fantasia ?? "").trim();
@@ -64,8 +80,11 @@ function hasText(v: unknown): boolean {
   return typeof v === "string" && v.trim().length > 0;
 }
 
-export function isStep1EmpresaComplete(e: EmpresaMap): boolean {
-  return validateStep1Empresa(e) == null;
+export function isStep1EmpresaComplete(
+  e: EmpresaMap,
+  opts?: ValidateStep1EmpresaOpts,
+): boolean {
+  return validateStep1Empresa(e, opts) == null;
 }
 
 /** Regra solicitada: etapa só conclui com todos os campos preenchidos. */
@@ -74,7 +93,6 @@ export function isStep2EnderecoComplete(e: EnderecoPrincipalMap): boolean {
     hasText(e.cep) &&
     hasText(e.logradouro) &&
     hasText(e.numero) &&
-    hasText(e.complemento) &&
     hasText(e.bairro) &&
     hasText(e.municipio) &&
     hasText(e.uf) &&
@@ -111,6 +129,16 @@ export function isStep4CertificateComplete(
   return cert?.status === "valid";
 }
 
+/** Passo 3 antes de existir `companyId`: arquivo escolhido + base64 e senha só em memória. */
+export function isStep3CertificatePayloadComplete(
+  cert: SetupCertificateState | undefined,
+  secrets: { certBase64: string; certPassword: string },
+): boolean {
+  const b64 = secrets.certBase64.trim();
+  const pwd = secrets.certPassword.trim();
+  return !!cert?.file_name && b64.length > 0 && pwd.length > 0;
+}
+
 /** Concluído apenas quando importação terminar. */
 export function isStep5XmlZipComplete(
   xmlZip: SetupXmlZipImportState | undefined,
@@ -119,24 +147,24 @@ export function isStep5XmlZipComplete(
 }
 
 /**
- * EPOC:
+ * PDV (integração EPOC):
  * - "no" => ignorado/concluído
- * - credenciais => usuário+senha
- * - excel => arquivo enviado
+ * - credenciais => usuário obrigatório; com integração ativa, senha nova ou já salva
  */
-export function getStep6EpocState(
+/** Passo 5 do wizard (PDV / EPOC). */
+export function getStep5EpocState(
   epoc: SetupEpocState | undefined,
 ): { completed: boolean; skipped: boolean } {
   const mode = epoc?.mode ?? "undecided";
   if (mode === "no") return { completed: true, skipped: true };
   if (mode === "credentials") {
-    return {
-      completed: hasText(epoc?.username) && hasText(epoc?.password),
-      skipped: false,
-    };
-  }
-  if (mode === "excel") {
-    return { completed: hasText(epoc?.excel_storage_path), skipped: false };
+    const userOk = hasText(epoc?.username);
+    const enabled = epoc?.enabled ?? false;
+    const pwdOk =
+      !enabled ||
+      hasText(epoc?.password) ||
+      epoc?.password_on_server === true;
+    return { completed: userOk && pwdOk, skipped: false };
   }
   return { completed: false, skipped: false };
 }

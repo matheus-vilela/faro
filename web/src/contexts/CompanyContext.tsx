@@ -22,6 +22,8 @@ export interface Company {
   endereco_principal?: Record<string, unknown> | null
   focusnfe?: Record<string, unknown> | null
   setup?: Record<string, unknown> | null
+  focus_cnpj_consulta?: Record<string, unknown> | null
+  representante_legal?: Record<string, unknown> | null
 }
 
 export interface UserCompany {

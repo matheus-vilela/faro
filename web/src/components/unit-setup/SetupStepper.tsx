@@ -7,10 +7,9 @@ import { Check, Circle, Minus } from "lucide-react";
 const LABELS: Record<SetupStepNumber, string> = {
   1: "Empresa",
   2: "Endereço",
-  3: "Fiscal",
-  4: "Certificado",
-  5: "XML / ZIP",
-  6: "EPOC",
+  3: "Certificado",
+  4: "XML / ZIP",
+  5: "PDV",
 };
 
 function StepRowVisual({
@@ -33,10 +32,7 @@ function StepRowVisual({
           <span>{n}</span>
         )}
       </span>
-      <span className="min-w-0 truncate">
-        <span className="text-muted-foreground">{n}. </span>
-        {LABELS[n]}
-      </span>
+      <span className="min-w-0 truncate">{LABELS[n]}</span>
     </>
   );
 }
@@ -45,18 +41,26 @@ export function SetupStepper({
   activeStep,
   setup,
   companyId,
+  lockStepsOneToThree,
   onStepClick,
 }: {
   activeStep: number;
   setup: CompanySetupMap;
   /** Após criar a unidade no passo 1, permite ir aos passos 2–6. */
   companyId: string | null;
+  /**
+   * Quando a unidade já foi criada na Faro e o fluxo passou do certificado (`current_step >= 4`),
+   * os passos 1–3 ficam somente leitura (não navegáveis).
+   */
+  lockStepsOneToThree?: boolean;
   onStepClick?: (step: SetupStepNumber) => void;
 }) {
   const pct = Math.min(100, Math.max(0, setup.progress_percent ?? 0));
   const interactive = !!onStepClick;
+  const locked123 = lockStepsOneToThree === true;
 
   const stepEnabled = (n: SetupStepNumber) => {
+    if (locked123 && n <= 3) return false;
     if (n === 1) return true;
     return !!companyId;
   };
@@ -74,7 +78,7 @@ export function SetupStepper({
         />
       </div>
       <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {([1, 2, 3, 4, 5, 6] as const).map((n) => {
+        {([1, 2, 3, 4, 5] as const).map((n) => {
           const st = stepStatus(n, setup, activeStep);
           const enabled = stepEnabled(n);
           const canClick = interactive && enabled;
@@ -99,7 +103,7 @@ export function SetupStepper({
                   className={baseClass}
                   onClick={() => enabled && onStepClick?.(n)}
                   aria-current={st === "current" ? "step" : undefined}
-                  aria-label={`${LABELS[n]}, etapa ${n} de 6`}
+                  aria-label={`${LABELS[n]}, etapa ${n} de 5`}
                 >
                   <StepRowVisual n={n} st={st} />
                 </button>

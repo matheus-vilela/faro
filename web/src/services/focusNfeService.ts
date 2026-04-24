@@ -7,7 +7,10 @@ import type { CertificateUploadStatus } from "@/types/companySetup";
  */
 export async function validateCertificateWithFocusNfe(_input: {
   companyId: string;
-  storagePath: string;
+  /** Legado: arquivo no bucket `company-setup`. */
+  storagePath?: string;
+  /** Preferível: conteúdo A1 em base64 (não persistido). */
+  certBase64?: string;
   password: string;
 }): Promise<{
   status: Extract<CertificateUploadStatus, "valid" | "invalid">;

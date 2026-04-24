@@ -27,7 +27,7 @@ export function StepXmlZipForm({
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Envie um arquivo .zip com XMLs de notas. O processamento completo pode
-        rodar em segundo plano numa versão futura; aqui simulamos as fases.
+        levar alguns segundos e processa cada XML separadamente.
       </p>
 
       <div
@@ -71,7 +71,8 @@ export function StepXmlZipForm({
         <ul className="max-h-40 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
           {log.map((e, i) => (
             <li key={i} className={e.ok ? "" : "text-destructive"}>
-              {e.name}: {e.ok ? e.message ?? "OK" : e.message ?? "Erro"}
+              {e.name}: [{e.status ?? (e.ok ? "success" : "error")}]{" "}
+              {e.ok ? e.message ?? "OK" : e.message ?? "Erro"}
             </li>
           ))}
         </ul>

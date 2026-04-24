@@ -4,18 +4,27 @@ import { maskCep } from "@/lib/masks";
 import type { EnderecoPrincipalMap } from "@/types/companySetup";
 import { Loader2 } from "lucide-react";
 
+function isEndLocked(
+  key: keyof EnderecoPrincipalMap,
+  locked: readonly string[] | undefined,
+): boolean {
+  return !!locked?.includes(key as string);
+}
+
 export function StepAddressForm({
   endereco,
   onEnderecoChange,
   cepLoading,
   cepError,
   onCepBlur,
+  lockedEnderecoKeys,
 }: {
   endereco: EnderecoPrincipalMap;
   onEnderecoChange: (patch: Partial<EnderecoPrincipalMap>) => void;
   cepLoading: boolean;
   cepError: string | null;
   onCepBlur: () => void;
+  lockedEnderecoKeys?: readonly string[];
 }) {
   return (
     <div className="space-y-4">
@@ -26,6 +35,7 @@ export function StepAddressForm({
             id="cep"
             inputMode="numeric"
             value={maskCep(endereco.cep ?? "")}
+            disabled={isEndLocked("cep", lockedEnderecoKeys)}
             onChange={(e) =>
               onEnderecoChange({ cep: e.target.value.replace(/\D/g, "") })
             }
@@ -45,6 +55,7 @@ export function StepAddressForm({
         <Input
           id="log"
           value={endereco.logradouro ?? ""}
+          disabled={isEndLocked("logradouro", lockedEnderecoKeys)}
           onChange={(e) => onEnderecoChange({ logradouro: e.target.value })}
         />
       </div>
@@ -54,6 +65,7 @@ export function StepAddressForm({
           <Input
             id="num"
             value={endereco.numero ?? ""}
+            disabled={isEndLocked("numero", lockedEnderecoKeys)}
             onChange={(e) => onEnderecoChange({ numero: e.target.value })}
           />
         </div>
@@ -62,6 +74,7 @@ export function StepAddressForm({
           <Input
             id="comp"
             value={endereco.complemento ?? ""}
+            disabled={isEndLocked("complemento", lockedEnderecoKeys)}
             onChange={(e) => onEnderecoChange({ complemento: e.target.value })}
           />
         </div>
@@ -71,6 +84,7 @@ export function StepAddressForm({
         <Input
           id="bairro"
           value={endereco.bairro ?? ""}
+          disabled={isEndLocked("bairro", lockedEnderecoKeys)}
           onChange={(e) => onEnderecoChange({ bairro: e.target.value })}
         />
       </div>
@@ -80,6 +94,7 @@ export function StepAddressForm({
           <Input
             id="mun"
             value={endereco.municipio ?? ""}
+            disabled={isEndLocked("municipio", lockedEnderecoKeys)}
             onChange={(e) => onEnderecoChange({ municipio: e.target.value })}
           />
         </div>
@@ -89,6 +104,7 @@ export function StepAddressForm({
             id="uf"
             maxLength={2}
             value={endereco.uf ?? ""}
+            disabled={isEndLocked("uf", lockedEnderecoKeys)}
             onChange={(e) =>
               onEnderecoChange({
                 uf: e.target.value.toUpperCase().slice(0, 2),
@@ -103,6 +119,7 @@ export function StepAddressForm({
           id="ibge"
           inputMode="numeric"
           value={endereco.ibge_cidade ?? ""}
+          disabled={isEndLocked("ibge_cidade", lockedEnderecoKeys)}
           onChange={(e) => onEnderecoChange({ ibge_cidade: e.target.value })}
         />
       </div>

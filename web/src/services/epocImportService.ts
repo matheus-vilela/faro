@@ -1,6 +1,6 @@
 /**
- * Contratos para importação de dados a partir da EPOC (credenciais ou planilha).
- * Implementação completa fica para iteração futura; UI e persistência já se preparam.
+ * Contratos para importação de dados a partir do PDV (EPOC) via credenciais.
+ * Implementação completa fica para iteração futura.
  */
 
 export type EpocCredentialsInput = {
