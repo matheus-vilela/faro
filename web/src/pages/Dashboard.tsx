@@ -1,4 +1,5 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
+import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
@@ -209,6 +210,7 @@ export function Dashboard() {
       </div>
 
       <div className="grid gap-6">
+        {currentCompany ? <SetupProgressCard /> : null}
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
         {canSeeAlerts ? (
           <DashboardAlertsCard

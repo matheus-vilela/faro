@@ -8,6 +8,7 @@ export type ExtractedExpenseItem = {
   quantity: number;
   unitValue: number;
   lineTotal: number;
+  productCode?: string | null;
   /** Unidade comercial (NF-e: uCom) quando identificável. */
   unitCommercial?: string | null;
   /** Unidade tributável (NF-e: uTrib) quando diferente da comercial. */
@@ -38,6 +39,8 @@ export type ExtractedDocumentResult = {
   supplierDocument: string | null;
   invoiceNumber: string | null;
   invoiceSeries: string | null;
+  nfeAccessKey?: string | null;
+  emissionDate?: string | null;
   totalAmount: number | null;
   items: ExtractedExpenseItem[];
   notes: string | null;

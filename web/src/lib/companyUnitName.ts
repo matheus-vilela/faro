@@ -27,7 +27,10 @@ export function hasDuplicateUnitNameInGroup(
 const DUPLICATE_UNIT_MSG =
   "Já existe uma unidade com este nome neste grupo.";
 
-/** Mensagem amigável para violação de unicidade ou erro genérico. */
+const FK_VIOLATION_MSG =
+  "Esta unidade ainda possui vínculos no banco que impedem a exclusão. Tente novamente mais tarde ou fale com o suporte.";
+
+/** Mensagem amigável para violação de unicidade, FK, PostgREST ou erro genérico. */
 export function mapCompanyUnitMutationError(
   err: unknown,
   fallback: string,
@@ -39,6 +42,14 @@ export function mapCompanyUnitMutationError(
     (err as { code?: string }).code === "23505"
   ) {
     return DUPLICATE_UNIT_MSG;
+  }
+  if (
+    err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: string }).code === "23503"
+  ) {
+    return FK_VIOLATION_MSG;
   }
   if (err instanceof Error) return err.message;
   if (
