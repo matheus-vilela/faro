@@ -40,6 +40,7 @@ export function StepCompanyForm({
   lockedEmpresaKeys,
   cnpjValidating,
   onValidarCnpj,
+  cnpjValidated,
 }: {
   groupName: string;
   onGroupNameChange: (v: string) => void;
@@ -49,6 +50,7 @@ export function StepCompanyForm({
   lockedEmpresaKeys?: readonly string[];
   cnpjValidating?: boolean;
   onValidarCnpj?: () => void;
+  cnpjValidated?: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -98,82 +100,92 @@ export function StepCompanyForm({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="nf">Nome fantasia *</Label>
-        <Input
-          id="nf"
-          value={empresa.nome_fantasia ?? ""}
-          onChange={(e) => onEmpresaChange({ nome_fantasia: e.target.value })}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="rz">Razão social *</Label>
-        <Input
-          id="rz"
-          value={empresa.nome_razao_social ?? ""}
-          disabled={isEmpresaKeyLocked("nome_razao_social", lockedEmpresaKeys)}
-          onChange={(e) =>
-            onEmpresaChange({ nome_razao_social: e.target.value })
-          }
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="ie">Inscrição estadual</Label>
-        <Input
-          id="ie"
-          value={empresa.inscricao_estadual ?? ""}
-          onChange={(e) =>
-            onEmpresaChange({ inscricao_estadual: e.target.value })
-          }
-        />
-      </div>
-      <div className="space-y-2">
-        <Label>Regime tributário *</Label>
-        <Select
-          value={normalizeRegimeValue(empresa.regime_tributario)}
-          onValueChange={(v) =>
-            onEmpresaChange({ regime_tributario: Number(v) })
-          }
-          disabled={isEmpresaKeyLocked("regime_tributario", lockedEmpresaKeys)}
-        >
-          <SelectTrigger className="w-full min-w-0">
-            <SelectValue placeholder="Selecione" />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            sideOffset={4}
-            className="z-[200] max-h-[min(280px,50vh)]"
-          >
-            {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={String(o.value)}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="em">E-mail *</Label>
-        <Input
-          id="em"
-          type="email"
-          value={empresa.email ?? ""}
-          onChange={(e) => onEmpresaChange({ email: e.target.value })}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="tel">Telefone *</Label>
-        <Input
-          id="tel"
-          inputMode="tel"
-          value={maskPhone(empresa.telefone ?? "")}
-          onChange={(e) =>
-            onEmpresaChange({
-              telefone: e.target.value.replace(/\D/g, ""),
-            })
-          }
-        />
-      </div>
+      {!cnpjValidated ? (
+        <p className="text-sm text-muted-foreground">
+          Valide o CNPJ para liberar os demais campos da empresa.
+        </p>
+      ) : null}
+
+      {cnpjValidated ? (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="nf">Nome fantasia *</Label>
+            <Input
+              id="nf"
+              value={empresa.nome_fantasia ?? ""}
+              onChange={(e) => onEmpresaChange({ nome_fantasia: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="rz">Razão social *</Label>
+            <Input
+              id="rz"
+              value={empresa.nome_razao_social ?? ""}
+              disabled={isEmpresaKeyLocked("nome_razao_social", lockedEmpresaKeys)}
+              onChange={(e) =>
+                onEmpresaChange({ nome_razao_social: e.target.value })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="ie">Inscrição estadual</Label>
+            <Input
+              id="ie"
+              value={empresa.inscricao_estadual ?? ""}
+              onChange={(e) =>
+                onEmpresaChange({ inscricao_estadual: e.target.value })
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Regime tributário *</Label>
+            <Select
+              value={normalizeRegimeValue(empresa.regime_tributario)}
+              onValueChange={(v) =>
+                onEmpresaChange({ regime_tributario: Number(v) })
+              }
+              disabled={isEmpresaKeyLocked("regime_tributario", lockedEmpresaKeys)}
+            >
+              <SelectTrigger className="w-full min-w-0">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent
+                position="popper"
+                sideOffset={4}
+                className="z-[200] max-h-[min(280px,50vh)]"
+              >
+                {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={String(o.value)}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="em">E-mail *</Label>
+            <Input
+              id="em"
+              type="email"
+              value={empresa.email ?? ""}
+              onChange={(e) => onEmpresaChange({ email: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="tel">Telefone *</Label>
+            <Input
+              id="tel"
+              inputMode="tel"
+              value={maskPhone(empresa.telefone ?? "")}
+              onChange={(e) =>
+                onEmpresaChange({
+                  telefone: e.target.value.replace(/\D/g, ""),
+                })
+              }
+            />
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

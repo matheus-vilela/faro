@@ -11,10 +11,7 @@ import {
 } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { maskCpfCnpj, unmask } from "@/lib/masks";
-import {
-  getNextPendingStep,
-  mergeSetupPatch,
-} from "@/lib/setup/setupProgress";
+import { getNextPendingStep, mergeSetupPatch } from "@/lib/setup/setupProgress";
 import {
   getStep5EpocState,
   isStep1EmpresaComplete,
@@ -26,7 +23,21 @@ import {
 } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
 import { fetchAddressByCep } from "@/services/addressLookupService";
-import { validateCertificateWithFocusNfe, syncFocusNfeCompanyProfile } from "@/services/focusNfeService";
+import {
+  focusAtualizarCertificado,
+  hasFocusNfeEmpresaId,
+} from "@/services/focusAtualizarCertificadoService";
+import { consultarCnpjNaFocus } from "@/services/focusConsultaCnpjService";
+import {
+  buildFocusCriaEmpresaBody,
+  fileToPureBase64,
+  focusCriaEmpresa,
+  parseFocusCriaEmpresaIdFromResponse,
+} from "@/services/focusCriaEmpresaService";
+import {
+  syncFocusNfeCompanyProfile,
+  validateCertificateWithFocusNfe,
+} from "@/services/focusNfeService";
 import {
   buildCompletedSetup,
   buildPausedSetup,
@@ -35,31 +46,21 @@ import {
   normalizeSetupMap,
   patchCompanyMaps,
 } from "@/services/unitSetupService";
-import {
-  focusAtualizarCertificado,
-  hasFocusNfeEmpresaId,
-} from "@/services/focusAtualizarCertificadoService";
-import {
-  buildFocusCriaEmpresaBody,
-  focusCriaEmpresa,
-  fileToPureBase64,
-  parseFocusCriaEmpresaIdFromResponse,
-} from "@/services/focusCriaEmpresaService";
-import { consultarCnpjNaFocus } from "@/services/focusConsultaCnpjService";
 import { processXmlZipImport } from "@/services/xmlZipImportService";
 import {
   parseEpocSettings,
   type EpocIntegrationSettings,
 } from "@/types/companyIntegration";
 import type {
+  CompanySetupMap,
   EmpresaMap,
   EnderecoPrincipalMap,
   FocusNfeMap,
-  CompanySetupMap,
   RepresentanteLegalMap,
-  SetupXmlZipImportState,
   SetupStepNumber,
+  SetupXmlZipImportState,
 } from "@/types/companySetup";
+import { Building2, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -69,7 +70,6 @@ import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
 import { StepPdvForm } from "./steps/StepPdvForm";
 import { StepXmlZipForm } from "./steps/StepXmlZipForm";
-import { Building2, Loader2 } from "lucide-react";
 
 type Phase = "wizard" | "finalize_loading" | "finalize_summary";
 
@@ -89,7 +89,11 @@ function emptyRepresentante(): RepresentanteLegalMap {
   return {};
 }
 
-function upsertStep(list: number[], step: SetupStepNumber, include: boolean): number[] {
+function upsertStep(
+  list: number[],
+  step: SetupStepNumber,
+  include: boolean,
+): number[] {
   const s = new Set(list);
   if (include) s.add(step);
   else s.delete(step);
@@ -153,8 +157,7 @@ export function UnitSetupWizard({
   const [stepError, setStepError] = useState<string | null>(null);
 
   /** Unidade já criada na Faro e assistente além do certificado: não reabrir passos 1–3. */
-  const lockStepsOneToThree =
-    !!companyId && (setup.current_step ?? 1) >= 4;
+  const lockStepsOneToThree = !!companyId && (setup.current_step ?? 1) >= 4;
 
   const load = useCallback(async () => {
     if (!resumeCompanyId) return;
@@ -175,7 +178,9 @@ export function UnitSetupWizard({
     setFocusnfe(stripFocusnfeSecrets((c.focusnfe ?? {}) as FocusNfeMap));
     setCertFileBase64("");
     setCertPassword("");
-    setRepresentanteLegal((c.representante_legal ?? {}) as RepresentanteLegalMap);
+    setRepresentanteLegal(
+      (c.representante_legal ?? {}) as RepresentanteLegalMap,
+    );
     const consultaRec =
       c.focus_cnpj_consulta && typeof c.focus_cnpj_consulta === "object"
         ? (c.focus_cnpj_consulta as Record<string, unknown>)
@@ -321,7 +326,9 @@ export function UnitSetupWizard({
       const nextEmpresa = { ...empresa, ...applied.empresa, cnpj_cpf: digits };
       const nextEndereco = { ...endereco, ...applied.endereco };
       const nextRep = { ...representanteLegal, ...applied.representante };
-      const nextSetup = mergeSetupPatch(setup, { focus_cnpj_lock: applied.lock });
+      const nextSetup = mergeSetupPatch(setup, {
+        focus_cnpj_lock: applied.lock,
+      });
       setEmpresa(nextEmpresa);
       setEndereco(nextEndereco);
       setRepresentanteLegal(nextRep);
@@ -343,17 +350,13 @@ export function UnitSetupWizard({
           return;
         }
       }
-      toast.success("CNPJ validado. Dados da empresa e endereço foram preenchidos.");
+      toast.success(
+        "CNPJ validado. Dados da empresa e endereço foram preenchidos.",
+      );
     } finally {
       setCnpjValidating(false);
     }
-  }, [
-    empresa,
-    endereco,
-    representanteLegal,
-    setup,
-    companyId,
-  ]);
+  }, [empresa, endereco, representanteLegal, setup, companyId]);
 
   const handleCepBlur = useCallback(async () => {
     if ((setup.focus_cnpj_lock?.locked_endereco_keys ?? []).length > 0) {
@@ -376,7 +379,7 @@ export function UnitSetupWizard({
     if (!user) return;
     if (!companyId) {
       toast.error(
-        "Conclua o passo 3 com sucesso na Focus para salvar a unidade na Faro e poder pausar.",
+        "Conclua o passo 3 com sucesso para salvar a unidade na Faro e poder pausar.",
       );
       return;
     }
@@ -390,7 +393,10 @@ export function UnitSetupWizard({
         focus_cnpj_consulta: focusConsultaRecord,
         focusnfe,
         setup: paused,
-        name: (empresa.nome_fantasia ?? "").trim() || empresa.nome_razao_social?.trim() || undefined,
+        name:
+          (empresa.nome_fantasia ?? "").trim() ||
+          empresa.nome_razao_social?.trim() ||
+          undefined,
         document: (empresa.cnpj_cpf ?? "").replace(/\D/g, "") || undefined,
         email: (empresa.email ?? "").trim() || null,
         phone: (empresa.telefone ?? "").replace(/\D/g, "") || null,
@@ -513,7 +519,8 @@ export function UnitSetupWizard({
     const docDigits = (empresa.cnpj_cpf ?? "").replace(/\D/g, "");
     const phoneDigits = (empresa.telefone ?? "").replace(/\D/g, "");
     const displayName =
-      (empresa.nome_fantasia ?? "").trim() || (empresa.nome_razao_social ?? "").trim();
+      (empresa.nome_fantasia ?? "").trim() ||
+      (empresa.nome_razao_social ?? "").trim();
     const nextSetup = syncCompletionState(
       mergeSetupPatch(setup, { current_step: 2 }),
     );
@@ -838,10 +845,7 @@ export function UnitSetupWizard({
     }
   };
 
-  async function finalizeRun(
-    lastSetup: CompanySetupMap,
-    focus: FocusNfeMap,
-  ) {
+  async function finalizeRun(lastSetup: CompanySetupMap, focus: FocusNfeMap) {
     if (!companyId) return;
     await syncFocusNfeCompanyProfile(companyId, focus);
     const pending = getNextPendingStep(lastSetup);
@@ -858,11 +862,7 @@ export function UnitSetupWizard({
   const handleBack = () => {
     if (activeStep <= 1) return;
     const target = activeStep - 1;
-    if (
-      lockStepsOneToThree &&
-      target >= 1 &&
-      target <= 3
-    ) {
+    if (lockStepsOneToThree && target >= 1 && target <= 3) {
       toast.message(
         "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
       );
@@ -875,11 +875,7 @@ export function UnitSetupWizard({
     (step: SetupStepNumber) => {
       if (step < 1 || step > 5) return;
       if (step > 1 && !companyId && step > 3) return;
-      if (
-        lockStepsOneToThree &&
-        step >= 1 &&
-        step <= 3
-      ) {
+      if (lockStepsOneToThree && step >= 1 && step <= 3) {
         toast.message(
           "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
         );
@@ -894,7 +890,9 @@ export function UnitSetupWizard({
   const handleRemoveCertificate = useCallback(async () => {
     const path = setup.certificate?.storage_path;
     if (path && companyId) {
-      const { error } = await supabase.storage.from("company-setup").remove([path]);
+      const { error } = await supabase.storage
+        .from("company-setup")
+        .remove([path]);
       if (error) toast.error(error.message);
     }
     if (companyId && hasFocusNfeEmpresaId(focusnfe)) {
@@ -956,9 +954,13 @@ export function UnitSetupWizard({
           toast.error(res.error);
           return;
         }
-        toast.success("Certificado carregado. Informe a senha e avançe para validar.");
+        toast.success(
+          "Certificado carregado. Informe a senha e avançe para validar.",
+        );
       } else {
-        toast.success("Certificado carregado — informe a senha para concluir o passo.");
+        toast.success(
+          "Certificado carregado — informe a senha para concluir o passo.",
+        );
       }
     } finally {
       setCertBusy(false);
@@ -1054,7 +1056,9 @@ export function UnitSetupWizard({
 
   if (phase === "finalize_loading") {
     return (
-      <div className={`flex ${loadingMinH} flex-col items-center justify-center gap-4`}>
+      <div
+        className={`flex ${loadingMinH} flex-col items-center justify-center gap-4`}
+      >
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
         <p className="text-center text-lg font-medium">
           Finalizando configuração…
@@ -1099,7 +1103,7 @@ export function UnitSetupWizard({
             <p className="text-muted-foreground">
               {setup.certificate?.status === "valid"
                 ? `Válido até ${focusnfe.certificado_validade ?? "—"}`
-                : setup.certificate?.status ?? "não enviado"}
+                : (setup.certificate?.status ?? "não enviado")}
             </p>
           </div>
           <div>
@@ -1115,7 +1119,7 @@ export function UnitSetupWizard({
                   ? setup.epoc?.enabled
                     ? "Integração ativa"
                     : "Credenciais salvas (inativa)"
-                  : setup.epoc?.mode ?? "—"}
+                  : (setup.epoc?.mode ?? "—")}
             </p>
           </div>
           <p className="pt-2 font-semibold">
@@ -1136,7 +1140,7 @@ export function UnitSetupWizard({
     <>
       <PageHeader
         title="Configurar unidade"
-        description="Assistente em cinco etapas. O passo 1 cria a unidade; os demais podem ser concluídos depois."
+        description="Assistente em cinco etapas."
         icon={Building2}
         className={isModal ? "pb-2" : undefined}
       />
@@ -1170,6 +1174,11 @@ export function UnitSetupWizard({
             lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
             cnpjValidating={cnpjValidating}
             onValidarCnpj={() => void handleValidarCnpj()}
+            cnpjValidated={
+              !!setup.focus_cnpj_lock?.validated_cnpj_digits &&
+              setup.focus_cnpj_lock.validated_cnpj_digits ===
+                unmask(empresa.cnpj_cpf ?? "")
+            }
           />
         ) : null}
         {activeStep === 2 ? (
@@ -1225,26 +1234,26 @@ export function UnitSetupWizard({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void handlePause()}
-          disabled={saving}
-        >
-          Pausar setup
-        </Button>
+        {activeStep > 3 ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handlePause()}
+            disabled={saving}
+          >
+            Pausar setup
+          </Button>
+        ) : (
+          <div />
+        )}
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="secondary"
-            onClick={handleBack}
-            disabled={
-              activeStep <= 1 ||
-              saving ||
-              (lockStepsOneToThree && activeStep === 4)
-            }
+            onClick={activeStep === 1 ? () => exitApp() : handleBack}
+            disabled={saving || (lockStepsOneToThree && activeStep === 4)}
           >
-            Voltar
+            {activeStep === 1 ? "Cancelar" : "Voltar"}
           </Button>
           <Button
             type="button"

@@ -98,14 +98,16 @@ export function applyFocusCnpjConsulta(
     empresa.optante_mei = optMei;
     lockEmpresa.push("optante_mei");
   }
-  if (optSn !== undefined || optMei !== undefined) {
-    if (optMei === true || optSn === true) {
-      empresa.regime_tributario = 1;
-      lockEmpresa.push("regime_tributario");
-    } else if (optSn === false && optMei === false) {
-      empresa.regime_tributario = 2;
-      lockEmpresa.push("regime_tributario");
-    }
+  // Regra solicitada no setup:
+  // - optante_simples_nacional = true  -> Simples Nacional (1)
+  // - optante_simples_nacional = false -> Regime Normal (2)
+  // Quando a API não informa esse campo, não força regime.
+  if (optSn === true) {
+    empresa.regime_tributario = 1;
+    lockEmpresa.push("regime_tributario");
+  } else if (optSn === false) {
+    empresa.regime_tributario = 2;
+    lockEmpresa.push("regime_tributario");
   }
   const lockEmpresaUnique = [...new Set(lockEmpresa)];
   lockEmpresa.length = 0;
