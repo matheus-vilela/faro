@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import {
   Select,
   SelectContent,
@@ -20,11 +20,11 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import {
   invokeEpocCsvSync,
   triggerEpocCsvSyncInBackground,
 } from "@/services/epocSyncCsvService";
-import { cn } from "@/lib/utils";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -55,15 +55,18 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [codigoFilial, setCodigoFilial] = useState("");
   const [ambiente, setAmbiente] = useState<EpocAmbiente>("producao");
   const [existingPassword, setExistingPassword] = useState<string | null>(null);
-  const [lastEpocCsvSyncAt, setLastEpocCsvSyncAt] = useState<string | null>(null);
+  const [lastEpocCsvSyncAt, setLastEpocCsvSyncAt] = useState<string | null>(
+    null,
+  );
   const [lastEpocCsvStoragePath, setLastEpocCsvStoragePath] = useState<
     string | null
   >(null);
-  const [lastEpocAcoesResponseSyncAt, setLastEpocAcoesResponseSyncAt] = useState<
-    string | null
-  >(null);
-  const [lastEpocAcoesResponseStoragePath, setLastEpocAcoesResponseStoragePath] =
+  const [lastEpocAcoesResponseSyncAt, setLastEpocAcoesResponseSyncAt] =
     useState<string | null>(null);
+  const [
+    lastEpocAcoesResponseStoragePath,
+    setLastEpocAcoesResponseStoragePath,
+  ] = useState<string | null>(null);
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
   const [downloadingLastAcoes, setDownloadingLastAcoes] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
@@ -95,10 +98,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setBaseUrl(s.base_url ?? "");
       setCodigoFilial(s.codigo_filial ?? "");
       setAmbiente(s.ambiente ?? "producao");
-      setExistingPassword(s.password && s.password.length > 0 ? s.password : null);
+      setExistingPassword(
+        s.password && s.password.length > 0 ? s.password : null,
+      );
       setLastEpocCsvSyncAt(s.last_epoc_csv_sync_at ?? null);
       setLastEpocCsvStoragePath(s.last_epoc_csv_storage_path ?? null);
-      setLastEpocAcoesResponseSyncAt(s.last_epoc_acoes_response_sync_at ?? null);
+      setLastEpocAcoesResponseSyncAt(
+        s.last_epoc_acoes_response_sync_at ?? null,
+      );
       setLastEpocAcoesResponseStoragePath(
         s.last_epoc_acoes_response_storage_path ?? null,
       );
@@ -141,11 +148,15 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     if (error) {
       console.error(error);
       toast.error(
-        error.message || "Não foi possível baixar o arquivo. Verifique as permissões.",
+        error.message ||
+          "Não foi possível baixar o arquivo. Verifique as permissões.",
       );
       return;
     }
-    const name = fileNameFromStoragePath(lastEpocCsvStoragePath, "epoc-ultimo.csv");
+    const name = fileNameFromStoragePath(
+      lastEpocCsvStoragePath,
+      "epoc-ultimo.csv",
+    );
     const url = URL.createObjectURL(data);
     const a = document.createElement("a");
     a.href = url;
@@ -169,7 +180,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     if (error) {
       console.error(error);
       toast.error(
-        error.message || "Não foi possível baixar o ficheiro. Verifique as permissões.",
+        error.message ||
+          "Não foi possível baixar o ficheiro. Verifique as permissões.",
       );
       return;
     }
@@ -203,7 +215,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         .from("company-setup")
         .remove(uniqueOldPaths);
       if (removeErr) {
-        console.warn("[epoc-sync-csv] falha ao remover arquivos antigos", removeErr);
+        console.warn(
+          "[epoc-sync-csv] falha ao remover arquivos antigos",
+          removeErr,
+        );
         toast.warning(
           "Não foi possível remover todos os arquivos antigos antes da nova sincronização. Continuando mesmo assim.",
         );
@@ -241,9 +256,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         res.html_download_url ??
         null;
       const failName = lastFail?.label ?? lastFail?.name;
-      const tail = failName
-        ? ` Etapa com problema: ${failName}.`
-        : "";
+      const tail = failName ? ` Etapa com problema: ${failName}.` : "";
       if (downloadOnErr) {
         toast.error(
           (res.error ?? "Falha na sincronização.") +
@@ -255,7 +268,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         return;
       }
       toast.error(
-        (res.error ?? "Falha na sincronização. Veja os logs da função epoc-sync-csv.") +
+        (res.error ??
+          "Falha na sincronização. Veja os logs da função epoc-sync-csv.") +
           tail,
       );
       return;
@@ -273,9 +287,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     } else if (res.download_url) {
       window.open(res.download_url, "_blank", "noopener,noreferrer");
     } else {
-      toast.message("Use os botões de download abaixo se o browser bloqueou pop-ups.", {
-        duration: 5000,
-      });
+      toast.message(
+        "Use os botões de download abaixo se o browser bloqueou pop-ups.",
+        {
+          duration: 5000,
+        },
+      );
     }
   };
 
@@ -325,10 +342,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase.from("company_integrations").upsert(
-      payload,
-      { onConflict: "company_id,provider" },
-    );
+    const { error } = await supabase
+      .from("company_integrations")
+      .upsert(payload, { onConflict: "company_id,provider" });
 
     setSaving(false);
     if (error) {
@@ -395,8 +411,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 EPOC
               </p>
               <p className="text-sm text-muted-foreground line-clamp-2">
-                Por enquanto, importa só vendas realizadas. Sincronização automática
-                uma vez ao dia.
+                Por enquanto, importa só vendas realizadas. Sincronização
+                automática uma vez ao dia.
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
@@ -417,7 +433,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   Inativo
                 </span>
               )}
-              <ChevronRight className="h-5 w-5 text-muted-foreground" aria-hidden />
+              <ChevronRight
+                className="h-5 w-5 text-muted-foreground"
+                aria-hidden
+              />
             </div>
           </button>
           {lastEpocCsvStoragePath ? (
@@ -448,10 +467,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           <SheetHeader>
             <SheetTitle>Integração EPOC</SheetTitle>
             <SheetDescription>
-              URL do portal, usuário, senha e código de filial (NaoMenu). A função
-              no servidor (epoc-sync-csv) executa o login e o fluxo de exportação
-              do relatório em CSV. Somente quem administra a unidade vê estes
-              campos.
+              URL do portal, usuário, senha e código de filial (NaoMenu). A
+              função no servidor (epoc-sync-csv) executa o login e o fluxo de
+              exportação do relatório em CSV. Somente quem administra a unidade
+              vê estes campos.
             </SheetDescription>
           </SheetHeader>
 
@@ -462,8 +481,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   Integração ativa
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Quando ativo, o Faro usa estas credenciais na rotina que importa
-                  vendas do EPOC (execução diária automática).
+                  Quando ativo, o Faro usa estas credenciais na rotina que
+                  importa vendas do EPOC (execução diária automática).
                 </p>
               </div>
               <Switch
@@ -539,21 +558,30 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
               </div>
             </div>
             <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
-              <p className="text-sm font-medium">Relatório EPOC (tabela + CSV)</p>
+              <p className="text-sm font-medium">
+                Relatório EPOC (tabela + CSV)
+              </p>
               {lastEpocAcoesResponseSyncAt ? (
                 <p className="text-xs text-muted-foreground">
                   Última tabela (#tblExport):{" "}
-                  {new Date(lastEpocAcoesResponseSyncAt).toLocaleString("pt-BR")}
+                  {new Date(lastEpocAcoesResponseSyncAt).toLocaleString(
+                    "pt-BR",
+                  )}
                 </p>
               ) : null}
               {lastEpocCsvSyncAt ? (
                 <p className="text-xs text-muted-foreground">
-                  Último CSV: {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
+                  Último CSV:{" "}
+                  {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
                 </p>
               ) : !lastEpocAcoesResponseSyncAt ? (
                 <p className="text-xs text-muted-foreground">
                   Nada sincronizado ainda — use o botão abaixo (função
-                  <span className="font-mono text-[0.7rem]"> epoc-sync-csv</span>).
+                  <span className="font-mono text-[0.7rem]">
+                    {" "}
+                    epoc-sync-csv
+                  </span>
+                  ).
                 </p>
               ) : null}
               <Button
@@ -569,20 +597,16 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 )}
                 Sincronizar agora (EPOC → Storage)
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Após o login, a função envia <span className="font-mono text-[0.7rem]">validadorOz.php</span> (NaoMenu e
-                token) e, em seguida, <span className="font-mono text-[0.7rem]">acoes.php</span>, com
-                o token e o período; extrai só a tabela{" "}
-                <span className="font-mono text-[0.7rem]">#tblExport</span> para um ficheiro
-                HTML e tenta ainda obter o CSV. URLs assinadas (1h) se o browser abrir o separador.
-              </p>
+
               <div className="grid gap-2 sm:grid-cols-2">
                 <Button
                   type="button"
                   variant="secondary"
                   className="w-full"
                   onClick={() => void handleDownloadLastAcoesResponse()}
-                  disabled={!lastEpocAcoesResponseStoragePath || downloadingLastAcoes}
+                  disabled={
+                    !lastEpocAcoesResponseStoragePath || downloadingLastAcoes
+                  }
                 >
                   {downloadingLastAcoes ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
