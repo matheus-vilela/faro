@@ -460,6 +460,53 @@ function buildTblExportFileOrError(
   return { doc: buildTblExportDocument(bloco) };
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+function normalizeCellText(cellHtml: string): string {
+  const noScripts = cellHtml
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "");
+  const withBreaks = noScripts.replace(/<br\s*\/?>/gi, "\n");
+  const plain = withBreaks.replace(/<[^>]+>/g, " ");
+  return decodeHtmlEntities(plain).replace(/\s+/g, " ").trim();
+}
+
+function csvEscapeCell(v: string): string {
+  const s = v.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const needsQuote = /[",;\n]/.test(s);
+  const esc = s.replace(/"/g, "\"\"");
+  return needsQuote ? `"${esc}"` : esc;
+}
+
+/** Converte a table HTML em CSV delimitado por ';' (pt-BR friendly). */
+function tableHtmlToCsv(tableHtml: string): string | null {
+  const rows: string[] = [];
+  const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let trM: RegExpExecArray | null;
+  while ((trM = trRe.exec(tableHtml)) !== null) {
+    const rowInner = trM[1] ?? "";
+    const cols: string[] = [];
+    const cellRe = /<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi;
+    let cM: RegExpExecArray | null;
+    while ((cM = cellRe.exec(rowInner)) !== null) {
+      cols.push(csvEscapeCell(normalizeCellText(cM[1] ?? "")));
+    }
+    if (cols.length > 0) rows.push(cols.join(";"));
+  }
+  if (rows.length === 0) return null;
+  return `${rows.join("\n")}\n`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -1212,12 +1259,54 @@ Deno.serve(async (req) => {
     return failJson(500, "Não foi possível guardar a tabela final no Storage.");
   }
 
+  // --- CSV gerado diretamente da tabela #tblExport ---------------------------
+  const tableOnlyHtml = extractElementOuterHtmlById(
+    unwrapAcoesHtml(acoes2.text),
+    EPOC_ID_TBL_EXPORT,
+  );
+  const csvGenerated = tableOnlyHtml ? tableHtmlToCsv(tableOnlyHtml) : null;
+  let csvStoragePath: string | null = null;
+  let csvFileName: string | null = null;
+  let csvSizeBytes = 0;
+  let csvDownloadUrl: string | null = null;
+
+  if (csvGenerated && csvGenerated.trim().length > 0) {
+    const csvStep = await recordStepWithUpload(
+      "csv_from_tbl_export",
+      "CSV gerado a partir de #tblExport",
+      "tblExport.csv",
+      new TextEncoder().encode(csvGenerated),
+      "text/csv",
+      {
+        status: "ok",
+        detalhes: {
+          origem: "table_to_csv",
+          linhas: csvGenerated.split(/\r?\n/).filter(Boolean).length,
+          previa: previewText(csvGenerated, 800),
+        },
+      },
+    );
+    csvStoragePath = csvStep.storage_path ?? null;
+    csvFileName = csvStep.file_name ?? null;
+    csvSizeBytes = csvStep.bytes ?? 0;
+    csvDownloadUrl = csvStep.download_url ?? null;
+  } else {
+    recordStepWithoutUpload("csv_from_tbl_export", "CSV gerado a partir de #tblExport", {
+      status: "warn",
+      message: "Não foi possível gerar CSV a partir da tabela (sem linhas/células).",
+    });
+  }
+
   const nowIso = new Date().toISOString();
   const nextSettings: Record<string, unknown> = {
     ...raw,
     last_epoc_acoes_response_sync_at: nowIso,
     last_epoc_acoes_response_storage_path: acoesResponsePath,
   };
+  if (csvStoragePath) {
+    nextSettings.last_epoc_csv_sync_at = nowIso;
+    nextSettings.last_epoc_csv_storage_path = csvStoragePath;
+  }
 
   const { error: upIntegErr } = await admin
     .from("company_integrations")
@@ -1261,11 +1350,11 @@ Deno.serve(async (req) => {
     acoes_response_download_url: acoesResponseDownloadUrl,
     /** Legado: mesmo que `acoes_response_download_url`. */
     html_download_url: acoesResponseDownloadUrl,
-    csv_uploaded: false,
-    storage_path: null,
-    file_name: null,
-    size_bytes: 0,
-    download_url: null,
+    csv_uploaded: !!csvStoragePath,
+    storage_path: csvStoragePath,
+    file_name: csvFileName,
+    size_bytes: csvSizeBytes,
+    download_url: csvDownloadUrl,
     signed_url_expires_in: signedTtl,
   });
 });

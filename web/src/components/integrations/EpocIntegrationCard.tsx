@@ -192,6 +192,32 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
+
+    const oldPaths = [
+      lastEpocAcoesResponseStoragePath?.trim() ?? "",
+      lastEpocCsvStoragePath?.trim() ?? "",
+    ].filter(Boolean);
+    const uniqueOldPaths = Array.from(new Set(oldPaths));
+    if (uniqueOldPaths.length > 0) {
+      const { error: removeErr } = await supabase.storage
+        .from("company-setup")
+        .remove(uniqueOldPaths);
+      if (removeErr) {
+        console.warn("[epoc-sync-csv] falha ao remover arquivos antigos", removeErr);
+        toast.warning(
+          "Não foi possível remover todos os arquivos antigos antes da nova sincronização. Continuando mesmo assim.",
+        );
+      } else {
+        toast.message(
+          `Arquivos antigos removidos (${uniqueOldPaths.length}) antes da nova sincronização.`,
+        );
+      }
+      setLastEpocAcoesResponseStoragePath(null);
+      setLastEpocCsvStoragePath(null);
+      setLastEpocAcoesResponseSyncAt(null);
+      setLastEpocCsvSyncAt(null);
+    }
+
     setSyncingFull(true);
     const res = await invokeEpocCsvSync(companyId);
     setSyncingFull(false);
