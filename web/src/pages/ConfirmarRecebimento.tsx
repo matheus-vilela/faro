@@ -11,10 +11,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/contexts/ThemeContext";
+import { RecebimentoImportItemResolution } from "@/components/recebimento/RecebimentoImportItemResolution";
 import { supabase } from "@/lib/supabase";
 import { Building2, FileText, PackageCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
+import { toast } from "sonner";
 
 /** Mesmo fundo de grade + vinheta da tela de login */
 function RecebimentoPageShell({ children }: { children: ReactNode }) {
@@ -53,11 +55,21 @@ interface RecebimentoItem {
   product_name: string;
   quantity: number;
   unit_value: number;
+  product_id?: string | null;
+  import_nature?: string | null;
+  import_engine_suggestion?: string | null;
+  import_confidence_0_1?: number | null;
+  import_score_reasons_json?: Record<string, unknown> | null;
+  import_stock_resolution?: string | null;
+  resolved_entry_breakdown_recipe_id?: string | null;
+  import_pending_resolution?: boolean | null;
 }
 
 interface RecebimentoData {
   id?: string;
   expense_id?: string;
+  company_id?: string;
+  supplier_id?: string | null;
   status?: string;
   supplier_name?: string;
   invoice_number?: string;
@@ -71,6 +83,13 @@ interface RecebimentoData {
 
 type ItemStatus = "received" | "partial" | "not_received";
 
+function recipeSessionKey(item: RecebimentoItem): string {
+  const pid = item.product_id?.trim();
+  if (pid) return `pid:${pid}`;
+  const raw = (item.product_name ?? "").trim().toLowerCase();
+  return `name:${raw}`;
+}
+
 export function ConfirmarRecebimento() {
   const { token } = useParams<{ token: string }>();
   const [loading, setLoading] = useState(true);
@@ -81,6 +100,7 @@ export function ConfirmarRecebimento() {
   const [partialQty, setPartialQty] = useState<Record<number, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [sessionRecipeByKey, setSessionRecipeByKey] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!token) {
@@ -114,6 +134,7 @@ export function ConfirmarRecebimento() {
     });
     setItemStatus({});
     setPartialQty(pq);
+    setSessionRecipeByKey({});
   }, [token]);
 
   useEffect(() => {
@@ -123,6 +144,13 @@ export function ConfirmarRecebimento() {
   const handleConfirm = async () => {
     if (!token || !data?.items?.length) return;
     const items = data.items;
+    const importPending = items.some((it) => it.import_pending_resolution === true);
+    if (importPending) {
+      setError(
+        "Resolva todos os itens pendentes de importação (estoque ou ficha) antes de confirmar o recebimento.",
+      );
+      return;
+    }
     if (!items.every((_, i) => itemStatus[i] !== undefined)) return;
     const pItems = items.map((it, i) => {
       const st = itemStatus[i]!;
@@ -275,6 +303,9 @@ export function ConfirmarRecebimento() {
   const hasNotReceived = items.some((_, i) => itemStatus[i] === "not_received");
   const hasPartial = items.some((_, i) => itemStatus[i] === "partial");
   const canConfirm = data?.viewer_can_confirm !== false;
+  const importResolutionPending = items.some(
+    (it) => it.import_pending_resolution === true,
+  );
 
   return (
     <RecebimentoPageShell>
@@ -350,6 +381,13 @@ export function ConfirmarRecebimento() {
             nada. Faltas e parciais geram alerta para o gestor (ex.: pediu 10 e
             chegaram 6 — informe 6 em &quot;Parcial&quot;).
           </p>
+          {importResolutionPending && (
+            <p className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-50">
+              Esta nota tem itens importados por XML que precisam de decisão de
+              estoque (entrada direta ou distribuição por ficha técnica de
+              entrada). Use o painel em cada item antes de confirmar.
+            </p>
+          )}
 
           <div className="space-y-3">
             <p className="font-medium">Itens:</p>
@@ -436,6 +474,77 @@ export function ConfirmarRecebimento() {
                       </Button>
                     </div>
                   </div>
+                  {token && (
+                    <RecebimentoImportItemResolution
+                      token={token}
+                      item={it}
+                      companyId={data?.company_id ?? null}
+                      supplierId={data?.supplier_id ?? null}
+                      disabled={!canConfirm}
+                      pendingItemsCount={
+                        items.filter((x) => x.import_pending_resolution === true)
+                          .length
+                      }
+                      sessionSuggestedRecipeId={sessionRecipeByKey[recipeSessionKey(it)] ?? null}
+                      sessionSuggestionActive={Boolean(
+                        sessionRecipeByKey[recipeSessionKey(it)],
+                      )}
+                      onSessionRecipeSelected={(recipeId) => {
+                        const k = recipeSessionKey(it);
+                        setSessionRecipeByKey((prev) => ({ ...prev, [k]: recipeId }));
+                      }}
+                      onApplyRecipeToAllPending={async (recipeId) => {
+                        if (!token) return;
+                        setError(null);
+                        const { data: rpcData, error: rpcError } = await supabase.rpc(
+                          "bulk_update_import_resolution_for_recebimento",
+                          {
+                            p_token: token,
+                            p_import_stock_resolution: "EXPLODE_BY_RECIPE",
+                            p_resolved_recipe_id: recipeId,
+                            p_target_product_id: null,
+                            p_import_nature: "EXPLODIR_POR_FICHA",
+                            p_import_engine_suggestion: "AUTO_APPLY_EXPLODIR_FICHA",
+                            p_import_pending_resolution: false,
+                          },
+                        );
+                        if (rpcError) {
+                          const msg = rpcError.message || "Falha ao aplicar resolução em lote.";
+                          setError(msg);
+                          toast.error(msg);
+                          return;
+                        }
+                        const payload = rpcData as {
+                          ok?: boolean;
+                          error?: string;
+                          updated?: number;
+                        };
+                        if (!payload?.ok) {
+                          const msg = payload?.error ?? "Falha ao aplicar em lote.";
+                          setError(msg);
+                          toast.error(msg);
+                          return;
+                        }
+
+                        setSessionRecipeByKey((prev) => {
+                          const next = { ...prev };
+                          items.forEach((candidate) => {
+                            if (candidate.import_pending_resolution !== true) return;
+                            next[recipeSessionKey(candidate)] = recipeId;
+                          });
+                          return next;
+                        });
+                        const updated = Number(payload.updated ?? 0);
+                        toast.success(
+                          updated > 0
+                            ? `${updated} item(ns) pendente(s) resolvido(s) em lote.`
+                            : "Nenhum item pendente para atualizar.",
+                        );
+                        await load();
+                      }}
+                      onSaved={() => void load()}
+                    />
+                  )}
                   {isPartial && (
                     <div className="space-y-1.5 pt-1 border-t border-border/60">
                       <Label htmlFor={`qty-${i}`} className="text-xs">
@@ -502,7 +611,12 @@ export function ConfirmarRecebimento() {
             className="w-full"
             size="lg"
             onClick={() => void handleConfirm()}
-            disabled={!canConfirm || !allResponded || confirming}
+            disabled={
+              !canConfirm ||
+              !allResponded ||
+              confirming ||
+              importResolutionPending
+            }
           >
             {confirming ? "Confirmando..." : "Confirmar recebimento"}
           </Button>

@@ -22,6 +22,14 @@ import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -60,7 +68,10 @@ import {
   convertQuantityForProduct,
   rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
-import { getSystemProductUnitSelectOptionsWithLegacy } from "@/lib/companyUnits/productUnitOptions";
+import {
+  getSystemProductUnitSelectOptionsWithLegacy,
+  isSystemUnitCode,
+} from "@/lib/companyUnits/productUnitOptions";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { supabase } from "@/lib/supabase";
@@ -315,6 +326,19 @@ export function Produtos() {
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
   const [stockUnit, setStockUnit] = useState("un");
+  const [stockCustomUnitInput, setStockCustomUnitInput] = useState("");
+  const [stockCustomUnitLabel, setStockCustomUnitLabel] = useState("");
+  const [customUnitAliasOptions, setCustomUnitAliasOptions] = useState<
+    Array<{ unit_code: string; unit_label: string }>
+  >([]);
+  const [bulkUnitApplyDialogOpen, setBulkUnitApplyDialogOpen] = useState(false);
+  const [bulkUnitApplyLoading, setBulkUnitApplyLoading] = useState(false);
+  const [pendingBulkUnitApply, setPendingBulkUnitApply] = useState<{
+    companyId: string;
+    sourceUnitRaw: string;
+    targetUnitCode: string;
+    excludeProductId: string;
+  } | null>(null);
   const [stockBarcode, setStockBarcode] = useState("");
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
@@ -366,9 +390,31 @@ export function Produtos() {
 
   const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
 
-  const unitSelectOptions = useMemo(
-    () => getSystemProductUnitSelectOptionsWithLegacy(stockUnit),
-    [stockUnit],
+  const unitSelectOptions = useMemo(() => {
+    const base = getSystemProductUnitSelectOptionsWithLegacy(stockUnit);
+    if (!customUnitAliasOptions.length) return base;
+    const customCodes = new Set(
+      customUnitAliasOptions.map((u) => u.unit_code.trim().toLowerCase()),
+    );
+    const baseWithoutLegacyForCustom = base.filter(
+      (x) =>
+        !(
+          customCodes.has(x.value.trim().toLowerCase()) &&
+          x.label.toLowerCase().includes("legado")
+        ),
+    );
+    const has = new Set(baseWithoutLegacyForCustom.map((x) => x.value.toLowerCase()));
+    const extra = customUnitAliasOptions
+      .map((u) => ({
+        value: u.unit_code.trim().toLowerCase(),
+        label: `${u.unit_label} (${u.unit_code.trim().toLowerCase()})`,
+      }))
+      .filter((u) => u.value && !has.has(u.value));
+    return [...baseWithoutLegacyForCustom, ...extra];
+  }, [stockUnit, customUnitAliasOptions]);
+  const knownUnitCodes = useMemo(
+    () => new Set(unitSelectOptions.map((u) => u.value.trim().toLowerCase())),
+    [unitSelectOptions],
   );
   const lastUnitValueUnitOptions = useMemo(() => {
     const allowed = new Set<string>([stockUnit]);
@@ -439,6 +485,134 @@ export function Produtos() {
     }
   };
 
+  const normalizeCustomUnitCode = (raw: string): string => {
+    return raw
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9_]/g, "");
+  };
+
+  const applyCustomUnit = async () => {
+    const code = normalizeCustomUnitCode(stockCustomUnitInput);
+    const label = stockCustomUnitLabel.trim();
+    if (!code) {
+      toast.error("Informe um código de unidade válido (ex.: fd).");
+      return;
+    }
+    if (!label) {
+      toast.error("Informe o nome da unidade (ex.: Vidro).");
+      return;
+    }
+    if (!currentCompany?.id) {
+      toast.error("Empresa não encontrada para registrar unidade.");
+      return;
+    }
+    const sourceHint = String(stockProduct?.import_unit_raw ?? stockCustomUnitInput).trim();
+    const { data, error } = await supabase.rpc("register_company_custom_unit_alias", {
+      p_company_id: currentCompany.id,
+      p_unit_label: label,
+      p_unit_code: code,
+      p_source_hint: sourceHint || code,
+      p_apply_to_existing: true,
+    });
+    let updatedProducts = 0;
+    if (error) {
+      const msg = String(error.message ?? "");
+      const canFallback =
+        msg.includes("register_company_custom_unit_alias") &&
+        msg.includes("does not exist");
+      if (!canFallback) {
+        toast.error(`Falha ao criar unidade: ${error.message}`);
+        return;
+      }
+      const { error: aliasInsertError } = await supabase
+        .from("company_custom_unit_aliases")
+        .upsert(
+          {
+            company_id: currentCompany.id,
+            unit_code: code,
+            unit_label: label,
+            source_hint: sourceHint || code,
+          },
+          { onConflict: "company_id,unit_code" },
+        );
+      if (aliasInsertError) {
+        toast.error(`Falha ao registrar unidade: ${aliasInsertError.message}`);
+        return;
+      }
+      const { data: pendingRows, error: pendingError } = await supabase
+        .from("products")
+        .select("id")
+        .eq("company_id", currentCompany.id)
+        .eq("import_unit_needs_review", true)
+        .eq("import_unit_raw", sourceHint || code);
+      if (pendingError) {
+        toast.error(`Falha ao localizar produtos pendentes: ${pendingError.message}`);
+        return;
+      }
+      const ids = (pendingRows ?? []).map((r) => String((r as { id: string }).id));
+      if (ids.length > 0) {
+        const { error: bulkError } = await supabase
+          .from("products")
+          .update({
+            unit: code,
+            import_unit_needs_review: false,
+            import_unit_raw: null,
+          })
+          .in("id", ids);
+        if (bulkError) {
+          toast.error(`Falha ao aplicar em lote: ${bulkError.message}`);
+          return;
+        }
+      }
+      updatedProducts = ids.length;
+    } else {
+      const payload = data as { ok?: boolean; error?: string; updated_products?: number };
+      if (!payload?.ok) {
+        toast.error(payload?.error ?? "Não foi possível registrar unidade.");
+        return;
+      }
+      updatedProducts = Number(payload.updated_products ?? 0);
+    }
+
+    if (stockProduct?.id) {
+      const { error: currentProductError } = await supabase
+        .from("products")
+        .update({
+          unit: code,
+          import_unit_needs_review: false,
+          import_unit_raw: null,
+        })
+        .eq("id", stockProduct.id);
+      if (currentProductError) {
+        toast.error(
+          `Unidade criada, mas falhou ao aplicar no produto atual: ${currentProductError.message}`,
+        );
+      }
+    }
+    handleStockUnitChange(code);
+    setStockCustomUnitInput("");
+    setStockCustomUnitLabel("");
+    toast.success(
+      `Unidade "${label} (${code})" criada e aplicada em ${updatedProducts} produto(s).`,
+    );
+    const { data: aliases } = await supabase
+      .from("company_custom_unit_aliases")
+      .select("unit_code, unit_label")
+      .eq("company_id", currentCompany.id)
+      .order("unit_label", { ascending: true });
+    setCustomUnitAliasOptions(
+      (aliases ?? []) as Array<{ unit_code: string; unit_label: string }>,
+    );
+    await fetchProducts();
+  };
+
+  const customUnitCodeNormalized = normalizeCustomUnitCode(stockCustomUnitInput);
+  const customUnitIsValid = customUnitCodeNormalized.length >= 1;
+  const customUnitIsSystem = isSystemUnitCode(customUnitCodeNormalized);
+
   const loadCompanyProductCategories = useCallback(async () => {
     if (!currentCompany?.id) return;
     const { data, error } = await supabase
@@ -454,10 +628,37 @@ export function Produtos() {
     setCompanyProductCategories((data ?? []) as CompanyProductCategory[]);
   }, [currentCompany?.id]);
 
+  const loadCustomUnitAliasOptions = useCallback(async () => {
+    if (!currentCompany?.id) {
+      setCustomUnitAliasOptions([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("company_custom_unit_aliases")
+      .select("unit_code, unit_label")
+      .eq("company_id", currentCompany.id)
+      .order("unit_label", { ascending: true });
+    if (error) {
+      console.error(error);
+      setCustomUnitAliasOptions([]);
+      toast.error(
+        `Não foi possível carregar unidades personalizadas: ${error.message}`,
+      );
+      return;
+    }
+    setCustomUnitAliasOptions(
+      (data ?? []) as Array<{ unit_code: string; unit_label: string }>,
+    );
+  }, [currentCompany?.id]);
+
   useEffect(() => {
     if (!currentCompany?.id) return;
     void loadCompanyProductCategories();
   }, [currentCompany?.id, loadCompanyProductCategories]);
+
+  useEffect(() => {
+    void loadCustomUnitAliasOptions();
+  }, [loadCustomUnitAliasOptions]);
 
   useEffect(() => {
     if (!currentCompany?.id) return;
@@ -785,9 +986,17 @@ export function Produtos() {
   }, [stockProduct, stockPricePresentation.lineUnit]);
 
   const syncStockFormFromProduct = useCallback((p: Product) => {
+    const normalizedUnit = (p.unit || "un").trim().toLowerCase();
+    const normalizedLastUnit = (
+      p.last_unit_value_unit_code?.trim() ||
+      p.unit ||
+      "un"
+    )
+      .trim()
+      .toLowerCase();
     setStockName(p.name);
     setStockSku(p.sku ?? "");
-    setStockUnit(p.unit || "un");
+    setStockUnit(normalizedUnit);
     setStockBarcode(p.barcode ?? "");
     setStockQuantity(String(p.current_quantity));
     setStockMinQuantity(String(p.min_quantity ?? 0));
@@ -801,11 +1010,12 @@ export function Produtos() {
           }).format(Number(p.last_unit_value))
         : "",
     );
-    setStockLastUnitValueUnitCode(
-      p.last_unit_value_unit_code?.trim() || p.unit || "un",
-    );
+    setStockLastUnitValueUnitCode(normalizedLastUnit);
     setStockIsActive(p.is_active !== false);
     setStockComposesCmv(productComposesCmv(p));
+    const importRaw = (p.import_unit_raw ?? "").trim();
+    setStockCustomUnitInput(importRaw);
+    setStockCustomUnitLabel("");
   }, []);
 
   const openStockSheet = (p: Product) => {
@@ -866,7 +1076,8 @@ export function Produtos() {
     const qtyChanged = delta !== 0;
     const skuChanged =
       (stockSku.trim() || null) !== (stockProduct.sku?.trim() || null);
-    const unitChanged = stockUnit !== (stockProduct.unit || "un");
+    const currentUnit = (stockProduct.unit || "un").trim().toLowerCase();
+    const unitChanged = stockUnit !== currentUnit;
     const barcodeChanged =
       (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
     const composesCmvChanged =
@@ -942,6 +1153,8 @@ export function Produtos() {
       is_active?: boolean;
       sku?: string | null;
       unit?: string;
+      import_unit_raw?: string | null;
+      import_unit_needs_review?: boolean;
       barcode?: string | null;
       composes_cmv?: boolean;
       last_unit_value?: number | null;
@@ -951,7 +1164,14 @@ export function Produtos() {
     } = {};
     if (nameChanged) updates.name = newName;
     if (unitChanged) {
-      updates.unit = stockUnit;
+      updates.unit = stockUnit.trim().toLowerCase();
+      if (
+        isSystemUnitCode(stockUnit) ||
+        knownUnitCodes.has(stockUnit.trim().toLowerCase())
+      ) {
+        updates.import_unit_needs_review = false;
+        updates.import_unit_raw = null;
+      }
       updates.current_quantity = newQty;
       updates.min_quantity = newMinQty;
     } else if (minChanged) {
@@ -1040,6 +1260,23 @@ export function Produtos() {
       }
     }
 
+    const sourceReviewRaw = String(stockProduct.import_unit_raw ?? "").trim();
+    const shouldOfferBulkReviewApply =
+      unitChanged &&
+      isSystemUnitCode(stockUnit) &&
+      stockProduct.import_unit_needs_review === true &&
+      sourceReviewRaw.length > 0 &&
+      !!currentCompany?.id;
+    if (shouldOfferBulkReviewApply) {
+      setPendingBulkUnitApply({
+        companyId: currentCompany!.id,
+        sourceUnitRaw: sourceReviewRaw,
+        targetUnitCode: stockUnit.trim().toLowerCase(),
+        excludeProductId: stockProduct.id,
+      });
+      setBulkUnitApplyDialogOpen(true);
+    }
+
     if (categoriesChanged) {
       const idsToPersist = [...categoryIdsSnapshot];
       const { error: delErr } = await supabase
@@ -1109,6 +1346,45 @@ export function Produtos() {
     fetchProducts();
     void fetchLowStockCount();
     if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
+  };
+
+  const confirmBulkUnitApply = async () => {
+    if (!pendingBulkUnitApply) {
+      setBulkUnitApplyDialogOpen(false);
+      return;
+    }
+    setBulkUnitApplyLoading(true);
+    const { data: bulkData, error: bulkError } = await supabase.rpc(
+      "apply_unit_review_to_similar_products",
+      {
+        p_company_id: pendingBulkUnitApply.companyId,
+        p_source_unit_raw: pendingBulkUnitApply.sourceUnitRaw,
+        p_target_unit_code: pendingBulkUnitApply.targetUnitCode,
+        p_exclude_product_id: pendingBulkUnitApply.excludeProductId,
+      },
+    );
+    if (bulkError) {
+      toast.error(`Falha ao aplicar em lote: ${bulkError.message}`);
+    } else {
+      const payload = bulkData as {
+        ok?: boolean;
+        error?: string;
+        updated_products?: number;
+      };
+      if (!payload?.ok) {
+        toast.error(
+          payload?.error ?? "Não foi possível aplicar para os demais produtos.",
+        );
+      } else {
+        toast.success(
+          `Unidade aplicada em ${Number(payload.updated_products ?? 0)} produto(s) pendente(s).`,
+        );
+        await fetchProducts();
+      }
+    }
+    setBulkUnitApplyLoading(false);
+    setBulkUnitApplyDialogOpen(false);
+    setPendingBulkUnitApply(null);
   };
 
   return (
@@ -1537,6 +1813,16 @@ export function Produtos() {
                                     Compra em andamento
                                   </Badge>
                                 )}
+                                {(p.import_unit_needs_review === true ||
+                                  !isSystemUnitCode(p.unit)) && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="h-6 gap-1 border-rose-500/40 bg-rose-500/10 px-2 text-[0.7rem] font-normal text-rose-950 dark:text-rose-100"
+                                  >
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Revisar unidade
+                                  </Badge>
+                                )}
                               </div>
 
                               {catSegments.length > 0 ? (
@@ -1561,6 +1847,12 @@ export function Produtos() {
                                 </span>
                                 <span className="mx-2 text-border">·</span>
                                 <span>Unidade: {p.unit}</span>
+                                {p.import_unit_needs_review && p.import_unit_raw ? (
+                                  <>
+                                    <span className="mx-2 text-border">·</span>
+                                    <span>XML: {p.import_unit_raw}</span>
+                                  </>
+                                ) : null}
                               </p>
                             </div>
 
@@ -2142,6 +2434,85 @@ export function Produtos() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {!isSystemUnitCode(stockUnit) && (
+                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                            Unidade legada/custom. Revise para uma unidade padrão quando possível.
+                          </p>
+                        )}
+                        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                          <div>
+                            <Label htmlFor="stock-custom-unit-label" className="text-xs">
+                              Nome da unidade
+                            </Label>
+                            <Input
+                              id="stock-custom-unit-label"
+                              value={stockCustomUnitLabel}
+                              onChange={(e) => setStockCustomUnitLabel(e.target.value)}
+                              placeholder="Ex.: Vidro"
+                              className={SHEET_INPUT}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="stock-custom-unit" className="text-xs">
+                              Abreviação da unidade
+                            </Label>
+                            <Input
+                              id="stock-custom-unit"
+                              value={stockCustomUnitInput}
+                              onChange={(e) => setStockCustomUnitInput(e.target.value)}
+                              placeholder={
+                                stockProduct?.import_unit_raw
+                                  ? `Sugestão XML: ${stockProduct.import_unit_raw}`
+                                  : "Ex.: fd"
+                              }
+                              className={SHEET_INPUT}
+                            />
+                            {stockCustomUnitInput.trim().length > 0 && (
+                              <p
+                                className={cn(
+                                  "mt-1 text-xs",
+                                  customUnitIsValid
+                                    ? customUnitIsSystem
+                                      ? "text-emerald-700 dark:text-emerald-300"
+                                      : "text-amber-700 dark:text-amber-300"
+                                    : "text-destructive",
+                                )}
+                              >
+                                {customUnitIsValid
+                                  ? customUnitIsSystem
+                                    ? `Código válido (unidade padrão): ${customUnitCodeNormalized}`
+                                    : `Código válido custom: ${customUnitCodeNormalized}`
+                                  : "Código inválido. Use letras e números (sem espaços/símbolos)."}
+                              </p>
+                            )}
+                          </div>
+                          <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void applyCustomUnit()}
+                              disabled={!customUnitIsValid || !stockCustomUnitLabel.trim()}
+                            >
+                              Criar e aplicar unidade
+                            </Button>
+                            {stockProduct?.import_unit_raw && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  const raw = String(stockProduct.import_unit_raw ?? "").trim();
+                                  const code = normalizeCustomUnitCode(raw);
+                                  setStockCustomUnitInput(code || raw);
+                                  if (!stockCustomUnitLabel.trim()) {
+                                    setStockCustomUnitLabel(raw);
+                                  }
+                                }}
+                              >
+                                Usar unidade do XML ({stockProduct.import_unit_raw})
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2398,6 +2769,46 @@ export function Produtos() {
           }}
         />
       )}
+      <Dialog
+        open={bulkUnitApplyDialogOpen}
+        onOpenChange={(open) => {
+          setBulkUnitApplyDialogOpen(open);
+          if (!open && !bulkUnitApplyLoading) {
+            setPendingBulkUnitApply(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Aplicar unidade para pendentes?</DialogTitle>
+            <DialogDescription>
+              {pendingBulkUnitApply
+                ? `Aplicar "${pendingBulkUnitApply.targetUnitCode}" para todos os produtos pendentes com unidade XML "${pendingBulkUnitApply.sourceUnitRaw}"?`
+                : "Confirme a aplicação em massa da unidade para produtos pendentes."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setBulkUnitApplyDialogOpen(false);
+                if (!bulkUnitApplyLoading) setPendingBulkUnitApply(null);
+              }}
+              disabled={bulkUnitApplyLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void confirmBulkUnitApply()}
+              disabled={bulkUnitApplyLoading || !pendingBulkUnitApply}
+            >
+              {bulkUnitApplyLoading ? "Aplicando..." : "Aplicar para pendentes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

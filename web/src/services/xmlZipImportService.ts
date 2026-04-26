@@ -6,6 +6,19 @@ export type XmlZipProcessCallbacks = {
   onLog: (entries: XmlZipFileLogEntry[]) => void;
 };
 
+function normalizeXmlZipImportError(raw: unknown): string {
+  const msg = typeof raw === "string" ? raw : "";
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("nenhum xml válido") ||
+    lower.includes("nenhum xml valido") ||
+    lower.includes("nenhum xml")
+  ) {
+    return "O ZIP enviado não contém arquivos XML válidos de NF-e. Verifique o arquivo e tente novamente.";
+  }
+  return msg || "Falha ao importar ZIP de XML.";
+}
+
 export async function processXmlZipImport(
   companyId: string,
   file: File,
@@ -55,10 +68,11 @@ export async function processXmlZipImport(
       callbacks.onPhase("error");
       return {
         ok: false,
-        error:
+        error: normalizeXmlZipImportError(
           (typeof o.error === "string" && o.error) ||
-          (typeof o.message === "string" && o.message) ||
-          "Falha ao importar ZIP de XML.",
+            (typeof o.message === "string" && o.message) ||
+            "Falha ao importar ZIP de XML.",
+        ),
       };
     }
     const files = Array.isArray(o.files) ? o.files : [];

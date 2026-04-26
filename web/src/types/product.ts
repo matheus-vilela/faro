@@ -28,4 +28,8 @@ export interface Product {
   stock_below_min_positive?: boolean
   stock_below_min_inclusive?: boolean
   stock_has_alert?: boolean
+  /** Unidade trazida do XML quando não mapeada de forma confiável para o catálogo. */
+  import_unit_raw?: string | null
+  /** Sinaliza produto com unidade legada/desconhecida criada via importação. */
+  import_unit_needs_review?: boolean
 }
