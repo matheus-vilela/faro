@@ -46,8 +46,10 @@ import {
   normalizeSetupMap,
   patchCompanyMaps,
 } from "@/services/unitSetupService";
+import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
 import { processXmlZipImport } from "@/services/xmlZipImportService";
 import {
+  mergeEpocSettingsForUpsert,
   parseEpocSettings,
   type EpocIntegrationSettings,
 } from "@/types/companyIntegration";
@@ -744,19 +746,19 @@ export function UnitSetupWizard({
         const enabled = ep.enabled ?? false;
         const pwdInput = (ep.password ?? "").trim();
         let pwdFinal = pwdInput;
-        if (enabled && !pwdFinal && ep.password_on_server) {
-          const { data: existingRow } = await supabase
-            .from("company_integrations")
-            .select("settings")
-            .eq("company_id", companyId)
-            .eq("provider", "epoc")
-            .maybeSingle();
-          if (existingRow?.settings) {
-            const prev = parseEpocSettings(
-              existingRow.settings as Record<string, unknown>,
-            );
-            if (prev.password) pwdFinal = prev.password;
-          }
+
+        const { data: existingRow } = await supabase
+          .from("company_integrations")
+          .select("settings")
+          .eq("company_id", companyId)
+          .eq("provider", "epoc")
+          .maybeSingle();
+
+        if (enabled && !pwdFinal && ep.password_on_server && existingRow?.settings) {
+          const prev = parseEpocSettings(
+            existingRow.settings as Record<string, unknown>,
+          );
+          if (prev.password) pwdFinal = prev.password;
         }
 
         if (u && (!enabled || pwdFinal)) {
@@ -767,31 +769,29 @@ export function UnitSetupWizard({
             ambiente: ep.ambiente ?? "producao",
           };
           if (pwdFinal) settings.password = pwdFinal;
-          else if (!enabled) {
-            const { data: existingRow } = await supabase
-              .from("company_integrations")
-              .select("settings")
-              .eq("company_id", companyId)
-              .eq("provider", "epoc")
-              .maybeSingle();
-            if (existingRow?.settings) {
-              const prev = parseEpocSettings(
-                existingRow.settings as Record<string, unknown>,
-              );
-              if (prev.password) settings.password = prev.password;
-            }
-          }
+
+          const merged = mergeEpocSettingsForUpsert(
+            existingRow?.settings as Record<string, unknown> | undefined,
+            settings,
+          );
 
           await supabase.from("company_integrations").upsert(
             {
               company_id: companyId,
               provider: "epoc",
               enabled,
-              settings: settings as unknown as Record<string, unknown>,
+              settings: merged,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "company_id,provider" },
           );
+          if (enabled && (ep.base_url ?? "").trim()) {
+            triggerEpocCsvSyncInBackground(companyId);
+            toast.message(
+              "Sincronização EPOC (epoc-sync-csv) em segundo plano: login e exportação do CSV.",
+              { duration: 5500 },
+            );
+          }
         }
       }
       const nextSetup = syncCompletionState(

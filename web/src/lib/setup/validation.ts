@@ -159,12 +159,13 @@ export function getStep5EpocState(
   if (mode === "no") return { completed: true, skipped: true };
   if (mode === "credentials") {
     const userOk = hasText(epoc?.username);
+    const baseOk = !epoc?.enabled || hasText(epoc?.base_url);
     const enabled = epoc?.enabled ?? false;
     const pwdOk =
       !enabled ||
       hasText(epoc?.password) ||
       epoc?.password_on_server === true;
-    return { completed: userOk && pwdOk, skipped: false };
+    return { completed: userOk && baseOk && pwdOk, skipped: false };
   }
   return { completed: false, skipped: false };
 }

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import type { EpocAmbiente } from "@/types/companyIntegration";
+import { type EpocAmbiente } from "@/types/companyIntegration";
 import type { SetupEpocState } from "@/types/companySetup";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -49,8 +49,8 @@ export function StepPdvForm({
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
         Conecte o ponto de venda (PDV) desta unidade ao Faro para importar vendas e
-        manter os dados alinhados. O fluxo é o mesmo da página Integrações. Indique
-        se há integração com algum PDV ou se prefere seguir sem essa conexão.
+        manter os dados alinhados. Indique se há integração com algum PDV ou se
+        prefere seguir sem essa conexão.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -108,8 +108,8 @@ export function StepPdvForm({
                     EPOC
                   </p>
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    Por enquanto, importa só vendas realizadas. Sincronização automática
-                    uma vez ao dia.
+                    URL, usuário, senha e filial. O Faro importa o relatório de
+                    vendas (CSV) após o login no portal.
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
@@ -143,20 +143,14 @@ export function StepPdvForm({
 
             <CollapsibleContent>
               <div className="space-y-5 border-t border-border/80 px-5 py-5">
-                <p className="text-sm text-muted-foreground">
-                  Usuário, senha e parâmetros de ambiente. No momento, esta integração
-                  apenas busca as vendas registradas no PDV; a sincronização é
-                  executada automaticamente uma vez por dia.
-                </p>
-
                 <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
                   <div>
                     <Label htmlFor="pdv-epoc-enabled" className="text-sm font-medium">
                       Integração ativa
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Quando ativo, o Faro usa estas credenciais na rotina que importa
-                      vendas do PDV (execução diária automática).
+                      Quando ativo, o Faro usa estas credenciais na rotina diária
+                      (epoc-sync-csv).
                     </p>
                   </div>
                   <Switch
@@ -167,11 +161,11 @@ export function StepPdvForm({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="pdv-epoc-base-url">URL base (API ou portal)</Label>
+                  <Label htmlFor="pdv-epoc-base-url">URL base (portal EPOC)</Label>
                   <Input
                     id="pdv-epoc-base-url"
                     type="url"
-                    placeholder="https://…"
+                    placeholder="https://… ou http://…:porta"
                     value={epoc?.base_url ?? ""}
                     onChange={(e) => patchFields({ base_url: e.target.value })}
                     autoComplete="off"
@@ -186,7 +180,7 @@ export function StepPdvForm({
                       autoComplete="username"
                       value={epoc?.username ?? ""}
                       onChange={(e) => patchFields({ username: e.target.value })}
-                      placeholder="Usuário no PDV"
+                      placeholder="Usuário no portal"
                     />
                   </div>
                   <div className="space-y-2 sm:col-span-2">
@@ -204,14 +198,14 @@ export function StepPdvForm({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="pdv-epoc-filial">Código da filial (opcional)</Label>
+                    <Label htmlFor="pdv-epoc-filial">Código da filial</Label>
                     <Input
                       id="pdv-epoc-filial"
                       value={epoc?.codigo_filial ?? ""}
                       onChange={(e) =>
                         patchFields({ codigo_filial: e.target.value })
                       }
-                      placeholder="Ex.: 001"
+                      placeholder="Ex.: 123A (NaoMenu); vazio = 123A"
                     />
                   </div>
                   <div className="space-y-2">
@@ -225,7 +219,7 @@ export function StepPdvForm({
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent position="popper" sideOffset={4} className="z-[200]">
+                      <SelectContent position="popper" sideOffset={4} className="z-200">
                         <SelectItem value="producao">Produção</SelectItem>
                         <SelectItem value="homologacao">Homologação</SelectItem>
                       </SelectContent>

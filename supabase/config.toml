@@ -49,3 +49,6 @@ verify_jwt = false
 
 [functions.focus-cria-empresa]
 verify_jwt = false
+
+[functions.epoc-sync-csv]
+verify_jwt = true
