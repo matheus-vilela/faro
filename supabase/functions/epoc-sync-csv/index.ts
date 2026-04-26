@@ -301,14 +301,15 @@ ${tableOuterHtml}
 }
 
 function escapeHtmlForPre(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** Documento HTML com a resposta bruta de um passo, para revisão pelo utilizador. */
-function buildRawDebugDocument(title: string, note: string, rawText: string): string {
+function buildRawDebugDocument(
+  title: string,
+  note: string,
+  rawText: string,
+): string {
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -344,9 +345,12 @@ function inspectResponseHtml(text: string): {
     has_login_form:
       /name\s*=\s*["'](?:senha|password|user|usuario)["']/i.test(t) &&
       /<form\b[^>]*>/i.test(t),
-    has_token_field: /name\s*=\s*["']token["']/i.test(t) ||
-      /Tente_A_Vontade_/i.test(t),
-    parece_json: text.replace(/^\uFEFF/, "").trim().startsWith("{"),
+    has_token_field:
+      /name\s*=\s*["']token["']/i.test(t) || /Tente_A_Vontade_/i.test(t),
+    parece_json: text
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .startsWith("{"),
   };
 }
 
@@ -366,17 +370,21 @@ interface StepRecord {
   detalhes?: Record<string, unknown>;
 }
 
-/** Primeiro e último dia do mês atual, DD/MM/AAAA */
-function dateRangeMesAtual(): { data_de: string; data_ate: string } {
-  const now = new Date();
-  const y = now.getFullYear();
-  const mo = now.getMonth();
+function formatDateBr(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const ult = new Date(y, mo + 1, 0).getDate();
-  return {
-    data_de: `01/${pad(mo + 1)}/${y}`,
-    data_ate: `${pad(ult)}/${pad(mo + 1)}/${y}`,
-  };
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+/** Janela dos últimos N dias (inclui hoje), do mais antigo para o mais recente. */
+function lastNDaysBr(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(formatDateBr(d));
+  }
+  return out;
 }
 
 function extractTokenFromHtml(html: string): string {
@@ -427,8 +435,9 @@ function extractLoginFormHints(html: string): {
   let m: RegExpExecArray | null;
   while ((m = inputRe.exec(html)) !== null) {
     const tag = m[0];
-    const type = (/\btype\s*=\s*["']?([^"'\s>]+)["']?/i.exec(tag)?.[1] ?? "")
-      .toLowerCase();
+    const type = (
+      /\btype\s*=\s*["']?([^"'\s>]+)["']?/i.exec(tag)?.[1] ?? ""
+    ).toLowerCase();
     const name = /\bname\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] ?? "";
     if (!name) continue;
     if (!passField && type === "password") {
@@ -466,10 +475,12 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, "\"")
+    .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) =>
+      String.fromCharCode(parseInt(h, 16)),
+    );
 }
 
 function normalizeCellText(cellHtml: string): string {
@@ -484,7 +495,7 @@ function normalizeCellText(cellHtml: string): string {
 function csvEscapeCell(v: string): string {
   const s = v.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const needsQuote = /[",;\n]/.test(s);
-  const esc = s.replace(/"/g, "\"\"");
+  const esc = s.replace(/"/g, '""');
   return needsQuote ? `"${esc}"` : esc;
 }
 
@@ -505,6 +516,45 @@ function tableHtmlToCsv(tableHtml: string): string | null {
   }
   if (rows.length === 0) return null;
   return `${rows.join("\n")}\n`;
+}
+
+function extractTableHeaderAndRows(tableHtml: string): {
+  header: string[];
+  rows: string[][];
+} {
+  const rows: string[][] = [];
+  let header: string[] = [];
+  const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let trM: RegExpExecArray | null;
+  while ((trM = trRe.exec(tableHtml)) !== null) {
+    const rowInner = trM[1] ?? "";
+    const isHeader = /<th\b/i.test(rowInner);
+    const cols: string[] = [];
+    const cellRe = /<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi;
+    let cM: RegExpExecArray | null;
+    while ((cM = cellRe.exec(rowInner)) !== null) {
+      cols.push(normalizeCellText(cM[1] ?? ""));
+    }
+    if (cols.length === 0) continue;
+    if (isHeader && header.length === 0) {
+      header = cols;
+    } else {
+      rows.push(cols);
+    }
+  }
+  if (header.length === 0 && rows.length > 0) {
+    header = rows.shift() ?? [];
+  }
+  return { header, rows };
+}
+
+function matrixToCsv(header: string[], rows: string[][]): string {
+  const lines: string[] = [];
+  lines.push(header.map(csvEscapeCell).join(";"));
+  for (const row of rows) {
+    lines.push(row.map(csvEscapeCell).join(";"));
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 Deno.serve(async (req) => {
@@ -627,16 +677,14 @@ Deno.serve(async (req) => {
     base: Partial<StepRecord> = {},
   ): Promise<StepRecord> {
     const idx = steps.length + 1;
-    const path =
-      `${stepsPrefix}${String(idx).padStart(2, "0")}-${fileName}`;
+    const path = `${stepsPrefix}${String(idx).padStart(2, "0")}-${fileName}`;
     const det: Record<string, unknown> = { ...(base.detalhes ?? {}) };
     let storagePath: string | null = null;
     let fileNameOut: string | null = null;
     let downloadUrl: string | null = null;
-    const normalizedContentType = contentType
-      .split(";")[0]
-      .trim()
-      .toLowerCase() || "application/octet-stream";
+    const normalizedContentType =
+      contentType.split(";")[0].trim().toLowerCase() ||
+      "application/octet-stream";
     let upErrMsg: string | null = null;
     {
       const { error: upErr } = await admin.storage
@@ -647,10 +695,7 @@ Deno.serve(async (req) => {
         });
       if (upErr) upErrMsg = upErr.message;
     }
-    if (
-      upErrMsg &&
-      /mime type .* is not supported/i.test(upErrMsg)
-    ) {
+    if (upErrMsg && /mime type .* is not supported/i.test(upErrMsg)) {
       const { error: retryErr } = await admin.storage
         .from("company-setup")
         .upload(path, bytes, {
@@ -816,8 +861,10 @@ Deno.serve(async (req) => {
   for (const [k, v] of Object.entries(hidden)) {
     if (!form.has(k)) form.set(k, v);
   }
-  const userField = userFieldFromSettings || userFieldAuto || DEFAULT_USER_FIELD;
-  const passField = passFieldFromSettings || passFieldAuto || DEFAULT_PASS_FIELD;
+  const userField =
+    userFieldFromSettings || userFieldAuto || DEFAULT_USER_FIELD;
+  const passField =
+    passFieldFromSettings || passFieldAuto || DEFAULT_PASS_FIELD;
   form.set(userField, username);
   form.set(passField, password);
   const loginSubmitUrl = loginActionOverride
@@ -995,8 +1042,8 @@ Deno.serve(async (req) => {
           message: !indexRes.ok
             ? `HTTP ${indexRes.status}`
             : !insight.has_token_field
-                ? "index.php não tem campo `token` nem `Tente_A_Vontade_…`."
-                : undefined,
+              ? "index.php não tem campo `token` nem `Tente_A_Vontade_…`."
+              : undefined,
           detalhes: { cookies: cookieNameList(cookies), ...insight },
         },
       );
@@ -1024,8 +1071,12 @@ Deno.serve(async (req) => {
   } else {
     recordStepWithoutUpload("index_skip_com_token", "Pular GET /index.php", {
       status: "ok",
-      message: "Token já encontrado no passo 2; seguindo para validadorOz + acoes.",
-      detalhes: { token_len: token.length, token_previa: previewText(token, 24) },
+      message:
+        "Token já encontrado no passo 2; seguindo para validadorOz + acoes.",
+      detalhes: {
+        token_len: token.length,
+        token_previa: previewText(token, 24),
+      },
     });
   }
 
@@ -1197,55 +1248,158 @@ Deno.serve(async (req) => {
     },
   );
 
-  // --- Fase 2: validadorOz + acoes com datas → exige id=tblExport ----------
-  const v2 = await callValidador("fase2");
-  if (v2.status === "fail") {
-    return failJson(502, v2.message ?? "validadorOz fase2 falhou.");
+  // --- Fase 2: últimos 60 dias (consulta diária) ----------------------------
+  const diasConsulta = lastNDaysBr(60);
+  const headerBase: string[] = [];
+  const linhasCsvFinal: string[][] = [];
+  let totalDiasComTabela = 0;
+  let totalLinhasDados = 0;
+  let lastTblDoc: string | null = null;
+
+  const BATCH_SIZE = 20;
+  for (
+    let batchStart = 0;
+    batchStart < diasConsulta.length;
+    batchStart += BATCH_SIZE
+  ) {
+    const batchDays = diasConsulta.slice(batchStart, batchStart + BATCH_SIZE);
+    recordStepWithoutUpload(
+      `fase2_batch_${String(Math.floor(batchStart / BATCH_SIZE) + 1).padStart(2, "0")}`,
+      `Consulta paralela de ${batchDays.length} dia(s)`,
+      {
+        status: "ok",
+        message: `Executando ${batchDays.length} requisições em paralelo.`,
+        detalhes: { dias: batchDays },
+      },
+    );
+
+    const batchResults = await Promise.all(
+      batchDays.map(async (dia, idx) => {
+        const globalIdx = batchStart + idx + 1;
+        const suffix = `dia${String(globalIdx).padStart(2, "0")}`;
+        const vDia = await callValidador(`fase2_${suffix}`);
+        if (vDia.status === "fail") {
+          return {
+            dia,
+            suffix,
+            ok: false as const,
+            message: "validadorOz falhou; dia ignorado.",
+          };
+        }
+
+        const acoesDia = await callAcoes(`fase2_${suffix}`, {
+          modulo: MODULO_REL,
+          NaoMenu: naoMenu,
+          token: tokenForBody,
+          data_de: dia,
+          data_ate: dia,
+          busca_grupo_evento: "-1",
+          filtrar: "FORM",
+        });
+        if (!acoesDia.ok) {
+          return {
+            dia,
+            suffix,
+            ok: false as const,
+            message: "acoes.php falhou; dia ignorado.",
+          };
+        }
+
+        const htmlDia = unwrapAcoesHtml(acoesDia.text);
+        if (!htmlHasId(htmlDia, EPOC_ID_TBL_EXPORT)) {
+          return {
+            dia,
+            suffix,
+            ok: false as const,
+            message: "Sem id=tblExport para este dia.",
+          };
+        }
+
+        const tableHtml = extractElementOuterHtmlById(
+          htmlDia,
+          EPOC_ID_TBL_EXPORT,
+        );
+        if (!tableHtml) {
+          return {
+            dia,
+            suffix,
+            ok: false as const,
+            message: "tblExport não pôde ser extraída do HTML.",
+          };
+        }
+        const parsed = extractTableHeaderAndRows(tableHtml);
+        if (parsed.header.length === 0) {
+          return {
+            dia,
+            suffix,
+            ok: false as const,
+            message: "Tabela sem cabeçalho legível.",
+          };
+        }
+        return {
+          dia,
+          suffix,
+          ok: true as const,
+          parsed,
+          tableHtml,
+        };
+      }),
+    );
+
+    for (const result of batchResults) {
+      if (!result.ok) {
+        recordStepWithoutUpload(
+          `fase2_${result.suffix}_resumo`,
+          `Resumo consulta diária ${result.dia}`,
+          {
+            status: "warn",
+            message: result.message,
+            detalhes: { dia: result.dia },
+          },
+        );
+        continue;
+      }
+      if (headerBase.length === 0) {
+        headerBase.push(...result.parsed.header);
+      }
+      const targetLen = headerBase.length;
+      let linhasDia = 0;
+      for (const row of result.parsed.rows) {
+        const ajustada = row.slice(0, targetLen);
+        while (ajustada.length < targetLen) ajustada.push("");
+        linhasCsvFinal.push([result.dia, ...ajustada]);
+        linhasDia++;
+      }
+      totalDiasComTabela++;
+      totalLinhasDados += linhasDia;
+      lastTblDoc = buildTblExportDocument(result.tableHtml);
+      recordStepWithoutUpload(
+        `fase2_${result.suffix}_resumo`,
+        `Resumo consulta diária ${result.dia}`,
+        {
+          status: "ok",
+          message: `tblExport encontrada com ${linhasDia} linha(s) de dados.`,
+          detalhes: {
+            dia: result.dia,
+            header_cols: result.parsed.header.length,
+          },
+        },
+      );
+    }
   }
 
-  const { data_de, data_ate } = dateRangeMesAtual();
-  const acoes2 = await callAcoes("fase2", {
-    modulo: MODULO_REL,
-    NaoMenu: naoMenu,
-    token: tokenForBody,
-    data_de,
-    data_ate,
-    busca_grupo_evento: "-1",
-    filtrar: "FORM",
-  });
-  if (!acoes2.ok) {
-    return failJson(502, acoes2.step.message ?? "acoes.php (fase2) falhou.");
-  }
-  if (!htmlHasId(unwrapAcoesHtml(acoes2.text), EPOC_ID_TBL_EXPORT)) {
-    acoes2.step.status = "fail";
-    acoes2.step.message =
-      "Resposta de acoes.php (fase2) não contém id=tblExport.";
-    log("tblExport_nao_encontrado", {
-      previa: previewText(acoes2.text, 800),
-    });
+  if (!lastTblDoc || headerBase.length === 0) {
     return failJson(
       502,
-      "Resposta de acoes.php (fase2) não contém id=tblExport. Use os passos guardados (steps[]) para diagnóstico.",
-      { tblExport_found: false },
+      "Nenhuma tabela #tblExport encontrada na janela dos últimos 60 dias.",
+      { tblExport_found: false, dias_consultados: diasConsulta.length },
     );
   }
 
-  // --- Extração da tabela e gravação do HTML final --------------------------
-  const tblResult = buildTblExportFileOrError(acoes2.text);
-  if ("error" in tblResult) {
-    acoes2.step.status = "fail";
-    acoes2.step.message = tblResult.error;
-    return failJson(502, tblResult.error, { tblExport_found: false });
-  }
-  recordStepWithoutUpload("validar_tbl_export", "Extrair id=tblExport", {
-    status: "ok",
-    message: `tblExport extraído (${tblResult.doc.length} bytes).`,
-  });
-
-  const docBytes = new TextEncoder().encode(tblResult.doc);
+  const docBytes = new TextEncoder().encode(lastTblDoc);
   const finalStep = await recordStepWithUpload(
     "tblExport_final",
-    "HTML final com a tabela id=tblExport",
+    "HTML final com a última tabela #tblExport encontrada",
     "tblExport.html",
     docBytes,
     "text/html; charset=utf-8",
@@ -1259,29 +1413,29 @@ Deno.serve(async (req) => {
     return failJson(500, "Não foi possível guardar a tabela final no Storage.");
   }
 
-  // --- CSV gerado diretamente da tabela #tblExport ---------------------------
-  const tableOnlyHtml = extractElementOuterHtmlById(
-    unwrapAcoesHtml(acoes2.text),
-    EPOC_ID_TBL_EXPORT,
-  );
-  const csvGenerated = tableOnlyHtml ? tableHtmlToCsv(tableOnlyHtml) : null;
+  // --- CSV final consolidado (60 dias) --------------------------------------
+  const csvHeader = ["data_consumo", ...headerBase];
+  const csvGenerated = matrixToCsv(csvHeader, linhasCsvFinal);
   let csvStoragePath: string | null = null;
   let csvFileName: string | null = null;
   let csvSizeBytes = 0;
   let csvDownloadUrl: string | null = null;
 
-  if (csvGenerated && csvGenerated.trim().length > 0) {
+  if (csvGenerated.trim().length > 0) {
     const csvStep = await recordStepWithUpload(
       "csv_from_tbl_export",
-      "CSV gerado a partir de #tblExport",
-      "tblExport.csv",
+      "CSV final consolidado dos últimos 60 dias",
+      "tblExport-ultimos-60-dias.csv",
       new TextEncoder().encode(csvGenerated),
       "text/csv",
       {
         status: "ok",
         detalhes: {
-          origem: "table_to_csv",
-          linhas: csvGenerated.split(/\r?\n/).filter(Boolean).length,
+          origem: "table_to_csv_60_days",
+          dias_consultados: diasConsulta.length,
+          dias_com_tabela: totalDiasComTabela,
+          linhas_dados: totalLinhasDados,
+          linhas_csv_total: csvGenerated.split(/\r?\n/).filter(Boolean).length,
           previa: previewText(csvGenerated, 800),
         },
       },
@@ -1291,10 +1445,14 @@ Deno.serve(async (req) => {
     csvSizeBytes = csvStep.bytes ?? 0;
     csvDownloadUrl = csvStep.download_url ?? null;
   } else {
-    recordStepWithoutUpload("csv_from_tbl_export", "CSV gerado a partir de #tblExport", {
-      status: "warn",
-      message: "Não foi possível gerar CSV a partir da tabela (sem linhas/células).",
-    });
+    recordStepWithoutUpload(
+      "csv_from_tbl_export",
+      "CSV gerado a partir de #tblExport",
+      {
+        status: "warn",
+        message: "CSV consolidado ficou vazio (sem linhas de dados).",
+      },
+    );
   }
 
   const nowIso = new Date().toISOString();
