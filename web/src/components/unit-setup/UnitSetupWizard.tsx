@@ -933,7 +933,15 @@ export function UnitSetupWizard({
   const handleXmlFile = async (file: File) => {
     if (!companyId) return;
     setXmlBusy(true);
-    const path = `${companyId}/imports/xml/${Date.now()}_${file.name}`;
+    const sanitizedName = file.name
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w.\-() ]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/ /g, "_");
+    const safeName = sanitizedName.length > 0 ? sanitizedName : "import.xml.zip";
+    const path = `${companyId}/imports/xml/${Date.now()}_${safeName}`;
     const { error } = await supabase.storage
       .from("company-setup")
       .upload(path, file, {

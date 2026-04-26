@@ -55,24 +55,9 @@ function SelectContent({
   align = "center",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
-  const wheelCleanupRef = React.useRef<(() => void) | null>(null)
-  const setContentRef = React.useCallback((node: HTMLDivElement | null) => {
-    wheelCleanupRef.current?.()
-    wheelCleanupRef.current = null
-    if (!node) return
-    const onWheel = (e: WheelEvent) => {
-      e.stopPropagation()
-      e.preventDefault()
-      node.scrollTop += e.deltaY
-    }
-    node.addEventListener("wheel", onWheel, { passive: false })
-    wheelCleanupRef.current = () => node.removeEventListener("wheel", onWheel)
-  }, [])
-
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={setContentRef}
         data-slot="select-content"
         onWheel={(e) => e.stopPropagation()}
         className={cn(

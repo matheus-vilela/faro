@@ -29,6 +29,7 @@ export const SYSTEM_PRODUCT_UNITS: readonly SystemProductUnit[] = [
   { code: "barrica", label: "Barrica", sortOrder: 16 },
   { code: "tambor", label: "Tambor", sortOrder: 17 },
   { code: "fardo", label: "Fardo", sortOrder: 18 },
+  { code: "fd", label: "Fardo (sigla)", sortOrder: 18 },
   { code: "bisnaga", label: "Bisnaga", sortOrder: 19 },
   { code: "maco", label: "Maço", sortOrder: 20 },
   { code: "bandeja", label: "Bandeja", sortOrder: 21 },
