@@ -22,7 +22,7 @@ import {
   validateStep1Empresa,
 } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
-import { fetchAddressByCep } from "@/services/addressLookupService";
+import { cn } from "@/lib/utils";
 import {
   focusAtualizarCertificado,
   hasFocusNfeEmpresaId,
@@ -64,8 +64,11 @@ import { Building2, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { SetupStepper } from "./SetupStepper";
-import { StepAddressForm } from "./steps/StepAddressForm";
+import {
+  SETUP_STEP_HINTS,
+  SETUP_STEP_LABELS,
+  SetupStepper,
+} from "./SetupStepper";
 import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
 import { StepPdvForm } from "./steps/StepPdvForm";
@@ -146,8 +149,6 @@ export function UnitSetupWizard({
   const [certPassword, setCertPassword] = useState("");
   /** Base64 do A1 só em memória — não vai para `companies.focusnfe`. */
   const [certFileBase64, setCertFileBase64] = useState("");
-  const [cepLoading, setCepLoading] = useState(false);
-  const [cepError, setCepError] = useState<string | null>(null);
   const [xmlBusy, setXmlBusy] = useState(false);
   const [certBusy, setCertBusy] = useState(false);
   const [cnpjValidating, setCnpjValidating] = useState(false);
@@ -156,8 +157,8 @@ export function UnitSetupWizard({
   const [saving, setSaving] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
 
-  /** Unidade já criada na Faro e assistente além do certificado: não reabrir passos 1–3. */
-  const lockStepsOneToThree = !!companyId && (setup.current_step ?? 1) >= 4;
+  /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
+  const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
 
   const load = useCallback(async () => {
     if (!resumeCompanyId) return;
@@ -230,7 +231,7 @@ export function UnitSetupWizard({
 
     setSetup(su);
     setActiveStep(
-      Math.min(5, Math.max(1, su.current_step ?? getNextPendingStep(su))),
+      Math.min(4, Math.max(1, su.current_step ?? getNextPendingStep(su))),
     );
   }, [resumeCompanyId]);
 
@@ -249,32 +250,30 @@ export function UnitSetupWizard({
         requireFocusCnpjValidation: true,
         focusCnpjLock: merged.focus_cnpj_lock,
       });
-      const s2 = isStep2EnderecoComplete(endereco);
       const sec = certSecrets ?? {
         certBase64: certFileBase64,
         certPassword,
       };
-      const s3cert = companyId
+      const s2cert = companyId
         ? isStep4CertificateComplete(merged.certificate)
         : isStep3CertificatePayloadComplete(merged.certificate, sec);
-      const s4xml = isStep5XmlZipComplete(merged.xml_zip_import);
-      const s5ep = getStep5EpocState(merged.epoc);
+      const s3xml = isStep5XmlZipComplete(merged.xml_zip_import);
+      const s4ep = getStep5EpocState(merged.epoc);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
       completed = upsertStep(completed, 1, s1);
-      completed = upsertStep(completed, 2, s2);
-      completed = upsertStep(completed, 3, s3cert);
-      completed = upsertStep(completed, 4, s4xml);
-      completed = upsertStep(completed, 5, s5ep.completed);
-      skipped = upsertStep(skipped, 5, s5ep.skipped);
+      completed = upsertStep(completed, 2, s2cert);
+      completed = upsertStep(completed, 3, s3xml);
+      completed = upsertStep(completed, 4, s4ep.completed);
+      skipped = upsertStep(skipped, 4, s4ep.skipped);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
         skipped_steps: skipped,
       });
     },
-    [companyId, empresa, endereco, certFileBase64, certPassword],
+    [companyId, empresa, certFileBase64, certPassword],
   );
 
   const applyEmpresaPatch = useCallback(
@@ -358,28 +357,11 @@ export function UnitSetupWizard({
     }
   }, [empresa, endereco, representanteLegal, setup, companyId]);
 
-  const handleCepBlur = useCallback(async () => {
-    if ((setup.focus_cnpj_lock?.locked_endereco_keys ?? []).length > 0) {
-      return;
-    }
-    const digits = (endereco.cep ?? "").replace(/\D/g, "");
-    if (digits.length !== 8) return;
-    setCepLoading(true);
-    setCepError(null);
-    const res = await fetchAddressByCep(endereco.cep ?? "");
-    setCepLoading(false);
-    if (!res.ok) {
-      setCepError(res.error);
-      return;
-    }
-    setEndereco((prev) => ({ ...prev, ...res.data }));
-  }, [endereco.cep, setup.focus_cnpj_lock?.locked_endereco_keys]);
-
   const handlePause = async () => {
     if (!user) return;
     if (!companyId) {
       toast.error(
-        "Conclua o passo 3 com sucesso para salvar a unidade na Faro e poder pausar.",
+        "Conclua o certificado com sucesso para salvar a unidade na Faro e poder pausar.",
       );
       return;
     }
@@ -410,7 +392,7 @@ export function UnitSetupWizard({
     }
   };
 
-  /** Passo 1 sem `companyId`: só valida; a unidade na Faro é criada após sucesso na Focus (passo 3). */
+  /** Passo 1 sem `companyId`: valida; a unidade na Faro é criada após sucesso na Focus (certificado). */
   const runAdvanceStep1Local = (): boolean => {
     const err = validateStep1Empresa(empresa, {
       requireFocusCnpjValidation: true,
@@ -426,6 +408,12 @@ export function UnitSetupWizard({
     }
     if (!createNewGroup && !newUnitGroupId) {
       setStepError("Grupo inválido.");
+      return false;
+    }
+    if (!isStep2EnderecoComplete(endereco)) {
+      setStepError(
+        "Valide o CNPJ: o endereço deve vir completo da consulta antes do certificado.",
+      );
       return false;
     }
     return true;
@@ -490,7 +478,7 @@ export function UnitSetupWizard({
     setFocusnfe(stripFocusnfeSecrets(focusnfeForDb));
     const nextSetup = syncCompletionState(
       mergeSetupPatch(setup, {
-        current_step: 4,
+        current_step: 3,
         certificate: certOut,
       }),
     );
@@ -501,7 +489,7 @@ export function UnitSetupWizard({
         replace: true,
       });
     }
-    toast.success("Unidade criada na Faro e cadastrada na Focus.");
+    toast.success("Unidade criada na Faro.");
     return true;
   };
 
@@ -512,6 +500,12 @@ export function UnitSetupWizard({
     });
     if (err) {
       setStepError(err);
+      return false;
+    }
+    if (!isStep2EnderecoComplete(endereco)) {
+      setStepError(
+        "Valide o CNPJ: o endereço deve vir completo da consulta antes do certificado.",
+      );
       return false;
     }
     if (!companyId) return false;
@@ -559,37 +553,6 @@ export function UnitSetupWizard({
     }
 
     if (activeStep === 2) {
-      if (!isStep2EnderecoComplete(endereco)) {
-        setStepError(
-          "Preencha todos os campos de endereço obrigatórios antes de avançar.",
-        );
-        return;
-      }
-      if (!companyId) {
-        setActiveStep(3);
-        return;
-      }
-      setSaving(true);
-      const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 3 }),
-      );
-      const res = await patchCompanyMaps(companyId, {
-        endereco_principal: endereco,
-        representante_legal: representanteLegal,
-        focus_cnpj_consulta: focusConsultaRecord,
-        setup: nextSetup,
-      });
-      setSaving(false);
-      if (res.error) {
-        toast.error(res.error);
-        return;
-      }
-      setSetup(nextSetup);
-      setActiveStep(3);
-      return;
-    }
-
-    if (activeStep === 3) {
       if (!companyId) {
         const err1 = validateStep1Empresa(empresa, {
           requireFocusCnpjValidation: true,
@@ -601,7 +564,7 @@ export function UnitSetupWizard({
         }
         if (!isStep2EnderecoComplete(endereco)) {
           setStepError(
-            "Preencha todos os campos de endereço obrigatórios antes de avançar.",
+            "Valide o CNPJ: o endereço deve vir completo da consulta antes de avançar.",
           );
           return;
         }
@@ -653,7 +616,7 @@ export function UnitSetupWizard({
         const okCreate = await runCreateCompanyAfterFocusSuccess(focusnfeForDb);
         setSaving(false);
         if (!okCreate) return;
-        setActiveStep(4);
+        setActiveStep(3);
         return;
       }
 
@@ -729,12 +692,34 @@ export function UnitSetupWizard({
       setSaving(true);
       const nextSetup = syncCompletionState(
         mergeSetupPatch(setup, {
-          current_step: 4,
+          current_step: 3,
           certificate: certOut,
         }),
       );
       const res = await patchCompanyMaps(companyId, {
         focusnfe: nextFocus,
+        setup: nextSetup,
+      });
+      setSaving(false);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      setSetup(nextSetup);
+      setActiveStep(3);
+      return;
+    }
+
+    if (activeStep === 3) {
+      if (!companyId) {
+        toast.error("Conclua o certificado para criar a unidade.");
+        return;
+      }
+      setSaving(true);
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 4 }),
+      );
+      const res = await patchCompanyMaps(companyId, {
         setup: nextSetup,
       });
       setSaving(false);
@@ -749,29 +734,7 @@ export function UnitSetupWizard({
 
     if (activeStep === 4) {
       if (!companyId) {
-        toast.error("Conclua o passo 3 para criar a unidade.");
-        return;
-      }
-      setSaving(true);
-      const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 5 }),
-      );
-      const res = await patchCompanyMaps(companyId, {
-        setup: nextSetup,
-      });
-      setSaving(false);
-      if (res.error) {
-        toast.error(res.error);
-        return;
-      }
-      setSetup(nextSetup);
-      setActiveStep(5);
-      return;
-    }
-
-    if (activeStep === 5) {
-      if (!companyId) {
-        toast.error("Conclua o passo 3 para criar a unidade.");
+        toast.error("Conclua o certificado para criar a unidade.");
         return;
       }
       const ep = setup.epoc ?? { mode: "undecided" as const };
@@ -832,7 +795,7 @@ export function UnitSetupWizard({
         }
       }
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 6, epoc: ep }),
+        mergeSetupPatch(setup, { current_step: 5, epoc: ep }),
       );
       await patchCompanyMaps(companyId, {
         setup: nextSetup,
@@ -849,7 +812,7 @@ export function UnitSetupWizard({
     if (!companyId) return;
     await syncFocusNfeCompanyProfile(companyId, focus);
     const pending = getNextPendingStep(lastSetup);
-    const allDone = pending > 5;
+    const allDone = pending > 4;
     const completed = buildCompletedSetup(lastSetup, {
       allApplicableDone: allDone,
     });
@@ -862,9 +825,9 @@ export function UnitSetupWizard({
   const handleBack = () => {
     if (activeStep <= 1) return;
     const target = activeStep - 1;
-    if (lockStepsOneToThree && target >= 1 && target <= 3) {
+    if (lockStepsOneToTwo && target >= 1 && target <= 2) {
       toast.message(
-        "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
+        "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa ou Certificado.",
       );
       return;
     }
@@ -873,18 +836,18 @@ export function UnitSetupWizard({
 
   const goToStep = useCallback(
     (step: SetupStepNumber) => {
-      if (step < 1 || step > 5) return;
-      if (step > 1 && !companyId && step > 3) return;
-      if (lockStepsOneToThree && step >= 1 && step <= 3) {
+      if (step < 1 || step > 4) return;
+      if (step > 1 && !companyId && step > 2) return;
+      if (lockStepsOneToTwo && step >= 1 && step <= 2) {
         toast.message(
-          "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa, Endereço ou Certificado.",
+          "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa ou Certificado.",
         );
         return;
       }
       setStepError(null);
       setActiveStep(step);
     },
-    [companyId, lockStepsOneToThree],
+    [companyId, lockStepsOneToTwo],
   );
 
   const handleRemoveCertificate = useCallback(async () => {
@@ -1136,127 +1099,135 @@ export function UnitSetupWizard({
     );
   }
 
+  const stepKey = (
+    activeStep >= 1 && activeStep <= 4 ? activeStep : 1
+  ) as SetupStepNumber;
+
   const wizardBody = (
     <>
       <PageHeader
         title="Configurar unidade"
-        description="Assistente em cinco etapas."
+        description={SETUP_STEP_HINTS[stepKey]}
         icon={Building2}
-        className={isModal ? "pb-2" : undefined}
+        className={isModal ? "pb-1" : undefined}
       />
 
       <SetupStepper
         activeStep={activeStep}
         setup={setup}
         companyId={companyId}
-        lockStepsOneToThree={lockStepsOneToThree}
+        lockStepsOneToTwo={lockStepsOneToTwo}
         onStepClick={goToStep}
       />
 
       {stepError ? (
-        <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           {stepError}
         </p>
       ) : null}
 
-      <div className="rounded-xl border bg-card p-6 shadow-sm">
-        {activeStep === 1 ? (
-          <StepCompanyForm
-            groupName={groupName}
-            onGroupNameChange={setGroupName}
-            showGroupName={createNewGroup && !resumeCompanyId}
-            empresa={{
-              ...empresa,
-              cnpj_cpf: empresa.cnpj_cpf ?? "",
-              telefone: empresa.telefone ?? "",
-            }}
-            onEmpresaChange={applyEmpresaPatch}
-            lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
-            cnpjValidating={cnpjValidating}
-            onValidarCnpj={() => void handleValidarCnpj()}
-            cnpjValidated={
-              !!setup.focus_cnpj_lock?.validated_cnpj_digits &&
-              setup.focus_cnpj_lock.validated_cnpj_digits ===
-                unmask(empresa.cnpj_cpf ?? "")
-            }
-          />
-        ) : null}
-        {activeStep === 2 ? (
-          <StepAddressForm
-            endereco={endereco}
-            onEnderecoChange={(patch) =>
-              setEndereco((prev) => ({ ...prev, ...patch }))
-            }
-            cepLoading={cepLoading}
-            cepError={cepError}
-            onCepBlur={() => void handleCepBlur()}
-            lockedEnderecoKeys={setup.focus_cnpj_lock?.locked_endereco_keys}
-          />
-        ) : null}
-        {activeStep === 3 ? (
-          <StepCertificateForm
-            companyId={companyId}
-            cert={setup.certificate}
-            password={certPassword}
-            onPasswordChange={(v) => {
-              setCertPassword(v);
-              setSetup((s) =>
-                syncCompletionState(s, undefined, {
-                  certBase64: certFileBase64,
-                  certPassword: v,
-                }),
-              );
-            }}
-            onPickFile={(f) => void handleCertFile(f)}
-            onRemoveCertificate={() => void handleRemoveCertificate()}
-            busy={certBusy}
-          />
-        ) : null}
-        {activeStep === 4 ? (
-          <StepXmlZipForm
-            state={setup.xml_zip_import}
-            onPickFile={(f) => void handleXmlFile(f)}
-            busy={xmlBusy}
-          />
-        ) : null}
-        {activeStep === 5 ? (
-          <StepPdvForm
-            epoc={setup.epoc}
-            onEpocChange={(patch) =>
-              setSetup((s) =>
-                mergeSetupPatch(s, {
-                  epoc: { ...(s.epoc ?? { mode: "undecided" }), ...patch },
-                }),
-              )
-            }
-          />
-        ) : null}
+      <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
+        <div className="border-b border-border/60 bg-muted/20 px-4 py-3 sm:px-6 sm:py-3.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Etapa {activeStep} de 4
+          </p>
+          <h2 className="text-base font-semibold leading-snug sm:text-lg">
+            {SETUP_STEP_LABELS[stepKey]}
+          </h2>
+        </div>
+        <div className="p-4 sm:p-6">
+          {activeStep === 1 ? (
+            <StepCompanyForm
+              groupName={groupName}
+              onGroupNameChange={setGroupName}
+              showGroupName={createNewGroup && !resumeCompanyId}
+              empresa={{
+                ...empresa,
+                cnpj_cpf: empresa.cnpj_cpf ?? "",
+                telefone: empresa.telefone ?? "",
+              }}
+              onEmpresaChange={applyEmpresaPatch}
+              lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
+              cnpjValidating={cnpjValidating}
+              onValidarCnpj={() => void handleValidarCnpj()}
+              cnpjValidated={
+                !!setup.focus_cnpj_lock?.validated_cnpj_digits &&
+                setup.focus_cnpj_lock.validated_cnpj_digits ===
+                  unmask(empresa.cnpj_cpf ?? "")
+              }
+            />
+          ) : null}
+          {activeStep === 2 ? (
+            <StepCertificateForm
+              companyId={companyId}
+              cert={setup.certificate}
+              password={certPassword}
+              onPasswordChange={(v) => {
+                setCertPassword(v);
+                setSetup((s) =>
+                  syncCompletionState(s, undefined, {
+                    certBase64: certFileBase64,
+                    certPassword: v,
+                  }),
+                );
+              }}
+              onPickFile={(f) => void handleCertFile(f)}
+              onRemoveCertificate={() => void handleRemoveCertificate()}
+              busy={certBusy}
+            />
+          ) : null}
+          {activeStep === 3 ? (
+            <StepXmlZipForm
+              state={setup.xml_zip_import}
+              onPickFile={(f) => void handleXmlFile(f)}
+              busy={xmlBusy}
+            />
+          ) : null}
+          {activeStep === 4 ? (
+            <StepPdvForm
+              epoc={setup.epoc}
+              onEpocChange={(patch) =>
+                setSetup((s) =>
+                  mergeSetupPatch(s, {
+                    epoc: { ...(s.epoc ?? { mode: "undecided" }), ...patch },
+                  }),
+                )
+              }
+            />
+          ) : null}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {activeStep > 3 ? (
+      <div
+        className={cn(
+          "flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:pt-5",
+          activeStep > 2 ? "sm:justify-between" : "sm:justify-end",
+        )}
+      >
+        {activeStep > 2 ? (
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            className="w-full text-muted-foreground sm:w-auto"
             onClick={() => void handlePause()}
             disabled={saving}
           >
-            Pausar setup
+            Pausar e continuar depois
           </Button>
-        ) : (
-          <div />
-        )}
-        <div className="flex flex-wrap gap-2">
+        ) : null}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
+            className="w-full sm:w-auto"
             onClick={activeStep === 1 ? () => exitApp() : handleBack}
-            disabled={saving || (lockStepsOneToThree && activeStep === 4)}
+            disabled={saving || (lockStepsOneToTwo && activeStep === 3)}
           >
             {activeStep === 1 ? "Cancelar" : "Voltar"}
           </Button>
           <Button
             type="button"
+            className="w-full min-w-32 sm:w-auto"
             onClick={() => void handleNext()}
             disabled={saving || certBusy}
           >
@@ -1265,10 +1236,10 @@ export function UnitSetupWizard({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Salvando…
               </>
-            ) : activeStep === 5 ? (
+            ) : activeStep === 4 ? (
               "Concluir"
             ) : (
-              "Próximo"
+              "Continuar"
             )}
           </Button>
         </div>
@@ -1277,8 +1248,8 @@ export function UnitSetupWizard({
   );
 
   return isModal ? (
-    <div className="space-y-6">{wizardBody}</div>
+    <div className="space-y-5">{wizardBody}</div>
   ) : (
-    <PageShell className="max-w-3xl space-y-8">{wizardBody}</PageShell>
+    <PageShell className="max-w-2xl space-y-6">{wizardBody}</PageShell>
   );
 }

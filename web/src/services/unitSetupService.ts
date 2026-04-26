@@ -13,7 +13,7 @@ import type { Company } from "@/contexts/CompanyContext";
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
-  setup_schema_version: 2,
+  setup_schema_version: 3,
   current_step: 1,
   completed_steps: [],
   skipped_steps: [],
@@ -22,6 +22,45 @@ export const EMPTY_SETUP_BASE: CompanySetupMap = {
   xml_zip_import: { phase: "idle", file_log: [] },
   epoc: { mode: "undecided" },
 };
+
+/**
+ * Converte o modelo de 5 etapas (com endereço) para 4 (endereço só via consulta CNPJ).
+ * Antigo: 1=emp, 2=end, 3=cert, 4=xml, 5=PDV. Novo: 1=emp, 2=cert, 3=xml, 4=PDV.
+ */
+function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
+  if ((setup.setup_schema_version ?? 0) >= 3) return setup;
+  const cs = setup.completed_steps ?? [];
+  const sk = setup.skipped_steps ?? [];
+  const mapOldToNew = (o: number): number | null => {
+    if (o < 1 || o > 5) return null;
+    if (o === 1) return 1;
+    if (o === 2) return null; // endereço
+    if (o === 3) return 2;
+    if (o === 4) return 3;
+    if (o === 5) return 4;
+    return null;
+  };
+  const newCompleted = [
+    ...new Set(cs.map(mapOldToNew).filter((n): n is number => n != null)),
+  ].sort((a, b) => a - b);
+  const newSkipped = [
+    ...new Set(sk.map(mapOldToNew).filter((n): n is number => n != null)),
+  ].sort((a, b) => a - b);
+  const cur = setup.current_step ?? 1;
+  let newCur = cur;
+  if (cur <= 1) newCur = 1;
+  else if (cur === 2) newCur = 2; // fim de empresa ou início de cert. no novo
+  else if (cur === 3) newCur = 2;
+  else if (cur === 4) newCur = 3;
+  else if (cur === 5) newCur = 4;
+  else if (cur >= 6) newCur = 5;
+  return mergeSetupPatch(setup, {
+    completed_steps: newCompleted,
+    skipped_steps: newSkipped,
+    current_step: Math.min(5, Math.max(1, newCur)),
+    setup_schema_version: 3,
+  });
+}
 
 /** Converte progresso do assistente antigo (6 etapas) para o atual (5 etapas). */
 function migrateLegacySixStepWizardSetup(setup: CompanySetupMap): CompanySetupMap {
@@ -71,8 +110,8 @@ type CreateUnitStep1Maps = {
   /** Mesclado no `setup` inicial (ex.: `focus_cnpj_lock`, certificado após passo 3). */
   setupExtension?: Partial<CompanySetupMap>;
   /**
-   * Quando true, a linha só é criada após sucesso em `focus-cria-empresa` (passos 1–3 concluídos).
-   * `setup` inicia em `current_step: 4` e `completed_steps: [1,2,3]`.
+   * Quando true, a linha só é criada após sucesso em `focus-cria-empresa` (empresa + cert).
+   * `setup` inicia em `current_step: 3` (XML/ZIP) e `completed_steps: [1,2]`.
    */
   afterFocusCriaSuccess?: boolean;
   /** Dados Focus em `companies.focusnfe` (sem certificado em base64 nem senha). */
@@ -119,8 +158,8 @@ export async function createCompanyFromSetupStep1(
   const afterFocus = input.afterFocusCriaSuccess === true;
   let setup = mergeSetupPatch(initialSetupMap(), {
     status: "in_progress",
-    current_step: afterFocus ? 4 : 2,
-    completed_steps: afterFocus ? [1, 2, 3] : [1],
+    current_step: afterFocus ? 3 : 2,
+    completed_steps: afterFocus ? [1, 2] : [1],
     last_paused_at: undefined,
     updated_at: nowIso(),
   });
@@ -288,7 +327,10 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
     };
   }
   const version = base.setup_schema_version ?? 0;
-  const migrated = version < 2 ? migrateLegacySixStepWizardSetup(base) : base;
+  let migrated = version < 2 ? migrateLegacySixStepWizardSetup(base) : base;
+  if ((migrated.setup_schema_version ?? 0) < 3) {
+    migrated = migrateFromFiveToFourStep(migrated);
+  }
   migrated.progress_percent = calculateSetupProgress(migrated);
   return migrated;
 }

@@ -7,8 +7,8 @@ export type CompanySetupStatus =
   | "paused"
   | "completed";
 
-/** Passos 1–5 do wizard (empresa, endereço, certificado, XML/ZIP, PDV). */
-export type SetupStepNumber = 1 | 2 | 3 | 4 | 5;
+/** Passos 1–4: empresa, certificado, XML/ZIP, PDV (endereço vem da consulta CNPJ). */
+export type SetupStepNumber = 1 | 2 | 3 | 4;
 
 export type EmpresaMap = {
   nome_razao_social?: string;
@@ -139,8 +139,8 @@ export type SetupEpocState = {
 export type CompanySetupMap = {
   status: CompanySetupStatus;
   /**
-   * 2 = assistente com 5 passos (certificado fiscal = passo 3).
-   * Ausente ou &lt; 2: formato antigo (6 passos com representante no 3) — migrar ao normalizar.
+   * 2 = 5 passos (legado, com endereço manual); 3 = 4 passos (endereço via consulta CNPJ).
+   * &lt; 2: 6 passos muito antigo — migrar ao normalizar.
    */
   setup_schema_version?: number;
   current_step: number;
