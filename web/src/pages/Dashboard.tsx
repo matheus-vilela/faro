@@ -28,6 +28,7 @@ interface AlertSummary {
   notReceived: number;
   boletoD3: number;
   boletoD1: number;
+  importPending: number;
 }
 
 function formatLongDate(d: Date): string {
@@ -56,6 +57,7 @@ export function Dashboard() {
     notReceived: 0,
     boletoD3: 0,
     boletoD1: 0,
+    importPending: 0,
   });
 
   const loadBoletos = useCallback(async () => {
@@ -103,6 +105,7 @@ export function Dashboard() {
         notReceived: 0,
         boletoD3: 0,
         boletoD1: 0,
+        importPending: 0,
       });
       return;
     }
@@ -122,6 +125,7 @@ export function Dashboard() {
         notReceived: 0,
         boletoD3: 0,
         boletoD1: 0,
+        importPending: 0,
       });
       setLoadingAlerts(false);
       return;
@@ -134,6 +138,7 @@ export function Dashboard() {
       notReceived: list.filter((r) => r.kind === "recebimento_falta").length,
       boletoD3: list.filter((r) => r.kind === "boleto_vencimento_d3").length,
       boletoD1: list.filter((r) => r.kind === "boleto_vencimento_d1").length,
+      importPending: list.filter((r) => r.kind === "import_pending_review").length,
     });
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
@@ -166,7 +171,8 @@ export function Dashboard() {
     alertSummary.withoutBoleto +
     alertSummary.notReceived +
     alertSummary.boletoD3 +
-    alertSummary.boletoD1;
+    alertSummary.boletoD1 +
+    alertSummary.importPending;
 
   const headerDescription = (
     <span className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
@@ -221,6 +227,7 @@ export function Dashboard() {
             notReceived={alertSummary.notReceived}
             boletoD3={alertSummary.boletoD3}
             boletoD1={alertSummary.boletoD1}
+            importPending={alertSummary.importPending}
           />
         ) : null}
       </div>

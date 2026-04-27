@@ -13,7 +13,7 @@ import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { maskCpfCnpj, unmask } from "@/lib/masks";
 import { getNextPendingStep, mergeSetupPatch } from "@/lib/setup/setupProgress";
 import {
-  getStep5EpocState,
+  getStep6EpocState,
   isStep1EmpresaComplete,
   isStep2EnderecoComplete,
   isStep3CertificatePayloadComplete,
@@ -23,6 +23,7 @@ import {
 } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
 import {
   focusAtualizarCertificado,
   hasFocusNfeEmpresaId,
@@ -46,7 +47,6 @@ import {
   normalizeSetupMap,
   patchCompanyMaps,
 } from "@/services/unitSetupService";
-import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
 import { processXmlZipImport } from "@/services/xmlZipImportService";
 import {
   mergeEpocSettingsForUpsert,
@@ -260,7 +260,7 @@ export function UnitSetupWizard({
         ? isStep4CertificateComplete(merged.certificate)
         : isStep3CertificatePayloadComplete(merged.certificate, sec);
       const s3xml = isStep5XmlZipComplete(merged.xml_zip_import);
-      const s4ep = getStep5EpocState(merged.epoc);
+      const s4ep = getStep6EpocState(merged.epoc);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
@@ -754,7 +754,12 @@ export function UnitSetupWizard({
           .eq("provider", "epoc")
           .maybeSingle();
 
-        if (enabled && !pwdFinal && ep.password_on_server && existingRow?.settings) {
+        if (
+          enabled &&
+          !pwdFinal &&
+          ep.password_on_server &&
+          existingRow?.settings
+        ) {
           const prev = parseEpocSettings(
             existingRow.settings as Record<string, unknown>,
           );
@@ -940,7 +945,8 @@ export function UnitSetupWizard({
       .replace(/\s+/g, " ")
       .trim()
       .replace(/ /g, "_");
-    const safeName = sanitizedName.length > 0 ? sanitizedName : "import.xml.zip";
+    const safeName =
+      sanitizedName.length > 0 ? sanitizedName : "import.xml.zip";
     const path = `${companyId}/imports/xml/${Date.now()}_${safeName}`;
     const { error } = await supabase.storage
       .from("company-setup")

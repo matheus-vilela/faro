@@ -1,6 +1,10 @@
+import type { Company } from "@/contexts/CompanyContext";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
+import {
+  calculateSetupProgress,
+  mergeSetupPatch,
+} from "@/lib/setup/setupProgress";
 import { supabase } from "@/lib/supabase";
-import { calculateSetupProgress, mergeSetupPatch } from "@/lib/setup/setupProgress";
 import type {
   CompanySetupMap,
   EmpresaMap,
@@ -9,7 +13,6 @@ import type {
   RepresentanteLegalMap,
   SetupEpocState,
 } from "@/types/companySetup";
-import type { Company } from "@/contexts/CompanyContext";
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
@@ -49,7 +52,8 @@ function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
   const cur = setup.current_step ?? 1;
   let newCur = cur;
   if (cur <= 1) newCur = 1;
-  else if (cur === 2) newCur = 2; // fim de empresa ou início de cert. no novo
+  else if (cur === 2)
+    newCur = 2; // fim de empresa ou início de cert. no novo
   else if (cur === 3) newCur = 2;
   else if (cur === 4) newCur = 3;
   else if (cur === 5) newCur = 4;
@@ -63,7 +67,9 @@ function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
 }
 
 /** Converte progresso do assistente antigo (6 etapas) para o atual (5 etapas). */
-function migrateLegacySixStepWizardSetup(setup: CompanySetupMap): CompanySetupMap {
+function migrateLegacySixStepWizardSetup(
+  setup: CompanySetupMap,
+): CompanySetupMap {
   const cs = setup.completed_steps ?? [];
   const sk = setup.skipped_steps ?? [];
   const remap = (arr: number[]): number[] => {
@@ -85,8 +91,34 @@ function migrateLegacySixStepWizardSetup(setup: CompanySetupMap): CompanySetupMa
   return mergeSetupPatch(setup, {
     completed_steps: remap(cs),
     skipped_steps: remap(sk),
-    current_step: Math.min(6, Math.max(1, newCur)),
+    current_step: Math.min(5, Math.max(1, newCur)),
     setup_schema_version: 2,
+  });
+}
+
+/** Versão 2 (5 passos) → 3 (6 passos, classificação de itens = passo 5; PDV = passo 6). */
+function migrateV2FiveStepToV3SixStep(setup: CompanySetupMap): CompanySetupMap {
+  const mapStep = (s: number) => (s === 5 ? 6 : s);
+  const cs = (setup.completed_steps ?? []).map(mapStep);
+  const sk = (setup.skipped_steps ?? []).map(mapStep);
+  const completed = new Set(cs);
+  const skipped = new Set(sk);
+  if (completed.has(6) && !completed.has(5) && !skipped.has(5)) {
+    skipped.add(5);
+  }
+  let cur = setup.current_step ?? 1;
+  if (cur === 5) {
+    cur = 6;
+  } else if (cur === 6) {
+    cur = 7;
+  } else if (cur > 6) {
+    cur = 7;
+  }
+  return mergeSetupPatch(setup, {
+    setup_schema_version: 3,
+    completed_steps: [...completed].sort((a, b) => a - b),
+    skipped_steps: [...skipped].sort((a, b) => a - b),
+    current_step: Math.min(7, Math.max(1, cur)),
   });
 }
 
@@ -181,12 +213,18 @@ export async function createCompanyFromSetupStep1(
     email: (e.email ?? "").trim() || null,
     phone: phoneDigits || null,
     empresa: empresaPayload as unknown as Record<string, unknown>,
-    endereco_principal: (input.endereco_principal ??
-      {}) as unknown as Record<string, unknown>,
-    representante_legal: (input.representante_legal ??
-      {}) as unknown as Record<string, unknown>,
-    focus_cnpj_consulta: (input.focus_cnpj_consulta ??
-      {}) as unknown as Record<string, unknown>,
+    endereco_principal: (input.endereco_principal ?? {}) as unknown as Record<
+      string,
+      unknown
+    >,
+    representante_legal: (input.representante_legal ?? {}) as unknown as Record<
+      string,
+      unknown
+    >,
+    focus_cnpj_consulta: (input.focus_cnpj_consulta ?? {}) as unknown as Record<
+      string,
+      unknown
+    >,
     focusnfe: stripFocusnfeSecrets(input.focusnfe ?? {}) as unknown as Record<
       string,
       unknown
@@ -205,9 +243,7 @@ export async function createCompanyFromSetupStep1(
   return { companyId };
 }
 
-export async function fetchCompanySetupRow(
-  companyId: string,
-): Promise<
+export async function fetchCompanySetupRow(companyId: string): Promise<
   | {
       company: Company & {
         empresa: Record<string, unknown>;
@@ -224,12 +260,14 @@ export async function fetchCompanySetupRow(
     .eq("id", companyId)
     .single();
   if (error || !data) return { error: error?.message ?? "Não encontrado" };
-  return { company: data as Company & {
-    empresa: Record<string, unknown>;
-    endereco_principal: Record<string, unknown>;
-    focusnfe: Record<string, unknown>;
-    setup: Record<string, unknown>;
-  } };
+  return {
+    company: data as Company & {
+      empresa: Record<string, unknown>;
+      endereco_principal: Record<string, unknown>;
+      focusnfe: Record<string, unknown>;
+      setup: Record<string, unknown>;
+    },
+  };
 }
 
 export async function patchCompanyMaps(
@@ -264,9 +302,10 @@ export async function patchCompanyMaps(
   if (patch.focus_cnpj_consulta !== undefined)
     row.focus_cnpj_consulta = patch.focus_cnpj_consulta;
   if (patch.focusnfe !== undefined)
-    row.focusnfe = stripFocusnfeSecrets(
-      patch.focusnfe,
-    ) as unknown as Record<string, unknown>;
+    row.focusnfe = stripFocusnfeSecrets(patch.focusnfe) as unknown as Record<
+      string,
+      unknown
+    >;
   if (patch.setup !== undefined) {
     row.setup = patch.setup as unknown as Record<string, unknown>;
   }
@@ -275,7 +314,10 @@ export async function patchCompanyMaps(
   if (patch.email !== undefined) row.email = patch.email;
   if (patch.phone !== undefined) row.phone = patch.phone;
 
-  const { error } = await supabase.from("companies").update(row).eq("id", companyId);
+  const { error } = await supabase
+    .from("companies")
+    .update(row)
+    .eq("id", companyId);
   return { error: error?.message };
 }
 
@@ -287,7 +329,9 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
   const base: CompanySetupMap = {
     status: (o.status as CompanySetupMap["status"]) ?? "not_started",
     setup_schema_version:
-      typeof o.setup_schema_version === "number" ? o.setup_schema_version : undefined,
+      typeof o.setup_schema_version === "number"
+        ? o.setup_schema_version
+        : undefined,
     current_step: typeof o.current_step === "number" ? o.current_step : 1,
     completed_steps: Array.isArray(o.completed_steps)
       ? (o.completed_steps as number[])
@@ -299,21 +343,28 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
       typeof o.progress_percent === "number" ? o.progress_percent : 0,
     started_at: typeof o.started_at === "string" ? o.started_at : undefined,
     updated_at: typeof o.updated_at === "string" ? o.updated_at : undefined,
-    completed_at: typeof o.completed_at === "string" ? o.completed_at : undefined,
+    completed_at:
+      typeof o.completed_at === "string" ? o.completed_at : undefined,
     last_paused_at:
       typeof o.last_paused_at === "string" ? o.last_paused_at : undefined,
     focus_cnpj_lock: o.focus_cnpj_lock as CompanySetupMap["focus_cnpj_lock"],
     certificate: o.certificate as CompanySetupMap["certificate"],
     xml_zip_import: o.xml_zip_import as CompanySetupMap["xml_zip_import"],
     epoc: o.epoc as CompanySetupMap["epoc"],
+    item_classification_onboarding: o.item_classification_onboarding as
+      | CompanySetupMap["item_classification_onboarding"]
+      | undefined,
   };
   if (!base.certificate) base.certificate = { status: "not_sent" };
   if (!base.xml_zip_import) {
     base.xml_zip_import = { phase: "idle", file_log: [] };
   }
   if (!base.epoc) base.epoc = { mode: "undecided" };
-  const ep = base.epoc as SetupEpocState & { mode?: string; excel_storage_path?: string };
-  if (ep.mode === "excel") {
+  const ep = base.epoc as SetupEpocState & {
+    mode?: string;
+    excel_storage_path?: string;
+  };
+  if (String(ep.mode) === "excel") {
     base.epoc = {
       mode: "undecided",
       enabled: ep.enabled,

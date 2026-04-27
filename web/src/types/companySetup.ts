@@ -101,18 +101,26 @@ export type XmlZipImportPhase =
   | "parsing"
   | "preview"
   | "importing"
+  | "queued"
+  | "processing"
   | "done"
   | "error";
 
 export type XmlZipFileLogEntry = {
   name: string;
   ok: boolean;
-  status?: "success" | "duplicate" | "read_error" | "validation_error" | "needs_review";
+  status?:
+    | "success"
+    | "duplicate"
+    | "read_error"
+    | "validation_error"
+    | "needs_review";
   message?: string;
 };
 
 export type SetupXmlZipImportState = {
   phase: XmlZipImportPhase;
+  job_batch_id?: string;
   storage_path?: string;
   file_name?: string;
   error_message?: string;
@@ -136,6 +144,14 @@ export type SetupEpocState = {
   updated_at?: string;
 };
 
+/** Snapshot do passo "Classificação de itens" (RPC `get_item_classification_onboarding_status`). */
+export type ItemClassificationOnboardingSnapshot = {
+  total_products: number;
+  incomplete: number;
+  percent: number;
+  synced_at?: string;
+};
+
 export type CompanySetupMap = {
   status: CompanySetupStatus;
   /**
@@ -143,6 +159,8 @@ export type CompanySetupMap = {
    * &lt; 2: 6 passos muito antigo — migrar ao normalizar.
    */
   setup_schema_version?: number;
+  /** Preenchido ao visitar o passo de classificação de itens (evita concluir o passo com pendências). */
+  item_classification_onboarding?: ItemClassificationOnboardingSnapshot;
   current_step: number;
   completed_steps: number[];
   skipped_steps: number[];

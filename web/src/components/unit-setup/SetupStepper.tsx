@@ -62,10 +62,6 @@ export function SetupStepper({
   activeStep: number;
   setup: CompanySetupMap;
   companyId: string | null;
-  /**
-   * Com `current_step` já na fase pós-certificado, empresa e certificado
-   * ficam somente leitura no trilho.
-   */
   lockStepsOneToTwo?: boolean;
   onStepClick?: (step: SetupStepNumber) => void;
 }) {

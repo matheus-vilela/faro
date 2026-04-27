@@ -152,7 +152,7 @@ export function isStep5XmlZipComplete(
  * - credenciais => usuário obrigatório; com integração ativa, senha nova ou já salva
  */
 /** Passo 5 do wizard (PDV / EPOC). */
-export function getStep5EpocState(
+export function getStep6EpocState(
   epoc: SetupEpocState | undefined,
 ): { completed: boolean; skipped: boolean } {
   const mode = epoc?.mode ?? "undecided";
@@ -169,3 +169,4 @@ export function getStep5EpocState(
   }
   return { completed: false, skipped: false };
 }
+

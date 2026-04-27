@@ -65,7 +65,8 @@ export function getSystemProductUnitSelectOptions(): {
 }
 
 /**
- * Opções do select + item extra quando o produto ainda usa código fora do catálogo (legado).
+ * Opções do select + item extra quando o produto ainda usa código fora do catálogo
+ * (importação, XML, dados antigos).
  */
 export function getSystemProductUnitSelectOptionsWithLegacy(
   currentUnit: string | undefined | null,
@@ -74,5 +75,58 @@ export function getSystemProductUnitSelectOptionsWithLegacy(
   const raw = (currentUnit ?? "").trim();
   if (!raw) return base;
   if (isSystemUnitCode(raw)) return base;
-  return [{ value: raw, label: `${raw} (legado — altere para uma unidade do sistema)` }, ...base];
+  return [
+    {
+      value: raw,
+      label: `${raw} — fora do catálogo: escolha abaixo ou crie a unidade.`,
+    },
+    ...base,
+  ];
+}
+
+export type CompanyUnitAliasRow = { unit_code: string; unit_label: string };
+
+/** Unidade do catálogo (sistema) ou unidade personalizada da empresa. */
+export function isUnitInCompanyCatalog(
+  unit: string | null | undefined,
+  customUnitAliasOptions: ReadonlyArray<CompanyUnitAliasRow>,
+): boolean {
+  const u = (unit ?? "").trim();
+  if (!u) return true;
+  if (isSystemUnitCode(u)) return true;
+  return customUnitAliasOptions.some(
+    (a) => a.unit_code.trim().toLowerCase() === u.toLowerCase(),
+  );
+}
+
+/**
+ * Sistema + unidades personalizadas da empresa; inclui a linha extra
+ * (código atual fora do catálogo) quando a unidade do produto ainda não bate
+ * com nenhum código conhecido.
+ */
+export function buildProductUnitSelectOptions(
+  currentUnit: string | undefined | null,
+  customUnitAliasOptions: ReadonlyArray<CompanyUnitAliasRow>,
+): { value: string; label: string }[] {
+  const base = getSystemProductUnitSelectOptionsWithLegacy(currentUnit);
+  if (!customUnitAliasOptions.length) return base;
+  const customCodes = new Set(
+    customUnitAliasOptions.map((u) => u.unit_code.trim().toLowerCase()),
+  );
+  const baseWithoutLegacyForCustom = base.filter(
+    (x) =>
+      !(
+        customCodes.has(x.value.trim().toLowerCase()) && !isSystemUnitCode(x.value)
+      ),
+  );
+  const has = new Set(
+    baseWithoutLegacyForCustom.map((x) => x.value.toLowerCase()),
+  );
+  const extra = customUnitAliasOptions
+    .map((u) => ({
+      value: u.unit_code.trim().toLowerCase(),
+      label: `${u.unit_label} (${u.unit_code.trim().toLowerCase()})`,
+    }))
+    .filter((u) => u.value && !has.has(u.value));
+  return [...baseWithoutLegacyForCustom, ...extra];
 }

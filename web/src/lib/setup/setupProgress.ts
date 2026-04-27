@@ -8,10 +8,7 @@ function asStep(n: number): SetupStepNumber | null {
 }
 
 /** Passos que contam como “feitos” para o percentual */
-function isStepCounted(
-  step: SetupStepNumber,
-  setup: CompanySetupMap,
-): boolean {
+function isStepCounted(step: SetupStepNumber, setup: CompanySetupMap): boolean {
   const completed = new Set(setup.completed_steps ?? []);
   const skipped = new Set(setup.skipped_steps ?? []);
   return completed.has(step) || skipped.has(step);

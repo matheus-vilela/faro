@@ -113,8 +113,9 @@ export function applyFocusCnpjConsulta(
   lockEmpresa.length = 0;
   lockEmpresa.push(...lockEmpresaUnique);
 
-  if ((currentFantasia ?? "").trim()) {
-    empresa.nome_fantasia = currentFantasia.trim();
+  const fant = (currentFantasia ?? "").trim();
+  if (fant) {
+    empresa.nome_fantasia = fant;
   }
 
   const endereco: EnderecoPrincipalMap = {};

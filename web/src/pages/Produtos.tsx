@@ -62,6 +62,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import {
   getLockedSystemSecondaryQty,
   convertUnitPriceForProduct,
@@ -69,6 +70,7 @@ import {
   rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
 import {
+  buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
   isSystemUnitCode,
 } from "@/lib/companyUnits/productUnitOptions";
@@ -193,6 +195,46 @@ type StockMovementRow = {
   unit_cost: number | null;
 };
 
+type OperationalTypeValue =
+  | "INSUMO"
+  | "PRODUTO_REVENDA"
+  | "ITEM_OPERACIONAL"
+  | "RECEITA_FICHA"
+  | "NAO_ESTOCAVEL"
+  | "REVISAO_PENDENTE";
+
+const OPERATIONAL_TYPE_LABEL: Record<OperationalTypeValue, string> = {
+  INSUMO: "Insumo",
+  PRODUTO_REVENDA: "Revenda",
+  ITEM_OPERACIONAL: "Operacional",
+  RECEITA_FICHA: "Receita / ficha",
+  NAO_ESTOCAVEL: "Nao estocavel",
+  REVISAO_PENDENTE: "Revisao pendente",
+};
+
+const OPERATIONAL_TYPE_OPTIONS: OperationalTypeValue[] = [
+  "INSUMO",
+  "PRODUTO_REVENDA",
+  "ITEM_OPERACIONAL",
+  "RECEITA_FICHA",
+  "NAO_ESTOCAVEL",
+  "REVISAO_PENDENTE",
+];
+
+type OperationalConfigSnapshot = {
+  suggested_operational_type: string | null;
+  suggested_score: number | null;
+  suggestion_reasons: Record<string, unknown> | null;
+  configuration_status: string | null;
+  configuration_completeness: Record<string, unknown> | null;
+  linked_entry_breakdown_recipe_id: string | null;
+};
+
+function operationalTypeLabel(value: string | null | undefined): string {
+  if (!value) return "Nao classificado";
+  return OPERATIONAL_TYPE_LABEL[value as OperationalTypeValue] ?? value;
+}
+
 const STOCK_REF_LABEL: Record<string, string> = {
   inventory_count: "Contagem",
   expense: "Despesa",
@@ -234,6 +276,38 @@ async function fetchProductCatalogMap(
     const list = out[row.product_id] ?? [];
     list.push({ id: c.id, name: c.name });
     out[row.product_id] = list;
+  }
+  return out;
+}
+
+async function fetchProductConversionMap(
+  companyId: string,
+  productIds: string[],
+): Promise<Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>>> {
+  if (productIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from("product_unit_conversions")
+    .select("product_id, primary_qty, primary_unit_code, secondary_qty, secondary_unit_code")
+    .eq("company_id", companyId)
+    .in("product_id", productIds)
+    .order("secondary_unit_code", { ascending: true });
+  if (error) return {};
+  const out: Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>> = {};
+  for (const row of data ?? []) {
+    const r = row as {
+      product_id: string;
+      primary_qty: number;
+      primary_unit_code: string;
+      secondary_qty: number;
+      secondary_unit_code: string;
+    };
+    if (!out[r.product_id]) out[r.product_id] = [];
+    out[r.product_id]!.push({
+      primary_qty: Number(r.primary_qty),
+      primary_unit_code: r.primary_unit_code,
+      secondary_qty: Number(r.secondary_qty),
+      secondary_unit_code: r.secondary_unit_code,
+    });
   }
   return out;
 }
@@ -365,8 +439,17 @@ export function Produtos() {
   const [productCatalogMap, setProductCatalogMap] = useState<
     Record<string, { id: string; name: string }[]>
   >({});
+  const [operationalTypeByProduct, setOperationalTypeByProduct] = useState<Record<string, string | null>>({});
+  const [operationalConfigByProduct, setOperationalConfigByProduct] = useState<
+    Record<string, OperationalConfigSnapshot>
+  >({});
+  const [stockOperationalType, setStockOperationalType] =
+    useState<OperationalTypeValue>("REVISAO_PENDENTE");
   const [pendingPurchaseByProduct, setPendingPurchaseByProduct] = useState<
     Record<string, number>
+  >({});
+  const [productConversionMap, setProductConversionMap] = useState<
+    Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>>
   >({});
   const [stockSaving, setStockSaving] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
@@ -390,28 +473,10 @@ export function Produtos() {
 
   const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
 
-  const unitSelectOptions = useMemo(() => {
-    const base = getSystemProductUnitSelectOptionsWithLegacy(stockUnit);
-    if (!customUnitAliasOptions.length) return base;
-    const customCodes = new Set(
-      customUnitAliasOptions.map((u) => u.unit_code.trim().toLowerCase()),
-    );
-    const baseWithoutLegacyForCustom = base.filter(
-      (x) =>
-        !(
-          customCodes.has(x.value.trim().toLowerCase()) &&
-          x.label.toLowerCase().includes("legado")
-        ),
-    );
-    const has = new Set(baseWithoutLegacyForCustom.map((x) => x.value.toLowerCase()));
-    const extra = customUnitAliasOptions
-      .map((u) => ({
-        value: u.unit_code.trim().toLowerCase(),
-        label: `${u.unit_label} (${u.unit_code.trim().toLowerCase()})`,
-      }))
-      .filter((u) => u.value && !has.has(u.value));
-    return [...baseWithoutLegacyForCustom, ...extra];
-  }, [stockUnit, customUnitAliasOptions]);
+  const unitSelectOptions = useMemo(
+    () => buildProductUnitSelectOptions(stockUnit, customUnitAliasOptions),
+    [stockUnit, customUnitAliasOptions],
+  );
   const knownUnitCodes = useMemo(
     () => new Set(unitSelectOptions.map((u) => u.value.trim().toLowerCase())),
     [unitSelectOptions],
@@ -702,6 +767,8 @@ export function Produtos() {
           setProducts([]);
           setProductsCount(0);
           setProductCatalogMap({});
+          setOperationalTypeByProduct({});
+          setOperationalConfigByProduct({});
           setPendingPurchaseByProduct({});
           return;
         }
@@ -764,15 +831,60 @@ export function Produtos() {
       const rows = (data ?? []) as Product[];
       setProducts(rows);
       setProductsCount(count ?? 0);
-      const [catalogMap, pendingMap] = await Promise.all([
+      const [catalogMap, pendingMap, opCfg] = await Promise.all([
         fetchProductCatalogMap(
           currentCompany.id,
           rows.map((p) => p.id),
         ),
         loadPendingPurchaseQuantities(currentCompany.id),
+        rows.length > 0
+          ? supabase
+              .from("product_operational_config")
+              .select(
+                "product_id, final_operational_type, suggested_operational_type, suggested_score, suggestion_reasons, configuration_status, configuration_completeness, linked_entry_breakdown_recipe_id",
+              )
+              .eq("company_id", currentCompany.id)
+              .in("product_id", rows.map((p) => p.id))
+          : Promise.resolve({ data: [], error: null }),
       ]);
       setProductCatalogMap(catalogMap);
       setPendingPurchaseByProduct(pendingMap);
+      const convMap = await fetchProductConversionMap(
+        currentCompany.id,
+        rows.map((p) => p.id),
+      );
+      setProductConversionMap(convMap);
+      if (opCfg.error) {
+        console.error(opCfg.error);
+        setOperationalTypeByProduct({});
+        setOperationalConfigByProduct({});
+      } else {
+        const byId: Record<string, string | null> = {};
+        const cfgById: Record<string, OperationalConfigSnapshot> = {};
+        for (const raw of opCfg.data ?? []) {
+          const row = raw as {
+            product_id: string;
+            final_operational_type: string | null;
+            suggested_operational_type: string | null;
+            suggested_score: number | null;
+            suggestion_reasons: Record<string, unknown> | null;
+            configuration_status: string | null;
+            configuration_completeness: Record<string, unknown> | null;
+            linked_entry_breakdown_recipe_id: string | null;
+          };
+          byId[row.product_id] = row.final_operational_type ?? row.suggested_operational_type ?? null;
+          cfgById[row.product_id] = {
+            suggested_operational_type: row.suggested_operational_type,
+            suggested_score: row.suggested_score,
+            suggestion_reasons: row.suggestion_reasons ?? null,
+            configuration_status: row.configuration_status,
+            configuration_completeness: row.configuration_completeness ?? null,
+            linked_entry_breakdown_recipe_id: row.linked_entry_breakdown_recipe_id ?? null,
+          };
+        }
+        setOperationalTypeByProduct(byId);
+        setOperationalConfigByProduct(cfgById);
+      }
     } finally {
       setLoading(false);
     }
@@ -1016,7 +1128,11 @@ export function Produtos() {
     const importRaw = (p.import_unit_raw ?? "").trim();
     setStockCustomUnitInput(importRaw);
     setStockCustomUnitLabel("");
-  }, []);
+    setStockOperationalType(
+      (operationalTypeByProduct[p.id] as OperationalTypeValue | null | undefined) ??
+        "REVISAO_PENDENTE",
+    );
+  }, [operationalTypeByProduct]);
 
   const openStockSheet = (p: Product) => {
     const gen = ++assignmentLoadGenRef.current;
@@ -1052,6 +1168,7 @@ export function Produtos() {
     setStockProductCategoryIds([]);
     setInitialStockProductCategoryIds([]);
     stockProductCategoryIdsRef.current = [];
+    setStockOperationalType("REVISAO_PENDENTE");
     setStockProductConversions([]);
     setInitialStockProductConversions([]);
     setStockMovementRows([]);
@@ -1082,6 +1199,10 @@ export function Produtos() {
       (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
     const composesCmvChanged =
       productComposesCmv(stockProduct) !== stockComposesCmv;
+    const currentOperationalType =
+      (operationalTypeByProduct[stockProduct.id] as OperationalTypeValue | null | undefined) ??
+      "REVISAO_PENDENTE";
+    const operationalTypeChanged = stockOperationalType !== currentOperationalType;
 
     const parsedLast = parseCurrencyInput(stockLastUnitValue);
     const resolvedLastUnit =
@@ -1123,6 +1244,7 @@ export function Produtos() {
       !unitChanged &&
       !barcodeChanged &&
       !composesCmvChanged &&
+      !operationalTypeChanged &&
       !lastUnitValueChanged &&
       !lastUnitValueUnitChanged &&
       !categoriesChanged &&
@@ -1258,6 +1380,41 @@ export function Produtos() {
         setStockSaving(false);
         return;
       }
+    }
+    if (operationalTypeChanged) {
+      const cfg = operationalConfigByProduct[stockProduct.id];
+      const { data, error } = await supabase.rpc("upsert_product_operational_config", {
+        p_product_id: stockProduct.id,
+        p_suggested_operational_type:
+          (cfg?.suggested_operational_type as OperationalItemType | null) ??
+          stockOperationalType,
+        p_suggested_score: cfg?.suggested_score ?? 0,
+        p_suggestion_reasons: (cfg?.suggestion_reasons ?? {}) as never,
+        p_final_operational_type: stockOperationalType,
+        p_final_decision_source: "USER_EDITED",
+        p_configuration_status: cfg?.configuration_status ?? "PENDENTE",
+        p_configuration_completeness:
+          (cfg?.configuration_completeness ?? {}) as never,
+        p_linked_entry_breakdown_recipe_id:
+          cfg?.linked_entry_breakdown_recipe_id ?? null,
+        p_notes: null,
+        p_ui_filter_json: null,
+      });
+      if (error) {
+        console.error(error);
+        setStockSaving(false);
+        return;
+      }
+      const out = data as { ok?: boolean; error?: string };
+      if (!out?.ok) {
+        toast.error(out?.error ?? "Falha ao salvar tipo operacional.");
+        setStockSaving(false);
+        return;
+      }
+      setOperationalTypeByProduct((prev) => ({
+        ...prev,
+        [stockProduct.id]: stockOperationalType,
+      }));
     }
 
     const sourceReviewRaw = String(stockProduct.import_unit_raw ?? "").trim();
@@ -1730,6 +1887,7 @@ export function Produtos() {
                   unitCost != null
                     ? Number(p.current_quantity) * unitCost
                     : null;
+                const operationalType = operationalTypeByProduct[p.id] ?? null;
                 const catalogTags = productCatalogMap[p.id];
                 const composesLabel = productComposesCmv(p)
                   ? "Compõe CMV: Sim"
@@ -1740,6 +1898,17 @@ export function Produtos() {
                     : [composesLabel];
                 const pendingPurchaseQty =
                   pendingPurchaseByProduct[p.id] ?? 0;
+                const convRows = productConversionMap[p.id] ?? [];
+                const conversionStatus =
+                  p.import_unit_needs_review
+                    ? "conflitante"
+                    : convRows.length > 0
+                      ? "configurada"
+                      : "pendente";
+                const conversionExample =
+                  convRows.length > 0
+                    ? `${convRows[0]!.secondary_qty} ${convRows[0]!.secondary_unit_code.toUpperCase()} = ${convRows[0]!.primary_qty} ${convRows[0]!.primary_unit_code.toUpperCase()}`
+                    : "Sem conversão cadastrada";
                 return (
                   <li key={p.id}>
                     <div
@@ -1827,6 +1996,18 @@ export function Produtos() {
 
                               {catSegments.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
+                                  {operationalType ? (
+                                    <span
+                                      className={cn(
+                                        "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
+                                        "border-indigo-300/70 bg-indigo-500/10 text-indigo-950 dark:border-indigo-600/50 dark:bg-indigo-500/[0.14] dark:text-indigo-50",
+                                      )}
+                                    >
+                                      <span className="truncate">
+                                        Tipo final: {operationalTypeLabel(operationalType)}
+                                      </span>
+                                    </span>
+                                  ) : null}
                                   {catSegments.map((seg, idx) => (
                                     <span
                                       key={`${p.id}-${idx}-${seg}`}
@@ -1847,12 +2028,17 @@ export function Produtos() {
                                 </span>
                                 <span className="mx-2 text-border">·</span>
                                 <span>Unidade: {p.unit}</span>
+                                <span className="mx-2 text-border">·</span>
+                                <span>Compra: {p.last_unit_value_unit_code ?? p.unit}</span>
                                 {p.import_unit_needs_review && p.import_unit_raw ? (
                                   <>
                                     <span className="mx-2 text-border">·</span>
                                     <span>XML: {p.import_unit_raw}</span>
                                   </>
                                 ) : null}
+                              </p>
+                              <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
+                                Conversões: {convRows.length} · Exemplo: {conversionExample} · Situação: {conversionStatus}
                               </p>
                             </div>
 
@@ -2097,6 +2283,14 @@ export function Produtos() {
                         </span>
                         <span className="text-right font-medium leading-snug">
                           {productComposesCmv(stockProduct) ? "Sim" : "Não"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm sm:col-span-2">
+                        <span className="text-muted-foreground shrink-0">
+                          Tipo final operacional
+                        </span>
+                        <span className="text-right font-medium leading-snug">
+                          {operationalTypeLabel(operationalTypeByProduct[stockProduct.id] ?? null)}
                         </span>
                       </div>
                     </div>
@@ -2415,6 +2609,30 @@ export function Produtos() {
                             placeholder="Opcional — EAN ou alfanumérico"
                             className={cn(SHEET_INPUT, "font-mono")}
                           />
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background px-4 py-3">
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Tipo final operacional
+                        </p>
+                        <div className="mt-2">
+                          <Select
+                            value={stockOperationalType}
+                            onValueChange={(v) =>
+                              setStockOperationalType(v as OperationalTypeValue)
+                            }
+                          >
+                            <SelectTrigger className={SHEET_SELECT}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {OPERATIONAL_TYPE_OPTIONS.map((t) => (
+                                <SelectItem key={t} value={t}>
+                                  {operationalTypeLabel(t)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                       <div>

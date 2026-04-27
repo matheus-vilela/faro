@@ -45,6 +45,91 @@ describe("resolveXmlImportLine", () => {
     expect(r.import_nature).toBe("ESTOQUE_DIRETO")
     expect(r.import_stock_resolution).toBe("DIRECT")
     expect(r.import_pending_resolution).toBe(false)
+    expect(
+      (r.import_score_reasons_json as { master_catalog?: { master_item_id?: string } }).master_catalog
+        ?.master_item_id,
+    ).toBeDefined()
+    expect(
+      (r.import_score_reasons_json as { master_recipe?: { master_recipe_id?: string } }).master_recipe,
+    ).toBeNull()
+  })
+
+  it("nome com sinal negativo forte bloqueia explosão por ficha ainda que o catálogo seja receita", () => {
+    const rules: ImportResolutionRuleRow[] = []
+    const recipes: EntryBreakdownRecipeRow[] = [
+      {
+        id: "rec_barril",
+        output_product_id: "barril_unit",
+        batch_yield: 1,
+        active: true,
+        recipe_type: "ENTRY_BREAKDOWN",
+        version: 1,
+      },
+    ]
+    const products = new Map<string, ProductStockRow>([
+      ["barril_unit", { id: "barril_unit", stock_control_type: "RECIPE_CONTROLLED" }],
+    ])
+    const item: XmlLineForResolution = {
+      productName: "Barril de chopp 30L vazio",
+      quantity: 1,
+      productMatch: {
+        resolvedProductId: "barril_unit",
+        suggestedProductId: "barril_unit",
+        suggestedScore: 98,
+        needsConfirmation: false,
+        resolutionStatus: "AUTO_MATCH",
+      },
+    }
+    const r = resolveXmlImportLine({
+      companyId: "c1",
+      supplierId: "s1",
+      item,
+      rules,
+      productsById: products,
+      entryBreakdownRecipes: recipes,
+      thresholds,
+    })
+    expect(r.import_engine_suggestion).toBe("REVISAO_MANUAL")
+    expect(r.import_pending_resolution).toBe(true)
+    expect(r.import_stock_resolution).toBeNull()
+  })
+
+  it("item de drink expõe sugestão de template master_recipe na auditoria", () => {
+    const item: XmlLineForResolution = {
+      productName: "Caipirinha tradicional",
+      quantity: 10,
+      productMatch: {
+        resolvedProductId: "caipirinha",
+        suggestedProductId: "caipirinha",
+        suggestedScore: 96,
+        needsConfirmation: false,
+        resolutionStatus: "AUTO_MATCH",
+      },
+    }
+    const recipes: EntryBreakdownRecipeRow[] = [
+      {
+        id: "rec_caipi",
+        output_product_id: "caipirinha",
+        batch_yield: 1,
+        active: true,
+        recipe_type: "ENTRY_BREAKDOWN",
+        version: 2,
+      },
+    ]
+    const r = resolveXmlImportLine({
+      companyId: "c1",
+      supplierId: "s1",
+      item,
+      rules: [],
+      productsById: baseProducts(),
+      entryBreakdownRecipes: recipes,
+      thresholds,
+    })
+    expect(
+      (
+        r.import_score_reasons_json as { master_recipe?: { master_recipe_id?: string; explanation_pt?: string } }
+      ).master_recipe?.master_recipe_id,
+    ).toBe("mr-drink-caipirinha-tradicional")
   })
 
   it("baixa confiança vai para revisão manual", () => {
@@ -73,7 +158,7 @@ describe("resolveXmlImportLine", () => {
     expect(r.import_stock_resolution).toBeNull()
   })
 
-  it("regra aprendida por descrição normalizada explode automaticamente", () => {
+  it("regra aprendida EXPLODE_BY_RECIPE no XML vira revisão (explosão desligada)", () => {
     const rules: ImportResolutionRuleRow[] = [
       {
         id: "rule-caipi",
@@ -120,9 +205,15 @@ describe("resolveXmlImportLine", () => {
       thresholds,
     })
     expect(r.import_applied_rule_id).toBe("rule-caipi")
-    expect(r.import_stock_resolution).toBe("EXPLODE_BY_RECIPE")
-    expect(r.import_pending_resolution).toBe(false)
-    expect(r.import_engine_suggestion).toBe("AUTO_APPLY_EXPLODIR_FICHA")
+    expect(r.import_stock_resolution).toBeNull()
+    expect(r.resolved_entry_breakdown_recipe_id).toBeNull()
+    expect(r.import_pending_resolution).toBe(true)
+    expect(r.import_nature).toBe("REVISAO_MANUAL")
+    expect(r.import_engine_suggestion).toBe("REVISAO_MANUAL")
+    expect(
+      (r.import_score_reasons_json as { xml_recipe_path_disabled?: boolean })
+        ?.xml_recipe_path_disabled,
+    ).toBe(true)
   })
 
   it("produto composto sem ficha de entrada ativa bloqueia auto explosão", () => {
@@ -151,7 +242,7 @@ describe("resolveXmlImportLine", () => {
     expect(r.import_nature).toBe("REVISAO_MANUAL")
   })
 
-  it("sugestão explode quando score alto e ficha ativa", () => {
+  it("score alto com ficha ativa no XML não liga explosão (revisão pendente)", () => {
     const recipes: EntryBreakdownRecipeRow[] = [
       {
         id: "rec1",
@@ -182,9 +273,14 @@ describe("resolveXmlImportLine", () => {
       entryBreakdownRecipes: recipes,
       thresholds,
     })
-    expect(r.resolved_entry_breakdown_recipe_id).toBe("rec1")
-    expect(r.import_stock_resolution).toBe("EXPLODE_BY_RECIPE")
-    expect(r.import_pending_resolution).toBe(false)
+    expect(r.resolved_entry_breakdown_recipe_id).toBeNull()
+    expect(r.import_stock_resolution).toBeNull()
+    expect(r.import_pending_resolution).toBe(true)
+    expect(r.import_nature).toBe("REVISAO_MANUAL")
+    expect(
+      (r.import_score_reasons_json as { xml_recipe_path_disabled?: boolean })
+        ?.xml_recipe_path_disabled,
+    ).toBe(true)
   })
 
   it("reimportação: decisão memorizada não duplica regra no motor (apenas aplica rule id)", () => {
