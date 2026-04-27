@@ -1,4 +1,4 @@
-﻿-- Baixa de receita no estoque: converte ingredientes via input_quantity/input_unit_code.
+-- Baixa de receita no estoque: converte ingredientes via input_quantity/input_unit_code.
 -- Remove consume_recipe_stock(uuid, numeric) (ambiguidade com Supabase RPC).
 
 DROP FUNCTION IF EXISTS public.consume_recipe_stock(uuid, numeric);

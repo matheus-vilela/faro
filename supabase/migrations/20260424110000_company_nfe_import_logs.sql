@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS public.company_nfe_import_logs (
 
 ALTER TABLE public.company_nfe_import_logs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own company nfe logs"
+  ON public.company_nfe_import_logs;
 CREATE POLICY "Users can manage own company nfe logs"
   ON public.company_nfe_import_logs
   FOR ALL

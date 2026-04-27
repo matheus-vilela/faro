@@ -43,6 +43,8 @@ COMMENT ON TABLE public.product_operational_config IS
 
 ALTER TABLE public.product_operational_config ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users manage operational config in their company"
+  ON public.product_operational_config;
 CREATE POLICY "Users manage operational config in their company"
   ON public.product_operational_config FOR ALL
   USING (

@@ -126,6 +126,7 @@ WHERE NOT EXISTS (
 ALTER TABLE public.company_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_unit_conversions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage company units" ON public.company_units;
 CREATE POLICY "Users can manage company units"
   ON public.company_units FOR ALL
   USING (
@@ -135,6 +136,8 @@ CREATE POLICY "Users can manage company units"
     company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid())
   );
 
+DROP POLICY IF EXISTS "Users can manage company unit conversions"
+  ON public.company_unit_conversions;
 CREATE POLICY "Users can manage company unit conversions"
   ON public.company_unit_conversions FOR ALL
   USING (

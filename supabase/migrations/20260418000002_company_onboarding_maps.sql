@@ -32,6 +32,11 @@ ON CONFLICT (id) DO UPDATE SET
   file_size_limit = EXCLUDED.file_size_limit,
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
+DROP POLICY IF EXISTS "company_setup_select_company" ON storage.objects;
+DROP POLICY IF EXISTS "company_setup_insert_company" ON storage.objects;
+DROP POLICY IF EXISTS "company_setup_update_company" ON storage.objects;
+DROP POLICY IF EXISTS "company_setup_delete_company" ON storage.objects;
+
 CREATE POLICY "company_setup_select_company"
   ON storage.objects FOR SELECT TO authenticated
   USING (

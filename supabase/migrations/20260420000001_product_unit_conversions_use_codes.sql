@@ -8,14 +8,34 @@ ALTER TABLE public.product_unit_conversions
   ADD COLUMN IF NOT EXISTS primary_unit_code TEXT,
   ADD COLUMN IF NOT EXISTS secondary_unit_code TEXT;
 
-UPDATE public.product_unit_conversions puc
-SET
-  primary_unit_code = pu.code,
-  secondary_unit_code = su.code
-FROM public.company_units pu, public.company_units su
-WHERE puc.primary_unit_id = pu.id
-  AND puc.secondary_unit_id = su.id
-  AND (puc.primary_unit_code IS NULL OR puc.secondary_unit_code IS NULL);
+-- Só há primary_unit_id / secondary_unit_id na primeira migração a partir do schema 20260419000001.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'product_unit_conversions'
+      AND c.column_name = 'primary_unit_id'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'product_unit_conversions'
+      AND c.column_name = 'secondary_unit_id'
+  ) THEN
+    UPDATE public.product_unit_conversions puc
+    SET
+      primary_unit_code = pu.code,
+      secondary_unit_code = su.code
+    FROM public.company_units pu, public.company_units su
+    WHERE puc.primary_unit_id = pu.id
+      AND puc.secondary_unit_id = su.id
+      AND (puc.primary_unit_code IS NULL OR puc.secondary_unit_code IS NULL);
+  END IF;
+END;
+$$;
 
 DELETE FROM public.product_unit_conversions
 WHERE primary_unit_code IS NULL OR secondary_unit_code IS NULL;
@@ -39,6 +59,9 @@ ALTER TABLE public.product_unit_conversions
 ALTER TABLE public.product_unit_conversions
   DROP COLUMN IF EXISTS primary_unit_id,
   DROP COLUMN IF EXISTS secondary_unit_id;
+
+ALTER TABLE public.product_unit_conversions
+  DROP CONSTRAINT IF EXISTS product_unit_conversions_distinct_codes;
 
 ALTER TABLE public.product_unit_conversions
   ADD CONSTRAINT product_unit_conversions_distinct_codes
@@ -81,6 +104,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS tr_product_unit_conversions_codes_check ON public.product_unit_conversions;
 CREATE TRIGGER tr_product_unit_conversions_codes_check
   BEFORE INSERT OR UPDATE OF primary_unit_code, secondary_unit_code, product_id, company_id
   ON public.product_unit_conversions

@@ -1,5 +1,6 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
+import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
@@ -258,11 +259,16 @@ export function Dashboard() {
         icon={LayoutDashboard}
       />
 
-      <DashboardImportProgressBanner
-        loading={loadingImportProgress}
-        activeImportFiles={activeImportFiles}
-        activeImportPercent={activeImportPercent}
-      />
+      <div className="space-y-4">
+        <DashboardImportProgressBanner
+          loading={loadingImportProgress}
+          activeImportFiles={activeImportFiles}
+          activeImportPercent={activeImportPercent}
+        />
+        {companyId ? (
+          <DashboardIntegrationCsvRevenueCard companyId={companyId} />
+        ) : null}
+      </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">

@@ -1,5 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -39,6 +47,7 @@ import {
   Loader2,
   RefreshCw,
   Save,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -70,6 +79,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
   const [downloadingLastAcoes, setDownloadingLastAcoes] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+  const [purgeCount, setPurgeCount] = useState<number | null>(null);
+  const [purgeCountLoading, setPurgeCountLoading] = useState(false);
+  const [purging, setPurging] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,7 +139,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   }, [companyId]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
   const fileNameFromStoragePath = (path: string, fallback: string) => {
@@ -204,7 +217,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
-
     const oldPaths = [
       lastEpocAcoesResponseStoragePath?.trim() ?? "",
       lastEpocCsvStoragePath?.trim() ?? "",
@@ -296,6 +308,61 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     }
   };
 
+  const fetchEpocIntegrationRevenueCount = async () => {
+    setPurgeCountLoading(true);
+    setPurgeCount(null);
+    try {
+      const { data, error } = await supabase.rpc(
+        "count_revenue_entries_from_integration_import",
+        { p_company_id: companyId, p_provider: "epoc" },
+      );
+      if (error) throw error;
+      setPurgeCount(Number(data ?? 0));
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível contar as receitas importadas.",
+      );
+      setPurgeCount(null);
+    } finally {
+      setPurgeCountLoading(false);
+    }
+  };
+
+  const openPurgeEpocRevenuesDialog = () => {
+    setPurgeDialogOpen(true);
+    void fetchEpocIntegrationRevenueCount();
+  };
+
+  const handleConfirmPurgeEpocRevenues = async () => {
+    setPurging(true);
+    try {
+      const { data, error } = await supabase.rpc(
+        "delete_revenue_entries_from_integration_import",
+        { p_company_id: companyId, p_provider: "epoc" },
+      );
+      if (error) throw error;
+      const n = Number(data ?? 0);
+      toast.success(
+        n === 0
+          ? "Nenhuma receita importada do EPOC para remover."
+          : `Removidas ${n} receita(s) criadas pela integração EPOC.`,
+      );
+      setPurgeDialogOpen(false);
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível apagar as receitas importadas.",
+      );
+    } finally {
+      setPurging(false);
+    }
+  };
+
   const handleSave = async () => {
     const u = username.trim();
     if (!u) {
@@ -306,7 +373,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Informe a senha ou desative a integração até configurar.");
       return;
     }
-
     setSaving(true);
 
     const { data: prevRow } = await supabase
@@ -557,9 +623,16 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 </Select>
               </div>
             </div>
+
             <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
               <p className="text-sm font-medium">
                 Relatório EPOC (tabela + CSV)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                O import automático de receitas usa sempre a{" "}
+                <strong>primeira folha de receita operacional</strong> da unidade
+                (exclui deduções DRE), na mesma ordem de Configurações → Categorias
+                (campo ordem, depois nome).
               </p>
               {lastEpocAcoesResponseSyncAt ? (
                 <p className="text-xs text-muted-foreground">
@@ -631,6 +704,27 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 </Button>
               </div>
             </div>
+
+            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">
+                Receitas importadas do EPOC
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Remove receitas ligadas ao lote de importação EPOC ou ao job do CSV
+                (mesmo que o lote já não exista), com estorno de estoque em vendas
+                de produto e remoção de boletos vinculados. Ficheiros no Storage e
+                definições da integração não são alterados.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => openPurgeEpocRevenuesDialog()}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Apagar receitas importadas do EPOC
+              </Button>
+            </div>
           </div>
 
           <SheetFooter className="gap-2 border-t pt-4 sm:flex-col sm:space-x-0">
@@ -652,6 +746,67 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={purgeDialogOpen}
+        onOpenChange={(open) => {
+          setPurgeDialogOpen(open);
+          if (!open) {
+            setPurgeCount(null);
+            setPurgeCountLoading(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apagar receitas importadas do EPOC?</DialogTitle>
+            <DialogDescription>
+              Esta ação remove permanentemente os lançamentos ligados aos lotes
+              de importação automática do EPOC nesta unidade. Não pode ser
+              desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {purgeCountLoading ? (
+              <p className="flex items-center gap-2 font-medium text-foreground">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                A contar receitas…
+              </p>
+            ) : purgeCount !== null ? (
+              <p className="font-medium text-foreground">
+                {purgeCount === 0
+                  ? "Neste momento não há receitas importadas do EPOC para apagar."
+                  : `Serão apagadas ${purgeCount} receita(s).`}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPurgeDialogOpen(false)}
+              disabled={purging}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleConfirmPurgeEpocRevenues()}
+              disabled={purging || purgeCountLoading}
+            >
+              {purging ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A apagar…
+                </>
+              ) : (
+                "Apagar receitas"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

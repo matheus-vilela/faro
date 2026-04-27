@@ -113,6 +113,15 @@ ALTER TABLE public.master_item_alias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_master_catalog_override ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_item_classification_learning ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "master_item_catalog_select_authenticated"
+  ON public.master_item_catalog;
+DROP POLICY IF EXISTS "master_item_alias_select_authenticated"
+  ON public.master_item_alias;
+DROP POLICY IF EXISTS "company_master_catalog_override_all_member"
+  ON public.company_master_catalog_override;
+DROP POLICY IF EXISTS "company_item_class_learning_all_member"
+  ON public.company_item_classification_learning;
+
 -- Catálogo global: leitura para utilizadores autenticados; escrita só via migrations/serviço.
 CREATE POLICY "master_item_catalog_select_authenticated"
   ON public.master_item_catalog FOR SELECT

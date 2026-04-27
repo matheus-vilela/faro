@@ -198,6 +198,39 @@ function previewText(s: string, max: number): string {
   return `${s.slice(0, max)}… (${s.length} chars)`;
 }
 
+/** Dispara import de receitas a partir do CSV (não depende só do Database Webhook). */
+function scheduleProcessCsvRevenueJob(
+  supabaseUrl: string,
+  serviceKey: string,
+  anonKey: string,
+  jobId: string,
+): void {
+  const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-integration-csv-revenue-job`;
+  const trigger = fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      apikey: anonKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  }).catch((err) => {
+    console.error(LOG, "process_csv_revenue_job_trigger_falhou", {
+      job_id: jobId,
+      err: String(err),
+    });
+  });
+  try {
+    // @ts-ignore EdgeRuntime.waitUntil prolonga o isolate até o fetch terminar
+    if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(trigger);
+    }
+  } catch {
+    void trigger;
+  }
+}
+
 const VOID_HTML = new Set([
   "area",
   "base",
@@ -1490,10 +1523,38 @@ Deno.serve(async (req) => {
     );
   }
 
+  let csvRevenueImportJobId: string | null = null;
+  if (csvStoragePath) {
+    const { data: jobIns, error: jobErr } = await admin
+      .from("integration_csv_revenue_import_jobs")
+      .insert({
+        company_id: companyId,
+        requested_by: user.id,
+        provider: "epoc",
+        storage_bucket: "company-setup",
+        storage_path: csvStoragePath,
+        status: "PENDING",
+        metadata: {
+          steps_prefix: stepsPrefix,
+          source: "epoc-sync-csv",
+        },
+      })
+      .select("id")
+      .maybeSingle();
+    if (jobErr) {
+      log("csv_revenue_job_enqueue_falhou", { message: jobErr.message });
+    } else if (jobIns?.id) {
+      csvRevenueImportJobId = String(jobIns.id);
+      scheduleProcessCsvRevenueJob(supabaseUrl, serviceKey, anonKey, csvRevenueImportJobId);
+      log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
+    }
+  }
+
   log("concluido", {
     acoes_response_path: acoesResponsePath,
     doc_bytes: docBytes.length,
     steps: steps.length,
+    csv_revenue_import_job_id: csvRevenueImportJobId,
   });
 
   return json({
@@ -1514,5 +1575,7 @@ Deno.serve(async (req) => {
     size_bytes: csvSizeBytes,
     download_url: csvDownloadUrl,
     signed_url_expires_in: signedTtl,
+    /** Job para fila + Database Webhook → `process-integration-csv-revenue-job`. */
+    csv_revenue_import_job_id: csvRevenueImportJobId,
   });
 });

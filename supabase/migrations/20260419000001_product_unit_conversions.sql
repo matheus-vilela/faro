@@ -64,14 +64,31 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS tr_product_unit_conversions_check ON public.product_unit_conversions;
-CREATE TRIGGER tr_product_unit_conversions_check
-  BEFORE INSERT OR UPDATE OF primary_unit_id, secondary_unit_id, product_id, company_id
-  ON public.product_unit_conversions
-  FOR EACH ROW
-  EXECUTE FUNCTION public.enforce_product_unit_conversion_primary();
+
+-- Se a tabela já existir no formato pós-20260420000001 (só códigos), não há primary_unit_id;
+-- CREATE TABLE IF NOT EXISTS não recria colunas — evitar trigger inválido.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'product_unit_conversions'
+      AND c.column_name = 'primary_unit_id'
+  ) THEN
+    CREATE TRIGGER tr_product_unit_conversions_check
+      BEFORE INSERT OR UPDATE OF primary_unit_id, secondary_unit_id, product_id, company_id
+      ON public.product_unit_conversions
+      FOR EACH ROW
+      EXECUTE FUNCTION public.enforce_product_unit_conversion_primary();
+  END IF;
+END;
+$$;
 
 ALTER TABLE public.product_unit_conversions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage product unit conversions"
+  ON public.product_unit_conversions;
 CREATE POLICY "Users can manage product unit conversions"
   ON public.product_unit_conversions FOR ALL
   USING (

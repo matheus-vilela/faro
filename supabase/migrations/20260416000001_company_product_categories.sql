@@ -204,6 +204,8 @@ ON CONFLICT ON CONSTRAINT company_product_categories_company_name_unique DO NOTH
 ALTER TABLE public.company_product_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.product_category_assignments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage company product categories"
+  ON public.company_product_categories;
 CREATE POLICY "Users can manage company product categories"
   ON public.company_product_categories FOR ALL
   USING (
@@ -213,6 +215,8 @@ CREATE POLICY "Users can manage company product categories"
     company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid())
   );
 
+DROP POLICY IF EXISTS "Users can manage product category assignments"
+  ON public.product_category_assignments;
 CREATE POLICY "Users can manage product category assignments"
   ON public.product_category_assignments FOR ALL
   USING (

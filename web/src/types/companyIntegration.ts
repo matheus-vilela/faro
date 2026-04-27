@@ -22,6 +22,11 @@ export type EpocIntegrationSettings = {
   /** Legado: antes da renomeação para `last_epoc_acoes_response_*`. */
   last_epoc_html_sync_at?: string;
   last_epoc_html_storage_path?: string;
+  /**
+   * Legado: ignorado pelo import; a edge escolhe automaticamente a primeira folha de
+   * receita operacional (excl. dedução DRE).
+   */
+  epoc_csv_revenue_subcategory_id?: string;
 };
 
 export type CompanyIntegrationRow = {
@@ -75,6 +80,10 @@ export function parseEpocSettings(
     last_epoc_html_storage_path:
       typeof raw.last_epoc_html_storage_path === "string"
         ? raw.last_epoc_html_storage_path
+        : "",
+    epoc_csv_revenue_subcategory_id:
+      typeof raw.epoc_csv_revenue_subcategory_id === "string"
+        ? raw.epoc_csv_revenue_subcategory_id
         : "",
   };
 }

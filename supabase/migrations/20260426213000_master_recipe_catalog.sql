@@ -95,6 +95,15 @@ ALTER TABLE public.master_recipe_alias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.master_recipe_component ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenant_recipe_template_override ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "master_recipe_catalog_select_authenticated"
+  ON public.master_recipe_catalog;
+DROP POLICY IF EXISTS "master_recipe_alias_select_authenticated"
+  ON public.master_recipe_alias;
+DROP POLICY IF EXISTS "master_recipe_component_select_authenticated"
+  ON public.master_recipe_component;
+DROP POLICY IF EXISTS "tenant_recipe_template_override_all_member"
+  ON public.tenant_recipe_template_override;
+
 CREATE POLICY "master_recipe_catalog_select_authenticated"
   ON public.master_recipe_catalog FOR SELECT TO authenticated USING (true);
 CREATE POLICY "master_recipe_alias_select_authenticated"

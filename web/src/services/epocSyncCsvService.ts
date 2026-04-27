@@ -47,6 +47,8 @@ export type EpocSyncCsvResponse = {
   size_bytes?: number;
   download_url?: string | null;
   signed_url_expires_in?: number | null;
+  /** Fila criada para import de receitas (webhook → `process-integration-csv-revenue-job`). */
+  csv_revenue_import_job_id?: string | null;
 };
 
 /** Invoca a edge e devolve a resposta (URLs assinadas após sucesso). */

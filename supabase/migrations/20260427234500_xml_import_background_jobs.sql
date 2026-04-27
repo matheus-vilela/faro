@@ -131,6 +131,17 @@ ALTER TABLE public.import_job_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.import_job_timeline ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.import_review_pending ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage import job batches in their company"
+  ON public.import_job_batches;
+DROP POLICY IF EXISTS "Users can manage import job files in their company"
+  ON public.import_job_files;
+DROP POLICY IF EXISTS "Users can manage import job items in their company"
+  ON public.import_job_items;
+DROP POLICY IF EXISTS "Users can manage import job timeline in their company"
+  ON public.import_job_timeline;
+DROP POLICY IF EXISTS "Users can manage import review pending in their company"
+  ON public.import_review_pending;
+
 CREATE POLICY "Users can manage import job batches in their company"
   ON public.import_job_batches FOR ALL
   USING (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()))
