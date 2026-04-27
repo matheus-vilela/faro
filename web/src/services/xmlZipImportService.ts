@@ -10,6 +10,13 @@ function normalizeXmlZipImportError(raw: unknown): string {
   const msg = typeof raw === "string" ? raw : "";
   const lower = msg.toLowerCase();
   if (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed")
+  ) {
+    return "Não foi possível conectar ao servidor de importação. Verifique sua internet, a URL do Supabase (VITE_SUPABASE_URL) e se a função enqueue-nfe-import está disponível.";
+  }
+  if (
     lower.includes("nenhum xml válido") ||
     lower.includes("nenhum xml valido") ||
     lower.includes("nenhum xml")
@@ -25,6 +32,15 @@ export async function processXmlZipImport(
   callbacks: XmlZipProcessCallbacks,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    if (!supabaseUrl || !supabaseAnonKey) {
+      callbacks.onPhase("error");
+      return {
+        ok: false,
+        error:
+          "Configuração do Supabase ausente no frontend. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env.",
+      };
+    }
+
     callbacks.onPhase("uploading");
     const { data: sessData, error: sessErr } = await supabase.auth.getSession();
     const accessToken = sessData.session?.access_token;
@@ -144,7 +160,9 @@ export async function processXmlZipImport(
     callbacks.onPhase("error");
     return {
       ok: false,
-      error: e instanceof Error ? e.message : "Falha na importação.",
+      error: normalizeXmlZipImportError(
+        e instanceof Error ? e.message : "Falha na importação.",
+      ),
     };
   }
 }

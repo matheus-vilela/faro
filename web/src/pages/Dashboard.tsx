@@ -1,4 +1,5 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
+import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
@@ -31,6 +32,12 @@ interface AlertSummary {
   importPending: number;
 }
 
+type ImportBatchProgressRow = {
+  status: string;
+  total_files: number | null;
+  processed_files: number | null;
+};
+
 function formatLongDate(d: Date): string {
   return d.toLocaleDateString("pt-BR", {
     weekday: "long",
@@ -59,6 +66,9 @@ export function Dashboard() {
     boletoD1: 0,
     importPending: 0,
   });
+  const [loadingImportProgress, setLoadingImportProgress] = useState(true);
+  const [activeImportFiles, setActiveImportFiles] = useState(0);
+  const [activeImportPercent, setActiveImportPercent] = useState(0);
 
   const loadBoletos = useCallback(async () => {
     if (!companyId) {
@@ -143,6 +153,54 @@ export function Dashboard() {
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
 
+  const loadImportProgress = useCallback(async () => {
+    if (!companyId) {
+      setLoadingImportProgress(false);
+      setActiveImportFiles(0);
+      setActiveImportPercent(0);
+      return;
+    }
+
+    setLoadingImportProgress(true);
+    const { data, error } = await supabase
+      .from("import_job_batches")
+      .select("status, total_files, processed_files")
+      .eq("company_id", companyId)
+      .in("status", ["QUEUED", "PROCESSING"])
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error) {
+      setActiveImportFiles(0);
+      setActiveImportPercent(0);
+      setLoadingImportProgress(false);
+      return;
+    }
+
+    const rows = (data ?? []) as ImportBatchProgressRow[];
+    const totals = rows.reduce(
+      (acc, row) => {
+        const total = Math.max(Number(row.total_files ?? 0), 0);
+        const processed = Math.min(Math.max(Number(row.processed_files ?? 0), 0), total);
+        return {
+          totalFiles: acc.totalFiles + total,
+          processedFiles: acc.processedFiles + processed,
+        };
+      },
+      { totalFiles: 0, processedFiles: 0 },
+    );
+
+    const pendingFiles = Math.max(totals.totalFiles - totals.processedFiles, 0);
+    const progress =
+      totals.totalFiles > 0
+        ? Number(((totals.processedFiles / totals.totalFiles) * 100).toFixed(0))
+        : 0;
+
+    setActiveImportFiles(pendingFiles);
+    setActiveImportPercent(progress);
+    setLoadingImportProgress(false);
+  }, [companyId]);
+
   useEffect(() => {
     queueMicrotask(() => void loadBoletos());
   }, [loadBoletos]);
@@ -150,6 +208,10 @@ export function Dashboard() {
   useEffect(() => {
     queueMicrotask(() => void loadAlertSummary());
   }, [loadAlertSummary]);
+
+  useEffect(() => {
+    queueMicrotask(() => void loadImportProgress());
+  }, [loadImportProgress]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
@@ -194,6 +256,12 @@ export function Dashboard() {
         title="Início"
         description={headerDescription}
         icon={LayoutDashboard}
+      />
+
+      <DashboardImportProgressBanner
+        loading={loadingImportProgress}
+        activeImportFiles={activeImportFiles}
+        activeImportPercent={activeImportPercent}
       />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">

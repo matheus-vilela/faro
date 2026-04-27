@@ -13,6 +13,8 @@ const corsHeaders: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const MAX_FILES_PER_RUN = 8;
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -229,7 +231,7 @@ Deno.serve(async (req) => {
 
   const { data: batch, error: batchErr } = await supabase
     .from("import_job_batches")
-    .select("id, company_id, requested_by, total_files")
+    .select("id, company_id, requested_by, total_files, processed_files, success_files, failed_files, pending_review_files")
     .eq("id", batchId)
     .maybeSingle();
   if (batchErr || !batch?.id) return json({ ok: false, error: "lote não encontrado." }, 404);
@@ -248,24 +250,35 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
 
+  const nowIso = new Date().toISOString();
   await supabase
     .from("import_job_batches")
-    .update({ status: "PROCESSING", started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .update({ status: "PROCESSING", updated_at: nowIso })
     .eq("id", batchId);
-  await appendTimeline(supabase, batchId, "UPLOAD", "Lote enfileirado para processamento.");
+  if (Number(batch.processed_files ?? 0) === 0) {
+    await supabase
+      .from("import_job_batches")
+      .update({ started_at: nowIso })
+      .eq("id", batchId)
+      .is("started_at", null);
+    await appendTimeline(supabase, batchId, "UPLOAD", "Lote enfileirado para processamento.");
+  }
 
   const { data: files } = await supabase
     .from("import_job_files")
     .select("id, file_name, xml_hash, xml_content_base64")
     .eq("batch_id", batchId)
+    .in("status", ["QUEUED", "PROCESSING"])
     .order("created_at", { ascending: true });
 
-  let processed = 0;
-  let success = 0;
-  let failed = 0;
-  let pendingReviewFiles = 0;
+  let processed = Number(batch.processed_files ?? 0);
+  let success = Number(batch.success_files ?? 0);
+  let failed = Number(batch.failed_files ?? 0);
+  let pendingReviewFiles = Number(batch.pending_review_files ?? 0);
 
-  for (const fRaw of files ?? []) {
+  const chunkFiles = (files ?? []).slice(0, MAX_FILES_PER_RUN);
+
+  for (const fRaw of chunkFiles) {
     const file = fRaw as { id: string; file_name: string; xml_hash: string; xml_content_base64: string };
     const fileId = file.id;
     await supabase
@@ -515,6 +528,39 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       })
       .eq("id", batchId);
+  }
+
+  const totalFiles = Number(batch.total_files ?? 0);
+  const remainingFiles = Math.max(totalFiles - processed, 0);
+  if (remainingFiles > 0) {
+    const nextTrigger = fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        apikey: anonKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ batch_id: batchId }),
+    }).catch(() => undefined);
+    try {
+      // @ts-ignore Edge runtime helper (quando disponível)
+      if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(nextTrigger);
+      }
+    } catch {
+      // no-op
+    }
+    return json({
+      ok: true,
+      batch_id: batchId,
+      status: "PROCESSING",
+      processed_files: processed,
+      success_files: success,
+      failed_files: failed,
+      pending_review_files: pendingReviewFiles,
+      remaining_files: remainingFiles,
+    });
   }
 
   const finalStatus =

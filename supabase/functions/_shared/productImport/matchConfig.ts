@@ -9,7 +9,7 @@
  * Podem ser sobrescritos por linha em `company_product_import_settings` (Supabase).
  */
 export const DEFAULT_IMPORT_MATCH_THRESHOLDS = {
-  autoMatchMinScore: 92,
+  autoMatchMinScore: 80,
   confirmMinScore: 80,
 } as const
 
