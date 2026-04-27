@@ -7,6 +7,8 @@ const PHASE_LABEL: Record<SetupXmlZipImportState["phase"], string> = {
   parsing: "Lendo XMLs",
   preview: "Pré-visualização",
   importing: "Importando",
+  queued: "Na fila",
+  processing: "Processando em segundo plano",
   done: "Concluído",
   error: "Erro",
 };
@@ -26,8 +28,9 @@ export function StepXmlZipForm({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Envie um arquivo .zip com XMLs de notas. O processamento completo pode
-        levar alguns segundos e processa cada XML separadamente.
+        Envie um arquivo .zip com XMLs de notas. O processamento roda em
+        segundo plano e você pode continuar usando o sistema enquanto a
+        importação avança.
       </p>
 
       <div

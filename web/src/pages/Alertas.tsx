@@ -55,6 +55,7 @@ const KIND_LABEL: Record<CompanyAlertKind, string> = {
   recebimento_falta: "Falta no recebimento",
   boleto_vencimento_d3: "Boleto a pagar",
   boleto_vencimento_d1: "Boleto a pagar",
+  import_pending_review: "Pendência de importação",
 };
 
 function isBoletoVencimentoKind(k: CompanyAlertKind): boolean {
@@ -118,6 +119,8 @@ function kindIconWrap(kind: CompanyAlertKind) {
       "border-amber-600/35 bg-amber-500/12 text-amber-800 dark:text-amber-300",
     kind === "boleto_vencimento_d1" &&
       "border-red-500/35 bg-red-500/12 text-red-800 dark:text-red-400",
+    kind === "import_pending_review" &&
+      "border-indigo-500/35 bg-indigo-500/12 text-indigo-800 dark:text-indigo-300",
   );
 }
 
@@ -126,6 +129,8 @@ function KindIcon({ kind }: { kind: CompanyAlertKind }) {
   if (kind === "low_stock") return <Package className={cls} strokeWidth={2} />;
   if (kind === "expense_no_boleto")
     return <FileText className={cls} strokeWidth={2} />;
+  if (kind === "import_pending_review")
+    return <Bell className={cls} strokeWidth={2} />;
   if (kind === "boleto_vencimento_d3" || kind === "boleto_vencimento_d1")
     return <CalendarClock className={cls} strokeWidth={2} />;
   return <PackageX className={cls} strokeWidth={2} />;
@@ -144,7 +149,8 @@ export function Alertas() {
       k === "expense_no_boleto" ||
       k === "low_stock" ||
       k === "boleto_vencimento_d3" ||
-      k === "boleto_vencimento_d1"
+      k === "boleto_vencimento_d1" ||
+      k === "import_pending_review"
     ) {
       return k;
     }
@@ -320,6 +326,9 @@ export function Alertas() {
             </SelectItem>
             <SelectItem value="boleto_vencimento_d3">
               Vencimento D-3 (em 3 dias)
+            </SelectItem>
+            <SelectItem value="import_pending_review">
+              Pendências da importação
             </SelectItem>
           </SelectContent>
         </Select>

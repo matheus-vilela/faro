@@ -5,7 +5,9 @@ export type CompanyAlertKind =
   /** Boleto a pagar com vencimento em 3 dias (calendário). */
   | "boleto_vencimento_d3"
   /** Boleto a pagar com vencimento amanhã (D-1). */
-  | "boleto_vencimento_d1";
+  | "boleto_vencimento_d1"
+  /** Pendências abertas de importação XML em background. */
+  | "import_pending_review";
 
 export type CompanyAlertSeverity = "info" | "warning" | "danger";
 

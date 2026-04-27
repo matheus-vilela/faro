@@ -13,7 +13,7 @@ import type { Company } from "@/contexts/CompanyContext";
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
-  setup_schema_version: 2,
+  setup_schema_version: 3,
   current_step: 1,
   completed_steps: [],
   skipped_steps: [],
@@ -46,8 +46,34 @@ function migrateLegacySixStepWizardSetup(setup: CompanySetupMap): CompanySetupMa
   return mergeSetupPatch(setup, {
     completed_steps: remap(cs),
     skipped_steps: remap(sk),
-    current_step: Math.min(6, Math.max(1, newCur)),
+    current_step: Math.min(5, Math.max(1, newCur)),
     setup_schema_version: 2,
+  });
+}
+
+/** Versão 2 (5 passos) → 3 (6 passos, classificação de itens = passo 5; PDV = passo 6). */
+function migrateV2FiveStepToV3SixStep(setup: CompanySetupMap): CompanySetupMap {
+  const mapStep = (s: number) => (s === 5 ? 6 : s);
+  const cs = (setup.completed_steps ?? []).map(mapStep);
+  const sk = (setup.skipped_steps ?? []).map(mapStep);
+  const completed = new Set(cs);
+  const skipped = new Set(sk);
+  if (completed.has(6) && !completed.has(5) && !skipped.has(5)) {
+    skipped.add(5);
+  }
+  let cur = setup.current_step ?? 1;
+  if (cur === 5) {
+    cur = 6;
+  } else if (cur === 6) {
+    cur = 7;
+  } else if (cur > 6) {
+    cur = 7;
+  }
+  return mergeSetupPatch(setup, {
+    setup_schema_version: 3,
+    completed_steps: [...completed].sort((a, b) => a - b),
+    skipped_steps: [...skipped].sort((a, b) => a - b),
+    current_step: Math.min(7, Math.max(1, cur)),
   });
 }
 
@@ -267,6 +293,9 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
     certificate: o.certificate as CompanySetupMap["certificate"],
     xml_zip_import: o.xml_zip_import as CompanySetupMap["xml_zip_import"],
     epoc: o.epoc as CompanySetupMap["epoc"],
+    item_classification_onboarding: o.item_classification_onboarding as
+      | CompanySetupMap["item_classification_onboarding"]
+      | undefined,
   };
   if (!base.certificate) base.certificate = { status: "not_sent" };
   if (!base.xml_zip_import) {
@@ -274,7 +303,7 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
   }
   if (!base.epoc) base.epoc = { mode: "undecided" };
   const ep = base.epoc as SetupEpocState & { mode?: string; excel_storage_path?: string };
-  if (ep.mode === "excel") {
+  if (String(ep.mode) === "excel") {
     base.epoc = {
       mode: "undecided",
       enabled: ep.enabled,
@@ -287,8 +316,14 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
       updated_at: ep.updated_at,
     };
   }
+  let migrated: CompanySetupMap = base;
   const version = base.setup_schema_version ?? 0;
-  const migrated = version < 2 ? migrateLegacySixStepWizardSetup(base) : base;
+  if (version < 2) {
+    migrated = migrateLegacySixStepWizardSetup(migrated);
+  }
+  if ((migrated.setup_schema_version ?? 0) < 3) {
+    migrated = migrateV2FiveStepToV3SixStep(migrated);
+  }
   migrated.progress_percent = calculateSetupProgress(migrated);
   return migrated;
 }

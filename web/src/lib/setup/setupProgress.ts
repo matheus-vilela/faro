@@ -18,7 +18,7 @@ function isStepCounted(
 }
 
 /**
- * Progresso linear: 5 passos de igual peso.
+ * Progresso linear: 6 passos de igual peso.
  * Passos em `skipped_steps` (ex.: PDV/EPOC “não usa”) contam como concluídos.
  */
 export function calculateSetupProgress(setup: CompanySetupMap): number {

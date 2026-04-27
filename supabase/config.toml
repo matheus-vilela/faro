@@ -44,8 +44,11 @@ verify_jwt = false
 [functions.focus-atualizar-certificado]
 verify_jwt = false
 
-[functions.import-nfe-zip]
-verify_jwt = false
+[functions.enqueue-nfe-import]
+verify_jwt = true
+
+[functions.process-import-job-batch]
+verify_jwt = true
 
 [functions.focus-cria-empresa]
 verify_jwt = false

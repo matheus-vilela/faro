@@ -46,11 +46,11 @@ export function SetupStepper({
 }: {
   activeStep: number;
   setup: CompanySetupMap;
-  /** Após criar a unidade no passo 1, permite ir aos passos 2–6. */
+  /** Após criar a unidade no passo 1, permite ir aos passos 2–7. */
   companyId: string | null;
   /**
    * Quando a unidade já foi criada na Faro e o fluxo passou do certificado (`current_step >= 4`),
-   * os passos 1–3 ficam somente leitura (não navegáveis).
+   * os passos 1–3 ficam somente leitura.
    */
   lockStepsOneToThree?: boolean;
   onStepClick?: (step: SetupStepNumber) => void;
@@ -77,7 +77,7 @@ export function SetupStepper({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
         {([1, 2, 3, 4, 5] as const).map((n) => {
           const st = stepStatus(n, setup, activeStep);
           const enabled = stepEnabled(n);

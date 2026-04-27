@@ -8,6 +8,14 @@
  * - Conflitos de unidade vindos do `productMatch` forçam revisão manual (não misturar com explosão automática).
  */
 
+import {
+  importNameHeuristicBlocksRecipePath,
+  matchStrongNegativeLabels,
+} from "@/lib/itemClassification/namingImportSignals"
+import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes"
+import { buildMasterImportReasons } from "@/lib/masterItemCatalog/resolveMasterItemCatalog"
+import { buildMasterRecipeImportReasons } from "@/lib/masterRecipeCatalog/suggestMasterRecipeTemplate"
+import type { CompanyMasterCatalogOverrideInput } from "@/lib/masterItemCatalog/companyContext"
 import { canonicalProductName } from "@/lib/productImport/canonicalName"
 import type { ImportMatchThresholds } from "@/lib/productImport/matchConfig"
 
@@ -81,6 +89,14 @@ export type ResolveXmlImportLineInput = {
   productsById: Map<string, ProductStockRow>
   entryBreakdownRecipes: EntryBreakdownRecipeRow[]
   thresholds: ImportMatchThresholds
+  /** Sinais opcionais (overrides, aprendizado) para o mesmo lote de import. */
+  masterImportHints?: {
+    companyOverrides?: CompanyMasterCatalogOverrideInput[] | null
+    lineLearning?: {
+      normalizedKey: string
+      tallies: Partial<Record<OperationalItemType, number>>
+    } | null
+  } | null
 }
 
 export type ResolveXmlImportLineResult = {
@@ -98,6 +114,23 @@ export type ResolveXmlImportLineResult = {
 
 function scoreTo01(score0to100: number): number {
   return Math.min(1, Math.max(0, score0to100 / 100))
+}
+
+function withMasterImportAudit(
+  productName: string,
+  reasons: Record<string, unknown>,
+  hints: ResolveXmlImportLineInput["masterImportHints"] | undefined,
+): Record<string, unknown> {
+  return {
+    ...reasons,
+    ...buildMasterImportReasons(productName, {
+      companyOverrides: hints?.companyOverrides,
+      lineLearning: hints?.lineLearning
+        ? { normalized_key: hints.lineLearning.normalizedKey, tallies: hints.lineLearning.tallies }
+        : null,
+    }),
+    ...buildMasterRecipeImportReasons(productName),
+  }
 }
 
 function findLearnedRule(
@@ -167,7 +200,7 @@ function natureForProduct(t: StockControlType): ImportNature {
  * Decide como a linha deve ser tratada antes do recebimento / estoque.
  */
 export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveXmlImportLineResult {
-  const { supplierId, item, rules, productsById, entryBreakdownRecipes, thresholds } = input
+  const { supplierId, item, rules, productsById, entryBreakdownRecipes, thresholds, masterImportHints } = input
   const pm = item.productMatch
   const reasons: Record<string, unknown> = {}
   const autoT = thresholds.autoMatchMinScore / 100
@@ -187,7 +220,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
         import_nature: "REVISAO_MANUAL",
         import_engine_suggestion: "REVISAO_MANUAL",
         import_confidence_0_1: baseConf,
-        import_score_reasons_json: reasons,
+        import_score_reasons_json: withMasterImportAudit(item.productName, reasons, masterImportHints),
         import_stock_resolution: null,
         resolved_entry_breakdown_recipe_id: null,
         import_pending_resolution: true,
@@ -196,20 +229,19 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
       }
     }
 
-    if (learned.resolution_mode === "EXPLODE_BY_RECIPE" && learned.target_recipe_id) {
-      const rec = entryBreakdownRecipes.find((r) => r.id === learned.target_recipe_id)
-      const recipeOk = rec && rec.active && rec.recipe_type === "ENTRY_BREAKDOWN"
-      const autoApply = learned.auto_apply && recipeOk
+    if (learned.resolution_mode === "EXPLODE_BY_RECIPE") {
       return {
-        import_nature: recipeOk ? "EXPLODIR_POR_FICHA" : "REVISAO_MANUAL",
-        import_engine_suggestion: autoApply
-          ? "AUTO_APPLY_EXPLODIR_FICHA"
-          : "AUTO_SUGESTAO_EXPLODIR_FICHA",
+        import_nature: "REVISAO_MANUAL",
+        import_engine_suggestion: "REVISAO_MANUAL",
         import_confidence_0_1: baseConf,
-        import_score_reasons_json: { ...reasons, recipe_active: rec?.active ?? false },
-        import_stock_resolution: recipeOk ? "EXPLODE_BY_RECIPE" : null,
-        resolved_entry_breakdown_recipe_id: recipeOk ? learned.target_recipe_id : null,
-        import_pending_resolution: !autoApply || !recipeOk,
+        import_score_reasons_json: withMasterImportAudit(
+          item.productName,
+          { ...reasons, xml_recipe_path_disabled: true, learned_recipe_mode: true },
+          masterImportHints,
+        ),
+        import_stock_resolution: null,
+        resolved_entry_breakdown_recipe_id: null,
+        import_pending_resolution: true,
         target_product_id: learned.target_product_id,
         import_applied_rule_id: learned.id,
       }
@@ -221,7 +253,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
         import_nature: p ? natureForProduct(p.stock_control_type) : "ESTOQUE_DIRETO",
         import_engine_suggestion: learned.auto_apply ? "AUTO_MATCH_ESTOQUE_DIRETO" : "REVISAO_MANUAL",
         import_confidence_0_1: baseConf,
-        import_score_reasons_json: reasons,
+        import_score_reasons_json: withMasterImportAudit(item.productName, reasons, masterImportHints),
         import_stock_resolution: "DIRECT",
         resolved_entry_breakdown_recipe_id: null,
         import_pending_resolution: !learned.auto_apply,
@@ -236,7 +268,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
       import_nature: "REVISAO_MANUAL",
       import_engine_suggestion: "REVISAO_MANUAL",
       import_confidence_0_1: 0,
-      import_score_reasons_json: { ...reasons, note: "missing_product_match" },
+      import_score_reasons_json: withMasterImportAudit(item.productName, { ...reasons, note: "missing_product_match" }, masterImportHints),
       import_stock_resolution: null,
       resolved_entry_breakdown_recipe_id: null,
       import_pending_resolution: true,
@@ -252,7 +284,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
       import_nature: "REVISAO_MANUAL",
       import_engine_suggestion: "REVISAO_MANUAL",
       import_confidence_0_1: scoreTo01(pm.suggestedScore),
-      import_score_reasons_json: reasons,
+      import_score_reasons_json: withMasterImportAudit(item.productName, reasons, masterImportHints),
       import_stock_resolution: null,
       resolved_entry_breakdown_recipe_id: null,
       import_pending_resolution: true,
@@ -271,7 +303,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
       import_nature: "REVISAO_MANUAL",
       import_engine_suggestion: "REVISAO_MANUAL",
       import_confidence_0_1: conf,
-      import_score_reasons_json: reasons,
+      import_score_reasons_json: withMasterImportAudit(item.productName, reasons, masterImportHints),
       import_stock_resolution: null,
       resolved_entry_breakdown_recipe_id: null,
       import_pending_resolution: true,
@@ -285,24 +317,47 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
   const breakdown = pickEntryBreakdownForProduct(entryBreakdownRecipes, pid)
 
   if (
+    importNameHeuristicBlocksRecipePath(item.productName) &&
+    (stockType === "RECIPE_CONTROLLED" || stockType === "COMPOSITE") &&
+    breakdown
+  ) {
+    return {
+      import_nature: "REVISAO_MANUAL",
+      import_engine_suggestion: "REVISAO_MANUAL",
+      import_confidence_0_1: conf,
+      import_score_reasons_json: withMasterImportAudit(
+        item.productName,
+        {
+          ...reasons,
+          name_block_recipe_path: true,
+          name_negative_labels: matchStrongNegativeLabels(item.productName),
+        },
+        masterImportHints,
+      ),
+      import_stock_resolution: null,
+      resolved_entry_breakdown_recipe_id: null,
+      import_pending_resolution: true,
+      target_product_id: pid,
+      import_applied_rule_id: null,
+    }
+  }
+
+  if (
     breakdown &&
     (stockType === "RECIPE_CONTROLLED" || stockType === "COMPOSITE")
   ) {
-    const canAutoExplode = conf >= autoT && breakdown.active
-    reasons.entry_breakdown_recipe_id = breakdown.id
-    reasons.recipe_version = breakdown.version
     return {
-      import_nature: "EXPLODIR_POR_FICHA",
-      import_engine_suggestion: canAutoExplode
-        ? "AUTO_APPLY_EXPLODIR_FICHA"
-        : conf >= confT
-          ? "AUTO_SUGESTAO_EXPLODIR_FICHA"
-          : "REVISAO_MANUAL",
+      import_nature: "REVISAO_MANUAL",
+      import_engine_suggestion: "REVISAO_MANUAL",
       import_confidence_0_1: conf,
-      import_score_reasons_json: reasons,
-      import_stock_resolution: canAutoExplode ? "EXPLODE_BY_RECIPE" : null,
-      resolved_entry_breakdown_recipe_id: breakdown.id,
-      import_pending_resolution: !canAutoExplode,
+      import_score_reasons_json: withMasterImportAudit(
+        item.productName,
+        { ...reasons, xml_recipe_path_disabled: true, entry_breakdown_recipe_id: breakdown.id },
+        masterImportHints,
+      ),
+      import_stock_resolution: null,
+      resolved_entry_breakdown_recipe_id: null,
+      import_pending_resolution: true,
       target_product_id: pid,
       import_applied_rule_id: null,
     }
@@ -314,10 +369,11 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
       import_nature: "REVISAO_MANUAL",
       import_engine_suggestion: "REVISAO_MANUAL",
       import_confidence_0_1: conf,
-      import_score_reasons_json: {
-        ...reasons,
-        block_reason: "missing_active_entry_breakdown_recipe",
-      },
+      import_score_reasons_json: withMasterImportAudit(
+        item.productName,
+        { ...reasons, block_reason: "missing_active_entry_breakdown_recipe" },
+        masterImportHints,
+      ),
       import_stock_resolution: null,
       resolved_entry_breakdown_recipe_id: null,
       import_pending_resolution: true,
@@ -339,7 +395,7 @@ export function resolveXmlImportLine(input: ResolveXmlImportLineInput): ResolveX
     import_nature: insumoLike ? "INSUMO" : "ESTOQUE_DIRETO",
     import_engine_suggestion: suggestion,
     import_confidence_0_1: conf,
-    import_score_reasons_json: reasons,
+    import_score_reasons_json: withMasterImportAudit(item.productName, reasons, masterImportHints),
     import_stock_resolution: conf >= autoT ? "DIRECT" : null,
     resolved_entry_breakdown_recipe_id: null,
     import_pending_resolution: conf < autoT,

@@ -34,6 +34,8 @@ interface ProductCategoryTagsFieldProps {
   disabled?: boolean;
   label?: string;
   hint?: string;
+  /** Bloco mais baixo, para tabelas / onboarding. */
+  compact?: boolean;
 }
 
 export function ProductCategoryTagsField({
@@ -45,6 +47,7 @@ export function ProductCategoryTagsField({
   disabled,
   label,
   hint,
+  compact = false,
 }: ProductCategoryTagsFieldProps) {
   const resolvedLabel =
     label === undefined ? "Categorias de produto" : label;
@@ -121,16 +124,24 @@ export function ProductCategoryTagsField({
   };
 
   return (
-    <div className="space-y-2">
+    <div className={cn("space-y-2", compact && "space-y-1.5")}>
       {resolvedLabel.trim() ? <Label>{resolvedLabel}</Label> : null}
       <div
         className={cn(
-          "min-h-[3rem] rounded-2xl border border-border bg-background px-3 py-2.5 shadow-sm transition-colors",
+          "rounded-2xl border border-border bg-background shadow-sm transition-colors",
+          compact
+            ? "min-h-0 px-2.5 py-1.5"
+            : "min-h-[3rem] px-3 py-2.5",
           disabled && "pointer-events-none opacity-60",
         )}
       >
         {selectedOrdered.length === 0 ? (
-          <p className="py-1 text-sm text-muted-foreground">
+          <p
+            className={cn(
+              "text-muted-foreground",
+              compact ? "py-0.5 text-xs" : "py-1 text-sm",
+            )}
+          >
             Nenhuma categoria — use o campo abaixo para adicionar.
           </p>
         ) : (
@@ -166,7 +177,12 @@ export function ProductCategoryTagsField({
           <Button
             type="button"
             variant="outline"
-            className="h-11 w-full justify-between rounded-xl border-dashed font-normal text-muted-foreground hover:text-foreground"
+            className={cn(
+              "w-full justify-between border-dashed font-normal text-muted-foreground hover:text-foreground",
+              compact
+                ? "h-8 rounded-md text-xs"
+                : "h-11 rounded-xl",
+            )}
             disabled={disabled}
           >
             <span className="flex items-center gap-2">
@@ -177,7 +193,7 @@ export function ProductCategoryTagsField({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="flex max-h-[min(22rem,70vh)] w-[min(100vw-2rem,22rem)] flex-col gap-0 overflow-hidden p-0"
+          className="z-[200] flex max-h-[min(22rem,70vh)] w-[min(100vw-2rem,22rem)] flex-col gap-0 overflow-hidden p-0"
           align="start"
           sideOffset={6}
           collisionPadding={16}
@@ -188,7 +204,7 @@ export function ProductCategoryTagsField({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar ou digitar nome novo…"
-              className="h-10"
+              className={cn(compact ? "h-8 text-sm" : "h-10")}
               disabled={creating}
             />
           </div>

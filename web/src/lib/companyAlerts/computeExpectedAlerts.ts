@@ -282,5 +282,24 @@ export async function computeExpectedCompanyAlerts(
     });
   }
 
+  const { count: pendingImportCount } = await supabase
+    .from("import_review_pending")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("status", "OPEN");
+  if ((pendingImportCount ?? 0) > 0) {
+    out.push({
+      dedupe_key: "import_pending_review_open",
+      kind: "import_pending_review",
+      severity: "warning",
+      title: "Pendências da importação XML",
+      message: `${pendingImportCount} item(ns) precisam de revisão operacional.`,
+      link_path: "/app",
+      payload: {
+        open_pending_count: pendingImportCount,
+      },
+    });
+  }
+
   return out;
 }

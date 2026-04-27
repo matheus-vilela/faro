@@ -43,7 +43,7 @@ export async function processXmlZipImport(
     fd.append("company_id", companyId);
     fd.append("file", file);
     const base = supabaseUrl.replace(/\/$/, "");
-    const res = await fetch(`${base}/functions/v1/import-nfe-zip`, {
+    const res = await fetch(`${base}/functions/v1/enqueue-nfe-import`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -75,21 +75,70 @@ export async function processXmlZipImport(
         ),
       };
     }
-    const files = Array.isArray(o.files) ? o.files : [];
-    const out: XmlZipFileLogEntry[] = files.map((f) => {
-      const row = f && typeof f === "object" ? (f as Record<string, unknown>) : {};
-      return {
-        name: typeof row.name === "string" ? row.name : file.name,
-        ok: row.ok === true,
-        status:
-          typeof row.status === "string"
-            ? (row.status as XmlZipFileLogEntry["status"])
-            : undefined,
-        message: typeof row.message === "string" ? row.message : undefined,
-      };
-    });
-    callbacks.onLog(out);
+    const batchId = String(o.job_batch_id ?? "").trim();
+    if (!batchId) {
+      callbacks.onPhase("error");
+      return { ok: false, error: "Lote de importação não retornado pelo servidor." };
+    }
+    callbacks.onLog([{
+      name: file.name,
+      ok: true,
+      status: "success",
+      message: "Importação iniciada em segundo plano. Você pode continuar usando o sistema.",
+    }]);
+
+    const startedAt = Date.now();
+    const timeoutMs = 20_000;
+    while (Date.now() - startedAt < timeoutMs) {
+      const { data: batch, error: batchErr } = await supabase
+        .from("import_job_batches")
+        .select("status")
+        .eq("id", batchId)
+        .maybeSingle();
+      if (batchErr) break;
+      const status = String((batch as { status?: string } | null)?.status ?? "");
+      if (
+        status === "COMPLETED" ||
+        status === "FAILED" ||
+        status === "PARTIAL_SUCCESS" ||
+        status === "COMPLETED_WITH_PENDING_REVIEW"
+      ) {
+        const { data: files } = await supabase
+          .from("import_job_files")
+          .select("file_name, status, last_error")
+          .eq("batch_id", batchId)
+          .order("created_at", { ascending: true });
+        const out: XmlZipFileLogEntry[] = (files ?? []).map((f) => {
+          const row = f as { file_name: string; status: string; last_error?: string | null };
+          const ok = row.status === "COMPLETED" || row.status === "COMPLETED_WITH_PENDING_REVIEW";
+          const mappedStatus: XmlZipFileLogEntry["status"] =
+            row.status === "COMPLETED"
+              ? "success"
+              : row.status === "COMPLETED_WITH_PENDING_REVIEW"
+                ? "needs_review"
+                : row.status === "FAILED"
+                  ? "validation_error"
+                  : "duplicate";
+          return {
+            name: row.file_name,
+            ok,
+            status: mappedStatus,
+            message: ok ? (row.status === "COMPLETED_WITH_PENDING_REVIEW" ? "Concluído com pendências de revisão." : "Concluído.") : (row.last_error ?? "Falha."),
+          };
+        });
+        callbacks.onLog(out);
+        callbacks.onPhase("done");
+        return { ok: true };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
     callbacks.onPhase("done");
+    callbacks.onLog([{
+      name: file.name,
+      ok: true,
+      status: "needs_review",
+      message: "Importação segue em segundo plano. Acompanhe em Importações.",
+    }]);
     return { ok: true };
   } catch (e) {
     callbacks.onPhase("error");

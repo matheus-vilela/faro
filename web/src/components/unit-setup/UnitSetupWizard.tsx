@@ -16,7 +16,7 @@ import {
   mergeSetupPatch,
 } from "@/lib/setup/setupProgress";
 import {
-  getStep5EpocState,
+  getStep6EpocState,
   isStep1EmpresaComplete,
   isStep2EnderecoComplete,
   isStep3CertificatePayloadComplete,
@@ -253,7 +253,7 @@ export function UnitSetupWizard({
         ? isStep4CertificateComplete(merged.certificate)
         : isStep3CertificatePayloadComplete(merged.certificate, sec);
       const s4xml = isStep5XmlZipComplete(merged.xml_zip_import);
-      const s5ep = getStep5EpocState(merged.epoc);
+      const s6ep = getStep6EpocState(merged.epoc);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
@@ -261,8 +261,8 @@ export function UnitSetupWizard({
       completed = upsertStep(completed, 2, s2);
       completed = upsertStep(completed, 3, s3cert);
       completed = upsertStep(completed, 4, s4xml);
-      completed = upsertStep(completed, 5, s5ep.completed);
-      skipped = upsertStep(skipped, 5, s5ep.skipped);
+      completed = upsertStep(completed, 5, s6ep.completed);
+      skipped = upsertStep(skipped, 5, s6ep.skipped);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
@@ -825,7 +825,7 @@ export function UnitSetupWizard({
         }
       }
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 6, epoc: ep }),
+        mergeSetupPatch(setup, { current_step: 7, epoc: ep }),
       );
       await patchCompanyMaps(companyId, {
         setup: nextSetup,
@@ -1144,7 +1144,7 @@ export function UnitSetupWizard({
     <>
       <PageHeader
         title="Configurar unidade"
-        description="Assistente em cinco etapas. O passo 1 cria a unidade; os demais podem ser concluídos depois."
+        description="Assistente em seis etapas. O passo 1 cria a unidade; os demais podem ser concluídos depois."
         icon={Building2}
         className={isModal ? "pb-2" : undefined}
       />
@@ -1275,9 +1275,15 @@ export function UnitSetupWizard({
     </>
   );
 
+  const setupShellClass = "max-w-3xl space-y-8";
+
   return isModal ? (
-    <div className="space-y-6">{wizardBody}</div>
+    <div
+      className="space-y-6"
+    >
+      {wizardBody}
+    </div>
   ) : (
-    <PageShell className="max-w-3xl space-y-8">{wizardBody}</PageShell>
+    <PageShell className={setupShellClass}>{wizardBody}</PageShell>
   );
 }

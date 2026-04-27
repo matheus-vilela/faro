@@ -11,12 +11,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/contexts/ThemeContext";
-import { RecebimentoImportItemResolution } from "@/components/recebimento/RecebimentoImportItemResolution";
+import {
+  catalogResolutionFromOperationalConfig,
+  type CatalogResolutionHint,
+} from "@/lib/recebimento/catalogResolutionFromOperationalConfig";
 import { supabase } from "@/lib/supabase";
 import { Building2, FileText, PackageCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { toast } from "sonner";
 
 /** Mesmo fundo de grade + vinheta da tela de login */
 function RecebimentoPageShell({ children }: { children: ReactNode }) {
@@ -83,11 +85,48 @@ interface RecebimentoData {
 
 type ItemStatus = "received" | "partial" | "not_received";
 
-function recipeSessionKey(item: RecebimentoItem): string {
-  const pid = item.product_id?.trim();
-  if (pid) return `pid:${pid}`;
-  const raw = (item.product_name ?? "").trim().toLowerCase();
-  return `name:${raw}`;
+/**
+ * Aplica resolução de importação a partir do onboarding (`product_operational_config`)
+ * ou, em último caso, entrada direta — sem interação do operador no recebimento.
+ */
+async function autoApplyImportResolutions(
+  recebimentoToken: string,
+  items: RecebimentoItem[] | undefined,
+  hints: Record<string, CatalogResolutionHint | null>,
+): Promise<boolean> {
+  if (!items?.length) return false;
+  let anyOk = false;
+  for (const it of items) {
+    if (it.import_pending_resolution !== true) continue;
+    const h = it.product_id ? (hints[it.product_id] ?? null) : null;
+    const pImportStock = h
+      ? h.import_stock_resolution
+      : "DIRECT";
+    const pRecipe = h ? h.resolved_recipe_id : null;
+    const pNature = h ? h.import_nature : "ESTOQUE_DIRETO";
+    const pSuggestion = h
+      ? h.suggestion
+      : "AUTO_FALLBACK_SEM_CLASSIFICACAO_CADASTRO";
+    const { data, error } = await supabase.rpc(
+      "update_expense_item_import_resolution_for_recebimento",
+      {
+        p_token: recebimentoToken,
+        p_expense_item_id: it.id,
+        p_import_stock_resolution: pImportStock,
+        p_resolved_recipe_id: pRecipe,
+        p_target_product_id: it.product_id ?? null,
+        p_import_nature: pNature,
+        p_import_engine_suggestion: pSuggestion,
+        p_import_pending_resolution: false,
+        p_import_score_reasons_json: (it.import_score_reasons_json ?? null) as never,
+        p_import_confidence_0_1: it.import_confidence_0_1 ?? null,
+      },
+    );
+    if (error) continue;
+    const o = data as { ok?: boolean };
+    if (o?.ok) anyOk = true;
+  }
+  return anyOk;
 }
 
 export function ConfirmarRecebimento() {
@@ -100,7 +139,9 @@ export function ConfirmarRecebimento() {
   const [partialQty, setPartialQty] = useState<Record<number, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [sessionRecipeByKey, setSessionRecipeByKey] = useState<Record<string, string>>({});
+  const [itemClassificationIncomplete, setItemClassificationIncomplete] = useState<number | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     if (!token) {
@@ -115,8 +156,8 @@ export function ConfirmarRecebimento() {
         p_token: token,
       },
     );
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError("Erro ao carregar");
       return;
     }
@@ -124,17 +165,78 @@ export function ConfirmarRecebimento() {
     if (obj?.error) {
       setError(obj.error);
       setData(null);
+      setLoading(false);
       return;
     }
-    setData(obj);
     setError(null);
+    setItemStatus({});
+
+    const pids = [
+      ...new Set(
+        (obj.items ?? [])
+          .map((it) => it.product_id)
+          .filter((x): x is string => Boolean(x && String(x).trim())),
+      ),
+    ];
+    const hints: Record<string, CatalogResolutionHint | null> = {};
+    if (pids.length > 0) {
+      for (const pid of pids) {
+        hints[pid] = null;
+      }
+      const { data: hintRpc, error: hintErr } = await supabase.rpc(
+        "get_catalog_resolution_hints_for_recebimento",
+        {
+          p_token: token,
+          p_product_ids: pids,
+        },
+      );
+      const hPayload = hintRpc as {
+        ok?: boolean;
+        rows?: Array<{
+          product_id: string;
+          configuration_status: string;
+          final_operational_type: string | null;
+          linked_entry_breakdown_recipe_id: string | null;
+        }>;
+      };
+      if (!hintErr && hPayload?.ok && Array.isArray(hPayload.rows)) {
+        for (const r of hPayload.rows) {
+          const pid = r.product_id;
+          hints[pid] = catalogResolutionFromOperationalConfig(r);
+        }
+      }
+    }
+
+    const reloaded = await autoApplyImportResolutions(token, obj.items, hints);
+    let finalData = obj;
+    if (reloaded) {
+      const { data: res2, error: e2 } = await supabase.rpc("get_recebimento_by_token", {
+        p_token: token,
+      });
+      if (!e2 && res2) {
+        const o2 = res2 as RecebimentoData & { error?: string };
+        if (!o2.error) finalData = o2;
+      }
+    }
+
+    setData(finalData);
     const pq: Record<number, string> = {};
-    (obj.items ?? []).forEach((it, i) => {
+    (finalData.items ?? []).forEach((it, i) => {
       pq[i] = String(Number(it.quantity));
     });
-    setItemStatus({});
     setPartialQty(pq);
-    setSessionRecipeByKey({});
+
+    const { data: icSt } = await supabase.rpc(
+      "get_item_classification_onboarding_status_for_recebimento",
+      { p_token: token },
+    );
+    const ic = icSt as { ok?: boolean; incomplete?: number };
+    if (ic?.ok && typeof ic.incomplete === "number" && ic.incomplete > 0) {
+      setItemClassificationIncomplete(ic.incomplete);
+    } else {
+      setItemClassificationIncomplete(null);
+    }
+    setLoading(false);
   }, [token]);
 
   useEffect(() => {
@@ -144,13 +246,6 @@ export function ConfirmarRecebimento() {
   const handleConfirm = async () => {
     if (!token || !data?.items?.length) return;
     const items = data.items;
-    const importPending = items.some((it) => it.import_pending_resolution === true);
-    if (importPending) {
-      setError(
-        "Resolva todos os itens pendentes de importação (estoque ou ficha) antes de confirmar o recebimento.",
-      );
-      return;
-    }
     if (!items.every((_, i) => itemStatus[i] !== undefined)) return;
     const pItems = items.map((it, i) => {
       const st = itemStatus[i]!;
@@ -303,10 +398,6 @@ export function ConfirmarRecebimento() {
   const hasNotReceived = items.some((_, i) => itemStatus[i] === "not_received");
   const hasPartial = items.some((_, i) => itemStatus[i] === "partial");
   const canConfirm = data?.viewer_can_confirm !== false;
-  const importResolutionPending = items.some(
-    (it) => it.import_pending_resolution === true,
-  );
-
   return (
     <RecebimentoPageShell>
       <Card className="mx-auto max-w-lg w-full overflow-hidden border-border/80 shadow-md">
@@ -379,15 +470,19 @@ export function ConfirmarRecebimento() {
           <p className="text-sm text-muted-foreground">
             Para cada item, informe se recebeu tudo, uma parte da quantidade ou
             nada. Faltas e parciais geram alerta para o gestor (ex.: pediu 10 e
-            chegaram 6 — informe 6 em &quot;Parcial&quot;).
+            chegaram 6 — informe 6 em &quot;Parcial&quot;). A forma de entrada no
+            estoque (direta ou por ficha) usa automaticamente a classificação
+            operacional do produto no Faro; ajuste no assistente de itens, se
+            precisar.
           </p>
-          {importResolutionPending && (
-            <p className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-50">
-              Esta nota tem itens importados por XML que precisam de decisão de
-              estoque (entrada direta ou distribuição por ficha técnica de
-              entrada). Use o painel em cada item antes de confirmar.
+          {itemClassificationIncomplete != null && itemClassificationIncomplete > 0 ? (
+            <p className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-50">
+              A unidade ainda tem {itemClassificationIncomplete} item(ns) sem
+              classificação operacional concluída no assistente de configuração.
+              O recebimento usa a classificação já definida; finalize o cadastro no
+              onboarding para reduzir pendências e alertas.
             </p>
-          )}
+          ) : null}
 
           <div className="space-y-3">
             <p className="font-medium">Itens:</p>
@@ -474,77 +569,6 @@ export function ConfirmarRecebimento() {
                       </Button>
                     </div>
                   </div>
-                  {token && (
-                    <RecebimentoImportItemResolution
-                      token={token}
-                      item={it}
-                      companyId={data?.company_id ?? null}
-                      supplierId={data?.supplier_id ?? null}
-                      disabled={!canConfirm}
-                      pendingItemsCount={
-                        items.filter((x) => x.import_pending_resolution === true)
-                          .length
-                      }
-                      sessionSuggestedRecipeId={sessionRecipeByKey[recipeSessionKey(it)] ?? null}
-                      sessionSuggestionActive={Boolean(
-                        sessionRecipeByKey[recipeSessionKey(it)],
-                      )}
-                      onSessionRecipeSelected={(recipeId) => {
-                        const k = recipeSessionKey(it);
-                        setSessionRecipeByKey((prev) => ({ ...prev, [k]: recipeId }));
-                      }}
-                      onApplyRecipeToAllPending={async (recipeId) => {
-                        if (!token) return;
-                        setError(null);
-                        const { data: rpcData, error: rpcError } = await supabase.rpc(
-                          "bulk_update_import_resolution_for_recebimento",
-                          {
-                            p_token: token,
-                            p_import_stock_resolution: "EXPLODE_BY_RECIPE",
-                            p_resolved_recipe_id: recipeId,
-                            p_target_product_id: null,
-                            p_import_nature: "EXPLODIR_POR_FICHA",
-                            p_import_engine_suggestion: "AUTO_APPLY_EXPLODIR_FICHA",
-                            p_import_pending_resolution: false,
-                          },
-                        );
-                        if (rpcError) {
-                          const msg = rpcError.message || "Falha ao aplicar resolução em lote.";
-                          setError(msg);
-                          toast.error(msg);
-                          return;
-                        }
-                        const payload = rpcData as {
-                          ok?: boolean;
-                          error?: string;
-                          updated?: number;
-                        };
-                        if (!payload?.ok) {
-                          const msg = payload?.error ?? "Falha ao aplicar em lote.";
-                          setError(msg);
-                          toast.error(msg);
-                          return;
-                        }
-
-                        setSessionRecipeByKey((prev) => {
-                          const next = { ...prev };
-                          items.forEach((candidate) => {
-                            if (candidate.import_pending_resolution !== true) return;
-                            next[recipeSessionKey(candidate)] = recipeId;
-                          });
-                          return next;
-                        });
-                        const updated = Number(payload.updated ?? 0);
-                        toast.success(
-                          updated > 0
-                            ? `${updated} item(ns) pendente(s) resolvido(s) em lote.`
-                            : "Nenhum item pendente para atualizar.",
-                        );
-                        await load();
-                      }}
-                      onSaved={() => void load()}
-                    />
-                  )}
                   {isPartial && (
                     <div className="space-y-1.5 pt-1 border-t border-border/60">
                       <Label htmlFor={`qty-${i}`} className="text-xs">
@@ -611,12 +635,7 @@ export function ConfirmarRecebimento() {
             className="w-full"
             size="lg"
             onClick={() => void handleConfirm()}
-            disabled={
-              !canConfirm ||
-              !allResponded ||
-              confirming ||
-              importResolutionPending
-            }
+            disabled={!canConfirm || !allResponded || confirming}
           >
             {confirming ? "Confirmando..." : "Confirmar recebimento"}
           </Button>
