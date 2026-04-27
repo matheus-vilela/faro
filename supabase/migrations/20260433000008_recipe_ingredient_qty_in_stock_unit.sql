@@ -1,3 +1,4 @@
+-- Antes: 202604330000045_... (15 digitos fazia o Supabase CLI confundir com 20260433000004; repair remoto 045 + ficheiro renomeado).
 -- Converte quantidade de ingrediente de receita para a unidade de estoque do produto (hub).
 -- Alinha com web/src/lib/companyUnits/convert.ts: conversao hub/secundaria + unidades de sistema (massa/volume).
 

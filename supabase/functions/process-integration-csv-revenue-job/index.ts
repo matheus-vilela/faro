@@ -2,7 +2,10 @@
  * Processa `integration_csv_revenue_import_jobs` em **várias invocações** (cursor
  * `csv_resume_row_index` + auto-disparo com `resume: true` e `EdgeRuntime.waitUntil`),
  * até percorrer todo o CSV: coluna "Total recebido(R$)" + `data_consumo`.
- * Título da receita: texto da coluna **Produto** (ou "Nome do produto"), senão fallback EPOC+data.
+ * Lançamento: **venda de produto** (`entry_mode: product_sale`), produto pelo nome
+ * (coluna Produto / Nome do produto, igual ao cadastro), **quantidade** na coluna **Quant.** (aliases),
+ * **gross_amount** = total da coluna "Total recebido(R$)", **pricing_mode: total**.
+ * Título da receita: nome do produto na linha.
  * Categoria: primeira folha de receita **operacional** (excl. dedução DRE), resolvida no servidor.
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
@@ -21,8 +24,10 @@ const corsHeaders: Record<string, string> = {
 };
 
 const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
-/** Cabeçalhos aceites para o nome da linha (título do lançamento). */
+/** Cabeçalhos aceites para o nome da linha (título do lançamento e match de produto). */
 const COL_PRODUTO_ALIASES = ["Produto", "Nome do produto"];
+/** Coluna de quantidade vendida (normalização ignora acentos e espaços). */
+const COL_QUANT_ALIASES = ["Quant.", "Quant", "Quantidade", "Qtd."];
 /** Máximo de linhas de dados visitadas por invocação (além do orçamento de tempo). */
 const ROWS_HARD_CAP = 55;
 /** Orçamento de tempo por invocação (ms); acima disso agenda continuação. */
@@ -93,6 +98,67 @@ function parseBrMoney(s: string): number | null {
   const v = Number(x);
   if (!Number.isFinite(v) || v <= 0) return null;
   return Math.round(v * 100) / 100;
+}
+
+/** Quantidade > 0 (inteiro ou decimal PT-BR / en). */
+function parseBrQuantity(s: string): number | null {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  let x = t.replace(/\s/g, "");
+  if (/^\d+$/.test(x)) {
+    const v = Number(x);
+    if (!Number.isFinite(v) || v <= 0) return null;
+    return v;
+  }
+  if (/^\d{1,3}(\.\d{3})*,\d+$/.test(x)) {
+    x = x.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d+,\d+$/.test(x)) {
+    x = x.replace(",", ".");
+  } else if (/^\d+\.\d+$/.test(x)) {
+    /* ok */
+  } else {
+    x = x.replace(/\./g, "").replace(",", ".");
+  }
+  const v = Number(x);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return Math.round(v * 10_000) / 10_000;
+}
+
+function escapeIlikeExact(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+async function resolveProductIdByName(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  displayName: string,
+  cache: Map<string, string | null>,
+): Promise<string | null> {
+  const key = displayName.trim().replace(/\s+/g, " ").toLowerCase();
+  if (cache.has(key)) return cache.get(key) ?? null;
+  const name = displayName.trim().replace(/\s+/g, " ");
+  if (!name) {
+    cache.set(key, null);
+    return null;
+  }
+  const pattern = escapeIlikeExact(name);
+  const { data: rows, error } = await admin
+    .from("products")
+    .select("id")
+    .eq("company_id", companyId)
+    .ilike("name", pattern)
+    .limit(2);
+  if (error || !rows?.length) {
+    cache.set(key, null);
+    return null;
+  }
+  if (rows.length > 1) {
+    cache.set(key, null);
+    return null;
+  }
+  const id = (rows[0] as { id: string }).id;
+  cache.set(key, id);
+  return id;
 }
 
 function extractJobId(body: Record<string, unknown>): string | null {
@@ -342,6 +408,25 @@ Deno.serve(async (req) => {
       }
     }
 
+    let quantCol = -1;
+    for (const alias of COL_QUANT_ALIASES) {
+      const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
+      if (j >= 0) {
+        quantCol = j;
+        break;
+      }
+    }
+    if (quantCol < 0) {
+      return await fail(
+        `Coluna de quantidade não encontrada (esperado: ${COL_QUANT_ALIASES.join(", ")}). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
+      );
+    }
+    if (produtoCol < 0) {
+      return await fail(
+        `Coluna de produto não encontrada (esperado: ${COL_PRODUTO_ALIASES.join(", ")}). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
+      );
+    }
+
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
     if (startOffset > rows.length) {
       return await fail("Cursor de retomada inválido (fora do CSV).");
@@ -362,8 +447,16 @@ Deno.serve(async (req) => {
 
     let createdChunk = 0;
     let skippedChunk = 0;
+    let skipNoProductChunk = 0;
+    let skipNoQtyChunk = 0;
+    let skipNoNameChunk = 0;
     const prevCreated = Number(priorMeta.revenue_entries_created_total ?? 0) || 0;
     const prevSkipped = Number(priorMeta.rows_skipped_total ?? 0) || 0;
+    const prevSkipNoProduct = Number(priorMeta.rows_skipped_no_product ?? 0) || 0;
+    const prevSkipNoQty = Number(priorMeta.rows_skipped_no_quantity ?? 0) || 0;
+    const prevSkipNoName = Number(priorMeta.rows_skipped_no_product_name ?? 0) || 0;
+
+    const productIdCache = new Map<string, string | null>();
 
     const t0 = Date.now();
     let idx = startOffset;
@@ -384,6 +477,37 @@ Deno.serve(async (req) => {
       const entryDate = parseFlexibleDate(rawDate);
       if (!entryDate) {
         skippedChunk += 1;
+        idx += 1;
+        continue;
+      }
+
+      const rawProdutoForMatch =
+        produtoCol >= 0 ? String(row[produtoCol] ?? "").trim().replace(/\s+/g, " ") : "";
+      if (!rawProdutoForMatch) {
+        skippedChunk += 1;
+        skipNoNameChunk += 1;
+        idx += 1;
+        continue;
+      }
+
+      const qtyCell = row[quantCol] ?? "";
+      const quantity = parseBrQuantity(String(qtyCell));
+      if (quantity == null) {
+        skippedChunk += 1;
+        skipNoQtyChunk += 1;
+        idx += 1;
+        continue;
+      }
+
+      const productId = await resolveProductIdByName(
+        admin,
+        job.company_id,
+        rawProdutoForMatch,
+        productIdCache,
+      );
+      if (!productId) {
+        skippedChunk += 1;
+        skipNoProductChunk += 1;
         idx += 1;
         continue;
       }
@@ -411,12 +535,7 @@ Deno.serve(async (req) => {
         batchByDate.set(entryDate, batchId);
       }
 
-      const rawProduto =
-        produtoCol >= 0 ? String(row[produtoCol] ?? "").trim() : "";
-      const title =
-        rawProduto.length > 0
-          ? rawProduto.replace(/\s+/g, " ")
-          : `EPOC ${entryDate} #${idx + 1}`;
+      const title = rawProdutoForMatch;
 
       const { data: entryId, error: rpcErr } = await admin.rpc(
         "create_revenue_entry",
@@ -425,15 +544,15 @@ Deno.serve(async (req) => {
             company_id: job.company_id,
             entry_date: entryDate,
             title,
-            entry_mode: "manual",
+            entry_mode: "product_sale",
             revenue_type: "operational",
             category_id: categoryId,
             subcategory_id: subcategoryId,
             gross_amount: gross,
-            product_id: null,
+            product_id: productId,
             recipe_id: null,
-            quantity: null,
-            pricing_mode: null,
+            quantity,
+            pricing_mode: "total",
             unit_value: null,
             _csv_import_job_id: job.id,
             integration_import_batch_id: batchId,
@@ -459,6 +578,9 @@ Deno.serve(async (req) => {
       csv_total_data_rows: rows.length,
       revenue_entries_created_total: prevCreated + createdChunk,
       rows_skipped_total: prevSkipped + skippedChunk,
+      rows_skipped_no_product: prevSkipNoProduct + skipNoProductChunk,
+      rows_skipped_no_quantity: prevSkipNoQty + skipNoQtyChunk,
+      rows_skipped_no_product_name: prevSkipNoName + skipNoNameChunk,
     };
 
     const done = nextOffset >= rows.length;
