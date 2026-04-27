@@ -7,6 +7,26 @@ export type RevenueTaxType = "currency" | "percentage";
 
 export type ProductSalePricingMode = "unit" | "total";
 
+export type RevenueIntegrationImportBatchStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+/** Lote de import automático de receitas (tabela company_revenue_integration_import_batches). */
+export interface CompanyRevenueIntegrationImportBatch {
+  id: string;
+  company_id: string;
+  provider: string;
+  reference_date: string;
+  status: RevenueIntegrationImportBatchStatus;
+  revenue_entry_count: number;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RevenueEntry {
   id: string;
   company_id: string;
@@ -28,6 +48,8 @@ export interface RevenueEntry {
   tax_amount: number;
   net_amount: number;
   source: RevenueEntryMode;
+  /** Preenchido quando o lançamento veio de import automático (lote). */
+  integration_import_batch_id?: string | null;
   created_at: string;
   updated_at: string;
 }
