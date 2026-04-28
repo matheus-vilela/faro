@@ -12,13 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -297,10 +290,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       const lastFail = [...(res.steps ?? [])]
         .reverse()
         .find((s) => s.status !== "ok");
-      const downloadOnErr =
-        lastFail?.download_url ??
-        res.download_url ??
-        null;
+      const downloadOnErr = lastFail?.download_url ?? res.download_url ?? null;
       const failName = lastFail?.label ?? lastFail?.name;
       const tail = failName ? ` Etapa com problema: ${failName}.` : "";
       if (downloadOnErr) {
@@ -565,14 +555,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           if (!open) setActiveTab("config");
         }}
       >
-        <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
+        <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
           <SheetHeader>
             <SheetTitle>Integração EPOC</SheetTitle>
             <SheetDescription>
-              URL do portal, usuário, senha e código de filial (NaoMenu). A
-              função no servidor (epoc-sync-csv) executa o login e o fluxo de
-              exportação do relatório em CSV. Somente quem administra a unidade
-              vê estes campos.
+              URL do portal, usuário, senha e código de filial caso haja.
+              Somente quem administra a unidade vê estes campos.
             </SheetDescription>
           </SheetHeader>
 
@@ -596,171 +584,175 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
 
             {activeTab === "config" ? (
               <>
-            <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
-              <div>
-                <Label htmlFor="epoc-enabled" className="text-sm font-medium">
-                  Integração ativa
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Quando ativo, o Faro usa estas credenciais na rotina que
-                  importa vendas do EPOC (execução diária automática).
-                </p>
-              </div>
-              <Switch
-                id="epoc-enabled"
-                checked={enabled}
-                onCheckedChange={setEnabled}
-              />
-            </div>
+                <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
+                  <div>
+                    <Label
+                      htmlFor="epoc-enabled"
+                      className="text-sm font-medium"
+                    >
+                      Integração ativa
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Quando ativo, o Faro usa estas credenciais na rotina que
+                      importa vendas do EPOC (execução diária automática).
+                    </p>
+                  </div>
+                  <Switch
+                    id="epoc-enabled"
+                    checked={enabled}
+                    onCheckedChange={setEnabled}
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="epoc-base-url">URL base (portal EPOC)</Label>
-              <Input
-                id="epoc-base-url"
-                type="url"
-                placeholder="https://… ou http://…:porta"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="epoc-base-url">URL base (portal EPOC)</Label>
+                  <Input
+                    id="epoc-base-url"
+                    type="url"
+                    placeholder="https://… ou http://…:porta"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="epoc-user">Usuário</Label>
-                <Input
-                  id="epoc-user"
-                  autoComplete="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Login EPOC"
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="epoc-pass">Senha</Label>
-                <PasswordInput
-                  id="epoc-pass"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={
-                    existingPassword
-                      ? "Deixe em branco para manter a atual"
-                      : "Senha"
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="epoc-filial">Código da filial</Label>
-                <Input
-                  id="epoc-filial"
-                  value={codigoFilial}
-                  onChange={(e) => setCodigoFilial(e.target.value)}
-                  placeholder="Ex.: 123A (enviado como NaoMenu)"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Se vazio, o servidor usa 123A como padrão.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Ambiente</Label>
-                <Select
-                  value={ambiente}
-                  onValueChange={(v) => setAmbiente(v as EpocAmbiente)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="producao">Produção</SelectItem>
-                    <SelectItem value="homologacao">Homologação</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="epoc-user">Usuário</Label>
+                    <Input
+                      id="epoc-user"
+                      autoComplete="username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="Login EPOC"
+                      className="min-w-0"
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="epoc-pass">Senha</Label>
+                    <PasswordInput
+                      id="epoc-pass"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={
+                        existingPassword
+                          ? "Deixe em branco para manter"
+                          : "Senha"
+                      }
+                      className="min-w-0"
+                    />
+                  </div>
+                </div>
 
-            <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
-              <p className="text-sm font-medium">
-                Relatório EPOC (CSV)
-              </p>
-              <p className="text-xs text-muted-foreground">
-                O import automático de receitas usa sempre a{" "}
-                <strong>primeira folha de receita operacional</strong> da unidade
-                (exclui deduções DRE), na mesma ordem de Configurações → Categorias
-                (campo ordem, depois nome).
-              </p>
-              {lastEpocCsvSyncAt ? (
-                <p className="text-xs text-muted-foreground">
-                  Último CSV:{" "}
-                  {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Nada sincronizado ainda — use o botão abaixo (função
-                  <span className="font-mono text-[0.7rem]">
-                    {" "}
-                    epoc-sync-csv
-                  </span>
-                  ).
-                </p>
-              )}
-              <Button
-                type="button"
-                className="w-full"
-                onClick={() => void handleSyncNow()}
-                disabled={!enabled || !baseUrl.trim() || syncingFull}
-              >
-                {syncingFull ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Sincronizar agora (EPOC → Storage)
-              </Button>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {/* <div className="space-y-2">
+                    <Label htmlFor="epoc-filial">Código da filial</Label>
+                    <Input
+                      id="epoc-filial"
+                      value={codigoFilial}
+                      onChange={(e) => setCodigoFilial(e.target.value)}
+                      placeholder="Ex.: "
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Se vazio, o servidor usa 123A como padrão.
+                    </p>
+                  </div> */}
+                  {/* <div className="space-y-2">
+                    <Label>Ambiente</Label>
+                    <Select
+                      value={ambiente}
+                      onValueChange={(v) => setAmbiente(v as EpocAmbiente)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="producao">Produção</SelectItem>
+                        <SelectItem value="homologacao">Homologação</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div> */}
+                </div>
 
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => void handleDownloadLastCsv()}
-                  disabled={!lastEpocCsvStoragePath || downloadingLastCsv}
-                >
-                  {downloadingLastCsv ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
+                  <p className="text-sm font-medium">Relatório EPOC (CSV)</p>
+                  <p className="text-xs text-muted-foreground">
+                    O import automático de receitas usa as categorias
+                    configuradas em receita operacional.
+                  </p>
+                  {lastEpocCsvSyncAt ? (
+                    <p className="text-xs text-muted-foreground">
+                      Último CSV:{" "}
+                      {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
+                    </p>
                   ) : (
-                    <Download className="mr-2 h-4 w-4" />
+                    <p className="text-xs text-muted-foreground">
+                      Nada sincronizado ainda — use o botão abaixo (função
+                      <span className="font-mono text-[0.7rem]">
+                        {" "}
+                        epoc-sync-csv
+                      </span>
+                      ).
+                    </p>
                   )}
-                  Baixar último CSV
-                </Button>
-              </div>
-            </div>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => void handleSyncNow()}
+                    disabled={!enabled || !baseUrl.trim() || syncingFull}
+                  >
+                    {syncingFull ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Sincronizar agora (EPOC → Storage)
+                  </Button>
 
-            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-              <p className="text-sm font-medium text-destructive">
-                Receitas importadas do EPOC
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Remove receitas ligadas ao lote de importação EPOC ou ao job do CSV
-                (mesmo que o lote já não exista), com estorno de estoque em vendas
-                de produto e remoção de boletos vinculados. Ficheiros no Storage e
-                definições da integração não são alterados.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => openPurgeEpocRevenuesDialog()}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Apagar receitas importadas do EPOC
-              </Button>
-            </div>
+                  <div className="grid gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => void handleDownloadLastCsv()}
+                      disabled={!lastEpocCsvStoragePath || downloadingLastCsv}
+                    >
+                      {downloadingLastCsv ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      Baixar último CSV
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm font-medium text-destructive">
+                    Receitas importadas do EPOC
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Remove receitas ligadas a integração EPOC, com estorno de
+                    estoque em vendas de produto.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => openPurgeEpocRevenuesDialog()}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Apagar receitas importadas do EPOC
+                  </Button>
+                </div>
               </>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Sincronizações realizadas</p>
+                  <p className="text-sm font-medium">
+                    Sincronizações realizadas
+                  </p>
                   <Button
                     type="button"
                     variant="outline"
@@ -779,8 +771,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 {historyLoading ? (
                   <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
                     <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      A carregar histórico…
+                      <Loader2 className="h-4 w-4 animate-spin" />A carregar
+                      histórico…
                     </span>
                   </div>
                 ) : syncHistory.length === 0 ? (
@@ -791,23 +783,28 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   <div className="space-y-2">
                     {syncHistory.map((item) => {
                       const meta = item.metadata ?? {};
-                      const created = Number(meta.revenue_entries_created_total ?? 0) || 0;
+                      const created =
+                        Number(meta.revenue_entries_created_total ?? 0) || 0;
                       const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
-                      const totalRows = Number(meta.csv_total_data_rows ?? 0) || 0;
+                      const totalRows =
+                        Number(meta.csv_total_data_rows ?? 0) || 0;
                       const jobIdShort = item.id.slice(0, 8);
                       const storageName = fileNameFromStoragePath(
                         item.storage_path,
                         "epoc.csv",
                       );
                       const ignoredReportPath =
-                        typeof meta.ignored_rows_report_storage_path === "string"
+                        typeof meta.ignored_rows_report_storage_path ===
+                        "string"
                           ? meta.ignored_rows_report_storage_path
                           : "";
                       const ignoredReportBucket =
-                        typeof meta.ignored_rows_report_storage_bucket === "string"
+                        typeof meta.ignored_rows_report_storage_bucket ===
+                        "string"
                           ? meta.ignored_rows_report_storage_bucket
                           : "company-setup";
-                      const canDownloadIgnoredReport = !!ignoredReportPath.trim();
+                      const canDownloadIgnoredReport =
+                        !!ignoredReportPath.trim();
                       return (
                         <div
                           key={item.id}
@@ -828,15 +825,23 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground space-y-1">
                             <p>
-                              Criado: {new Date(item.created_at).toLocaleString("pt-BR")}
+                              Criado:{" "}
+                              {new Date(item.created_at).toLocaleString(
+                                "pt-BR",
+                              )}
                             </p>
                             <p>
-                              Atualizado: {new Date(item.updated_at).toLocaleString("pt-BR")}
+                              Atualizado:{" "}
+                              {new Date(item.updated_at).toLocaleString(
+                                "pt-BR",
+                              )}
                             </p>
                             <p>CSV: {storageName}</p>
                             <p>
                               Receitas: {created} · Ignoradas: {skipped}
-                              {totalRows > 0 ? ` · Linhas CSV: ${totalRows}` : ""}
+                              {totalRows > 0
+                                ? ` · Linhas CSV: ${totalRows}`
+                                : ""}
                             </p>
                             {item.csv_resume_row_index != null ? (
                               <p>Cursor: linha {item.csv_resume_row_index}</p>
@@ -861,7 +866,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                     ignoredReportPath,
                                   )
                                 }
-                                disabled={downloadingIgnoredReportJobId === item.id}
+                                disabled={
+                                  downloadingIgnoredReportJobId === item.id
+                                }
                               >
                                 {downloadingIgnoredReportJobId === item.id ? (
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -925,8 +932,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           <div className="space-y-2 text-sm text-muted-foreground">
             {purgeCountLoading ? (
               <p className="flex items-center gap-2 font-medium text-foreground">
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                A contar receitas…
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />A contar
+                receitas…
               </p>
             ) : purgeCount !== null ? (
               <p className="font-medium text-foreground">
@@ -953,8 +960,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
             >
               {purging ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  A apagar…
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />A apagar…
                 </>
               ) : (
                 "Apagar receitas"

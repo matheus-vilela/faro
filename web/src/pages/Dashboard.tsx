@@ -274,22 +274,15 @@ export function Dashboard() {
         icon={LayoutDashboard}
       />
 
-      <div className="space-y-4">
-        <DashboardImportProgressBanner
-          loading={loadingImportProgress}
-          activeImportFiles={activeImportFiles}
-          activeImportPercent={activeImportPercent}
-        />
-        {companyId ? (
-          <DashboardIntegrationCsvRevenueCard companyId={companyId} />
-        ) : null}
-      </div>
       {!loadingImportProgress && companyId && activeImportFiles > 0 ? (
-        <DashboardImportProgressBanner
-          loading={false}
-          activeImportFiles={activeImportFiles}
-          activeImportPercent={activeImportPercent}
-        />
+        <>
+          <DashboardImportProgressBanner
+            loading={loadingImportProgress}
+            activeImportFiles={activeImportFiles}
+            activeImportPercent={activeImportPercent}
+          />
+          <DashboardIntegrationCsvRevenueCard companyId={companyId} />
+        </>
       ) : null}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
