@@ -1286,7 +1286,7 @@ Deno.serve(async (req) => {
   );
 
   // --- Fase 2: últimos 60 dias (consulta diária) ----------------------------
-  const diasConsulta = lastNDaysBr(30);
+  const diasConsulta = lastNDaysBr(10);
   const headerBase: string[] = [];
   const linhasCsvFinal: string[][] = [];
   /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
