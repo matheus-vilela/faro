@@ -26,7 +26,6 @@ export function SetupProgressCard() {
 
   const s = normalizeSetupMap(currentCompany.setup);
   const pct = Math.round(s.progress_percent ?? 0);
-  const step = s.current_step ?? 1;
 
   return (
     <Card className="border-amber-500/40 bg-amber-500/5">
@@ -36,7 +35,7 @@ export function SetupProgressCard() {
           <div className="min-w-0 flex-1 space-y-1">
             <CardTitle className="text-base">Setup em andamento</CardTitle>
             <CardDescription>
-              Etapa atual: {step - 1} de 4 · {pct}% concluído
+              Etapa atual: {pct % 4} de 4 · {pct}% concluído
             </CardDescription>
           </div>
         </div>

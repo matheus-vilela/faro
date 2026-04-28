@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { maskCpfCnpj, maskPhone } from "@/lib/masks";
+import { maskCpfCnpj } from "@/lib/masks";
 import type { EmpresaMap } from "@/types/companySetup";
 import { REGIME_TRIBUTARIO_OPTIONS } from "@/types/companySetup";
 import { Loader2 } from "lucide-react";
@@ -113,7 +113,9 @@ export function StepCompanyForm({
             <Input
               id="nf"
               value={empresa.nome_fantasia ?? ""}
-              onChange={(e) => onEmpresaChange({ nome_fantasia: e.target.value })}
+              onChange={(e) =>
+                onEmpresaChange({ nome_fantasia: e.target.value })
+              }
             />
           </div>
           <div className="space-y-2">
@@ -121,13 +123,16 @@ export function StepCompanyForm({
             <Input
               id="rz"
               value={empresa.nome_razao_social ?? ""}
-              disabled={isEmpresaKeyLocked("nome_razao_social", lockedEmpresaKeys)}
+              disabled={isEmpresaKeyLocked(
+                "nome_razao_social",
+                lockedEmpresaKeys,
+              )}
               onChange={(e) =>
                 onEmpresaChange({ nome_razao_social: e.target.value })
               }
             />
           </div>
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <Label htmlFor="ie">Inscrição estadual</Label>
             <Input
               id="ie"
@@ -136,7 +141,7 @@ export function StepCompanyForm({
                 onEmpresaChange({ inscricao_estadual: e.target.value })
               }
             />
-          </div>
+          </div> */}
           <div className="space-y-2">
             <Label>Regime tributário *</Label>
             <Select
@@ -144,7 +149,10 @@ export function StepCompanyForm({
               onValueChange={(v) =>
                 onEmpresaChange({ regime_tributario: Number(v) })
               }
-              disabled={isEmpresaKeyLocked("regime_tributario", lockedEmpresaKeys)}
+              disabled={isEmpresaKeyLocked(
+                "regime_tributario",
+                lockedEmpresaKeys,
+              )}
             >
               <SelectTrigger className="w-full min-w-0">
                 <SelectValue placeholder="Selecione" />
@@ -161,28 +169,6 @@ export function StepCompanyForm({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="em">E-mail *</Label>
-            <Input
-              id="em"
-              type="email"
-              value={empresa.email ?? ""}
-              onChange={(e) => onEmpresaChange({ email: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="tel">Telefone *</Label>
-            <Input
-              id="tel"
-              inputMode="tel"
-              value={maskPhone(empresa.telefone ?? "")}
-              onChange={(e) =>
-                onEmpresaChange({
-                  telefone: e.target.value.replace(/\D/g, ""),
-                })
-              }
-            />
           </div>
         </>
       ) : null}

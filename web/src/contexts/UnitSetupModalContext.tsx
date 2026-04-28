@@ -14,6 +14,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { Company } from "@/contexts/CompanyContext";
+import { useCompany } from "@/contexts/CompanyContext";
+import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
 
 export type UnitSetupModalPayload =
@@ -46,6 +49,7 @@ function isRadixSelectUiTarget(target: EventTarget | null): boolean {
 
 export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const { setCurrentCompany } = useCompany();
   const [open, setOpen] = useState(false);
   const [payload, setPayload] = useState<UnitSetupModalPayload | null>(null);
   const [sessionKey, setSessionKey] = useState(0);
@@ -62,10 +66,25 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /** Pausar / concluir: mesmo comportamento anterior (ir ao início do app). */
-  const handleExitToApp = useCallback(() => {
-    closeModal();
-    navigate("/app", { replace: true });
-  }, [closeModal, navigate]);
+  const handleExitToApp = useCallback(
+    (payload?: { companyId?: string; completed?: boolean }) => {
+      void (async () => {
+        closeModal();
+        if (payload?.completed && payload.companyId) {
+          const { data } = await supabase
+            .from("companies")
+            .select("*")
+            .eq("id", payload.companyId)
+            .maybeSingle();
+          if (data) {
+            setCurrentCompany(data as Company);
+          }
+        }
+        navigate("/app", { replace: true });
+      })();
+    },
+    [closeModal, navigate, setCurrentCompany],
+  );
 
   const value = useMemo(
     () => ({ openModal, closeModal }),

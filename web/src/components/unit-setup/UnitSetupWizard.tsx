@@ -119,14 +119,14 @@ export function UnitSetupWizard({
   /** `modal`: layout compacto e saída via `onExit` em vez de rotas. */
   variant?: "page" | "modal";
   /** Quando definido, substitui `navigate('/app')` (pausa, resumo, etc.). */
-  onExit?: () => void;
+  onExit?: (payload?: { companyId?: string; completed?: boolean }) => void;
 }) {
   const { user } = useAuth();
   const { refetchCompanies } = useCompany();
   const navigate = useNavigate();
   const isModal = variant === "modal";
-  const exitApp = () => {
-    if (onExit) onExit();
+  const exitApp = (payload?: { companyId?: string; completed?: boolean }) => {
+    if (onExit) onExit(payload);
     else navigate("/app", { replace: true });
   };
 
@@ -783,7 +783,7 @@ export function UnitSetupWizard({
           if (enabled && (ep.base_url ?? "").trim()) {
             triggerEpocCsvSyncInBackground(companyId);
             toast.message(
-              "Sincronização EPOC (epoc-sync-csv) em segundo plano: login e exportação do CSV.",
+              "Sincronização EPOC em segundo plano: login e exportação do CSV.",
               { duration: 5500 },
             );
           }
@@ -837,6 +837,10 @@ export function UnitSetupWizard({
     await patchCompanyMaps(companyId, { setup: completed });
     setSetup(completed);
     await refetchCompanies();
+    if (isModal) {
+      exitApp({ companyId, completed: true });
+      return;
+    }
     setPhase("finalize_summary");
   }
 

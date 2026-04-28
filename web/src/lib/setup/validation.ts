@@ -47,9 +47,9 @@ export function validateStep1Empresa(
     return "Selecione o regime tributário.";
   }
   const mail = (e.email ?? "").trim();
-  if (!isValidEmail(mail)) return "Informe um e-mail válido.";
+  if (mail.length > 0 && !isValidEmail(mail)) return "Informe um e-mail válido.";
   const tel = unmask(e.telefone ?? "");
-  if (tel.length < 10) return "Informe um telefone válido.";
+  if (tel.length > 0 && tel.length < 10) return "Informe um telefone válido.";
   return null;
 }
 

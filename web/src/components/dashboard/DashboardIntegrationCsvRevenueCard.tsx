@@ -86,6 +86,8 @@ export function DashboardIntegrationCsvRevenueCard({
   const [jobs, setJobs] = useState<JobRow[]>([]);
   /** `epoc-sync-csv` a correr (ainda sem linha em `integration_csv_revenue_import_jobs`). */
   const [edgeSyncPending, setEdgeSyncPending] = useState(false);
+  /** Evita sumir em lacunas transitórias entre sync e criação do job. */
+  const [stickyVisible, setStickyVisible] = useState(false);
   const [acknowledgedJobId, setAcknowledgedJobId] = useState<string | null>(
     () => (companyId ? loadDashboardAckJobId(companyId) : null),
   );
@@ -162,18 +164,6 @@ export function DashboardIntegrationCsvRevenueCard({
     [jobs],
   );
 
-  const pollImportJobs = useMemo(
-    () => hasActive || edgeSyncPending,
-    [hasActive, edgeSyncPending],
-  );
-
-  useEffect(() => {
-    if (!companyId || !pollImportJobs) return;
-    const ms = edgeSyncPending && !hasActive ? 4000 : 12_000;
-    const id = window.setInterval(() => void load({ silent: true }), ms);
-    return () => window.clearInterval(id);
-  }, [companyId, pollImportJobs, hasActive, edgeSyncPending, load]);
-
   const primary = useMemo(() => {
     const active = jobs.find(
       (j) => j.status === "PENDING" || j.status === "PROCESSING",
@@ -188,7 +178,39 @@ export function DashboardIntegrationCsvRevenueCard({
   const terminalAcked =
     !!primary && isTerminal && acknowledgedJobId === primary.id;
 
-  const showCard = !!companyId && (loading || edgeSyncPending || hasActive || (primary && !terminalAcked));
+  useEffect(() => {
+    if (!companyId) {
+      queueMicrotask(() => setStickyVisible(false));
+      return;
+    }
+    if (edgeSyncPending || hasActive || !!primary) {
+      queueMicrotask(() => setStickyVisible(true));
+      return;
+    }
+    if (terminalAcked) {
+      queueMicrotask(() => setStickyVisible(false));
+    }
+  }, [companyId, edgeSyncPending, hasActive, primary, terminalAcked]);
+
+  const pollImportJobs = useMemo(
+    () =>
+      hasActive ||
+      edgeSyncPending ||
+      (stickyVisible && !terminalAcked && !isTerminal),
+    [hasActive, edgeSyncPending, stickyVisible, terminalAcked, isTerminal],
+  );
+
+  useEffect(() => {
+    if (!companyId || !pollImportJobs) return;
+    const ms = edgeSyncPending && !hasActive ? 4000 : 12_000;
+    const id = window.setInterval(() => void load({ silent: true }), ms);
+    return () => window.clearInterval(id);
+  }, [companyId, pollImportJobs, hasActive, edgeSyncPending, load]);
+
+  const showCard =
+    !!companyId &&
+    (loading || stickyVisible) &&
+    (!terminalAcked || edgeSyncPending || hasActive);
 
   const onConfirmTerminal = useCallback(() => {
     if (!companyId || !primary || !isTerminal) return;
@@ -209,7 +231,7 @@ export function DashboardIntegrationCsvRevenueCard({
 
   const subtitle = useMemo(() => {
     if (edgeSyncPending && !hasActive) {
-      return "A função epoc-sync-csv está a ligar ao portal e a guardar a tabela/CSV. Depois disso o import de receitas entra na fila.";
+      return "A função está importando dados da integração. Depois disso o import de receitas entra na fila.";
     }
     if (!primary) {
       return "Quando sincronizar o CSV da EPOC, o progresso do import de receitas aparece aqui.";
@@ -228,9 +250,10 @@ export function DashboardIntegrationCsvRevenueCard({
       );
     }
     if (primary.status === "PENDING") {
-      return "Aguardando o processador (webhook ou fila). Pode levar alguns segundos.";
+      return "Estamos processando as informações da integração. Pode levar alguns segundos.";
     }
-    return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · linha ${Math.min(primary.csv_resume_row_index ?? 0, totalRows)}/${totalRows}` : ""}.`;
+    return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · Total: ${totalRows}` : ""}.`;
+    // return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · linha ${Math.min(primary.csv_resume_row_index ?? 0, totalRows)}/${totalRows}` : ""}.`;
   }, [primary, edgeSyncPending, hasActive]);
 
   const percent = Math.max(0, Math.min(100, progressPercent));
@@ -259,7 +282,7 @@ export function DashboardIntegrationCsvRevenueCard({
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wider text-sky-900/85 dark:text-sky-100/85">
-                Integração EPOC · receitas (CSV)
+                Integração EPOC · receitas
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActive
@@ -268,7 +291,7 @@ export function DashboardIntegrationCsvRevenueCard({
                     ? "Sincronização EPOC em curso"
                     : primary
                       ? `Sincronização EPOC: ${statusLabel(primary.status)}`
-                      : "Nenhum import de CSV recente"}
+                      : "Nenhum import de receitas recente"}
               </h3>
               <p className="mt-1 text-sm font-medium text-sky-950/90 dark:text-sky-100/90">
                 {loading ? "A carregar…" : subtitle}
@@ -285,7 +308,7 @@ export function DashboardIntegrationCsvRevenueCard({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
             {primary && isTerminal && !terminalAcked ? (
               <Button size="sm" type="button" onClick={onConfirmTerminal}>
                 Confirmar

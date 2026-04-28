@@ -10,6 +10,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -20,11 +25,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Select,
   SelectContent,
@@ -54,18 +54,18 @@ import {
   hasDuplicateUnitNameInGroup,
   mapCompanyUnitMutationError,
 } from "@/lib/companyUnitName";
-import { maskCep, maskCpfCnpj, maskPhone, unmask } from "@/lib/masks";
-import { ROLE_LABELS } from "@/lib/roles";
 import { resolveFocusCnpjLockForResume } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
+import { maskCep, maskCpfCnpj, maskPhone, unmask } from "@/lib/masks";
+import { ROLE_LABELS } from "@/lib/roles";
 import { validateStep1Empresa } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
-import { fileToPureBase64 } from "@/services/focusCriaEmpresaService";
-import { focusDeleteEmpresa } from "@/services/focusDeleteEmpresaService";
 import {
   focusAtualizarCertificado,
   hasFocusNfeEmpresaId,
 } from "@/services/focusAtualizarCertificadoService";
+import { fileToPureBase64 } from "@/services/focusCriaEmpresaService";
+import { focusDeleteEmpresa } from "@/services/focusDeleteEmpresaService";
 import { validateCertificateWithFocusNfe } from "@/services/focusNfeService";
 import { normalizeSetupMap } from "@/services/unitSetupService";
 import type { CompanyGroup } from "@/types/companyGroup";
@@ -77,7 +77,14 @@ import type {
   FocusNfeMap,
 } from "@/types/companySetup";
 import { REGIME_TRIBUTARIO_OPTIONS } from "@/types/companySetup";
-import { Building2, ChevronDown, FileKey, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Building2,
+  ChevronDown,
+  FileKey,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -88,11 +95,17 @@ function asObj(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function lockHasEmpresaKey(lock: FocusCnpjLockState | null, key: string): boolean {
+function lockHasEmpresaKey(
+  lock: FocusCnpjLockState | null,
+  key: string,
+): boolean {
   return !!lock?.locked_empresa_keys?.includes(key);
 }
 
-function lockHasEnderecoKey(lock: FocusCnpjLockState | null, key: string): boolean {
+function lockHasEnderecoKey(
+  lock: FocusCnpjLockState | null,
+  key: string,
+): boolean {
   return !!lock?.locked_endereco_keys?.includes(key);
 }
 
@@ -255,20 +268,23 @@ export function Companies() {
       nome_fantasia:
         (empresaRaw.nome_fantasia as string | undefined) ?? company.name,
       cnpj_cpf:
-        (empresaRaw.cnpj_cpf as string | undefined) ?? (company.document ?? ""),
+        (empresaRaw.cnpj_cpf as string | undefined) ?? company.document ?? "",
       inscricao_estadual:
         (empresaRaw.inscricao_estadual as string | undefined) ?? "",
       regime_tributario:
         (empresaRaw.regime_tributario as number | undefined) ?? undefined,
-      email: (empresaRaw.email as string | undefined) ?? (company.email ?? ""),
+      email: (empresaRaw.email as string | undefined) ?? company.email ?? "",
       telefone:
-        (empresaRaw.telefone as string | undefined) ?? (company.phone ?? ""),
-      photo_base64: (empresaRaw.photo_base64 as string | undefined) ?? undefined,
+        (empresaRaw.telefone as string | undefined) ?? company.phone ?? "",
+      photo_base64:
+        (empresaRaw.photo_base64 as string | undefined) ?? undefined,
       situacao_cadastral:
         (empresaRaw.situacao_cadastral as string | undefined) ?? undefined,
-      cnae_principal: (empresaRaw.cnae_principal as string | undefined) ?? undefined,
+      cnae_principal:
+        (empresaRaw.cnae_principal as string | undefined) ?? undefined,
       optante_simples_nacional:
-        (empresaRaw.optante_simples_nacional as boolean | undefined) ?? undefined,
+        (empresaRaw.optante_simples_nacional as boolean | undefined) ??
+        undefined,
       optante_mei: (empresaRaw.optante_mei as boolean | undefined) ?? undefined,
     };
 
@@ -283,7 +299,8 @@ export function Companies() {
       ibge_cidade: (enderecoRaw.ibge_cidade as string | undefined) ?? "",
       codigo_municipio:
         (enderecoRaw.codigo_municipio as string | undefined) ?? undefined,
-      codigo_siafi: (enderecoRaw.codigo_siafi as string | undefined) ?? undefined,
+      codigo_siafi:
+        (enderecoRaw.codigo_siafi as string | undefined) ?? undefined,
     };
 
     const focusMap: FocusNfeMap = {
@@ -337,7 +354,7 @@ export function Companies() {
     setEditDocument(maskCpfCnpj(empresaMap.cnpj_cpf ?? ""));
     setEditEmail(empresaMap.email ?? "");
     setEditCertificateStatus(
-      ((certRaw.status as CertificateUploadStatus | undefined) ?? "not_sent"),
+      (certRaw.status as CertificateUploadStatus | undefined) ?? "not_sent",
     );
     setEditCertPassword("");
     setEditCertBase64("");
@@ -408,8 +425,9 @@ export function Companies() {
       const setupRaw = asObj(editingCompany.setup);
       const currentSetupCertificate = asObj(setupRaw.certificate);
       const initialCertStatus =
-        (currentSetupCertificate.status as CertificateUploadStatus | undefined) ??
-        "not_sent";
+        (currentSetupCertificate.status as
+          | CertificateUploadStatus
+          | undefined) ?? "not_sent";
 
       let certStatusOut = editCertificateStatus;
       let certValidadeOut = editFocus.certificado_validade ?? "";
@@ -421,7 +439,9 @@ export function Companies() {
           password: editCertPassword.trim(),
         });
         if (val.status !== "valid") {
-          setError(val.error_message ?? "Não foi possível validar o certificado.");
+          setError(
+            val.error_message ?? "Não foi possível validar o certificado.",
+          );
           setLoading(false);
           return;
         }
@@ -456,8 +476,7 @@ export function Companies() {
       const focusPersist = stripFocusnfeSecrets({
         ...editFocus,
         certificado_ativo: certStatusOut === "valid",
-        certificado_validade:
-          certStatusOut === "valid" ? certValidadeOut : "",
+        certificado_validade: certStatusOut === "valid" ? certValidadeOut : "",
       });
 
       if (hasFocusNfeEmpresaId(editingCompany.focusnfe)) {
@@ -805,62 +824,65 @@ export function Companies() {
               </CollapsibleTrigger>
               <CollapsibleContent className="px-4 pb-4 border-t bg-muted/10">
                 <div className="space-y-3 pt-3">
-              <div className="space-y-2">
-                <Label htmlFor="edit-razao">Razão social *</Label>
-                <Input
-                  id="edit-razao"
-                  value={editEmpresa.nome_razao_social ?? ""}
-                  disabled={lockHasEmpresaKey(editFocusCnpjLock, "nome_razao_social")}
-                  onChange={(e) =>
-                    setEditEmpresa((prev) => ({
-                      ...prev,
-                      nome_razao_social: e.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-unit-name">Nome fantasia *</Label>
-                <Input
-                  id="edit-unit-name"
-                  placeholder="Nome do bar/restaurante"
-                  value={editName}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setEditName(value);
-                    setEditEmpresa((prev) => ({
-                      ...prev,
-                      nome_fantasia: value,
-                    }));
-                  }}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-document">CNPJ *</Label>
-                <Input
-                  id="edit-document"
-                  placeholder="00.000.000/0001-00"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={editDocument}
-                  disabled
-                  onChange={(e) => {
-                    const value = maskCpfCnpj(e.target.value);
-                    setEditDocument(value);
-                    setEditEmpresa((prev) => ({
-                      ...prev,
-                      cnpj_cpf: unmask(value),
-                    }));
-                  }}
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  O CNPJ da unidade nao pode ser alterado na edicao.
-                </p>
-              </div>
-              <div className="space-y-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-razao">Razão social *</Label>
+                    <Input
+                      id="edit-razao"
+                      value={editEmpresa.nome_razao_social ?? ""}
+                      disabled={lockHasEmpresaKey(
+                        editFocusCnpjLock,
+                        "nome_razao_social",
+                      )}
+                      onChange={(e) =>
+                        setEditEmpresa((prev) => ({
+                          ...prev,
+                          nome_razao_social: e.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-unit-name">Nome fantasia *</Label>
+                    <Input
+                      id="edit-unit-name"
+                      placeholder="Nome do bar/restaurante"
+                      value={editName}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setEditName(value);
+                        setEditEmpresa((prev) => ({
+                          ...prev,
+                          nome_fantasia: value,
+                        }));
+                      }}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-document">CNPJ *</Label>
+                    <Input
+                      id="edit-document"
+                      placeholder="00.000.000/0001-00"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={editDocument}
+                      disabled
+                      onChange={(e) => {
+                        const value = maskCpfCnpj(e.target.value);
+                        setEditDocument(value);
+                        setEditEmpresa((prev) => ({
+                          ...prev,
+                          cnpj_cpf: unmask(value),
+                        }));
+                      }}
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      O CNPJ da unidade nao pode ser alterado na edicao.
+                    </p>
+                  </div>
+                  {/* <div className="space-y-2">
                 <Label htmlFor="edit-ie">Inscrição estadual</Label>
                 <Input
                   id="edit-ie"
@@ -872,63 +894,66 @@ export function Companies() {
                     }))
                   }
                 />
-              </div>
-              <div className="space-y-2">
-                <Label>Regime tributário *</Label>
-                <Select
-                  value={
-                    editEmpresa.regime_tributario != null
-                      ? String(editEmpresa.regime_tributario)
-                      : undefined
-                  }
-                  disabled={lockHasEmpresaKey(editFocusCnpjLock, "regime_tributario")}
-                  onValueChange={(v) =>
-                    setEditEmpresa((prev) => ({
-                      ...prev,
-                      regime_tributario: Number(v),
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent className="z-[200]">
-                    {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={String(o.value)}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-email">Email *</Label>
-                <Input
-                  id="edit-email"
-                  type="email"
-                  placeholder="contato@estabelecimento.com"
-                  value={editEmail}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setEditEmail(value);
-                    setEditEmpresa((prev) => ({ ...prev, email: value }));
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-tel">Telefone *</Label>
-                <Input
-                  id="edit-tel"
-                  inputMode="tel"
-                  value={maskPhone(editEmpresa.telefone ?? "")}
-                  onChange={(e) =>
-                    setEditEmpresa((prev) => ({
-                      ...prev,
-                      telefone: unmask(e.target.value),
-                    }))
-                  }
-                />
-              </div>
+              </div> */}
+                  <div className="space-y-2">
+                    <Label>Regime tributário *</Label>
+                    <Select
+                      value={
+                        editEmpresa.regime_tributario != null
+                          ? String(editEmpresa.regime_tributario)
+                          : undefined
+                      }
+                      disabled={lockHasEmpresaKey(
+                        editFocusCnpjLock,
+                        "regime_tributario",
+                      )}
+                      onValueChange={(v) =>
+                        setEditEmpresa((prev) => ({
+                          ...prev,
+                          regime_tributario: Number(v),
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[200]">
+                        {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={String(o.value)}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-email">Email *</Label>
+                    <Input
+                      id="edit-email"
+                      type="email"
+                      placeholder="contato@estabelecimento.com"
+                      value={editEmail}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setEditEmail(value);
+                        setEditEmpresa((prev) => ({ ...prev, email: value }));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-tel">Telefone *</Label>
+                    <Input
+                      id="edit-tel"
+                      inputMode="tel"
+                      value={maskPhone(editEmpresa.telefone ?? "")}
+                      onChange={(e) =>
+                        setEditEmpresa((prev) => ({
+                          ...prev,
+                          telefone: unmask(e.target.value),
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
               </CollapsibleContent>
             </Collapsible>
@@ -951,123 +976,138 @@ export function Companies() {
               </CollapsibleTrigger>
               <CollapsibleContent className="px-4 pb-4 border-t bg-muted/10">
                 <div className="space-y-3 pt-3">
-              <div className="space-y-2">
-                <Label htmlFor="edit-cep">CEP</Label>
-                <Input
-                  id="edit-cep"
-                  value={maskCep(editEndereco.cep ?? "")}
-                  disabled={lockHasEnderecoKey(editFocusCnpjLock, "cep")}
-                  onChange={(e) =>
-                    setEditEndereco((prev) => ({
-                      ...prev,
-                      cep: unmask(e.target.value),
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-logradouro">Logradouro</Label>
-                <Input
-                  id="edit-logradouro"
-                  value={editEndereco.logradouro ?? ""}
-                  disabled={lockHasEnderecoKey(editFocusCnpjLock, "logradouro")}
-                  onChange={(e) =>
-                    setEditEndereco((prev) => ({
-                      ...prev,
-                      logradouro: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-numero">Número</Label>
-                  <Input
-                    id="edit-numero"
-                    value={editEndereco.numero ?? ""}
-                    disabled={lockHasEnderecoKey(editFocusCnpjLock, "numero")}
-                    onChange={(e) =>
-                      setEditEndereco((prev) => ({
-                        ...prev,
-                        numero: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-complemento">Complemento</Label>
-                  <Input
-                    id="edit-complemento"
-                    value={editEndereco.complemento ?? ""}
-                    disabled={lockHasEnderecoKey(editFocusCnpjLock, "complemento")}
-                    onChange={(e) =>
-                      setEditEndereco((prev) => ({
-                        ...prev,
-                        complemento: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-bairro">Bairro</Label>
-                <Input
-                  id="edit-bairro"
-                  value={editEndereco.bairro ?? ""}
-                  disabled={lockHasEnderecoKey(editFocusCnpjLock, "bairro")}
-                  onChange={(e) =>
-                    setEditEndereco((prev) => ({
-                      ...prev,
-                      bairro: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-municipio">Cidade</Label>
-                  <Input
-                    id="edit-municipio"
-                    value={editEndereco.municipio ?? ""}
-                    disabled={lockHasEnderecoKey(editFocusCnpjLock, "municipio")}
-                    onChange={(e) =>
-                      setEditEndereco((prev) => ({
-                        ...prev,
-                        municipio: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-uf">UF</Label>
-                  <Input
-                    id="edit-uf"
-                    value={editEndereco.uf ?? ""}
-                    maxLength={2}
-                    disabled={lockHasEnderecoKey(editFocusCnpjLock, "uf")}
-                    onChange={(e) =>
-                      setEditEndereco((prev) => ({
-                        ...prev,
-                        uf: e.target.value.toUpperCase().slice(0, 2),
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-ibge">IBGE da cidade</Label>
-                <Input
-                  id="edit-ibge"
-                  value={editEndereco.ibge_cidade ?? ""}
-                  disabled={lockHasEnderecoKey(editFocusCnpjLock, "ibge_cidade")}
-                  onChange={(e) =>
-                    setEditEndereco((prev) => ({
-                      ...prev,
-                      ibge_cidade: e.target.value,
-                    }))
-                  }
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-cep">CEP</Label>
+                    <Input
+                      id="edit-cep"
+                      value={maskCep(editEndereco.cep ?? "")}
+                      disabled={lockHasEnderecoKey(editFocusCnpjLock, "cep")}
+                      onChange={(e) =>
+                        setEditEndereco((prev) => ({
+                          ...prev,
+                          cep: unmask(e.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-logradouro">Logradouro</Label>
+                    <Input
+                      id="edit-logradouro"
+                      value={editEndereco.logradouro ?? ""}
+                      disabled={lockHasEnderecoKey(
+                        editFocusCnpjLock,
+                        "logradouro",
+                      )}
+                      onChange={(e) =>
+                        setEditEndereco((prev) => ({
+                          ...prev,
+                          logradouro: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-numero">Número</Label>
+                      <Input
+                        id="edit-numero"
+                        value={editEndereco.numero ?? ""}
+                        disabled={lockHasEnderecoKey(
+                          editFocusCnpjLock,
+                          "numero",
+                        )}
+                        onChange={(e) =>
+                          setEditEndereco((prev) => ({
+                            ...prev,
+                            numero: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-complemento">Complemento</Label>
+                      <Input
+                        id="edit-complemento"
+                        value={editEndereco.complemento ?? ""}
+                        disabled={lockHasEnderecoKey(
+                          editFocusCnpjLock,
+                          "complemento",
+                        )}
+                        onChange={(e) =>
+                          setEditEndereco((prev) => ({
+                            ...prev,
+                            complemento: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-bairro">Bairro</Label>
+                    <Input
+                      id="edit-bairro"
+                      value={editEndereco.bairro ?? ""}
+                      disabled={lockHasEnderecoKey(editFocusCnpjLock, "bairro")}
+                      onChange={(e) =>
+                        setEditEndereco((prev) => ({
+                          ...prev,
+                          bairro: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-municipio">Cidade</Label>
+                      <Input
+                        id="edit-municipio"
+                        value={editEndereco.municipio ?? ""}
+                        disabled={lockHasEnderecoKey(
+                          editFocusCnpjLock,
+                          "municipio",
+                        )}
+                        onChange={(e) =>
+                          setEditEndereco((prev) => ({
+                            ...prev,
+                            municipio: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-uf">UF</Label>
+                      <Input
+                        id="edit-uf"
+                        value={editEndereco.uf ?? ""}
+                        maxLength={2}
+                        disabled={lockHasEnderecoKey(editFocusCnpjLock, "uf")}
+                        onChange={(e) =>
+                          setEditEndereco((prev) => ({
+                            ...prev,
+                            uf: e.target.value.toUpperCase().slice(0, 2),
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-ibge">IBGE da cidade</Label>
+                    <Input
+                      id="edit-ibge"
+                      value={editEndereco.ibge_cidade ?? ""}
+                      disabled={lockHasEnderecoKey(
+                        editFocusCnpjLock,
+                        "ibge_cidade",
+                      )}
+                      onChange={(e) =>
+                        setEditEndereco((prev) => ({
+                          ...prev,
+                          ibge_cidade: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
               </CollapsibleContent>
             </Collapsible>
@@ -1081,9 +1121,9 @@ export function Companies() {
                 <div>
                   <p className="font-medium">Certificado fiscal</p>
                   <p className="text-xs text-muted-foreground">
-                    A senha e o arquivo do certificado não são armazenados na Faro.
-                    Para trocar o certificado, remova o atual e envie um novo com
-                    senha ao salvar.
+                    A senha e o arquivo do certificado não são armazenados na
+                    Faro. Para trocar o certificado, remova o atual e envie um
+                    novo com senha ao salvar.
                   </p>
                 </div>
                 <ChevronDown

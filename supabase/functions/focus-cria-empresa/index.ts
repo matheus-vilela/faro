@@ -108,6 +108,10 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
     (typeof raw.telefone === "number" && Number.isFinite(raw.telefone)
       ? String(Math.trunc(raw.telefone))
       : undefined);
+  const fallbackEmail =
+    cnpj != null ? `naoresponder+${cnpj}@faro.local` : "naoresponder@faro.local";
+  const emailFinal = email ?? fallbackEmail;
+  const telefoneFinal = telefone ?? "0000000000";
 
   const inscricaoEstadual = optNumber(raw.inscricao_estadual);
   const inscricaoMunicipal = optNumber(raw.inscricao_municipal);
@@ -127,13 +131,12 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
   if (!bairro) missing.push("bairro");
   if (cep === undefined) missing.push("cep");
   if (!cnpj) missing.push("cnpj (14 dígitos)");
-  if (!email) missing.push("email");
+  // onboarding pode não informar email/telefone; aplicamos fallback para Focus.
   if (inscricaoEstadual === undefined) missing.push("inscricao_estadual");
   if (inscricaoMunicipal === undefined) missing.push("inscricao_municipal");
   if (!logradouro) missing.push("logradouro");
   if (numero === undefined) missing.push("numero");
   if (regimeTributario === undefined) missing.push("regime_tributario");
-  if (!telefone) missing.push("telefone");
   if (!municipio) missing.push("municipio");
   if (!uf) missing.push("uf");
   else if (uf.length !== 2) missing.push("uf (2 letras)");
@@ -189,14 +192,14 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
     cnpj,
     complemento,
     discrimina_impostos: true,
-    email,
+    email: emailFinal,
     enviar_email_destinatario: enviarEmailDestinatario,
     inscricao_estadual: inscricaoEstadual,
     inscricao_municipal: inscricaoMunicipal,
     logradouro,
     numero,
     regime_tributario: regimeTributario,
-    telefone,
+    telefone: telefoneFinal,
     municipio,
     uf: ufUpper,
     habilita_nfe: false,

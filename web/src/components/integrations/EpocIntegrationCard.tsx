@@ -304,9 +304,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         return;
       }
       toast.error(
-        (res.error ??
-          "Falha na sincronização. Veja os logs da função epoc-sync-csv.") +
-          tail,
+        (res.error ?? "Falha na sincronização. Veja os logs da função.") + tail,
       );
       return;
     }
@@ -447,7 +445,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     if (enabled && baseUrl.trim()) {
       triggerEpocCsvSyncInBackground(companyId);
       toast.message(
-        "Sincronização EPOC (epoc-sync-csv) em segundo plano: login e exportação do CSV.",
+        "Sincronização EPOC em segundo plano: login e exportação do CSV.",
         { duration: 6000 },
       );
     }
@@ -676,24 +674,19 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 </div>
 
                 <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
-                  <p className="text-sm font-medium">Relatório EPOC (CSV)</p>
+                  <p className="text-sm font-medium">Importação EPOC</p>
                   <p className="text-xs text-muted-foreground">
                     O import automático de receitas usa as categorias
                     configuradas em receita operacional.
                   </p>
                   {lastEpocCsvSyncAt ? (
                     <p className="text-xs text-muted-foreground">
-                      Último CSV:{" "}
+                      Última importação:{" "}
                       {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
                     </p>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      Nada sincronizado ainda — use o botão abaixo (função
-                      <span className="font-mono text-[0.7rem]">
-                        {" "}
-                        epoc-sync-csv
-                      </span>
-                      ).
+                      Nada sincronizado ainda — use o botão abaixo.
                     </p>
                   )}
                   <Button

@@ -104,8 +104,8 @@ export function StepPdvForm({
                     EPOC
                   </p>
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    URL, usuário, senha e filial. O Faro importa o relatório de
-                    vendas (CSV) após o login no portal.
+                    URL, usuário, senha e filial. O Faro importa as receitas de
+                    vendas após o login no portal.
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
@@ -149,7 +149,7 @@ export function StepPdvForm({
                     </Label>
                     <p className="text-xs text-muted-foreground">
                       Quando ativo, o Faro usa estas credenciais na rotina
-                      diária (epoc-sync-csv).
+                      diária.
                     </p>
                   </div>
                   <Switch
@@ -174,7 +174,7 @@ export function StepPdvForm({
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2 sm:col-span-2">
+                  <div className="space-y-2">
                     <Label htmlFor="pdv-epoc-user">Usuário</Label>
                     <Input
                       id="pdv-epoc-user"
@@ -186,7 +186,7 @@ export function StepPdvForm({
                       placeholder="Usuário no portal"
                     />
                   </div>
-                  <div className="space-y-2 sm:col-span-2">
+                  <div className="space-y-2">
                     <Label htmlFor="pdv-epoc-pass">Senha</Label>
                     <PasswordInput
                       id="pdv-epoc-pass"

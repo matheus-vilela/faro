@@ -55,14 +55,27 @@ export async function invokeEpocCsvSync(
       { body: { company_id: companyId } },
     );
     if (error) {
+      clearEpocCsvSyncPending(companyId);
       return { ok: false, error: error.message };
     }
     if (!data) {
+      clearEpocCsvSyncPending(companyId);
       return { ok: false, error: "Resposta vazia da função" };
     }
+    if (!data.ok) {
+      clearEpocCsvSyncPending(companyId);
+      return data;
+    }
+    // Mantém o card do dashboard visível durante a janela de transição
+    // entre o fim da sync EPOC e a criação do job de importação CSV.
+    window.setTimeout(() => clearEpocCsvSyncPending(companyId), 120_000);
     return data;
-  } finally {
+  } catch (e) {
     clearEpocCsvSyncPending(companyId);
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Falha ao executar sincronização.",
+    };
   }
 }
 
