@@ -58,3 +58,5 @@ verify_jwt = true
 
 [functions.process-integration-csv-revenue-job]
 verify_jwt = false
+[functions.run-onboarding-product-reconciliation]
+verify_jwt = true

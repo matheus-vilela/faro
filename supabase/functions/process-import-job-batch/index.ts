@@ -45,6 +45,17 @@ function normalizeAscii(v: string): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+/** Igual ao pipeline web de reconciliação — rótulos de catálogo (PT-BR, NF-e). */
+function normalizeCatalogLabel(v: string): string {
+  return String(v ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\w\s%/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function mapInvoiceUnitToSystem(raw: string | null | undefined): {
   unit: string;
   needsReview: boolean;
@@ -231,7 +242,7 @@ Deno.serve(async (req) => {
 
   const { data: batch, error: batchErr } = await supabase
     .from("import_job_batches")
-    .select("id, company_id, requested_by, total_files, processed_files, success_files, failed_files, pending_review_files")
+    .select("id, company_id, requested_by, total_files, processed_files, success_files, failed_files, pending_review_files, status")
     .eq("id", batchId)
     .maybeSingle();
   if (batchErr || !batch?.id) return json({ ok: false, error: "lote não encontrado." }, 404);
@@ -251,6 +262,31 @@ Deno.serve(async (req) => {
   if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
 
   const nowIso = new Date().toISOString();
+
+  if (String(batch.status) === "CANCELLED") {
+    await supabase
+      .from("import_job_files")
+      .update({
+        status: "CANCELLED",
+        last_error: "Lote cancelado.",
+        finished_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq("batch_id", batchId)
+      .eq("status", "QUEUED");
+    await appendTimeline(supabase, batchId, "CANCEL", "Importação cancelada — nenhum arquivo pendente será processado.");
+    return json({
+      ok: true,
+      batch_id: batchId,
+      status: "CANCELLED",
+      cancelled: true,
+      processed_files: Number(batch.processed_files ?? 0),
+      success_files: Number(batch.success_files ?? 0),
+      failed_files: Number(batch.failed_files ?? 0),
+      pending_review_files: Number(batch.pending_review_files ?? 0),
+    });
+  }
+
   await supabase
     .from("import_job_batches")
     .update({ status: "PROCESSING", updated_at: nowIso })
@@ -279,6 +315,48 @@ Deno.serve(async (req) => {
   const chunkFiles = (files ?? []).slice(0, MAX_FILES_PER_RUN);
 
   for (const fRaw of chunkFiles) {
+    const { data: batchGate } = await supabase
+      .from("import_job_batches")
+      .select("status")
+      .eq("id", batchId)
+      .maybeSingle();
+    if (String(batchGate?.status) === "CANCELLED") {
+      const cancelIso = new Date().toISOString();
+      await supabase
+        .from("import_job_files")
+        .update({
+          status: "CANCELLED",
+          last_error: "Cancelado pelo usuário antes deste arquivo.",
+          finished_at: cancelIso,
+          updated_at: cancelIso,
+        })
+        .eq("batch_id", batchId)
+        .eq("status", "QUEUED");
+      await appendTimeline(supabase, batchId, "CANCEL", "Importação cancelada pelo usuário.");
+      await supabase
+        .from("import_job_batches")
+        .update({
+          status: "CANCELLED",
+          finished_at: cancelIso,
+          last_error: "Importação cancelada pelo usuário.",
+          progress_percent: batch.total_files > 0
+            ? Number(((processed / Number(batch.total_files)) * 100).toFixed(2))
+            : 100,
+          updated_at: cancelIso,
+        })
+        .eq("id", batchId);
+      return json({
+        ok: true,
+        batch_id: batchId,
+        status: "CANCELLED",
+        cancelled: true,
+        processed_files: processed,
+        success_files: success,
+        failed_files: failed,
+        pending_review_files: pendingReviewFiles,
+      });
+    }
+
     const file = fRaw as { id: string; file_name: string; xml_hash: string; xml_content_base64: string };
     const fileId = file.id;
     await supabase
@@ -344,7 +422,9 @@ Deno.serve(async (req) => {
             "Cadastrado automaticamente — importação XML/ZIP NF-e",
           );
           const match = await resolveProductMatches(supabase, companyId, data.items ?? []);
+          const deferProductCreation = match.deferProductCreationToReconciliation === true;
           const finalItems: Array<Record<string, unknown>> = [];
+          const rawRowIdsOrdered: string[] = [];
           let needsReviewReason: string | null = null;
           let itemIndex = 0;
           for (const item of match.items ?? []) {
@@ -352,7 +432,7 @@ Deno.serve(async (req) => {
             const resolvedProductId = String(pm?.resolvedProductId ?? "").trim() || null;
             const needsConfirmation = pm?.needsConfirmation === true;
             let productId = resolvedProductId;
-            if (!productId) {
+            if (!productId && !deferProductCreation) {
               const created = await findOrCreateProduct(supabase, companyId, item as Record<string, unknown>);
               if (created.needsReview || !created.productId) {
                 needsReviewReason = created.reason ?? `Não foi possível resolver "${item.productName}"`;
@@ -360,7 +440,9 @@ Deno.serve(async (req) => {
                 productId = created.productId;
               }
             }
-            await supabase.from("import_job_items").insert({
+            const { data: ijInserted, error: ijInsErr } = await supabase
+              .from("import_job_items")
+              .insert({
               batch_id: batchId,
               file_id: fileId,
               company_id: companyId,
@@ -370,7 +452,38 @@ Deno.serve(async (req) => {
               classification_type: needsConfirmation ? "REVISAO_PENDENTE" : "PRODUTO_ESTOCAVEL",
               pending_reason: needsConfirmation ? "Conflito de unidade/baixa confiança" : null,
               payload: item,
-            });
+            })
+              .select("id")
+              .single();
+            if (ijInsErr) {
+              throw new Error(ijInsErr.message);
+            }
+            const rawName = String(item.productName ?? "").trim() || "Item";
+            const eanDigits = digitsOnly(String((item as { ean?: string }).ean ?? ""));
+            const { data: rawIns, error: rawInsErr } = await supabase
+              .from("onboarding_import_item_raw")
+              .insert({
+                company_id: companyId,
+                import_job_batch_id: batchId,
+                import_job_file_id: fileId,
+                import_job_item_id: ijInserted?.id ?? null,
+                description_original: rawName,
+                description_normalized: normalizeCatalogLabel(rawName),
+                supplier_id: supplierId,
+                supplier_name_snapshot: String(data.supplierName ?? "").trim() || null,
+                xml_origem: file.file_name,
+                unit_raw: String((item as { unitCommercial?: string }).unitCommercial ?? "").trim() || null,
+                quantity: Number((item as { quantity?: number }).quantity ?? 0) || null,
+                line_value: Number((item as { lineTotal?: number }).lineTotal ?? 0) || null,
+                ean: eanDigits.length ? eanDigits : null,
+                ncm: String((item as { ncm?: string }).ncm ?? "").trim() || null,
+                extracted_attributes: {},
+                created_product_id: productId,
+              })
+              .select("id")
+              .single();
+            if (rawInsErr) throw new Error(rawInsErr.message);
+            rawRowIdsOrdered.push(String(rawIns?.id ?? ""));
             itemIndex += 1;
             if (needsConfirmation) {
               pendingForFile += 1;
@@ -413,7 +526,8 @@ Deno.serve(async (req) => {
           expenseId = String(expense.id);
           await appendTimeline(supabase, batchId, "UPSERT_EXPENSE", "Despesa criada.", { expense_id: expenseId }, fileId);
 
-          for (const it of finalItems) {
+          for (let idx = 0; idx < finalItems.length; idx++) {
+            const it = finalItems[idx]!;
             const q = Math.max(0.0001, Number(it.quantity ?? 0));
             const uv = Number(it.unitValue ?? 0);
             const invUnit = String(it.unitCommercial ?? "").trim() || null;
@@ -437,6 +551,11 @@ Deno.serve(async (req) => {
                   import_v2: {
                     mode: productId ? "DIRECT_STOCK_ENTRY" : "REVIEW_REQUIRED",
                     note: "Fluxo XML assíncrono sem vínculo com receita/ficha.",
+                    defer_product_creation: deferProductCreation,
+                    match_borderline_llm_calls: match.borderlineLlmCalls ?? 0,
+                    match_decision_path:
+                      (it as { productMatch?: { decisionPath?: string } }).productMatch?.decisionPath ??
+                      null,
                   },
                 },
                 import_stock_resolution: productId ? "DIRECT_STOCK_ENTRY" : "REVIEW_REQUIRED",
@@ -448,6 +567,17 @@ Deno.serve(async (req) => {
               .single();
             if (itemErr || !insItem?.id) {
               throw new Error(itemErr?.message ?? "Falha ao inserir item de despesa.");
+            }
+            const ri = rawRowIdsOrdered[idx];
+            if (ri) {
+              await supabase
+                .from("onboarding_import_item_raw")
+                .update({
+                  expense_item_id: String(insItem.id),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", ri)
+                .eq("company_id", companyId);
             }
             if (!productId || it.import_pending_resolution === true) {
               pendingForFile += 1;
@@ -530,9 +660,31 @@ Deno.serve(async (req) => {
       .eq("id", batchId);
   }
 
-  const totalFiles = Number(batch.total_files ?? 0);
-  const remainingFiles = Math.max(totalFiles - processed, 0);
-  if (remainingFiles > 0) {
+  const { count: stillActive } = await supabase
+    .from("import_job_files")
+    .select("id", { count: "exact", head: true })
+    .eq("batch_id", batchId)
+    .in("status", ["QUEUED", "PROCESSING"]);
+
+  const { data: batchBeforeChain } = await supabase
+    .from("import_job_batches")
+    .select("status")
+    .eq("id", batchId)
+    .maybeSingle();
+  if (String(batchBeforeChain?.status) === "CANCELLED") {
+    return json({
+      ok: true,
+      batch_id: batchId,
+      status: "CANCELLED",
+      cancelled: true,
+      processed_files: processed,
+      success_files: success,
+      failed_files: failed,
+      pending_review_files: pendingReviewFiles,
+    });
+  }
+
+  if ((stillActive ?? 0) > 0) {
     const nextTrigger = fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
       method: "POST",
       headers: {
@@ -559,18 +711,29 @@ Deno.serve(async (req) => {
       success_files: success,
       failed_files: failed,
       pending_review_files: pendingReviewFiles,
-      remaining_files: remainingFiles,
+      remaining_files: stillActive ?? 0,
     });
   }
 
-  const finalStatus =
-    failed > 0 && success > 0
-      ? "PARTIAL_SUCCESS"
-      : failed > 0
-        ? "FAILED"
-        : pendingReviewFiles > 0
-          ? "COMPLETED_WITH_PENDING_REVIEW"
-          : "COMPLETED";
+  const { data: batchTerminal } = await supabase
+    .from("import_job_batches")
+    .select("status")
+    .eq("id", batchId)
+    .maybeSingle();
+
+  let finalStatus: string;
+  if (String(batchTerminal?.status) === "CANCELLED") {
+    finalStatus = "CANCELLED";
+  } else if (failed > 0 && success > 0) {
+    finalStatus = "PARTIAL_SUCCESS";
+  } else if (failed > 0) {
+    finalStatus = "FAILED";
+  } else if (pendingReviewFiles > 0) {
+    finalStatus = "COMPLETED_WITH_PENDING_REVIEW";
+  } else {
+    finalStatus = "COMPLETED";
+  }
+
   await supabase
     .from("import_job_batches")
     .update({
@@ -578,9 +741,43 @@ Deno.serve(async (req) => {
       finished_at: new Date().toISOString(),
       progress_percent: 100,
       updated_at: new Date().toISOString(),
-      last_error: failed > 0 ? "Alguns arquivos falharam no processamento." : null,
+      last_error:
+        finalStatus === "CANCELLED"
+          ? "Importação cancelada pelo usuário."
+          : failed > 0
+            ? "Alguns arquivos falharam no processamento."
+            : null,
     })
     .eq("id", batchId);
+
+  const { count: rawInBatch } = await supabase
+    .from("onboarding_import_item_raw")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("import_job_batch_id", batchId);
+  if ((rawInBatch ?? 0) > 0 && finalStatus !== "CANCELLED") {
+    const reconcileTrigger = fetch(
+      `${supabaseUrl.replace(/\/$/, "")}/functions/v1/run-onboarding-product-reconciliation`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: authHeader!,
+          apikey: anonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ company_id: companyId, source_batch_id: batchId }),
+      },
+    ).catch(() => undefined);
+    try {
+      // @ts-ignore Edge runtime
+      if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(reconcileTrigger);
+      }
+    } catch {
+      // no-op
+    }
+  }
 
   const { count: pendingOpenCount } = await supabase
     .from("import_review_pending")
@@ -595,7 +792,7 @@ Deno.serve(async (req) => {
       dedupe_key: "import_pending_review_open",
       title: "Pendências de importação",
       message: `${pendingOpenCount} item(ns) de importação precisam de revisão.`,
-      link_path: "/app/importacoes/pendencias",
+      link_path: "/app",
       payload: { open_pending_count: pendingOpenCount },
       status: "open",
     }, { onConflict: "company_id,dedupe_key" });

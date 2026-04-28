@@ -114,7 +114,8 @@ export type XmlZipFileLogEntry = {
     | "duplicate"
     | "read_error"
     | "validation_error"
-    | "needs_review";
+    | "needs_review"
+    | "cancelled";
   message?: string;
 };
 

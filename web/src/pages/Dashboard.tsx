@@ -1,10 +1,10 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
-import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
+import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -122,11 +122,19 @@ export function Dashboard() {
     }
     setLoadingAlerts(true);
 
-    const { data, error } = await supabase
-      .from("company_alerts")
-      .select("kind")
-      .eq("company_id", companyId)
-      .eq("status", "open");
+    const [{ data, error }, { count: openImportCount, error: importCountErr }] =
+      await Promise.all([
+        supabase
+          .from("company_alerts")
+          .select("kind")
+          .eq("company_id", companyId)
+          .eq("status", "open"),
+        supabase
+          .from("import_review_pending")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .eq("status", "OPEN"),
+      ]);
 
     if (error) {
       console.error(error);
@@ -143,13 +151,17 @@ export function Dashboard() {
     }
 
     const list = data ?? [];
+    const importPending = importCountErr
+      ? 0
+      : Math.max(0, openImportCount ?? 0);
+
     setAlertSummary({
       lowStock: list.filter((r) => r.kind === "low_stock").length,
       withoutBoleto: list.filter((r) => r.kind === "expense_no_boleto").length,
       notReceived: list.filter((r) => r.kind === "recebimento_falta").length,
       boletoD3: list.filter((r) => r.kind === "boleto_vencimento_d3").length,
       boletoD1: list.filter((r) => r.kind === "boleto_vencimento_d1").length,
-      importPending: list.filter((r) => r.kind === "import_pending_review").length,
+      importPending,
     });
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
@@ -182,7 +194,10 @@ export function Dashboard() {
     const totals = rows.reduce(
       (acc, row) => {
         const total = Math.max(Number(row.total_files ?? 0), 0);
-        const processed = Math.min(Math.max(Number(row.processed_files ?? 0), 0), total);
+        const processed = Math.min(
+          Math.max(Number(row.processed_files ?? 0), 0),
+          total,
+        );
         return {
           totalFiles: acc.totalFiles + total,
           processedFiles: acc.processedFiles + processed,
@@ -269,6 +284,13 @@ export function Dashboard() {
           <DashboardIntegrationCsvRevenueCard companyId={companyId} />
         ) : null}
       </div>
+      {!loadingImportProgress && companyId && activeImportFiles > 0 ? (
+        <DashboardImportProgressBanner
+          loading={false}
+          activeImportFiles={activeImportFiles}
+          activeImportPercent={activeImportPercent}
+        />
+      ) : null}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">
@@ -302,6 +324,7 @@ export function Dashboard() {
             boletoD3={alertSummary.boletoD3}
             boletoD1={alertSummary.boletoD1}
             importPending={alertSummary.importPending}
+            onAfterImportSheetClose={() => void loadAlertSummary()}
           />
         ) : null}
       </div>

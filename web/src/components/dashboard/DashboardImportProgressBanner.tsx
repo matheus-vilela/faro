@@ -30,7 +30,7 @@ export function DashboardImportProgressBanner({
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wider text-amber-900/80 dark:text-amber-100/80">
-                Importacao XML
+                Importação XML
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActiveImport
@@ -45,7 +45,7 @@ export function DashboardImportProgressBanner({
 
           <Button size="sm" className="shrink-0" asChild>
             <Link to="/app/importacoes">
-              Abrir central de importacoes
+              Abrir central de importações
               <ArrowRight className="ml-1.5 h-4 w-4" />
             </Link>
           </Button>

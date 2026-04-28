@@ -1,4 +1,5 @@
 import type { SetupXmlZipImportState, XmlZipFileLogEntry } from "@/types/companySetup";
+import { importJobStatusLabel } from "@/lib/importBatchStatus";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 
 export type XmlZipProcessCallbacks = {
@@ -117,7 +118,8 @@ export async function processXmlZipImport(
         status === "COMPLETED" ||
         status === "FAILED" ||
         status === "PARTIAL_SUCCESS" ||
-        status === "COMPLETED_WITH_PENDING_REVIEW"
+        status === "COMPLETED_WITH_PENDING_REVIEW" ||
+        status === "CANCELLED"
       ) {
         const { data: files } = await supabase
           .from("import_job_files")
@@ -126,7 +128,9 @@ export async function processXmlZipImport(
           .order("created_at", { ascending: true });
         const out: XmlZipFileLogEntry[] = (files ?? []).map((f) => {
           const row = f as { file_name: string; status: string; last_error?: string | null };
-          const ok = row.status === "COMPLETED" || row.status === "COMPLETED_WITH_PENDING_REVIEW";
+          const ok =
+            row.status === "COMPLETED" ||
+            row.status === "COMPLETED_WITH_PENDING_REVIEW";
           const mappedStatus: XmlZipFileLogEntry["status"] =
             row.status === "COMPLETED"
               ? "success"
@@ -134,12 +138,27 @@ export async function processXmlZipImport(
                 ? "needs_review"
                 : row.status === "FAILED"
                   ? "validation_error"
-                  : "duplicate";
+                  : row.status === "CANCELLED"
+                    ? "cancelled"
+                    : "duplicate";
+          let message: string;
+          if (row.status === "CANCELLED") {
+            message =
+              row.last_error?.trim() ||
+              "Arquivo não processado (importação cancelada).";
+          } else if (ok) {
+            message =
+              row.status === "COMPLETED_WITH_PENDING_REVIEW"
+                ? "Concluído com pendências de revisão."
+                : "Concluído.";
+          } else {
+            message = row.last_error ?? importJobStatusLabel(row.status);
+          }
           return {
             name: row.file_name,
             ok,
             status: mappedStatus,
-            message: ok ? (row.status === "COMPLETED_WITH_PENDING_REVIEW" ? "Concluído com pendências de revisão." : "Concluído.") : (row.last_error ?? "Falha."),
+            message,
           };
         });
         callbacks.onLog(out);

@@ -17,7 +17,7 @@ export const SETUP_STEP_HINTS: Record<SetupStepNumber, string> = {
   1: "Dados da empresa, CNPJ e endereço (preenchidos na validação).",
   2: "Certificado digital A1 usado na emissão fiscal.",
   3: "Importação opcional de notas (XML ou ZIP).",
-  4: "Integração de PDV, se a unidade utilizar.",
+  4: "Integração de PDV (E-PoC) com a operação da unidade.",
 };
 
 const STEPS: readonly SetupStepNumber[] = [1, 2, 3, 4];

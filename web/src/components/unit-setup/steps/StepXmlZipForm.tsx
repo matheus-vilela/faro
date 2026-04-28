@@ -1,3 +1,4 @@
+import { importFileLogStatusLabel } from "@/lib/importBatchStatus";
 import { cn } from "@/lib/utils";
 import type { SetupXmlZipImportState } from "@/types/companySetup";
 import { CheckCircle2, FileArchive, FileUp, Loader2 } from "lucide-react";
@@ -174,7 +175,7 @@ export function StepXmlZipForm({
         <ul className="max-h-40 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
           {log.map((e, i) => (
             <li key={i} className={e.ok ? "" : "text-destructive"}>
-              {e.name}: [{e.status ?? (e.ok ? "success" : "error")}]{" "}
+              {e.name}: [{importFileLogStatusLabel(e.status ?? (e.ok ? "success" : "validation_error"))}]{" "}
               {e.ok ? e.message ?? "OK" : e.message ?? "Erro"}
             </li>
           ))}
