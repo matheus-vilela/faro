@@ -543,11 +543,6 @@ export function Receitas() {
           isProductSale && selectedProduct && item.saleUnitCode
             ? (toStockQty(selectedProduct.id, qtyNum, item.saleUnitCode) ?? 0)
             : 0;
-        const stockOk =
-          !isProductSale ||
-          !selectedProduct ||
-          qtyNum <= 0 ||
-          Number(selectedProduct.current_quantity) >= stockQtyNum;
         const unitNum = parseFloat(item.unitValue.replace(",", ".")) || 0;
         const grossNumItem = parseFloat(item.grossInput.replace(",", ".")) || 0;
         const computedGross =
@@ -572,7 +567,6 @@ export function Receitas() {
           quantityFieldProps,
           qtyNum,
           stockQtyNum,
-          stockOk,
           unitNum,
           grossNumItem,
           effectiveGross,
@@ -748,7 +742,6 @@ export function Receitas() {
           }
           if (item.pricingMode === "unit" && item.unitNum < 0) return false;
           if (item.pricingMode === "total" && item.grossNumItem <= 0) return false;
-          if (!item.stockOk) return false;
         }
         if (item.isRecipeSale) {
           if (!item.recipeId) return false;
@@ -1263,19 +1256,6 @@ export function Receitas() {
                       </div>
                     )}
 
-                    {item.selectedProduct && !item.stockOk && (
-                      <div
-                        role="alert"
-                        className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-                      >
-                        Estoque insuficiente. Disponível:{" "}
-                        {Number(item.selectedProduct.current_quantity).toLocaleString(
-                          "pt-BR",
-                          { maximumFractionDigits: 4 },
-                        )}{" "}
-                        {item.selectedProduct.unit}.
-                      </div>
-                    )}
                   </div>
                 ))}
 

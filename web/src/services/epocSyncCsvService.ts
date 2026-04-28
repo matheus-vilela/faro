@@ -1,9 +1,13 @@
+import {
+  clearEpocCsvSyncPending,
+  markEpocCsvSyncPending,
+} from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
 
 /**
  * Chama a edge `epoc-sync-csv`: cada etapa (login, index, validadorOz/acoes nas duas fases) é
  * gravada como um `step` no Storage com URL assinada, e o JSON traz `steps[]` para inspeção
- * e download. Sucesso só quando a fase 2 contém `id=tblExport`.
+ * e download. Sucesso só quando a fase 2 contém `id=tblExport` e o CSV é gerado.
  */
 export type EpocSyncStepStatus = "ok" | "fail" | "warn";
 export type EpocSyncStep = {
@@ -27,20 +31,9 @@ export type EpocSyncCsvResponse = {
   /** Trace de cada etapa (login → index → validador/acoes 1/2 → tblExport). */
   steps?: EpocSyncStep[];
   steps_prefix?: string;
-  /** Falso quando a resposta fase2 foi guardada, mas o id de exportação não veio. */
+  /** Falso quando a resposta fase2 não trouxe `id=tblExport`. */
   tblExport_found?: boolean;
-  /** HTML com a tabela `#tblExport` (ficheiro no Storage). */
-  acoes_response_storage_path?: string;
-  acoes_response_file_name?: string;
-  acoes_response_size_bytes?: number;
-  acoes_response_content_type?: string | null;
-  acoes_response_download_url?: string | null;
-  /** @deprecated use `acoes_response_download_url` (mesma URL). */
-  html_storage_path?: string;
-  html_file_name?: string;
-  html_size_bytes?: number;
-  html_download_url?: string | null;
-  /** CSV (não usado no fluxo atual, mantido para compatibilidade). */
+  /** CSV consolidado dos últimos 60 dias. */
   csv_uploaded?: boolean;
   storage_path?: string | null;
   file_name?: string | null;
@@ -55,35 +48,37 @@ export type EpocSyncCsvResponse = {
 export async function invokeEpocCsvSync(
   companyId: string,
 ): Promise<EpocSyncCsvResponse> {
-  const { data, error } = await supabase.functions.invoke<EpocSyncCsvResponse>(
-    "epoc-sync-csv",
-    { body: { company_id: companyId } },
-  );
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  if (!data) {
-    return { ok: false, error: "Resposta vazia da função" };
-  }
-  return data;
-}
-
-export function triggerEpocCsvSyncInBackground(companyId: string): void {
-  void (async () => {
+  markEpocCsvSyncPending(companyId);
+  try {
     const { data, error } = await supabase.functions.invoke<EpocSyncCsvResponse>(
       "epoc-sync-csv",
       { body: { company_id: companyId } },
     );
     if (error) {
-      console.warn("[epoc-sync-csv]", error.message);
+      return { ok: false, error: error.message };
+    }
+    if (!data) {
+      return { ok: false, error: "Resposta vazia da função" };
+    }
+    return data;
+  } finally {
+    clearEpocCsvSyncPending(companyId);
+  }
+}
+
+export function triggerEpocCsvSyncInBackground(companyId: string): void {
+  void (async () => {
+    const data = await invokeEpocCsvSync(companyId);
+    if (!data.ok && data.error) {
+      console.warn("[epoc-sync-csv]", data.error);
       return;
     }
-    if (data && !data.ok) {
-      console.warn("[epoc-sync-csv]", data.error ?? "ok false");
-    } else if (data?.ok) {
+    if (data.ok) {
       console.info(
-        "[epoc-sync-csv] concluído (resposta acoes.php + CSV no Storage, em segundo plano).",
+        "[epoc-sync-csv] concluído (CSV no Storage, em segundo plano).",
       );
+    } else {
+      console.warn("[epoc-sync-csv]", data.error ?? "ok false");
     }
   })();
 }

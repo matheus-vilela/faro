@@ -42,15 +42,27 @@ import {
 } from "@/types/companyIntegration";
 import {
   ChevronRight,
+  Clock3,
   Download,
-  FileText,
   Loader2,
   RefreshCw,
   Save,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+
+type EpocSyncHistoryRow = {
+  id: string;
+  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+  created_at: string;
+  updated_at: string;
+  error_message: string | null;
+  storage_path: string;
+  csv_resume_row_index: number | null;
+  metadata: Record<string, unknown> | null;
+};
 
 export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true);
@@ -70,19 +82,17 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [lastEpocCsvStoragePath, setLastEpocCsvStoragePath] = useState<
     string | null
   >(null);
-  const [lastEpocAcoesResponseSyncAt, setLastEpocAcoesResponseSyncAt] =
-    useState<string | null>(null);
-  const [
-    lastEpocAcoesResponseStoragePath,
-    setLastEpocAcoesResponseStoragePath,
-  ] = useState<string | null>(null);
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
-  const [downloadingLastAcoes, setDownloadingLastAcoes] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
   const [purgeCountLoading, setPurgeCountLoading] = useState(false);
   const [purging, setPurging] = useState(false);
+  const [activeTab, setActiveTab] = useState<"config" | "history">("config");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [syncHistory, setSyncHistory] = useState<EpocSyncHistoryRow[]>([]);
+  const [downloadingIgnoredReportJobId, setDownloadingIgnoredReportJobId] =
+    useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,12 +126,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       );
       setLastEpocCsvSyncAt(s.last_epoc_csv_sync_at ?? null);
       setLastEpocCsvStoragePath(s.last_epoc_csv_storage_path ?? null);
-      setLastEpocAcoesResponseSyncAt(
-        s.last_epoc_acoes_response_sync_at ?? null,
-      );
-      setLastEpocAcoesResponseStoragePath(
-        s.last_epoc_acoes_response_storage_path ?? null,
-      );
     } else {
       setEnabled(false);
       setUsername("");
@@ -132,8 +136,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setExistingPassword(null);
       setLastEpocCsvSyncAt(null);
       setLastEpocCsvStoragePath(null);
-      setLastEpocAcoesResponseSyncAt(null);
-      setLastEpocAcoesResponseStoragePath(null);
     }
     setLoading(false);
   }, [companyId]);
@@ -142,10 +144,44 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     queueMicrotask(() => void load());
   }, [load]);
 
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    const { data, error } = await supabase
+      .from("integration_csv_revenue_import_jobs")
+      .select(
+        "id, status, created_at, updated_at, error_message, storage_path, csv_resume_row_index, metadata",
+      )
+      .eq("company_id", companyId)
+      .eq("provider", "epoc")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    setHistoryLoading(false);
+    if (error) {
+      console.error(error);
+      toast.error("Não foi possível carregar o histórico de sincronizações.");
+      return;
+    }
+    setSyncHistory((data ?? []) as EpocSyncHistoryRow[]);
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!sheetOpen || activeTab !== "history") return;
+    queueMicrotask(() => void loadHistory());
+  }, [sheetOpen, activeTab, loadHistory]);
+
   const fileNameFromStoragePath = (path: string, fallback: string) => {
     const t = path.trim();
     const i = t.lastIndexOf("/");
     return (i >= 0 ? t.slice(i + 1) : t) || fallback;
+  };
+
+  const cleanText = (v: unknown) => String(v ?? "").trim();
+
+  const statusLabel = (s: EpocSyncHistoryRow["status"]) => {
+    if (s === "PENDING") return "Na fila";
+    if (s === "PROCESSING") return "A processar";
+    if (s === "COMPLETED") return "Concluída";
+    return "Falhou";
   };
 
   const handleDownloadLastCsv = async () => {
@@ -180,28 +216,28 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     toast.message(`Download iniciado: ${name}`);
   };
 
-  const handleDownloadLastAcoesResponse = async () => {
-    if (!lastEpocAcoesResponseStoragePath?.trim()) {
-      toast.error("Ainda não há ficheiro da tabela #tblExport sincronizado.");
+  const handleDownloadIgnoredRowsReport = async (
+    jobId: string,
+    bucket: string,
+    path: string,
+  ) => {
+    const cleanBucket = cleanText(bucket) || "company-setup";
+    const cleanPath = cleanText(path);
+    if (!cleanPath) {
+      toast.error("Este job não possui relatório de ignoradas.");
       return;
     }
-    setDownloadingLastAcoes(true);
+    setDownloadingIgnoredReportJobId(jobId);
     const { data, error } = await supabase.storage
-      .from("company-setup")
-      .download(lastEpocAcoesResponseStoragePath.trim());
-    setDownloadingLastAcoes(false);
+      .from(cleanBucket)
+      .download(cleanPath);
+    setDownloadingIgnoredReportJobId(null);
     if (error) {
       console.error(error);
-      toast.error(
-        error.message ||
-          "Não foi possível baixar o ficheiro. Verifique as permissões.",
-      );
+      toast.error(error.message || "Não foi possível baixar o relatório.");
       return;
     }
-    const name = fileNameFromStoragePath(
-      lastEpocAcoesResponseStoragePath,
-      "epoc-tblExport.html",
-    );
+    const name = fileNameFromStoragePath(cleanPath, "ignored-rows-report.csv");
     const url = URL.createObjectURL(data);
     const a = document.createElement("a");
     a.href = url;
@@ -217,10 +253,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
-    const oldPaths = [
-      lastEpocAcoesResponseStoragePath?.trim() ?? "",
-      lastEpocCsvStoragePath?.trim() ?? "",
-    ].filter(Boolean);
+    const oldPaths = [lastEpocCsvStoragePath?.trim() ?? ""].filter(Boolean);
     const uniqueOldPaths = Array.from(new Set(oldPaths));
     if (uniqueOldPaths.length > 0) {
       const { error: removeErr } = await supabase.storage
@@ -239,15 +272,17 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           `Arquivos antigos removidos (${uniqueOldPaths.length}) antes da nova sincronização.`,
         );
       }
-      setLastEpocAcoesResponseStoragePath(null);
       setLastEpocCsvStoragePath(null);
-      setLastEpocAcoesResponseSyncAt(null);
       setLastEpocCsvSyncAt(null);
     }
 
     setSyncingFull(true);
-    const res = await invokeEpocCsvSync(companyId);
-    setSyncingFull(false);
+    let res: Awaited<ReturnType<typeof invokeEpocCsvSync>>;
+    try {
+      res = await invokeEpocCsvSync(companyId);
+    } finally {
+      setSyncingFull(false);
+    }
     if (res.steps?.length) {
       console.groupCollapsed(`[epoc-sync-csv] steps (${res.steps.length})`);
       for (const s of res.steps) {
@@ -264,8 +299,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         .find((s) => s.status !== "ok");
       const downloadOnErr =
         lastFail?.download_url ??
-        res.acoes_response_download_url ??
-        res.html_download_url ??
+        res.download_url ??
         null;
       const failName = lastFail?.label ?? lastFail?.name;
       const tail = failName ? ` Etapa com problema: ${failName}.` : "";
@@ -288,15 +322,11 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     }
     toast.success(
       res.csv_uploaded
-        ? "Tabela #tblExport (HTML) e CSV guardados no armazenamento da unidade."
-        : "Tabela #tblExport (HTML) guardada. O CSV não foi extraído automaticamente.",
+        ? "CSV guardado no armazenamento da unidade."
+        : "Sincronização concluída, mas o CSV não foi extraído automaticamente.",
     );
     await load();
-    const acoesUrl =
-      res.acoes_response_download_url ?? res.html_download_url ?? null;
-    if (acoesUrl) {
-      window.open(acoesUrl, "_blank", "noopener,noreferrer");
-    } else if (res.download_url) {
+    if (res.download_url) {
       window.open(res.download_url, "_blank", "noopener,noreferrer");
     } else {
       toast.message(
@@ -427,7 +457,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     if (enabled && baseUrl.trim()) {
       triggerEpocCsvSyncInBackground(companyId);
       toast.message(
-        "Sincronização EPOC (epoc-sync-csv) em segundo plano: login, relatório e exportação do CSV.",
+        "Sincronização EPOC (epoc-sync-csv) em segundo plano: login e exportação do CSV.",
         { duration: 6000 },
       );
     }
@@ -528,7 +558,13 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         </div>
       </Card>
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Sheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open);
+          if (!open) setActiveTab("config");
+        }}
+      >
         <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Integração EPOC</SheetTitle>
@@ -541,6 +577,25 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           </SheetHeader>
 
           <div className="flex flex-1 flex-col gap-5 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={activeTab === "config" ? "default" : "outline"}
+                onClick={() => setActiveTab("config")}
+              >
+                Configuração
+              </Button>
+              <Button
+                type="button"
+                variant={activeTab === "history" ? "default" : "outline"}
+                onClick={() => setActiveTab("history")}
+              >
+                Histórico
+              </Button>
+            </div>
+
+            {activeTab === "config" ? (
+              <>
             <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
               <div>
                 <Label htmlFor="epoc-enabled" className="text-sm font-medium">
@@ -626,7 +681,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
 
             <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
               <p className="text-sm font-medium">
-                Relatório EPOC (tabela + CSV)
+                Relatório EPOC (CSV)
               </p>
               <p className="text-xs text-muted-foreground">
                 O import automático de receitas usa sempre a{" "}
@@ -634,20 +689,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 (exclui deduções DRE), na mesma ordem de Configurações → Categorias
                 (campo ordem, depois nome).
               </p>
-              {lastEpocAcoesResponseSyncAt ? (
-                <p className="text-xs text-muted-foreground">
-                  Última tabela (#tblExport):{" "}
-                  {new Date(lastEpocAcoesResponseSyncAt).toLocaleString(
-                    "pt-BR",
-                  )}
-                </p>
-              ) : null}
               {lastEpocCsvSyncAt ? (
                 <p className="text-xs text-muted-foreground">
                   Último CSV:{" "}
                   {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
                 </p>
-              ) : !lastEpocAcoesResponseSyncAt ? (
+              ) : (
                 <p className="text-xs text-muted-foreground">
                   Nada sincronizado ainda — use o botão abaixo (função
                   <span className="font-mono text-[0.7rem]">
@@ -656,7 +703,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   </span>
                   ).
                 </p>
-              ) : null}
+              )}
               <Button
                 type="button"
                 className="w-full"
@@ -671,23 +718,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 Sincronizar agora (EPOC → Storage)
               </Button>
 
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => void handleDownloadLastAcoesResponse()}
-                  disabled={
-                    !lastEpocAcoesResponseStoragePath || downloadingLastAcoes
-                  }
-                >
-                  {downloadingLastAcoes ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <FileText className="mr-2 h-4 w-4" />
-                  )}
-                  Baixar tabela (#tblExport)
-                </Button>
+              <div className="grid gap-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -725,23 +756,148 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 Apagar receitas importadas do EPOC
               </Button>
             </div>
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Sincronizações realizadas</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void loadHistory()}
+                    disabled={historyLoading}
+                  >
+                    {historyLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Atualizar
+                  </Button>
+                </div>
+                {historyLoading ? (
+                  <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      A carregar histórico…
+                    </span>
+                  </div>
+                ) : syncHistory.length === 0 ? (
+                  <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Nenhuma sincronização encontrada para esta unidade.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {syncHistory.map((item) => {
+                      const meta = item.metadata ?? {};
+                      const created = Number(meta.revenue_entries_created_total ?? 0) || 0;
+                      const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
+                      const totalRows = Number(meta.csv_total_data_rows ?? 0) || 0;
+                      const jobIdShort = item.id.slice(0, 8);
+                      const storageName = fileNameFromStoragePath(
+                        item.storage_path,
+                        "epoc.csv",
+                      );
+                      const ignoredReportPath =
+                        typeof meta.ignored_rows_report_storage_path === "string"
+                          ? meta.ignored_rows_report_storage_path
+                          : "";
+                      const ignoredReportBucket =
+                        typeof meta.ignored_rows_report_storage_bucket === "string"
+                          ? meta.ignored_rows_report_storage_bucket
+                          : "company-setup";
+                      const canDownloadIgnoredReport = !!ignoredReportPath.trim();
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-border/80 bg-card p-3 text-sm"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 font-medium">
+                              {item.status === "FAILED" ? (
+                                <SquareTerminal className="h-4 w-4 text-destructive" />
+                              ) : (
+                                <Clock3 className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              {statusLabel(item.status)}
+                            </span>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {jobIdShort}…
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground space-y-1">
+                            <p>
+                              Criado: {new Date(item.created_at).toLocaleString("pt-BR")}
+                            </p>
+                            <p>
+                              Atualizado: {new Date(item.updated_at).toLocaleString("pt-BR")}
+                            </p>
+                            <p>CSV: {storageName}</p>
+                            <p>
+                              Receitas: {created} · Ignoradas: {skipped}
+                              {totalRows > 0 ? ` · Linhas CSV: ${totalRows}` : ""}
+                            </p>
+                            {item.csv_resume_row_index != null ? (
+                              <p>Cursor: linha {item.csv_resume_row_index}</p>
+                            ) : null}
+                            {item.error_message ? (
+                              <p className="text-destructive">
+                                Erro: {item.error_message}
+                              </p>
+                            ) : null}
+                          </div>
+                          {canDownloadIgnoredReport ? (
+                            <div className="mt-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full"
+                                onClick={() =>
+                                  void handleDownloadIgnoredRowsReport(
+                                    item.id,
+                                    ignoredReportBucket,
+                                    ignoredReportPath,
+                                  )
+                                }
+                                disabled={downloadingIgnoredReportJobId === item.id}
+                              >
+                                {downloadingIgnoredReportJobId === item.id ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Download className="mr-2 h-4 w-4" />
+                                )}
+                                Baixar relatório de ignoradas
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <SheetFooter className="gap-2 border-t pt-4 sm:flex-col sm:space-x-0">
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                className="w-full sm:w-auto"
-                onClick={() => void handleSave()}
-                disabled={saving}
-              >
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                Salvar
-              </Button>
+              {activeTab === "config" ? (
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  onClick={() => void handleSave()}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  Salvar
+                </Button>
+              ) : null}
             </div>
           </SheetFooter>
         </SheetContent>

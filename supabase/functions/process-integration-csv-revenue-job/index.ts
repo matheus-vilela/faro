@@ -25,9 +25,24 @@ const corsHeaders: Record<string, string> = {
 
 const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
 /** Cabeçalhos aceites para o nome da linha (título do lançamento e match de produto). */
-const COL_PRODUTO_ALIASES = ["Produto", "Nome do produto"];
-/** Coluna de quantidade vendida (normalização ignora acentos e espaços). */
-const COL_QUANT_ALIASES = ["Quant.", "Quant", "Quantidade", "Qtd."];
+const COL_PRODUTO_ALIASES = [
+  "Produto",
+  "Nome do produto",
+  "Nome Produto",
+  "Descrição",
+  "Descricao",
+];
+/** Coluna de quantidade vendida (normalização ignora acentos e espaços no cabeçalho). */
+const COL_QUANT_ALIASES = [
+  "Quant.",
+  "Quant",
+  "Quantidade",
+  "Qtd.",
+  "Qtd",
+  "QTDE",
+  "Qtde",
+  "Qtde.",
+];
 /** Máximo de linhas de dados visitadas por invocação (além do orçamento de tempo). */
 const ROWS_HARD_CAP = 55;
 /** Orçamento de tempo por invocação (ms); acima disso agenda continuação. */
@@ -52,6 +67,89 @@ function normalizeHeaderLabel(s: string): string {
     .replace(/\s+/g, "");
 }
 
+/** Remove NBSP e zero-width; útil em células exportadas do EPOC. */
+function sanitizeCell(s: string): string {
+  return String(s ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .trim();
+}
+
+/** Nome de produto para comparar CSV ↔ cadastro (acentos e espaços colapsados). */
+function normalizeCatalogName(s: string): string {
+  return sanitizeCell(s)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferUnitFromProductName(
+  productName: string,
+  catalog: Array<{ id: string; name: string; unit?: string | null }>,
+): string {
+  const n = normalizeCatalogName(productName);
+  if (
+    /\b(kg|quilo|quilos)\b/.test(n)
+  ) return "kg";
+  if (
+    /\b(g|grama|gramas)\b/.test(n)
+  ) return "g";
+  if (
+    /\b(l|litro|litros)\b/.test(n)
+  ) return "l";
+  if (
+    /\b(ml|mililitro|mililitros)\b/.test(n)
+  ) return "ml";
+
+  const unitCount = new Map<string, number>();
+  for (const p of catalog) {
+    const u = sanitizeCell(p.unit ?? "").toLowerCase();
+    if (!u) continue;
+    unitCount.set(u, (unitCount.get(u) ?? 0) + 1);
+  }
+  let best = "un";
+  let bestCount = -1;
+  for (const [u, c] of unitCount.entries()) {
+    if (c > bestCount) {
+      best = u;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+/** Índice da coluna de quantidade: aliases exactos, depois heurística no cabeçalho já normalizado. */
+function resolveQuantColumnIndex(normHeaders: string[]): number {
+  for (const alias of COL_QUANT_ALIASES) {
+    const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
+    if (j >= 0) return j;
+  }
+  for (let i = 0; i < normHeaders.length; i++) {
+    const h = normHeaders[i]!;
+    if (h === "quant" || h === "qtd" || h === "qtde" || h === "qty") return i;
+    if (h.startsWith("quantidade")) return i;
+    if (h.startsWith("qtd")) return i;
+    if (h.startsWith("qtde")) return i;
+  }
+  return -1;
+}
+
+/** Índice da coluna de produto: aliases exactos, depois cabeçalho contém "produto" / "descricao". */
+function resolveProductColumnIndex(normHeaders: string[]): number {
+  for (const alias of COL_PRODUTO_ALIASES) {
+    const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
+    if (j >= 0) return j;
+  }
+  for (let i = 0; i < normHeaders.length; i++) {
+    const h = normHeaders[i]!;
+    if (h.includes("produto")) return i;
+    if (h.includes("descricao")) return i;
+  }
+  return -1;
+}
+
 function parseCsvSemicolon(text: string): { headers: string[]; rows: string[][] } {
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) return { headers: [], rows: [] };
@@ -65,8 +163,63 @@ function parseCsvSemicolon(text: string): { headers: string[]; rows: string[][] 
   return { headers, rows };
 }
 
+function csvEscapeCell(v: string): string {
+  const s = String(v ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const needsQuote = /[",;\n]/.test(s);
+  const esc = s.replace(/"/g, '""');
+  return needsQuote ? `"${esc}"` : esc;
+}
+
+type IgnoredRowReason =
+  | "gross_amount_invalid"
+  | "entry_date_invalid"
+  | "product_name_empty"
+  | "quantity_invalid"
+  | "product_ambiguous"
+  | "product_create_failed";
+
+type IgnoredRowDiagnostic = {
+  row_index: number;
+  entry_date_raw: string;
+  product_name_raw: string;
+  quantity_raw: string;
+  total_received_raw: string;
+  reason: IgnoredRowReason;
+  details: string;
+  action: string;
+};
+
+function diagnosticsToCsv(rows: IgnoredRowDiagnostic[]): string {
+  const header = [
+    "row_index",
+    "data_consumo",
+    "produto",
+    "quantidade",
+    "total_recebido",
+    "motivo",
+    "detalhe",
+    "acao_tomada",
+  ];
+  const lines = [header.map(csvEscapeCell).join(";")];
+  for (const r of rows) {
+    lines.push(
+      [
+        String(r.row_index),
+        r.entry_date_raw,
+        r.product_name_raw,
+        r.quantity_raw,
+        r.total_received_raw,
+        r.reason,
+        r.details,
+        r.action,
+      ].map(csvEscapeCell).join(";"),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function parseFlexibleDate(s: string): string | null {
-  const t = s.trim();
+  const t = sanitizeCell(s);
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
   return parseBrDate(t);
 }
@@ -83,7 +236,7 @@ function parseBrDate(s: string): string | null {
 }
 
 function parseBrMoney(s: string): number | null {
-  const t = String(s ?? "").trim();
+  const t = sanitizeCell(s);
   if (!t) return null;
   let x = t.replace(/\s/g, "");
   if (/^\d{1,3}(\.\d{3})*,\d{2}$/.test(x)) {
@@ -102,7 +255,7 @@ function parseBrMoney(s: string): number | null {
 
 /** Quantidade > 0 (inteiro ou decimal PT-BR / en). */
 function parseBrQuantity(s: string): number | null {
-  const t = String(s ?? "").trim();
+  const t = sanitizeCell(s);
   if (!t) return null;
   let x = t.replace(/\s/g, "");
   if (/^\d+$/.test(x)) {
@@ -124,41 +277,51 @@ function parseBrQuantity(s: string): number | null {
   return Math.round(v * 10_000) / 10_000;
 }
 
-function escapeIlikeExact(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
-async function resolveProductIdByName(
+async function loadProductCatalog(
   admin: ReturnType<typeof createClient>,
   companyId: string,
-  displayName: string,
-  cache: Map<string, string | null>,
-): Promise<string | null> {
-  const key = displayName.trim().replace(/\s+/g, " ").toLowerCase();
-  if (cache.has(key)) return cache.get(key) ?? null;
-  const name = displayName.trim().replace(/\s+/g, " ");
-  if (!name) {
-    cache.set(key, null);
-    return null;
-  }
-  const pattern = escapeIlikeExact(name);
-  const { data: rows, error } = await admin
+): Promise<
+  | { ok: true; catalog: Array<{ id: string; name: string; unit?: string | null }> }
+  | { ok: false; message: string }
+> {
+  const { data, error } = await admin
     .from("products")
-    .select("id")
-    .eq("company_id", companyId)
-    .ilike("name", pattern)
-    .limit(2);
-  if (error || !rows?.length) {
-    cache.set(key, null);
+    .select("id, name, unit")
+    .eq("company_id", companyId);
+  if (error) {
+    console.error("[process-integration-csv-revenue-job] products", error.message);
+    return { ok: false, message: error.message };
+  }
+  const catalog = (data ?? []) as Array<{ id: string; name: string; unit?: string | null }>;
+  return { ok: true, catalog };
+}
+
+/**
+ * Resolve produto por nome igual ao cadastro (case-insensitive, acentos, espaços),
+ * uma linha por match exato após normalização — evita depender do ilike do PostgREST.
+ */
+function resolveProductIdFromCatalog(
+  displayName: string,
+  catalog: Array<{ id: string; name: string; unit?: string | null }>,
+  cache: Map<string, string | null>,
+): string | null {
+  const cacheKey = normalizeCatalogName(displayName);
+  if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null;
+  if (!cacheKey) {
+    cache.set(cacheKey, null);
     return null;
   }
-  if (rows.length > 1) {
-    cache.set(key, null);
+  const matches = catalog.filter((p) => normalizeCatalogName(p.name) === cacheKey);
+  if (matches.length === 1) {
+    cache.set(cacheKey, matches[0]!.id);
+    return matches[0]!.id;
+  }
+  if (matches.length > 1) {
+    cache.set(cacheKey, null);
     return null;
   }
-  const id = (rows[0] as { id: string }).id;
-  cache.set(key, id);
-  return id;
+  cache.set(cacheKey, null);
+  return null;
 }
 
 function extractJobId(body: Record<string, unknown>): string | null {
@@ -399,33 +562,26 @@ Deno.serve(async (req) => {
       return await fail('Coluna "data_consumo" não encontrada no CSV.');
     }
 
-    let produtoCol = -1;
-    for (const alias of COL_PRODUTO_ALIASES) {
-      const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
-      if (j >= 0) {
-        produtoCol = j;
-        break;
-      }
-    }
-
-    let quantCol = -1;
-    for (const alias of COL_QUANT_ALIASES) {
-      const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
-      if (j >= 0) {
-        quantCol = j;
-        break;
-      }
-    }
+    const quantCol = resolveQuantColumnIndex(normHeaders);
     if (quantCol < 0) {
       return await fail(
-        `Coluna de quantidade não encontrada (esperado: ${COL_QUANT_ALIASES.join(", ")}). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
+        `Coluna de quantidade não encontrada (tente nomes como Quant., Quantidade, Qtd). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
       );
     }
+    const produtoCol = resolveProductColumnIndex(normHeaders);
     if (produtoCol < 0) {
       return await fail(
-        `Coluna de produto não encontrada (esperado: ${COL_PRODUTO_ALIASES.join(", ")}). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
+        `Coluna de produto não encontrada (tente Produto, Nome do produto, Descrição). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
       );
     }
+
+    const productCatalogLoad = await loadProductCatalog(admin, job.company_id);
+    if (!productCatalogLoad.ok) {
+      return await fail(
+        `Falha ao ler o catálogo de produtos: ${productCatalogLoad.message}`,
+      );
+    }
+    const productCatalog = [...productCatalogLoad.catalog];
 
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
     if (startOffset > rows.length) {
@@ -455,8 +611,26 @@ Deno.serve(async (req) => {
     const prevSkipNoProduct = Number(priorMeta.rows_skipped_no_product ?? 0) || 0;
     const prevSkipNoQty = Number(priorMeta.rows_skipped_no_quantity ?? 0) || 0;
     const prevSkipNoName = Number(priorMeta.rows_skipped_no_product_name ?? 0) || 0;
+    const prevProductsAutoCreated = Number(priorMeta.products_auto_created_total ?? 0) || 0;
+    const prevDiagnosticsTruncated = priorMeta.ignored_rows_report_truncated === true;
+    const maxDiagnostics = 2000;
+    const priorDiagnostics =
+      Array.isArray(priorMeta.ignored_rows_diagnostics)
+        ? (priorMeta.ignored_rows_diagnostics as IgnoredRowDiagnostic[])
+        : [];
+    const diagnostics: IgnoredRowDiagnostic[] = [...priorDiagnostics];
+    let diagnosticsTruncated = prevDiagnosticsTruncated;
+    let productsAutoCreatedChunk = 0;
 
     const productIdCache = new Map<string, string | null>();
+
+    const pushDiagnostic = (d: IgnoredRowDiagnostic) => {
+      if (diagnostics.length >= maxDiagnostics) {
+        diagnosticsTruncated = true;
+        return;
+      }
+      diagnostics.push(d);
+    };
 
     const t0 = Date.now();
     let idx = startOffset;
@@ -465,49 +639,156 @@ Deno.serve(async (req) => {
       if (Date.now() - t0 >= TIME_BUDGET_MS) break;
 
       const row = rows[idx]!;
-      const totalCell = row[totalCol] ?? "";
+      const totalCell = sanitizeCell(row[totalCol] ?? "");
       const gross = parseBrMoney(totalCell);
       if (gross == null) {
         skippedChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: "",
+          product_name_raw: "",
+          quantity_raw: "",
+          total_received_raw: totalCell,
+          reason: "gross_amount_invalid",
+          details: `Valor invalido em "${COL_TOTAL_RECEBIDO}"`,
+          action: "linha ignorada",
+        });
         idx += 1;
         continue;
       }
 
-      const rawDate = row[dataConsumoIdx] ?? "";
+      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
       const entryDate = parseFlexibleDate(rawDate);
       if (!entryDate) {
         skippedChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: "",
+          quantity_raw: "",
+          total_received_raw: totalCell,
+          reason: "entry_date_invalid",
+          details: 'Data invalida em "data_consumo"',
+          action: "linha ignorada",
+        });
         idx += 1;
         continue;
       }
 
       const rawProdutoForMatch =
-        produtoCol >= 0 ? String(row[produtoCol] ?? "").trim().replace(/\s+/g, " ") : "";
+        produtoCol >= 0
+          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
+          : "";
       if (!rawProdutoForMatch) {
         skippedChunk += 1;
         skipNoNameChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: "",
+          total_received_raw: totalCell,
+          reason: "product_name_empty",
+          details: "Nome do produto vazio",
+          action: "linha ignorada",
+        });
         idx += 1;
         continue;
       }
 
-      const qtyCell = row[quantCol] ?? "";
-      const quantity = parseBrQuantity(String(qtyCell));
+      const qtyCell = sanitizeCell(row[quantCol] ?? "");
+      const quantity = parseBrQuantity(qtyCell);
       if (quantity == null) {
         skippedChunk += 1;
         skipNoQtyChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "quantity_invalid",
+          details: `Quantidade invalida na coluna ${headers[quantCol] ?? "quantidade"}`,
+          action: "linha ignorada",
+        });
         idx += 1;
         continue;
       }
 
-      const productId = await resolveProductIdByName(
-        admin,
-        job.company_id,
+      let productId = resolveProductIdFromCatalog(
         rawProdutoForMatch,
+        productCatalog,
         productIdCache,
       );
       if (!productId) {
+        const normName = normalizeCatalogName(rawProdutoForMatch);
+        const ambiguous = productCatalog.filter(
+          (p) => normalizeCatalogName(p.name) === normName,
+        );
+        if (ambiguous.length > 1) {
+          skippedChunk += 1;
+          skipNoProductChunk += 1;
+          pushDiagnostic({
+            row_index: idx + 1,
+            entry_date_raw: rawDate,
+            product_name_raw: rawProdutoForMatch,
+            quantity_raw: qtyCell,
+            total_received_raw: totalCell,
+            reason: "product_ambiguous",
+            details: `Mais de um produto com o mesmo nome normalizado (${ambiguous.length})`,
+            action: "linha ignorada; consolidar nomes duplicados no cadastro",
+          });
+          idx += 1;
+          continue;
+        }
+
+        const inferredUnit = inferUnitFromProductName(rawProdutoForMatch, productCatalog);
+        const { data: createdProduct, error: createErr } = await admin
+          .from("products")
+          .insert({
+            company_id: job.company_id,
+            name: rawProdutoForMatch,
+            unit: inferredUnit,
+            min_quantity: 0,
+            current_quantity: 0,
+            is_active: true,
+          })
+          .select("id, name, unit")
+          .single();
+        if (createErr || !createdProduct?.id) {
+          skippedChunk += 1;
+          skipNoProductChunk += 1;
+          pushDiagnostic({
+            row_index: idx + 1,
+            entry_date_raw: rawDate,
+            product_name_raw: rawProdutoForMatch,
+            quantity_raw: qtyCell,
+            total_received_raw: totalCell,
+            reason: "product_create_failed",
+            details: createErr?.message ?? "Falha ao criar produto automaticamente",
+            action: "linha ignorada",
+          });
+          idx += 1;
+          continue;
+        }
+        productCatalog.push(createdProduct as { id: string; name: string; unit?: string | null });
+        productsAutoCreatedChunk += 1;
+        productIdCache.set(normalizeCatalogName(rawProdutoForMatch), createdProduct.id as string);
+        productId = String(createdProduct.id);
+      }
+      if (!productId) {
         skippedChunk += 1;
         skipNoProductChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "product_create_failed",
+          details: "Produto nao encontrado e criacao automatica nao retornou id",
+          action: "linha ignorada",
+        });
         idx += 1;
         continue;
       }
@@ -581,6 +862,9 @@ Deno.serve(async (req) => {
       rows_skipped_no_product: prevSkipNoProduct + skipNoProductChunk,
       rows_skipped_no_quantity: prevSkipNoQty + skipNoQtyChunk,
       rows_skipped_no_product_name: prevSkipNoName + skipNoNameChunk,
+      products_auto_created_total: prevProductsAutoCreated + productsAutoCreatedChunk,
+      ignored_rows_diagnostics: diagnostics,
+      ignored_rows_report_truncated: diagnosticsTruncated,
     };
 
     const done = nextOffset >= rows.length;
@@ -605,6 +889,7 @@ Deno.serve(async (req) => {
         total_rows: rows.length,
         revenue_entries_created_this_chunk: createdChunk,
         rows_skipped_this_chunk: skippedChunk,
+        products_auto_created_this_chunk: productsAutoCreatedChunk,
         revenue_entries_created_total: prevCreated + createdChunk,
         continuing: true,
       });
@@ -616,6 +901,26 @@ Deno.serve(async (req) => {
         .from("company_revenue_integration_import_batches")
         .update({ status: "completed", updated_at: now })
         .in("id", batchIdList);
+    }
+
+    let ignoredReportPath: string | null = null;
+    if (diagnostics.length > 0) {
+      const reportCsv = diagnosticsToCsv(diagnostics);
+      const reportPath =
+        `epoc/ignored-rows/${job.company_id}/${job.id}/ignored-rows-report.csv`;
+      const { error: upReportErr } = await admin.storage
+        .from(job.storage_bucket)
+        .upload(reportPath, new Blob([reportCsv], { type: "text/csv" }), {
+          upsert: true,
+          contentType: "text/csv",
+        });
+      if (!upReportErr) {
+        ignoredReportPath = reportPath;
+        newMeta.ignored_rows_report_storage_bucket = job.storage_bucket;
+        newMeta.ignored_rows_report_storage_path = reportPath;
+      } else {
+        newMeta.ignored_rows_report_upload_error = upReportErr.message;
+      }
     }
 
     await admin
@@ -638,6 +943,9 @@ Deno.serve(async (req) => {
       rows_skipped_this_chunk: skippedChunk,
       revenue_entries_created_total: prevCreated + createdChunk,
       rows_skipped_total: prevSkipped + skippedChunk,
+      products_auto_created_total: prevProductsAutoCreated + productsAutoCreatedChunk,
+      ignored_rows_report_storage_path: ignoredReportPath,
+      ignored_rows_report_truncated: diagnosticsTruncated,
       batches: batchIdList.length,
     });
   } catch (e) {

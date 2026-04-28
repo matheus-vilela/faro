@@ -4,6 +4,9 @@
  * Cada step traz: bytes, content-type, http_status, presença de ids relevantes
  * (`ConteudoTela`, `tblExport`) e URL assinada. O sucesso só é declarado quando a
  * fase 2 contém `id=tblExport`; mesmo no erro o JSON inclui o trace com as URLs.
+ *
+ * O CSV consolidado inclui apenas linhas de dados com a coluna "Total recebido(R$)"
+ * preenchida (célula não vazia após trim), quando essa coluna existir no cabeçalho.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -31,6 +34,9 @@ const DEFAULT_NAOMENU = "123A";
 /** Só usamos o `id` destes nós (como no DOM do EPOC) — sem classes ou outros atributos. */
 const EPOC_ID_CONTEUDO_TELA = "ConteudoTela";
 const EPOC_ID_TBL_EXPORT = "tblExport";
+
+/** Alinhado ao import `process-integration-csv-revenue-job`; CSV final sem linhas com esta coluna vazia. */
+const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
@@ -222,7 +228,10 @@ function scheduleProcessCsvRevenueJob(
   });
   try {
     // @ts-ignore EdgeRuntime.waitUntil prolonga o isolate até o fetch terminar
-    if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+    if (
+      typeof EdgeRuntime !== "undefined" &&
+      typeof EdgeRuntime.waitUntil === "function"
+    ) {
       // @ts-ignore
       EdgeRuntime.waitUntil(trigger);
     }
@@ -311,26 +320,6 @@ function extractElementOuterHtmlById(
     }
   }
   return null;
-}
-
-function buildTblExportDocument(tableOuterHtml: string): string {
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EPOC — tabela de exportação</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" crossorigin="anonymous" />
-<style>
-body{padding:12px 16px}
-.color_back_epoc,.color_back_epoc a{background-color:#337ab7 !important;color:#fff !important}
-</style>
-</head>
-<body>
-${tableOuterHtml}
-</body>
-</html>
-`;
 }
 
 function escapeHtmlForPre(s: string): string {
@@ -487,21 +476,6 @@ function extractLoginFormHints(html: string): {
   return { action, userField, passField };
 }
 
-/** Extrai o nó com id `tblExport` (ou de string JSON com campo html/conteudo). */
-function buildTblExportFileOrError(
-  acoesText: string,
-): { doc: string } | { error: string } {
-  const html = unwrapAcoesHtml(acoesText);
-  const bloco = extractElementOuterHtmlById(html, EPOC_ID_TBL_EXPORT);
-  if (!bloco) {
-    return {
-      error:
-        "A resposta final de acoes.php não contém o elemento com id=tblExport.",
-    };
-  }
-  return { doc: buildTblExportDocument(bloco) };
-}
-
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&nbsp;/gi, " ")
@@ -549,6 +523,36 @@ function tableHtmlToCsv(tableHtml: string): string | null {
   }
   if (rows.length === 0) return null;
   return `${rows.join("\n")}\n`;
+}
+
+function normalizeHeaderLabel(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+}
+
+function findTotalRecebidoColumnIndex(headers: string[]): number {
+  const want = normalizeHeaderLabel(COL_TOTAL_RECEBIDO);
+  for (let i = 0; i < headers.length; i++) {
+    if (normalizeHeaderLabel(headers[i] ?? "") === want) return i;
+  }
+  for (let i = 0; i < headers.length; i++) {
+    const h = normalizeHeaderLabel(headers[i] ?? "");
+    if (h.includes("totalrecebido")) return i;
+  }
+  return -1;
+}
+
+/** Valor “preenchido” para o CSV: não vazio após trim (NBSP / zero-width removidos). */
+function isTotalRecebidoCellFilled(raw: string): boolean {
+  const t = raw
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .trim();
+  return t.length > 0;
 }
 
 function extractTableHeaderAndRows(tableHtml: string): {
@@ -1282,12 +1286,13 @@ Deno.serve(async (req) => {
   );
 
   // --- Fase 2: últimos 60 dias (consulta diária) ----------------------------
-  const diasConsulta = lastNDaysBr(60);
+  const diasConsulta = lastNDaysBr(30);
   const headerBase: string[] = [];
   const linhasCsvFinal: string[][] = [];
+  /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
+  let totalRecebidoColIndex = -1;
   let totalDiasComTabela = 0;
   let totalLinhasDados = 0;
-  let lastTblDoc: string | null = null;
 
   const BATCH_SIZE = 20;
   for (
@@ -1394,18 +1399,22 @@ Deno.serve(async (req) => {
       }
       if (headerBase.length === 0) {
         headerBase.push(...result.parsed.header);
+        totalRecebidoColIndex = findTotalRecebidoColumnIndex(headerBase);
       }
       const targetLen = headerBase.length;
       let linhasDia = 0;
       for (const row of result.parsed.rows) {
         const ajustada = row.slice(0, targetLen);
         while (ajustada.length < targetLen) ajustada.push("");
+        if (totalRecebidoColIndex >= 0) {
+          const totalCell = ajustada[totalRecebidoColIndex] ?? "";
+          if (!isTotalRecebidoCellFilled(totalCell)) continue;
+        }
         linhasCsvFinal.push([result.dia, ...ajustada]);
         linhasDia++;
       }
       totalDiasComTabela++;
       totalLinhasDados += linhasDia;
-      lastTblDoc = buildTblExportDocument(result.tableHtml);
       recordStepWithoutUpload(
         `fase2_${result.suffix}_resumo`,
         `Resumo consulta diária ${result.dia}`,
@@ -1415,35 +1424,19 @@ Deno.serve(async (req) => {
           detalhes: {
             dia: result.dia,
             header_cols: result.parsed.header.length,
+            filtro_coluna_total_recebido: totalRecebidoColIndex >= 0,
           },
         },
       );
     }
   }
 
-  if (!lastTblDoc || headerBase.length === 0) {
+  if (headerBase.length === 0) {
     return failJson(
       502,
       "Nenhuma tabela #tblExport encontrada na janela dos últimos 60 dias.",
       { tblExport_found: false, dias_consultados: diasConsulta.length },
     );
-  }
-
-  const docBytes = new TextEncoder().encode(lastTblDoc);
-  const finalStep = await recordStepWithUpload(
-    "tblExport_final",
-    "HTML final com a última tabela #tblExport encontrada",
-    "tblExport.html",
-    docBytes,
-    "text/html; charset=utf-8",
-    { status: "ok" },
-  );
-  const acoesResponsePath = finalStep.storage_path ?? "";
-  const acoesResponseFileName = finalStep.file_name ?? "";
-  const acoesResponseDownloadUrl = finalStep.download_url ?? null;
-
-  if (!acoesResponsePath) {
-    return failJson(500, "Não foi possível guardar a tabela final no Storage.");
   }
 
   // --- CSV final consolidado (60 dias) --------------------------------------
@@ -1469,6 +1462,7 @@ Deno.serve(async (req) => {
           dias_com_tabela: totalDiasComTabela,
           linhas_dados: totalLinhasDados,
           linhas_csv_total: csvGenerated.split(/\r?\n/).filter(Boolean).length,
+          filtro_total_recebido_coluna_encontrada: totalRecebidoColIndex >= 0,
           previa: previewText(csvGenerated, 800),
         },
       },
@@ -1491,8 +1485,6 @@ Deno.serve(async (req) => {
   const nowIso = new Date().toISOString();
   const nextSettings: Record<string, unknown> = {
     ...raw,
-    last_epoc_acoes_response_sync_at: nowIso,
-    last_epoc_acoes_response_storage_path: acoesResponsePath,
   };
   if (csvStoragePath) {
     nextSettings.last_epoc_csv_sync_at = nowIso;
@@ -1512,14 +1504,7 @@ Deno.serve(async (req) => {
     return failJson(
       500,
       `Conteúdo salvo no Storage, mas metadados não atualizados: ${upIntegErr.message}.`,
-      {
-        acoes_response_storage_path: acoesResponsePath,
-        acoes_response_file_name: acoesResponseFileName,
-        acoes_response_size_bytes: docBytes.length,
-        acoes_response_content_type: "text/html; charset=utf-8",
-        acoes_response_download_url: acoesResponseDownloadUrl,
-        html_download_url: acoesResponseDownloadUrl,
-      },
+      {},
     );
   }
 
@@ -1545,14 +1530,17 @@ Deno.serve(async (req) => {
       log("csv_revenue_job_enqueue_falhou", { message: jobErr.message });
     } else if (jobIns?.id) {
       csvRevenueImportJobId = String(jobIns.id);
-      scheduleProcessCsvRevenueJob(supabaseUrl, serviceKey, anonKey, csvRevenueImportJobId);
+      scheduleProcessCsvRevenueJob(
+        supabaseUrl,
+        serviceKey,
+        anonKey,
+        csvRevenueImportJobId,
+      );
       log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
     }
   }
 
   log("concluido", {
-    acoes_response_path: acoesResponsePath,
-    doc_bytes: docBytes.length,
     steps: steps.length,
     csv_revenue_import_job_id: csvRevenueImportJobId,
   });
@@ -1562,13 +1550,6 @@ Deno.serve(async (req) => {
     steps_prefix: stepsPrefix,
     steps,
     tblExport_found: true,
-    acoes_response_storage_path: acoesResponsePath,
-    acoes_response_file_name: acoesResponseFileName,
-    acoes_response_size_bytes: docBytes.length,
-    acoes_response_content_type: "text/html; charset=utf-8",
-    acoes_response_download_url: acoesResponseDownloadUrl,
-    /** Legado: mesmo que `acoes_response_download_url`. */
-    html_download_url: acoesResponseDownloadUrl,
     csv_uploaded: !!csvStoragePath,
     storage_path: csvStoragePath,
     file_name: csvFileName,

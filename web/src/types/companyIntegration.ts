@@ -14,15 +14,6 @@ export type EpocIntegrationSettings = {
   last_epoc_csv_sync_at?: string;
   last_epoc_csv_storage_path?: string;
   /**
-   * Último HTML exportado (só a tabela `#tblExport` da resposta de `acoes.php`,
-   * empacotado num documento mínimo).
-   */
-  last_epoc_acoes_response_sync_at?: string;
-  last_epoc_acoes_response_storage_path?: string;
-  /** Legado: antes da renomeação para `last_epoc_acoes_response_*`. */
-  last_epoc_html_sync_at?: string;
-  last_epoc_html_storage_path?: string;
-  /**
    * Legado: ignorado pelo import; a edge escolhe automaticamente a primeira folha de
    * receita operacional (excl. dedução DRE).
    */
@@ -58,28 +49,6 @@ export function parseEpocSettings(
     last_epoc_csv_storage_path:
       typeof raw.last_epoc_csv_storage_path === "string"
         ? raw.last_epoc_csv_storage_path
-        : "",
-    last_epoc_acoes_response_sync_at:
-      typeof raw.last_epoc_acoes_response_sync_at === "string" &&
-      raw.last_epoc_acoes_response_sync_at
-        ? raw.last_epoc_acoes_response_sync_at
-        : typeof raw.last_epoc_html_sync_at === "string"
-          ? raw.last_epoc_html_sync_at
-          : "",
-    last_epoc_acoes_response_storage_path:
-      typeof raw.last_epoc_acoes_response_storage_path === "string" &&
-      raw.last_epoc_acoes_response_storage_path
-        ? raw.last_epoc_acoes_response_storage_path
-        : typeof raw.last_epoc_html_storage_path === "string"
-          ? raw.last_epoc_html_storage_path
-          : "",
-    last_epoc_html_sync_at:
-      typeof raw.last_epoc_html_sync_at === "string"
-        ? raw.last_epoc_html_sync_at
-        : "",
-    last_epoc_html_storage_path:
-      typeof raw.last_epoc_html_storage_path === "string"
-        ? raw.last_epoc_html_storage_path
         : "",
     epoc_csv_revenue_subcategory_id:
       typeof raw.epoc_csv_revenue_subcategory_id === "string"

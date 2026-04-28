@@ -15,6 +15,7 @@ export function DashboardImportProgressBanner({
   const hasActiveImport = activeImportFiles > 0;
   const percent = Math.max(0, Math.min(100, activeImportPercent));
 
+  if (!hasActiveImport && percent === 0) return null;
   return (
     <Card className="border-2 border-amber-500/50 bg-linear-to-r from-amber-500/20 via-orange-500/15 to-rose-500/10 shadow-md">
       <CardContent className="p-4 sm:p-5">

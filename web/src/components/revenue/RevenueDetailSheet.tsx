@@ -285,13 +285,6 @@ export function RevenueDetailSheet({
     taxValue: taxValNum,
   });
 
-  const stockOk =
-    entryMode !== "product_sale" ||
-    !selectedProduct ||
-    qtyNum <= 0 ||
-    stockQtyNum <= 0 ||
-    Number(selectedProduct.current_quantity) >= stockQtyNum;
-
   const quantityFieldProps = quantityInputPropsForSaleUnit(
     entryMode === "product_sale"
       ? saleUnitCode || selectedProduct?.unit
@@ -451,7 +444,6 @@ export function RevenueDetailSheet({
       if (toStockQty(productId, qtyNum, saleUnitCode) == null) return false;
       if (pricingMode === "unit" && unitNum < 0) return false;
       if (pricingMode === "total" && grossNum <= 0) return false;
-      if (!stockOk) return false;
     }
     if (entryMode === "recipe_sale") {
       if (!recipeId) return false;
@@ -474,7 +466,6 @@ export function RevenueDetailSheet({
     pricingMode,
     unitNum,
     grossNum,
-    stockOk,
     toStockQty,
   ]);
 
@@ -942,20 +933,6 @@ export function RevenueDetailSheet({
                           onChange={(e) => setTitle(e.target.value)}
                         />
                       </div>
-                      {selectedProduct && !stockOk && (
-                        <div
-                          role="alert"
-                          className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-                        >
-                          Estoque insuficiente. Disponível:{" "}
-                          {Number(
-                            selectedProduct.current_quantity,
-                          ).toLocaleString("pt-BR", {
-                            maximumFractionDigits: 4,
-                          })}{" "}
-                          {selectedProduct.unit}.
-                        </div>
-                      )}
                     </>
                   )}
 
