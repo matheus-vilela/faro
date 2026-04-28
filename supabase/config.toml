@@ -55,3 +55,6 @@ verify_jwt = false
 
 [functions.epoc-sync-csv]
 verify_jwt = true
+
+[functions.run-onboarding-product-reconciliation]
+verify_jwt = true

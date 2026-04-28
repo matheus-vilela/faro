@@ -3,8 +3,9 @@ import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/contexts/CompanyContext";
+import { importJobStatusLabel } from "@/lib/importBatchStatus";
 import { supabase } from "@/lib/supabase";
-import { Loader2, RefreshCcw } from "lucide-react";
+import { Loader2, RefreshCcw, Ban } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,6 +27,7 @@ export function Importacoes() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -110,6 +112,47 @@ export function Importacoes() {
     void load();
   };
 
+  const cancelBatch = async (batchId: string) => {
+    if (!currentCompany?.id) return;
+    setCancelling(batchId);
+    const cancelIso = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabase
+      .from("import_job_batches")
+      .update({
+        status: "CANCELLED",
+        last_error: "Cancelado pelo usuário.",
+        updated_at: cancelIso,
+      })
+      .eq("id", batchId)
+      .eq("company_id", currentCompany.id)
+      .in("status", ["QUEUED", "PROCESSING"])
+      .select("id");
+    if (updErr) {
+      setCancelling(null);
+      toast.error(updErr.message);
+      return;
+    }
+    if (!updated?.length) {
+      setCancelling(null);
+      toast.message("Este lote já não está em processamento.");
+      void load();
+      return;
+    }
+    await supabase
+      .from("import_job_files")
+      .update({
+        status: "CANCELLED",
+        last_error: "Cancelado pelo usuário.",
+        finished_at: cancelIso,
+        updated_at: cancelIso,
+      })
+      .eq("batch_id", batchId)
+      .eq("status", "QUEUED");
+    setCancelling(null);
+    toast.success("Cancelamento solicitado. Os arquivos em fila não serão processados.");
+    void load();
+  };
+
   return (
     <PageShell className="space-y-6" narrow>
       <PageHeader
@@ -136,23 +179,37 @@ export function Importacoes() {
                 <span className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("pt-BR")}</span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Status: <strong>{r.status}</strong> · Progresso: {Number(r.progress_percent ?? 0).toFixed(0)}%
+                Status: <strong>{importJobStatusLabel(r.status)}</strong> · Progresso:{" "}
+                {Number(r.progress_percent ?? 0).toFixed(0)}%
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Arquivos: {r.processed_files}/{r.total_files} · sucesso {r.success_files} · falha {r.failed_files} · pendência {r.pending_review_files}
               </p>
-              {(r.status === "FAILED" || r.status === "PARTIAL_SUCCESS") ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => void retryBatch(r.id)}
-                  disabled={retrying === r.id}
-                >
-                  {retrying === r.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Retry lote
-                </Button>
-              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(r.status === "QUEUED" || r.status === "PROCESSING") ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void cancelBatch(r.id)}
+                    disabled={cancelling === r.id}
+                  >
+                    {cancelling === r.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
+                    Cancelar importação
+                  </Button>
+                ) : null}
+                {(r.status === "FAILED" || r.status === "PARTIAL_SUCCESS") ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void retryBatch(r.id)}
+                    disabled={retrying === r.id}
+                  >
+                    {retrying === r.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Retry lote
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ))}
         </CardContent>

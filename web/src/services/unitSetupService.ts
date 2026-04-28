@@ -96,32 +96,6 @@ function migrateLegacySixStepWizardSetup(
   });
 }
 
-/** Versão 2 (5 passos) → 3 (6 passos, classificação de itens = passo 5; PDV = passo 6). */
-function migrateV2FiveStepToV3SixStep(setup: CompanySetupMap): CompanySetupMap {
-  const mapStep = (s: number) => (s === 5 ? 6 : s);
-  const cs = (setup.completed_steps ?? []).map(mapStep);
-  const sk = (setup.skipped_steps ?? []).map(mapStep);
-  const completed = new Set(cs);
-  const skipped = new Set(sk);
-  if (completed.has(6) && !completed.has(5) && !skipped.has(5)) {
-    skipped.add(5);
-  }
-  let cur = setup.current_step ?? 1;
-  if (cur === 5) {
-    cur = 6;
-  } else if (cur === 6) {
-    cur = 7;
-  } else if (cur > 6) {
-    cur = 7;
-  }
-  return mergeSetupPatch(setup, {
-    setup_schema_version: 3,
-    completed_steps: [...completed].sort((a, b) => a - b),
-    skipped_steps: [...skipped].sort((a, b) => a - b),
-    current_step: Math.min(7, Math.max(1, cur)),
-  });
-}
-
 function nowIso() {
   return new Date().toISOString();
 }

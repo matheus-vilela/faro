@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { CatalogReconciliationPanel } from "@/components/catalog/CatalogReconciliationPanel";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   buildProductUnitSelectOptions,
@@ -102,6 +103,16 @@ function readPayloadUnitRaw(payload: Record<string, unknown> | null): string {
   return String(payload.unitCommercial ?? payload.unit_trib ?? payload.unit ?? "").trim();
 }
 
+function readCatalogClusterIds(
+  payload: Record<string, unknown> | null,
+): string[] | null {
+  if (!payload) return null;
+  const raw = payload.cluster_ids;
+  if (!Array.isArray(raw)) return null;
+  const ids = raw.map((x) => String(x)).filter(Boolean);
+  return ids.length ? ids : null;
+}
+
 export function DashboardAlertsCard({
   loading,
   totalAlerts,
@@ -111,6 +122,7 @@ export function DashboardAlertsCard({
   boletoD3,
   boletoD1,
   importPending,
+  onAfterImportSheetClose,
 }: {
   loading: boolean;
   totalAlerts: number;
@@ -120,6 +132,8 @@ export function DashboardAlertsCard({
   boletoD3: number;
   boletoD1: number;
   importPending: number;
+  /** Recarrega totais do dashboard ao fechar o sheet (ex.: após resolver pendências). */
+  onAfterImportSheetClose?: () => void;
 }) {
   const { currentCompany } = useCompany();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -171,6 +185,7 @@ export function DashboardAlertsCard({
     const productIds = Array.from(
       new Set(
         openRows
+          .filter((r) => r.kind !== "catalog_reconciliation")
           .map((r) => readPayloadProductId(r.payload))
           .filter((v): v is string => Boolean(v)),
       ),
@@ -437,7 +452,13 @@ export function DashboardAlertsCard({
         ) : (
           <ul className="space-y-2">
             <li>
-              <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+              <Sheet
+                open={sheetOpen}
+                onOpenChange={(open) => {
+                  setSheetOpen(open);
+                  if (!open) onAfterImportSheetClose?.();
+                }}
+              >
                 <SheetTrigger asChild>
                   <button
                     type="button"
@@ -500,6 +521,7 @@ export function DashboardAlertsCard({
                             <SelectItem value="unit_conflict">Conflito de unidade</SelectItem>
                             <SelectItem value="possible_duplicate">Possível duplicidade</SelectItem>
                             <SelectItem value="missing_product_match">Sem vínculo de produto</SelectItem>
+                            <SelectItem value="catalog_reconciliation">Catálogo (agrupamentos)</SelectItem>
                           </SelectContent>
                         </Select>
                       </CardContent>
@@ -519,6 +541,52 @@ export function DashboardAlertsCard({
                         ) : rows.map((r) => {
                           const isResolved = r.status === "RESOLVED";
                           const isOpen = r.status === "OPEN";
+                          if (r.kind === "catalog_reconciliation") {
+                            const clusterIds = readCatalogClusterIds(r.payload);
+                            return (
+                              <div
+                                key={r.id}
+                                className={cn(
+                                  "rounded-lg border p-3 transition-all",
+                                  isResolved && "border-emerald-500/70 bg-emerald-50/40 py-2 dark:bg-emerald-950/20"
+                                )}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className={cn("text-sm font-medium", isResolved && "text-emerald-700 dark:text-emerald-300")}>{r.title}</p>
+                                  <div className="flex items-center gap-2">
+                                    {isResolved ? (
+                                      <Badge variant="outline" className="border-emerald-500 text-emerald-700 dark:text-emerald-300">
+                                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                        Resolvido
+                                      </Badge>
+                                    ) : null}
+                                    <span className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("pt-BR")}</span>
+                                  </div>
+                                </div>
+                                {r.detail ? <p className="mt-1 text-sm text-muted-foreground">{r.detail}</p> : null}
+                                {isOpen && currentCompany?.id && !isResolved ? (
+                                  <div className="mt-3 max-h-[min(70vh,480px)] overflow-y-auto pr-0.5">
+                                    <CatalogReconciliationPanel
+                                      companyId={currentCompany.id}
+                                      variant="sheet"
+                                      clusterIdsFilter={clusterIds}
+                                      onClustersChanged={() => void loadPendingRows()}
+                                    />
+                                  </div>
+                                ) : null}
+                                {isOpen ? (
+                                  <div className="mt-2 flex gap-2">
+                                    <Button size="sm" onClick={() => void closePending(r.id, "RESOLVED")} disabled={busy === r.id}>
+                                      Marcar como resolvido
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => void closePending(r.id, "IGNORED")} disabled={busy === r.id}>
+                                      Ignorar
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          }
                           const productId = readPayloadProductId(r.payload);
                           const product = productId ? pendingProducts[productId] : undefined;
                           const config = productId ? pendingProductConfigs[productId] : undefined;

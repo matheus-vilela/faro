@@ -30,6 +30,7 @@ import {
   unitsAreEqual,
   type NormalizedUnitCode,
 } from "../_shared/productImport/unitNormalize.ts";
+import { assistBorderlineProductMatch } from "../_shared/productImport/productMatchLlmAssist.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -60,12 +61,20 @@ export type ItemWithProductMatch = ExtractedExpenseItem & {
     stockQuantity?: number;
     conversionFactorApplied?: number;
     resolutionSource?: string;
+    /** Rastreio para métricas: origem da decisão de vínculo. */
+    decisionPath?: string;
+    borderlineLlmRationale?: string;
+    borderlineLlmSuggestedName?: string;
   };
 };
 
 export type ResolveProductMatchesResult = {
   items: ItemWithProductMatch[];
   requiresProductConfirmation: boolean;
+  /** Quando true, importadores não devem chamar findOrCreateProduct (Phase B). */
+  deferProductCreationToReconciliation: boolean;
+  /** Chamadas LLM na faixa borderline nesta execução (métricas). */
+  borderlineLlmCalls: number;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -80,17 +89,44 @@ type EquivRow = {
   conversion_factor?: number | null;
 };
 
+function envProductMatchLlmForce(): boolean {
+  try {
+    const v =
+      typeof Deno !== "undefined"
+        ? Deno.env.get("FORCE_PRODUCT_MATCH_LLM")
+        : "";
+    return String(v ?? "").toLowerCase() === "true" || v === "1";
+  } catch {
+    return false;
+  }
+}
+
+function envProductMatchLlmMaxCalls(): number {
+  try {
+    const raw =
+      typeof Deno !== "undefined"
+        ? Deno.env.get("PRODUCT_MATCH_LLM_MAX_PER_INVOCATION")
+        : "";
+    const n = Number.parseInt(String(raw ?? "30"), 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 200) : 30;
+  } catch {
+    return 30;
+  }
+}
+
 async function loadImportSettings(
   supabase: SupabaseClient,
   companyId: string,
 ): Promise<{
   thresholds: ImportMatchThresholds;
   autoApplyGlobalMassVolume: boolean;
+  llmBorderlineMatchEnabled: boolean;
+  deferProductCreationToReconciliation: boolean;
 }> {
   const { data, error } = await supabase
     .from("company_product_import_settings")
     .select(
-      "auto_match_min_score, confirm_min_score, auto_apply_global_mass_volume",
+      "auto_match_min_score, confirm_min_score, auto_apply_global_mass_volume, llm_borderline_match_enabled, defer_product_creation_to_reconciliation",
     )
     .eq("company_id", companyId)
     .maybeSingle();
@@ -99,12 +135,16 @@ async function loadImportSettings(
     return {
       thresholds: clampThresholds(DEFAULT_IMPORT_MATCH_THRESHOLDS),
       autoApplyGlobalMassVolume: false,
+      llmBorderlineMatchEnabled: envProductMatchLlmForce(),
+      deferProductCreationToReconciliation: false,
     };
   }
   const d = data as {
     auto_match_min_score?: number;
     confirm_min_score?: number;
     auto_apply_global_mass_volume?: boolean;
+    llm_borderline_match_enabled?: boolean;
+    defer_product_creation_to_reconciliation?: boolean;
   };
   return {
     thresholds: clampThresholds({
@@ -112,6 +152,10 @@ async function loadImportSettings(
       confirmMinScore: d.confirm_min_score,
     }),
     autoApplyGlobalMassVolume: !!d.auto_apply_global_mass_volume,
+    llmBorderlineMatchEnabled:
+      envProductMatchLlmForce() || !!d.llm_borderline_match_enabled,
+    deferProductCreationToReconciliation:
+      !!d.defer_product_creation_to_reconciliation,
   };
 }
 
@@ -270,10 +314,27 @@ export async function resolveProductMatches(
   companyId: string,
   items: ExtractedExpenseItem[],
 ): Promise<ResolveProductMatchesResult> {
-  const { thresholds, autoApplyGlobalMassVolume } = await loadImportSettings(
-    supabase,
-    companyId,
-  );
+  const {
+    thresholds,
+    autoApplyGlobalMassVolume,
+    llmBorderlineMatchEnabled,
+    deferProductCreationToReconciliation,
+  } = await loadImportSettings(supabase, companyId);
+
+  let borderlineLlmRemaining = envProductMatchLlmMaxCalls();
+  let borderlineLlmCalls = 0;
+
+  let openaiKey = "";
+  let openaiModel = "gpt-4o-mini";
+  try {
+    if (typeof Deno !== "undefined") {
+      openaiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+      openaiModel =
+        Deno.env.get("OPENAI_PRODUCT_MATCH_MODEL") ?? "gpt-4o-mini";
+    }
+  } catch {
+    openaiKey = "";
+  }
 
   const merged = consolidateInvoiceItems(
     items as ExtractedItemWithInvoiceMeta[],
@@ -512,9 +573,8 @@ export async function resolveProductMatches(
       }
     }
 
-    let bestScore = 0;
-    let bestProduct: ProductRow | null = null;
-    let matchReason = "";
+    type Scored = { product: ProductRow; score: number; detail: string };
+    const scoredList: Scored[] = [];
 
     for (const p of products) {
       let sc = scoreNameMatch(name, p.name);
@@ -527,14 +587,16 @@ export async function resolveProductMatches(
       });
       sc = sec.score;
       const extra = sec.reasons.length ? `; ${sec.reasons.join("; ")}` : "";
-      if (sc > bestScore) {
-        bestScore = sc;
-        bestProduct = p;
-        matchReason = `Melhor candidato: score ${sc.toFixed(1)}${extra}`;
-      }
+      scoredList.push({
+        product: p,
+        score: sc,
+        detail: `score ${sc.toFixed(1)}${extra}`,
+      });
     }
 
-    if (!bestProduct) {
+    scoredList.sort((a, b) => b.score - a.score);
+
+    if (!scoredList.length) {
       requiresProductConfirmation = true;
       out.push({
         ...it,
@@ -550,19 +612,92 @@ export async function resolveProductMatches(
           invoiceUnitNormalized: invoiceU,
           catalogUnitNormalized: "UNKN",
           unitConvertible: false,
+          decisionPath: "catalog_empty_or_no_candidates",
         },
       });
       continue;
     }
 
-    const catU = normalizeUnitLabel(bestProduct.unit);
-    const decision = decideWithUnits({
+    let bestScore = scoredList[0].score;
+    let bestProduct = scoredList[0].product;
+    let matchReason = `Melhor candidato: ${scoredList[0].detail}`;
+
+    const autoTh = thresholds.autoMatchMinScore;
+    const confMin = thresholds.confirmMinScore;
+
+    let catU = normalizeUnitLabel(bestProduct.unit);
+    let decision = decideWithUnits({
       thresholds,
       bestScore,
       invoiceU,
       catalogU: catU,
       hasCandidate: true,
     });
+
+    let decisionPath = "scored_catalog";
+    let borderlineLlmRationale: string | undefined;
+    let borderlineLlmSuggestedName: string | undefined;
+
+    const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
+
+    if (
+      inBorderlineScoreBand &&
+      llmBorderlineMatchEnabled &&
+      openaiKey &&
+      borderlineLlmRemaining > 0
+    ) {
+      const top5 = scoredList.slice(0, 5);
+      const candidates = top5.map((s) => ({
+        product_id: s.product.id,
+        product_name: s.product.name,
+        catalog_unit: s.product.unit ?? null,
+        similarity_score_0_100: Math.round(s.score * 10) / 10,
+      }));
+
+      borderlineLlmRemaining -= 1;
+      borderlineLlmCalls += 1;
+
+      const assist = await assistBorderlineProductMatch(openaiKey, openaiModel, {
+        invoice_description: name,
+        invoice_unit_raw: rawUnit ?? null,
+        invoice_ean: itemEan ? String(itemEan) : null,
+        candidates,
+      });
+
+      if (assist.kind === "LINK") {
+        const picked = productById.get(assist.product_id);
+        if (picked) {
+          const pickedEntry = scoredList.find((s) => s.product.id === picked.id);
+          bestProduct = picked;
+          if (pickedEntry) {
+            bestScore = pickedEntry.score;
+            matchReason = `Melhor candidato: ${pickedEntry.detail}`;
+          }
+          catU = normalizeUnitLabel(bestProduct.unit);
+          decision = decideWithUnits({
+            thresholds,
+            bestScore,
+            invoiceU,
+            catalogU: catU,
+            hasCandidate: true,
+          });
+          decisionPath = "borderline_llm_link";
+          borderlineLlmRationale = assist.rationale;
+        }
+      } else if (assist.kind === "NEW_PRODUCT") {
+        decisionPath = "borderline_llm_new_hint";
+        borderlineLlmRationale = assist.rationale;
+        borderlineLlmSuggestedName = assist.suggested_catalog_name;
+      } else if (assist.kind === "SKIP") {
+        decisionPath = "borderline_llm_skip";
+        borderlineLlmRationale = assist.rationale;
+      } else if (assist.kind === "ERROR") {
+        decisionPath = "borderline_llm_error";
+        borderlineLlmRationale = assist.message;
+      }
+    } else if (inBorderlineScoreBand) {
+      decisionPath = "scored_borderline_no_llm";
+    }
 
     let resolvedId: string | null = null;
     if (
@@ -572,18 +707,29 @@ export async function resolveProductMatches(
       resolvedId = bestProduct.id;
     }
 
-    const needsConfirmation = decision.needsConfirmation ||
-      resolvedId == null;
+    let needsConfirmation = decision.needsConfirmation || resolvedId == null;
+
+    if (borderlineLlmSuggestedName && decisionPath === "borderline_llm_new_hint") {
+      needsConfirmation = true;
+    }
 
     if (needsConfirmation) {
       requiresProductConfirmation = true;
     }
 
-    const confMin = thresholds.confirmMinScore;
     const suggestedIdOut =
       bestScore >= confMin ? bestProduct.id : null;
     const suggestedNameOut =
       bestScore >= confMin ? bestProduct.name : null;
+
+    let matchReasonFinal =
+      decision.matchReason + (matchReason ? ` (${matchReason})` : "");
+    if (borderlineLlmRationale) {
+      matchReasonFinal += ` · IA: ${borderlineLlmRationale}`;
+    }
+    if (borderlineLlmSuggestedName) {
+      matchReasonFinal += ` · Sugestão de nome (IA): ${borderlineLlmSuggestedName}`;
+    }
 
     const prulesB = rulesByProduct.get(bestProduct.id) ?? [];
     const mBest = enrichProductMatch(
@@ -595,10 +741,13 @@ export async function resolveProductMatches(
         suggestedScore: Math.round(bestScore * 10) / 10,
         needsConfirmation,
         resolutionStatus: decision.resolutionStatus,
-        matchReason: decision.matchReason + (matchReason ? ` (${matchReason})` : ""),
+        matchReason: matchReasonFinal,
         invoiceUnitNormalized: invoiceU,
         catalogUnitNormalized: catU,
         unitConvertible: decision.unitConvertible,
+        decisionPath,
+        borderlineLlmRationale,
+        borderlineLlmSuggestedName,
       },
       bestProduct,
       invoiceU,
@@ -614,7 +763,12 @@ export async function resolveProductMatches(
     });
   }
 
-  return { items: out, requiresProductConfirmation };
+  return {
+    items: out,
+    requiresProductConfirmation,
+    deferProductCreationToReconciliation,
+    borderlineLlmCalls,
+  };
 }
 
 export async function upsertProductInvoiceAlias(
