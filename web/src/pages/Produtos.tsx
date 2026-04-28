@@ -93,6 +93,7 @@ import {
   Coins,
   Download,
   FileSpreadsheet,
+  History,
   LayoutGrid,
   Package,
   Pencil,
@@ -396,6 +397,10 @@ export function Produtos() {
   /** Resumo ao abrir; edição após "Editar". */
   const [productSheetView, setProductSheetView] = useState<"summary" | "edit">(
     "summary",
+  );
+  /** Abas dentro do detalhe do produto (vista resumo). */
+  const [productDetailTab, setProductDetailTab] = useState<"resumo" | "historico">(
+    "resumo",
   );
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
@@ -1140,6 +1145,7 @@ export function Produtos() {
     setStockProduct(p);
     syncStockFormFromProduct(p);
     setProductSheetView("summary");
+    setProductDetailTab("resumo");
     setStockProductCategoryIds([]);
     setInitialStockProductCategoryIds([]);
     stockProductCategoryIdsRef.current = [];
@@ -1165,6 +1171,7 @@ export function Produtos() {
     productConversionsLoadedIdRef.current = null;
     setStockProduct(null);
     setProductSheetView("summary");
+    setProductDetailTab("resumo");
     setStockProductCategoryIds([]);
     setInitialStockProductCategoryIds([]);
     stockProductCategoryIdsRef.current = [];
@@ -2254,7 +2261,45 @@ export function Produtos() {
                 </div>
               </SheetHeader>
 
+              <div
+                className="flex shrink-0 gap-1 border-b border-border bg-card px-6"
+                role="tablist"
+                aria-label="Secções do produto"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={productDetailTab === "resumo"}
+                  onClick={() => setProductDetailTab("resumo")}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                    productDetailTab === "resumo"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Package className="h-4 w-4 shrink-0" />
+                  Resumo
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={productDetailTab === "historico"}
+                  onClick={() => setProductDetailTab("historico")}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                    productDetailTab === "historico"
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <History className="h-4 w-4 shrink-0" />
+                  Histórico
+                </button>
+              </div>
+
               <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+                {productDetailTab === "resumo" ? (
                 <div className="space-y-4 p-6">
                   <div className={SHEET_SECTION}>
                     <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -2424,6 +2469,44 @@ export function Produtos() {
                     </div>
                   </div>
 
+                  <div className={cn(SHEET_SECTION, "flex flex-wrap items-center justify-between gap-3")}>
+                    <div>
+                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Status
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Visível ao vincular em despesas e notas
+                      </p>
+                    </div>
+                    {stockProduct.is_active !== false ? (
+                      <Badge variant="secondary" className="h-8 px-3">
+                        Ativo
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="h-8 gap-1 px-3">
+                        <PowerOff className="h-3.5 w-3.5" />
+                        Inativo
+                      </Badge>
+                    )}
+                  </div>
+
+                  {stockProduct.min_quantity > 0 &&
+                    stockProduct.current_quantity <= stockProduct.min_quantity && (
+                      <div className="flex items-center gap-3 rounded-2xl border border-destructive/50 bg-card px-4 py-3 text-destructive shadow-sm">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/40 bg-background">
+                          <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">Estoque no ou abaixo do mínimo</p>
+                          <p className="text-xs text-destructive/90">
+                            Verifique compras ou ajuste o mínimo cadastrado.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                </div>
+                ) : (
+                <div className="space-y-4 p-6">
                   <div className={SHEET_SECTION}>
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -2500,43 +2583,8 @@ export function Produtos() {
                       </div>
                     )}
                   </div>
-
-                  <div className={cn(SHEET_SECTION, "flex flex-wrap items-center justify-between gap-3")}>
-                    <div>
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Status
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Visível ao vincular em despesas e notas
-                      </p>
-                    </div>
-                    {stockProduct.is_active !== false ? (
-                      <Badge variant="secondary" className="h-8 px-3">
-                        Ativo
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="h-8 gap-1 px-3">
-                        <PowerOff className="h-3.5 w-3.5" />
-                        Inativo
-                      </Badge>
-                    )}
-                  </div>
-
-                  {stockProduct.min_quantity > 0 &&
-                    stockProduct.current_quantity <= stockProduct.min_quantity && (
-                      <div className="flex items-center gap-3 rounded-2xl border border-destructive/50 bg-card px-4 py-3 text-destructive shadow-sm">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/40 bg-background">
-                          <AlertTriangle className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold">Estoque no ou abaixo do mínimo</p>
-                          <p className="text-xs text-destructive/90">
-                            Verifique compras ou ajuste o mínimo cadastrado.
-                          </p>
-                        </div>
-                      </div>
-                    )}
                 </div>
+                )}
               </div>
 
               <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
@@ -2914,6 +2962,7 @@ export function Produtos() {
                       stockProductCategoryIdsRef.current = ids;
                     })();
                     setProductSheetView("summary");
+                    setProductDetailTab("resumo");
                   }}
                   disabled={stockSaving}
                 >
