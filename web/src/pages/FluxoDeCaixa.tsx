@@ -259,12 +259,27 @@ export function FluxoDeCaixa() {
     void fetchBoletosReceivable();
   }, [fetchCalendarBoletos, fetchBoletosPayable, fetchBoletosReceivable]);
 
-  const formatDate = (s: string) =>
-    new Date(s).toLocaleDateString("pt-BR", {
+  const formatDate = (s: string) => {
+    const raw = String(s ?? "").trim();
+    if (!raw) return "—";
+    const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = ymd
+      ? new Date(
+          Number(ymd[1]),
+          Number(ymd[2]) - 1,
+          Number(ymd[3]),
+          12,
+          0,
+          0,
+        )
+      : new Date(raw.includes("T") ? raw : `${raw}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString("pt-BR", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
     });
+  };
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {

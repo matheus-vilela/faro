@@ -16,7 +16,7 @@ import type {
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
-  setup_schema_version: 3,
+  setup_schema_version: 4,
   current_step: 1,
   completed_steps: [],
   skipped_steps: [],
@@ -28,7 +28,7 @@ export const EMPTY_SETUP_BASE: CompanySetupMap = {
 
 /**
  * Converte o modelo de 5 etapas (com endereço) para 4 (endereço só via consulta CNPJ).
- * Antigo: 1=emp, 2=end, 3=cert, 4=xml, 5=PDV. Novo: 1=emp, 2=cert, 3=xml, 4=PDV.
+ * Antigo: 1=emp, 2=end, 3=cert, 4=xml, 5=PDV. Novo: 1=emp, 2=cert, 3=PDV, 4=xml.
  */
 function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
   if ((setup.setup_schema_version ?? 0) >= 3) return setup;
@@ -39,8 +39,8 @@ function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
     if (o === 1) return 1;
     if (o === 2) return null; // endereço
     if (o === 3) return 2;
-    if (o === 4) return 3;
-    if (o === 5) return 4;
+    if (o === 4) return 4;
+    if (o === 5) return 3;
     return null;
   };
   const newCompleted = [
@@ -55,14 +55,35 @@ function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
   else if (cur === 2)
     newCur = 2; // fim de empresa ou início de cert. no novo
   else if (cur === 3) newCur = 2;
-  else if (cur === 4) newCur = 3;
-  else if (cur === 5) newCur = 4;
+  else if (cur === 4) newCur = 4;
+  else if (cur === 5) newCur = 3;
   else if (cur >= 6) newCur = 5;
   return mergeSetupPatch(setup, {
     completed_steps: newCompleted,
     skipped_steps: newSkipped,
     current_step: Math.min(5, Math.max(1, newCur)),
-    setup_schema_version: 3,
+    setup_schema_version: 4,
+  });
+}
+
+/** Reordena esquema v3: 3=XML/ZIP,4=PDV -> v4: 3=PDV,4=XML/ZIP. */
+function migrateFromThreeOrderToFour(setup: CompanySetupMap): CompanySetupMap {
+  const remap = (arr: number[]): number[] => {
+    const out = new Set<number>();
+    for (const step of arr) {
+      if (step === 3) out.add(4);
+      else if (step === 4) out.add(3);
+      else out.add(step);
+    }
+    return [...out].sort((a, b) => a - b);
+  };
+  const cur = setup.current_step ?? 1;
+  const newCur = cur === 3 ? 4 : cur === 4 ? 3 : cur;
+  return mergeSetupPatch(setup, {
+    completed_steps: remap(setup.completed_steps ?? []),
+    skipped_steps: remap(setup.skipped_steps ?? []),
+    current_step: Math.min(5, Math.max(1, newCur)),
+    setup_schema_version: 4,
   });
 }
 
@@ -117,7 +138,7 @@ type CreateUnitStep1Maps = {
   setupExtension?: Partial<CompanySetupMap>;
   /**
    * Quando true, a linha só é criada após sucesso em `focus-cria-empresa` (empresa + cert).
-   * `setup` inicia em `current_step: 3` (XML/ZIP) e `completed_steps: [1,2]`.
+   * `setup` inicia em `current_step: 3` (PDV) e `completed_steps: [1,2]`.
    */
   afterFocusCriaSuccess?: boolean;
   /** Dados Focus em `companies.focusnfe` (sem certificado em base64 nem senha). */
@@ -355,6 +376,9 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
   let migrated = version < 2 ? migrateLegacySixStepWizardSetup(base) : base;
   if ((migrated.setup_schema_version ?? 0) < 3) {
     migrated = migrateFromFiveToFourStep(migrated);
+  }
+  if ((migrated.setup_schema_version ?? 0) < 4) {
+    migrated = migrateFromThreeOrderToFour(migrated);
   }
   migrated.progress_percent = calculateSetupProgress(migrated);
   return migrated;

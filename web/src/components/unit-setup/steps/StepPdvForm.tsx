@@ -8,16 +8,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { type EpocAmbiente } from "@/types/companyIntegration";
 import type { SetupEpocState } from "@/types/companySetup";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -38,7 +30,11 @@ export function StepPdvForm({
   }, [mode]);
 
   const patchFields = (patch: Partial<SetupEpocState>) => {
-    if (patch.password !== undefined && patch.password && patch.password.length > 0) {
+    if (
+      patch.password !== undefined &&
+      patch.password &&
+      patch.password.length > 0
+    ) {
       onEpocChange({ ...patch, password_on_server: false });
       return;
     }
@@ -48,9 +44,9 @@ export function StepPdvForm({
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Conecte o ponto de venda (PDV) desta unidade ao Faro para importar vendas e
-        manter os dados alinhados. Indique se há integração com algum PDV ou se
-        prefere seguir sem essa conexão.
+        Conecte o ponto de venda (PDV) desta unidade ao Faro para importar
+        vendas e manter os dados alinhados. Indique se há integração com algum
+        PDV ou se prefere seguir sem essa conexão.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -145,12 +141,15 @@ export function StepPdvForm({
               <div className="space-y-5 border-t border-border/80 px-5 py-5">
                 <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
                   <div>
-                    <Label htmlFor="pdv-epoc-enabled" className="text-sm font-medium">
+                    <Label
+                      htmlFor="pdv-epoc-enabled"
+                      className="text-sm font-medium"
+                    >
                       Integração ativa
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Quando ativo, o Faro usa estas credenciais na rotina diária
-                      (epoc-sync-csv).
+                      Quando ativo, o Faro usa estas credenciais na rotina
+                      diária (epoc-sync-csv).
                     </p>
                   </div>
                   <Switch
@@ -161,7 +160,9 @@ export function StepPdvForm({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="pdv-epoc-base-url">URL base (portal EPOC)</Label>
+                  <Label htmlFor="pdv-epoc-base-url">
+                    URL base (portal EPOC)
+                  </Label>
                   <Input
                     id="pdv-epoc-base-url"
                     type="url"
@@ -179,7 +180,9 @@ export function StepPdvForm({
                       id="pdv-epoc-user"
                       autoComplete="username"
                       value={epoc?.username ?? ""}
-                      onChange={(e) => patchFields({ username: e.target.value })}
+                      onChange={(e) =>
+                        patchFields({ username: e.target.value })
+                      }
                       placeholder="Usuário no portal"
                     />
                   </div>
@@ -189,7 +192,9 @@ export function StepPdvForm({
                       id="pdv-epoc-pass"
                       autoComplete="current-password"
                       value={epoc?.password ?? ""}
-                      onChange={(e) => patchFields({ password: e.target.value })}
+                      onChange={(e) =>
+                        patchFields({ password: e.target.value })
+                      }
                       placeholder={
                         epoc?.password_on_server
                           ? "Deixe em branco para manter a atual"
@@ -197,7 +202,7 @@ export function StepPdvForm({
                       }
                     />
                   </div>
-                  <div className="space-y-2">
+                  {/* <div className="space-y-2">
                     <Label htmlFor="pdv-epoc-filial">Código da filial</Label>
                     <Input
                       id="pdv-epoc-filial"
@@ -207,8 +212,8 @@ export function StepPdvForm({
                       }
                       placeholder="Ex.: 123A (NaoMenu); vazio = 123A"
                     />
-                  </div>
-                  <div className="space-y-2">
+                  </div> */}
+                  {/* <div className="space-y-2">
                     <Label>Ambiente</Label>
                     <Select
                       value={epoc?.ambiente ?? "producao"}
@@ -224,7 +229,7 @@ export function StepPdvForm({
                         <SelectItem value="homologacao">Homologação</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </CollapsibleContent>

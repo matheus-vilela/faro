@@ -8,16 +8,16 @@ import { Fragment } from "react";
 export const SETUP_STEP_LABELS: Record<SetupStepNumber, string> = {
   1: "Empresa",
   2: "Fiscal",
-  3: "XML / ZIP",
-  4: "PDV",
+  3: "PDV",
+  4: "XML / ZIP",
 };
 
 /** Uma linha de contexto para o cabeçalho da página (etapa atual). */
 export const SETUP_STEP_HINTS: Record<SetupStepNumber, string> = {
   1: "Dados da empresa, CNPJ e endereço (preenchidos na validação).",
   2: "Certificado digital A1 usado na emissão fiscal.",
-  3: "Importação opcional de notas (XML ou ZIP).",
-  4: "Integração de PDV (E-PoC) com a operação da unidade.",
+  3: "Integração de PDV com a operação da unidade.",
+  4: "Importação opcional de notas (XML ou ZIP).",
 };
 
 const STEPS: readonly SetupStepNumber[] = [1, 2, 3, 4];

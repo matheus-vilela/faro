@@ -9,8 +9,8 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import { normalizeSetupMap } from "@/services/unitSetupService";
-import { useMemo } from "react";
 import { ClipboardList } from "lucide-react";
+import { useMemo } from "react";
 
 export function SetupProgressCard() {
   const { currentCompany } = useCompany();
@@ -36,7 +36,7 @@ export function SetupProgressCard() {
           <div className="min-w-0 flex-1 space-y-1">
             <CardTitle className="text-base">Setup em andamento</CardTitle>
             <CardDescription>
-              Etapa atual: {step} de 4 · {pct}% concluído
+              Etapa atual: {step - 1} de 4 · {pct}% concluído
             </CardDescription>
           </div>
         </div>

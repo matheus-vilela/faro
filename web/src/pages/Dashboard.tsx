@@ -275,15 +275,16 @@ export function Dashboard() {
       />
 
       {!loadingImportProgress && companyId && activeImportFiles > 0 ? (
-        <>
-          <DashboardImportProgressBanner
-            loading={loadingImportProgress}
-            activeImportFiles={activeImportFiles}
-            activeImportPercent={activeImportPercent}
-          />
-          <DashboardIntegrationCsvRevenueCard companyId={companyId} />
-        </>
+        <DashboardImportProgressBanner
+          loading={loadingImportProgress}
+          activeImportFiles={activeImportFiles}
+          activeImportPercent={activeImportPercent}
+        />
       ) : null}
+      {companyId ? (
+        <DashboardIntegrationCsvRevenueCard companyId={companyId} />
+      ) : null}
+      {currentCompany ? <SetupProgressCard /> : null}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">
@@ -305,7 +306,6 @@ export function Dashboard() {
       </div>
 
       <div className="grid gap-6">
-        {currentCompany ? <SetupProgressCard /> : null}
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
         {canSeeAlerts ? (
           <DashboardAlertsCard

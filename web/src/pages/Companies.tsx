@@ -1,3 +1,5 @@
+import logoDark from "@/assets/logos/faro_logo_darkmode_transp.png";
+import logoLight from "@/assets/logos/faro_logo_light_transparent.png";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -46,6 +48,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import type { Company } from "@/contexts/CompanyContext";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import {
   hasDuplicateUnitNameInGroup,
@@ -58,6 +61,7 @@ import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { validateStep1Empresa } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
 import { fileToPureBase64 } from "@/services/focusCriaEmpresaService";
+import { focusDeleteEmpresa } from "@/services/focusDeleteEmpresaService";
 import {
   focusAtualizarCertificado,
   hasFocusNfeEmpresaId,
@@ -75,7 +79,8 @@ import type {
 import { REGIME_TRIBUTARIO_OPTIONS } from "@/types/companySetup";
 import { Building2, ChevronDown, FileKey, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 function asObj(value: unknown): Record<string, unknown> {
   return value && typeof value === "object"
@@ -123,6 +128,7 @@ function mergeMapsRespectingFocusCnpjLock(
 }
 
 export function Companies() {
+  const { resolvedTheme } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const gestao = searchParams.get("gestao") === "1";
@@ -530,6 +536,17 @@ export function Companies() {
     setLoading(true);
     setError(null);
     try {
+      if (hasFocusNfeEmpresaId(deleteTarget.company.focusnfe)) {
+        const focusDelete = await focusDeleteEmpresa({
+          companyId: deleteTarget.company.id,
+        });
+        if (!focusDelete.ok) {
+          setError(
+            `Não foi possível remover a unidade na Focus antes da exclusão local: ${focusDelete.error}`,
+          );
+          return;
+        }
+      }
       const { data: deletedRows, error: dErr } = await supabase
         .from("companies")
         .delete()
@@ -544,6 +561,7 @@ export function Companies() {
       }
       await refetchCompanies();
       setDeleteTarget(null);
+      toast.success("Unidade removida com sucesso.");
     } catch (err: unknown) {
       setError(mapCompanyUnitMutationError(err, "Erro ao remover unidade"));
     } finally {
@@ -565,8 +583,30 @@ export function Companies() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <PageShell className="max-w-2xl space-y-6 pb-0">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4 pt-20 sm:pt-4">
+      <Link
+        to="/"
+        className="absolute left-4 top-4 z-20 flex items-center transition-opacity hover:opacity-90 sm:left-6 sm:top-6"
+        aria-label="Faro — início"
+      >
+        <img
+          src={resolvedTheme === "dark" ? logoDark : logoLight}
+          alt=""
+          width={140}
+          height={40}
+          className="h-8 w-auto max-w-[min(140px,50vw)] object-contain object-left sm:h-12"
+          decoding="async"
+        />
+      </Link>
+      <div
+        className="pointer-events-none absolute inset-0 bg-size-[24px_24px] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,var(--background)_75%)]"
+        aria-hidden
+      />
+      <PageShell className="relative z-10 mt-2 max-w-2xl space-y-6 pb-0 sm:mt-0">
         <PageHeader
           className="flex-col items-center text-center sm:flex-col sm:items-center"
           title="Grupos e unidades"

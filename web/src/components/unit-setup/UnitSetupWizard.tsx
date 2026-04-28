@@ -162,6 +162,8 @@ export function UnitSetupWizard({
 
   /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
   const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
+  /** Após avançar do PDV (passo 3), não permitir voltar nele. */
+  const lockStepThree = !!companyId && (setup.current_step ?? 1) >= 4;
 
   const load = useCallback(async () => {
     if (!resumeCompanyId) return;
@@ -260,16 +262,16 @@ export function UnitSetupWizard({
       const s2cert = companyId
         ? isStep4CertificateComplete(merged.certificate)
         : isStep3CertificatePayloadComplete(merged.certificate, sec);
-      const s3xml = isStep5XmlZipComplete(merged.xml_zip_import);
-      const s4ep = getStep6EpocState(merged.epoc);
+      const s3ep = getStep6EpocState(merged.epoc);
+      const s4xml = isStep5XmlZipComplete(merged.xml_zip_import);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
       completed = upsertStep(completed, 1, s1);
       completed = upsertStep(completed, 2, s2cert);
-      completed = upsertStep(completed, 3, s3xml);
-      completed = upsertStep(completed, 4, s4ep.completed);
-      skipped = upsertStep(skipped, 4, s4ep.skipped);
+      completed = upsertStep(completed, 3, s3ep.completed);
+      skipped = upsertStep(skipped, 3, s3ep.skipped);
+      completed = upsertStep(completed, 4, s4xml);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
@@ -727,28 +729,6 @@ export function UnitSetupWizard({
         toast.error("Conclua o certificado para criar a unidade.");
         return;
       }
-      setSaving(true);
-      const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 4 }),
-      );
-      const res = await patchCompanyMaps(companyId, {
-        setup: nextSetup,
-      });
-      setSaving(false);
-      if (res.error) {
-        toast.error(res.error);
-        return;
-      }
-      setSetup(nextSetup);
-      setActiveStep(4);
-      return;
-    }
-
-    if (activeStep === 4) {
-      if (!companyId) {
-        toast.error("Conclua o certificado para criar a unidade.");
-        return;
-      }
       const ep = setup.epoc ?? { mode: "undecided" as const };
       setSaving(true);
       if (ep.mode === "credentials") {
@@ -810,7 +790,30 @@ export function UnitSetupWizard({
         }
       }
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 5, epoc: ep }),
+        mergeSetupPatch(setup, { current_step: 4, epoc: ep }),
+      );
+      const res = await patchCompanyMaps(companyId, {
+        setup: nextSetup,
+        focusnfe: stripFocusnfeSecrets(focusnfe),
+      });
+      setSaving(false);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      setSetup(nextSetup);
+      setActiveStep(4);
+      return;
+    }
+
+    if (activeStep === 4) {
+      if (!companyId) {
+        toast.error("Conclua o certificado para criar a unidade.");
+        return;
+      }
+      setSaving(true);
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 5 }),
       );
       await patchCompanyMaps(companyId, {
         setup: nextSetup,
@@ -846,6 +849,12 @@ export function UnitSetupWizard({
       );
       return;
     }
+    if (lockStepThree && target === 3) {
+      toast.message(
+        "Após avançar do passo PDV, não é possível voltar para ele.",
+      );
+      return;
+    }
     setActiveStep((s) => s - 1);
   };
 
@@ -859,10 +868,16 @@ export function UnitSetupWizard({
         );
         return;
       }
+      if (lockStepThree && step === 3) {
+        toast.message(
+          "Após avançar do passo PDV, não é possível voltar para ele.",
+        );
+        return;
+      }
       setStepError(null);
       setActiveStep(step);
     },
-    [companyId, lockStepsOneToTwo],
+    [companyId, lockStepsOneToTwo, lockStepThree],
   );
 
   const handleRemoveCertificate = useCallback(async () => {
@@ -1202,13 +1217,6 @@ export function UnitSetupWizard({
             />
           ) : null}
           {activeStep === 3 ? (
-            <StepXmlZipForm
-              state={setup.xml_zip_import}
-              onPickFile={(f) => void handleXmlFile(f)}
-              busy={xmlBusy}
-            />
-          ) : null}
-          {activeStep === 4 ? (
             <StepPdvForm
               epoc={setup.epoc}
               onEpocChange={(patch) =>
@@ -1218,6 +1226,13 @@ export function UnitSetupWizard({
                   }),
                 )
               }
+            />
+          ) : null}
+          {activeStep === 4 ? (
+            <StepXmlZipForm
+              state={setup.xml_zip_import}
+              onPickFile={(f) => void handleXmlFile(f)}
+              busy={xmlBusy}
             />
           ) : null}
         </div>
