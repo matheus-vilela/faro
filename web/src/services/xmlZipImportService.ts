@@ -31,7 +31,10 @@ export async function processXmlZipImport(
   companyId: string,
   file: File,
   callbacks: XmlZipProcessCallbacks,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<
+  | { ok: true; job_batch_id: string }
+  | { ok: false; error?: string }
+> {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
       callbacks.onPhase("error");
@@ -163,7 +166,7 @@ export async function processXmlZipImport(
         });
         callbacks.onLog(out);
         callbacks.onPhase("done");
-        return { ok: true };
+        return { ok: true, job_batch_id: batchId };
       }
       await new Promise((resolve) => setTimeout(resolve, 1200));
     }
@@ -174,7 +177,7 @@ export async function processXmlZipImport(
       status: "needs_review",
       message: "Importação segue em segundo plano. Acompanhe em Importações.",
     }]);
-    return { ok: true };
+    return { ok: true, job_batch_id: batchId };
   } catch (e) {
     callbacks.onPhase("error");
     return {

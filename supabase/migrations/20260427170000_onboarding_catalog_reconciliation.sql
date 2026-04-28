@@ -122,21 +122,29 @@ ALTER TABLE public.onboarding_product_cluster ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.onboarding_product_cluster_member ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.onboarding_catalog_decision_memory ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users manage onboarding reconciliation runs"
+  ON public.onboarding_reconciliation_runs;
 CREATE POLICY "Users manage onboarding reconciliation runs"
   ON public.onboarding_reconciliation_runs FOR ALL
   USING (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()))
   WITH CHECK (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users manage onboarding import raw"
+  ON public.onboarding_import_item_raw;
 CREATE POLICY "Users manage onboarding import raw"
   ON public.onboarding_import_item_raw FOR ALL
   USING (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()))
   WITH CHECK (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users manage onboarding clusters"
+  ON public.onboarding_product_cluster;
 CREATE POLICY "Users manage onboarding clusters"
   ON public.onboarding_product_cluster FOR ALL
   USING (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()))
   WITH CHECK (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users manage onboarding cluster members"
+  ON public.onboarding_product_cluster_member;
 CREATE POLICY "Users manage onboarding cluster members"
   ON public.onboarding_product_cluster_member FOR ALL
   USING (
@@ -152,6 +160,8 @@ CREATE POLICY "Users manage onboarding cluster members"
     )
   );
 
+DROP POLICY IF EXISTS "Users manage onboarding catalog memory"
+  ON public.onboarding_catalog_decision_memory;
 CREATE POLICY "Users manage onboarding catalog memory"
   ON public.onboarding_catalog_decision_memory FOR ALL
   USING (company_id IN (SELECT company_id FROM public.user_companies WHERE user_id = auth.uid()))

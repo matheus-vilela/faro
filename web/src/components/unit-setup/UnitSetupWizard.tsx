@@ -33,6 +33,7 @@ import {
   buildFocusCriaEmpresaBody,
   fileToPureBase64,
   focusCriaEmpresa,
+  parseFocusCertificadoValidoAteFromResponse,
   parseFocusCriaEmpresaIdFromResponse,
 } from "@/services/focusCriaEmpresaService";
 import {
@@ -605,6 +606,9 @@ export function UnitSetupWizard({
         const idEmpresaFocus =
           parseFocusCriaEmpresaIdFromResponse(foc.data) ??
           parseFocusCriaEmpresaIdFromResponse(foc.envelope);
+        const certValidadeFromCreate =
+          parseFocusCertificadoValidoAteFromResponse(foc.data) ??
+          parseFocusCertificadoValidoAteFromResponse(foc.envelope);
         if (idEmpresaFocus == null) {
           toast.warning(
             "Empresa criada na Focus, mas o id não veio na resposta. Confira a edge ou cadastre o id manualmente em focusnfe.id_empresa.",
@@ -614,6 +618,12 @@ export function UnitSetupWizard({
         const focusnfeForDb: FocusNfeMap = {
           ...stripFocusnfeSecrets(focusnfe),
           ...(idEmpresaFocus != null ? { id_empresa: idEmpresaFocus } : {}),
+          ...(certValidadeFromCreate
+            ? {
+                certificado_ativo: true,
+                certificado_validade: certValidadeFromCreate,
+              }
+            : {}),
         };
         const okCreate = await runCreateCompanyAfterFocusSuccess(focusnfeForDb);
         setSaving(false);
@@ -1006,6 +1016,7 @@ export function UnitSetupWizard({
       ...xmlState,
       phase: "done",
       updated_at: new Date().toISOString(),
+      ...(proc.job_batch_id ? { job_batch_id: proc.job_batch_id } : {}),
     };
     const nextSetup = syncCompletionState(
       mergeSetupPatch(setup, { xml_zip_import: xmlState }),

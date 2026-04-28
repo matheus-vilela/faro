@@ -14,6 +14,7 @@ export function StepCertificateForm({
   onPickFile,
   onRemoveCertificate,
   busy,
+  lockWhenValid = true,
 }: {
   /** `null` enquanto a unidade ainda não existe na Faro (passos 1–2 antes da Focus). */
   companyId: string | null;
@@ -24,10 +25,12 @@ export function StepCertificateForm({
   /** Quando o certificado está válido: remove e libera novo envio + senha. */
   onRemoveCertificate?: () => void;
   busy: boolean;
+  /** Quando false, mantém upload/senha ativos mesmo com status válido. */
+  lockWhenValid?: boolean;
 }) {
   const fileInputId = useId();
   const status = cert?.status ?? "not_sent";
-  const lockedAfterValid = status === "valid";
+  const lockedAfterValid = lockWhenValid && status === "valid";
   const hasFile = Boolean(cert?.file_name);
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);

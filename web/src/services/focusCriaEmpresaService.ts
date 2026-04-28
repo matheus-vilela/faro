@@ -176,3 +176,23 @@ export function parseFocusCriaEmpresaIdFromResponse(
   }
   return undefined;
 }
+
+/**
+ * Extrai a validade do certificado retornada pela Focus no cadastro da empresa.
+ * Aceita formatos aninhados como `data.certificado_valido_ate`.
+ */
+export function parseFocusCertificadoValidoAteFromResponse(
+  data: unknown,
+  depth = 0,
+): string | undefined {
+  if (depth > 6) return undefined;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const o = data as Record<string, unknown>;
+  const raw = o.certificado_valido_ate;
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  const nested = o.data;
+  if (nested !== undefined && nested !== data) {
+    return parseFocusCertificadoValidoAteFromResponse(nested, depth + 1);
+  }
+  return undefined;
+}
