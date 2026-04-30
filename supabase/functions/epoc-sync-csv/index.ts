@@ -409,6 +409,34 @@ function lastNDaysBr(n: number): string[] {
   return out;
 }
 
+/**
+ * Ontem civil no fuso `tz` (ex.: America/Sao_Paulo), em dd/MM/aaaa como o EPOC espera em data_de/data_ate.
+ * Caminha para trás em passos de 1h até o calendário no fuso mudar em relação a “hoje”.
+ */
+function yesterdayDateBrInTz(tz: string): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ymdInTz = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+  const today = ymdInTz(new Date());
+  let probe = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  for (let i = 0; i < 48; i++) {
+    if (ymdInTz(probe) !== today) {
+      const parts = ymdInTz(probe).split("-");
+      const [y, m, d] = parts.map((x) => parseInt(x, 10));
+      return `${pad(d)}/${pad(m)}/${y}`;
+    }
+    probe = new Date(probe.getTime() - 60 * 60 * 1000);
+  }
+  const [y0, m0, d0] = today.split("-").map((x) => parseInt(x, 10));
+  const fb = new Date(Date.UTC(y0, m0 - 1, d0 - 1));
+  return `${pad(fb.getUTCDate())}/${pad(fb.getUTCMonth() + 1)}/${fb.getUTCFullYear()}`;
+}
+
 function extractTokenFromHtml(html: string): string {
   const patterns: RegExp[] = [
     /name=["']token["'][^>]*value=["']([^"']*)/i,
@@ -616,20 +644,16 @@ Deno.serve(async (req) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return json({ ok: false, error: "Não autenticado" }, 401);
   }
+  const bearer = authHeader.slice("Bearer ".length).trim();
 
-  const supabase = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return json({ ok: false, error: "Sessão inválida" }, 401);
-  }
-
-  let body: { company_id?: string } = {};
+  type SyncBody = {
+    company_id?: string;
+    sync_mode?: string;
+    requested_by?: string;
+  };
+  let body: SyncBody = {};
   try {
-    body = (await req.json()) as { company_id?: string };
+    body = (await req.json()) as SyncBody;
   } catch {
     return json({ ok: false, error: "JSON inválido" }, 400);
   }
@@ -639,22 +663,97 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "company_id é obrigatório" }, 400);
   }
 
-  const { data: member } = await supabase
-    .from("user_companies")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!member) {
-    return json({ ok: false, error: "Sem acesso a esta unidade" }, 403);
+  const syncMode: "full" | "previous_day" =
+    body.sync_mode === "previous_day" ? "previous_day" : "full";
+
+  const admin = createClient(supabaseUrl, serviceKey);
+  const serviceKeyNorm = serviceKey.trim();
+  const bearerNorm = bearer.trim();
+  const isServiceInvoke =
+    bearerNorm.length > 0 && bearerNorm === serviceKeyNorm;
+
+  let userIdForJob: string;
+
+  let integ: { enabled: boolean; settings: unknown } | null;
+  let integErr: { message: string } | null = null;
+
+  if (isServiceInvoke) {
+    const rbRaw =
+      typeof body.requested_by === "string" ? body.requested_by.trim() : "";
+    if (rbRaw) {
+      const { data: link } = await admin
+        .from("user_companies")
+        .select("user_id")
+        .eq("company_id", companyId)
+        .eq("user_id", rbRaw)
+        .maybeSingle();
+      if (!link) {
+        return json(
+          { ok: false, error: "requested_by não pertence a esta unidade" },
+          403,
+        );
+      }
+      userIdForJob = rbRaw;
+    } else {
+      const { data: members, error: memErr } = await admin
+        .from("user_companies")
+        .select("user_id, role")
+        .eq("company_id", companyId);
+      if (memErr) {
+        return json({ ok: false, error: memErr.message }, 500);
+      }
+      const list = members ?? [];
+      const owner = list.find((m) => m.role === "owner");
+      const picked = owner?.user_id ?? list[0]?.user_id;
+      if (!picked) {
+        return json(
+          { ok: false, error: "Unidade sem utilizador em user_companies" },
+          400,
+        );
+      }
+      userIdForJob = picked;
+    }
+
+    const integRes = await admin
+      .from("company_integrations")
+      .select("enabled, settings")
+      .eq("company_id", companyId)
+      .eq("provider", "epoc")
+      .maybeSingle();
+    integ = integRes.data;
+    integErr = integRes.error;
+  } else {
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return json({ ok: false, error: "Sessão inválida" }, 401);
+    }
+    userIdForJob = user.id;
+
+    const { data: member } = await supabase
+      .from("user_companies")
+      .select("role")
+      .eq("company_id", companyId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!member) {
+      return json({ ok: false, error: "Sem acesso a esta unidade" }, 403);
+    }
+
+    const integRes = await supabase
+      .from("company_integrations")
+      .select("enabled, settings")
+      .eq("company_id", companyId)
+      .eq("provider", "epoc")
+      .maybeSingle();
+    integ = integRes.data;
+    integErr = integRes.error;
   }
 
-  const { data: integ, error: integErr } = await supabase
-    .from("company_integrations")
-    .select("enabled, settings")
-    .eq("company_id", companyId)
-    .eq("provider", "epoc")
-    .maybeSingle();
   if (integErr) {
     return json({ ok: false, error: integErr.message }, 500);
   }
@@ -698,7 +797,6 @@ Deno.serve(async (req) => {
   const actionUrl = buildActionUrl(baseUrl, loginPath);
   const form = new URLSearchParams();
 
-  const admin = createClient(supabaseUrl, serviceKey);
   const fileStamp = new Date().toISOString().replace(/[:.]/g, "-");
   const stepsPrefix = `${companyId}/epoc-sync/${fileStamp}/`;
   const signedTtl = 60 * 60;
@@ -1285,8 +1383,15 @@ Deno.serve(async (req) => {
     },
   );
 
-  // --- Fase 2: últimos 60 dias (consulta diária) ----------------------------
-  const diasConsulta = lastNDaysBr(10);
+  // --- Fase 2: janela de dias (consulta diária no EPOC) ----------------------
+  const diasConsulta =
+    syncMode === "previous_day"
+      ? [yesterdayDateBrInTz("America/Sao_Paulo")]
+      : lastNDaysBr(10);
+  const diasConsultaLabel =
+    syncMode === "previous_day"
+      ? "dia anterior (America/Sao_Paulo)"
+      : "últimos 10 dias";
   const headerBase: string[] = [];
   const linhasCsvFinal: string[][] = [];
   /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
@@ -1432,14 +1537,60 @@ Deno.serve(async (req) => {
   }
 
   if (headerBase.length === 0) {
+    const summary =
+      syncMode === "previous_day" && diasConsulta.length === 1
+        ? `Sem dados de receitas no EPOC para o dia ${diasConsulta[0]}.`
+        : `Sem tabela #tblExport no EPOC na janela consultada (${diasConsultaLabel}); não foi possível extrair receitas para importação.`;
+
+    recordStepWithoutUpload("sync_outcome", "Resultado da sincronização EPOC", {
+      status: "warn",
+      message: summary,
+      detalhes: {
+        outcome: "no_tbl_export",
+        dias: diasConsulta,
+        sync_mode: syncMode,
+        dias_consulta_label: diasConsultaLabel,
+      },
+    });
+
+    let epocCsvSyncRunId: string | null = null;
+    const { data: histRow, error: histErr } = await admin
+      .from("epoc_csv_sync_runs")
+      .insert({
+        company_id: companyId,
+        requested_by: userIdForJob,
+        provider: "epoc",
+        sync_mode: syncMode,
+        outcome: "no_tbl_export",
+        summary,
+        dates_consulted: diasConsulta,
+        steps_prefix: stepsPrefix,
+        metadata: {
+          dias_consulta_label: diasConsultaLabel,
+          tbl_export_found: false,
+          source: "epoc-sync-csv",
+        },
+      })
+      .select("id")
+      .maybeSingle();
+    if (histErr) {
+      log("epoc_csv_sync_runs_insert_falhou", { message: histErr.message });
+    } else if (histRow?.id) {
+      epocCsvSyncRunId = String(histRow.id);
+    }
+
     return failJson(
       502,
-      "Nenhuma tabela #tblExport encontrada na janela dos últimos 60 dias.",
-      { tblExport_found: false, dias_consultados: diasConsulta.length },
+      `Nenhuma tabela #tblExport encontrada na janela (${diasConsultaLabel}).`,
+      {
+        tblExport_found: false,
+        dias_consultados: diasConsulta.length,
+        epoc_csv_sync_run_id: epocCsvSyncRunId,
+      },
     );
   }
 
-  // --- CSV final consolidado (60 dias) --------------------------------------
+  // --- CSV final consolidado -------------------------------------------------
   const csvHeader = ["data_consumo", ...headerBase];
   const csvGenerated = matrixToCsv(csvHeader, linhasCsvFinal);
   let csvStoragePath: string | null = null;
@@ -1447,17 +1598,29 @@ Deno.serve(async (req) => {
   let csvSizeBytes = 0;
   let csvDownloadUrl: string | null = null;
 
+  const csvFileNameFinal =
+    syncMode === "previous_day"
+      ? "tblExport-dia-anterior.csv"
+      : "tblExport-ultimos-10-dias.csv";
+  const csvStepLabel =
+    syncMode === "previous_day"
+      ? "CSV final (dia anterior)"
+      : "CSV final consolidado (últimos 10 dias)";
+
   if (csvGenerated.trim().length > 0) {
     const csvStep = await recordStepWithUpload(
       "csv_from_tbl_export",
-      "CSV final consolidado dos últimos 60 dias",
-      "tblExport-ultimos-60-dias.csv",
+      csvStepLabel,
+      csvFileNameFinal,
       new TextEncoder().encode(csvGenerated),
       "text/csv",
       {
         status: "ok",
         detalhes: {
-          origem: "table_to_csv_60_days",
+          origem:
+            syncMode === "previous_day"
+              ? "table_to_csv_previous_day"
+              : "table_to_csv_10_days",
           dias_consultados: diasConsulta.length,
           dias_com_tabela: totalDiasComTabela,
           linhas_dados: totalLinhasDados,
@@ -1514,7 +1677,7 @@ Deno.serve(async (req) => {
       .from("integration_csv_revenue_import_jobs")
       .insert({
         company_id: companyId,
-        requested_by: user.id,
+        requested_by: userIdForJob,
         provider: "epoc",
         storage_bucket: "company-setup",
         storage_path: csvStoragePath,
@@ -1522,6 +1685,7 @@ Deno.serve(async (req) => {
         metadata: {
           steps_prefix: stepsPrefix,
           source: "epoc-sync-csv",
+          sync_mode: syncMode,
         },
       })
       .select("id")

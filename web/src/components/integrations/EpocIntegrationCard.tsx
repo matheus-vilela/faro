@@ -46,7 +46,9 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-type EpocSyncHistoryRow = {
+/** Fila após CSV gerado → importação de receitas. */
+type EpocImportJobHistoryRow = {
+  rowKind: "import_job";
   id: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   created_at: string;
@@ -56,6 +58,21 @@ type EpocSyncHistoryRow = {
   csv_resume_row_index: number | null;
   metadata: Record<string, unknown> | null;
 };
+
+/** Tentativa de export EPOC (manual ou agendada), incl. sem #tblExport. */
+type EpocSyncRunHistoryRow = {
+  rowKind: "sync_run";
+  id: string;
+  created_at: string;
+  sync_mode: string;
+  outcome: string;
+  summary: string;
+  dates_consulted: unknown;
+  steps_prefix: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type EpocSyncHistoryRow = EpocImportJobHistoryRow | EpocSyncRunHistoryRow;
 
 export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true);
@@ -86,6 +103,13 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [syncHistory, setSyncHistory] = useState<EpocSyncHistoryRow[]>([]);
   const [downloadingIgnoredReportJobId, setDownloadingIgnoredReportJobId] =
     useState<string | null>(null);
+  const [historyDeleteOpen, setHistoryDeleteOpen] = useState(false);
+  const [historyDeleteTarget, setHistoryDeleteTarget] = useState<
+    | { rowKind: "import_job"; id: string }
+    | { rowKind: "sync_run"; id: string }
+    | null
+  >(null);
+  const [historyDeleteLoading, setHistoryDeleteLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,22 +163,69 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
-    const { data, error } = await supabase
-      .from("integration_csv_revenue_import_jobs")
-      .select(
-        "id, status, created_at, updated_at, error_message, storage_path, csv_resume_row_index, metadata",
-      )
-      .eq("company_id", companyId)
-      .eq("provider", "epoc")
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const [jobsRes, runsRes] = await Promise.all([
+      supabase
+        .from("integration_csv_revenue_import_jobs")
+        .select(
+          "id, status, created_at, updated_at, error_message, storage_path, csv_resume_row_index, metadata",
+        )
+        .eq("company_id", companyId)
+        .eq("provider", "epoc")
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("epoc_csv_sync_runs")
+        .select(
+          "id, created_at, sync_mode, outcome, summary, dates_consulted, steps_prefix, metadata",
+        )
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
     setHistoryLoading(false);
-    if (error) {
-      console.error(error);
+    if (jobsRes.error) {
+      console.error(jobsRes.error);
       toast.error("Não foi possível carregar o histórico de sincronizações.");
       return;
     }
-    setSyncHistory((data ?? []) as EpocSyncHistoryRow[]);
+    if (runsRes.error) {
+      console.warn("[EPOC histórico] epoc_csv_sync_runs:", runsRes.error);
+    }
+
+    const jobRows: EpocImportJobHistoryRow[] = (jobsRes.data ?? []).map(
+      (r) => ({
+        rowKind: "import_job" as const,
+        id: String(r.id),
+        status: r.status as EpocImportJobHistoryRow["status"],
+        created_at: String(r.created_at),
+        updated_at: String(r.updated_at),
+        error_message: r.error_message ?? null,
+        storage_path: String(r.storage_path ?? ""),
+        csv_resume_row_index:
+          r.csv_resume_row_index != null
+            ? Number(r.csv_resume_row_index)
+            : null,
+        metadata: (r.metadata ?? null) as Record<string, unknown> | null,
+      }),
+    );
+
+    const runRows: EpocSyncRunHistoryRow[] = (runsRes.data ?? []).map((r) => ({
+      rowKind: "sync_run" as const,
+      id: String(r.id),
+      created_at: String(r.created_at),
+      sync_mode: String(r.sync_mode ?? ""),
+      outcome: String(r.outcome ?? ""),
+      summary: String(r.summary ?? ""),
+      dates_consulted: r.dates_consulted,
+      steps_prefix: r.steps_prefix != null ? String(r.steps_prefix) : null,
+      metadata: (r.metadata ?? null) as Record<string, unknown> | null,
+    }));
+
+    const merged = [...jobRows, ...runRows].sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+    setSyncHistory(merged.slice(0, 80));
   }, [companyId]);
 
   useEffect(() => {
@@ -170,11 +241,69 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
 
   const cleanText = (v: unknown) => String(v ?? "").trim();
 
-  const statusLabel = (s: EpocSyncHistoryRow["status"]) => {
+  const jobStatusLabel = (s: EpocImportJobHistoryRow["status"]) => {
     if (s === "PENDING") return "Na fila";
     if (s === "PROCESSING") return "A processar";
     if (s === "COMPLETED") return "Concluída";
     return "Falhou";
+  };
+
+  const syncRunOutcomeLabel = (outcome: string) => {
+    if (outcome === "no_tbl_export") return "Sem dados no portal";
+    if (outcome === "failed") return "Falha na exportação";
+    if (outcome === "success") return "Exportação registada";
+    return outcome;
+  };
+
+  const syncModeLabel = (mode: string) => {
+    if (mode === "previous_day") return "Dia anterior (rotina)";
+    if (mode === "full") return "Janela completa";
+    return mode || "—";
+  };
+
+  const formatDatesConsulted = (v: unknown): string => {
+    if (Array.isArray(v)) {
+      return v
+        .map((x) => String(x))
+        .filter(Boolean)
+        .join(", ");
+    }
+    return "";
+  };
+
+  const openHistoryDelete = (
+    target:
+      | { rowKind: "import_job"; id: string }
+      | { rowKind: "sync_run"; id: string },
+  ) => {
+    setHistoryDeleteTarget(target);
+    setHistoryDeleteOpen(true);
+  };
+
+  const confirmHistoryDelete = async () => {
+    if (!historyDeleteTarget) return;
+    setHistoryDeleteLoading(true);
+    const table =
+      historyDeleteTarget.rowKind === "import_job"
+        ? "integration_csv_revenue_import_jobs"
+        : "epoc_csv_sync_runs";
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq("id", historyDeleteTarget.id)
+      .eq("company_id", companyId);
+    setHistoryDeleteLoading(false);
+    if (error) {
+      console.error(error);
+      toast.error(
+        error.message || "Não foi possível remover este registo do histórico.",
+      );
+      return;
+    }
+    toast.success("Registo removido do histórico.");
+    setHistoryDeleteOpen(false);
+    setHistoryDeleteTarget(null);
+    void loadHistory();
   };
 
   const handleDownloadLastCsv = async () => {
@@ -744,7 +873,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">
-                    Sincronizações realizadas
+                    Importações e tentativas de sync
                   </p>
                   <Button
                     type="button"
@@ -770,11 +899,72 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   </div>
                 ) : syncHistory.length === 0 ? (
                   <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
-                    Nenhuma sincronização encontrada para esta unidade.
+                    Nenhum registo encontrado (importações ou tentativas de
+                    export, incluindo rotina agendada).
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {syncHistory.map((item) => {
+                      if (item.rowKind === "sync_run") {
+                        const idShort = item.id.slice(0, 8);
+                        const datesLine = formatDatesConsulted(
+                          item.dates_consulted,
+                        );
+                        return (
+                          <div
+                            key={`run-${item.id}`}
+                            className="rounded-lg border border-border/80 bg-card p-3 text-sm"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                                <Clock3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                {syncRunOutcomeLabel(item.outcome)}
+                              </span>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {idShort}…
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  title="Apagar este registo"
+                                  aria-label="Apagar registo do histórico"
+                                  onClick={() =>
+                                    openHistoryDelete({
+                                      rowKind: "sync_run",
+                                      id: item.id,
+                                    })
+                                  }
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {syncModeLabel(item.sync_mode)} ·{" "}
+                              {new Date(item.created_at).toLocaleString(
+                                "pt-BR",
+                              )}
+                            </p>
+                            <p className="mt-2 text-sm text-foreground">
+                              {item.summary}
+                            </p>
+                            {datesLine ? (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Data(s) consultada(s): {datesLine}
+                              </p>
+                            ) : null}
+                            {/* {item.steps_prefix?.trim() ? (
+                              <p className="mt-1 font-mono text-[11px] text-muted-foreground break-all">
+                                Trace: {item.steps_prefix.trim()}
+                              </p>
+                            ) : null} */}
+                          </div>
+                        );
+                      }
+
                       const meta = item.metadata ?? {};
                       const created =
                         Number(meta.revenue_entries_created_total ?? 0) || 0;
@@ -800,21 +990,39 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                         !!ignoredReportPath.trim();
                       return (
                         <div
-                          key={item.id}
+                          key={`job-${item.id}`}
                           className="rounded-lg border border-border/80 bg-card p-3 text-sm"
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="inline-flex items-center gap-1.5 font-medium">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                               {item.status === "FAILED" ? (
-                                <SquareTerminal className="h-4 w-4 text-destructive" />
+                                <SquareTerminal className="h-4 w-4 shrink-0 text-destructive" />
                               ) : (
-                                <Clock3 className="h-4 w-4 text-muted-foreground" />
+                                <Clock3 className="h-4 w-4 shrink-0 text-muted-foreground" />
                               )}
-                              {statusLabel(item.status)}
+                              {jobStatusLabel(item.status)}
                             </span>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {jobIdShort}…
-                            </span>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {jobIdShort}…
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                title="Apagar este registo"
+                                aria-label="Apagar registo do histórico"
+                                onClick={() =>
+                                  openHistoryDelete({
+                                    rowKind: "import_job",
+                                    id: item.id,
+                                  })
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground space-y-1">
                             <p>
@@ -902,6 +1110,52 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={historyDeleteOpen}
+        onOpenChange={(open) => {
+          setHistoryDeleteOpen(open);
+          if (!open) setHistoryDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apagar registo do histórico?</DialogTitle>
+            <DialogDescription>
+              {historyDeleteTarget?.rowKind === "import_job"
+                ? "Remove apenas a linha da lista de importação. O ficheiro CSV no Storage não é apagado. Se o job ainda estiver na fila ou a processar, evite apagar para não deixar o estado inconsistente."
+                : "Remove este registo de tentativa de exportação (ex.: dia sem dados no portal). O trace no Storage, se existir, não é apagado."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setHistoryDeleteOpen(false);
+                setHistoryDeleteTarget(null);
+              }}
+              disabled={historyDeleteLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void confirmHistoryDelete()}
+              disabled={historyDeleteLoading || !historyDeleteTarget}
+            >
+              {historyDeleteLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />A apagar…
+                </>
+              ) : (
+                "Apagar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={purgeDialogOpen}

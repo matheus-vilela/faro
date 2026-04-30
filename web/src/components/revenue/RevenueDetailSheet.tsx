@@ -44,9 +44,9 @@ import {
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
-import type { RecipeListItem } from "@/types/recipe";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import type { RecipeListItem } from "@/types/recipe";
 import {
   computeRevenueTaxDeduction,
   type RevenueEntry,
@@ -118,7 +118,10 @@ export function RevenueDetailSheet({
   const [taxType, setTaxType] = useState<RevenueTaxType>("percentage");
   const [taxValue, setTaxValue] = useState("0");
   const [categoryTaxSettings, setCategoryTaxSettings] = useState<
-    Pick<CompanyRevenueCategoryTaxSetting, "category_id" | "tax_type" | "tax_value">[]
+    Pick<
+      CompanyRevenueCategoryTaxSetting,
+      "category_id" | "tax_type" | "tax_value"
+    >[]
   >([]);
 
   const categoriesById = useMemo(
@@ -214,7 +217,10 @@ export function RevenueDetailSheet({
       const allowed = new Set<string>([base]);
       const convs = conversionsByProduct.get(pid) ?? [];
       for (const c of convs) {
-        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+        if (
+          c.primary_unit_code?.trim().toLowerCase() ===
+          base.trim().toLowerCase()
+        ) {
           allowed.add(c.secondary_unit_code);
         }
       }
@@ -257,13 +263,6 @@ export function RevenueDetailSheet({
     }
     return parseFloat(quantity.replace(",", ".")) || 0;
   }, [entryMode, quantity, selectedProduct, saleUnitCode]);
-
-  const stockQtyNum = useMemo(() => {
-    if (entryMode !== "product_sale" || !selectedProduct || !saleUnitCode) {
-      return 0;
-    }
-    return toStockQty(selectedProduct.id, qtyNum, saleUnitCode) ?? 0;
-  }, [entryMode, selectedProduct, saleUnitCode, qtyNum, toStockQty]);
 
   const computedGrossProduct = useMemo(() => {
     if (entryMode !== "product_sale" && entryMode !== "recipe_sale") {
@@ -374,26 +373,28 @@ export function RevenueDetailSheet({
   useEffect(() => {
     if (!detailEditMode || entryMode !== "product_sale") return;
     if (!selectedProduct) {
-      setSaleUnitCode("");
+      queueMicrotask(() => setSaleUnitCode(""));
       return;
     }
-    setSaleUnitCode((prev) => prev || selectedProduct.unit);
+    queueMicrotask(() =>
+      setSaleUnitCode((prev) => prev || selectedProduct.unit),
+    );
   }, [detailEditMode, entryMode, selectedProduct]);
 
   useEffect(() => {
     if (!detailEditMode) return;
     if (!categoryLeafId) {
-      setTaxType("percentage");
-      setTaxValue("0");
+      queueMicrotask(() => setTaxType("percentage"));
+      queueMicrotask(() => setTaxValue("0"));
       return;
     }
     const p = taxPresetByCategory.get(categoryLeafId);
     if (p) {
-      setTaxType(p.tax_type);
-      setTaxValue(String(p.tax_value));
+      queueMicrotask(() => setTaxType(p.tax_type));
+      queueMicrotask(() => setTaxValue(String(p.tax_value)));
     } else {
-      setTaxType("percentage");
-      setTaxValue("0");
+      queueMicrotask(() => setTaxType("percentage"));
+      queueMicrotask(() => setTaxValue("0"));
     }
   }, [detailEditMode, categoryLeafId, taxPresetByCategory]);
 
@@ -654,7 +655,10 @@ export function RevenueDetailSheet({
                     <Select
                       value={entryMode}
                       onValueChange={(v) => {
-                        const m = v as "manual" | "product_sale" | "recipe_sale";
+                        const m = v as
+                          | "manual"
+                          | "product_sale"
+                          | "recipe_sale";
                         setEntryMode(m);
                         if (m === "manual") {
                           setProductId("");
@@ -723,9 +727,7 @@ export function RevenueDetailSheet({
                       </span>{" "}
                       classifica no DRE.{" "}
                       {entryMode === "product_sale" ? (
-                        <>
-                          O produto define estoque e CMV.
-                        </>
+                        <>O produto define estoque e CMV.</>
                       ) : (
                         <>
                           A receita (ficha) baixa os ingredientes; quantidade
@@ -869,7 +871,9 @@ export function RevenueDetailSheet({
                               <SelectValue placeholder="Unidade" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="__none__">Selecione</SelectItem>
+                              <SelectItem value="__none__">
+                                Selecione
+                              </SelectItem>
                               {productId
                                 ? allowedUnitsForProduct(productId).map((u) => (
                                     <SelectItem

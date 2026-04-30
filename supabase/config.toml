@@ -56,8 +56,12 @@ verify_jwt = false
 [functions.focus-delete-empresa]
 verify_jwt = false
 
+# JWT validado no código (sessão ou service role) para permitir chamadas de `epoc-daily-sync`.
 [functions.epoc-sync-csv]
-verify_jwt = true
+verify_jwt = false
+
+[functions.epoc-daily-sync]
+verify_jwt = false
 
 [functions.process-integration-csv-revenue-job]
 verify_jwt = false
