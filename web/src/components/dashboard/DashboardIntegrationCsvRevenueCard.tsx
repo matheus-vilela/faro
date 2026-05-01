@@ -1,36 +1,22 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { readEpocCsvSyncPending } from "@/lib/epocCsvSyncProgress";
+import {
+  clearEpocCsvSyncPending,
+  readEpocCsvSyncPending,
+} from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
+import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
 import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
   FileSpreadsheet,
   Loader2,
+  RotateCcw,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-
-function epocCsvDashboardAckKey(companyId: string): string {
-  return `faro:epocCsvRevenueDashboardAck:${companyId}`;
-}
-
-function loadDashboardAckJobId(companyId: string): string | null {
-  try {
-    return localStorage.getItem(epocCsvDashboardAckKey(companyId));
-  } catch {
-    return null;
-  }
-}
-
-function saveDashboardAckJobId(companyId: string, jobId: string): void {
-  try {
-    localStorage.setItem(epocCsvDashboardAckKey(companyId), jobId);
-  } catch {
-    /* ignore */
-  }
-}
+import { toast } from "sonner";
 
 export type IntegrationCsvRevenueJobStatus =
   | "PENDING"
@@ -47,6 +33,12 @@ type JobRow = {
   error_message: string | null;
   csv_resume_row_index: number | null;
   metadata: Record<string, unknown> | null;
+};
+
+type SyncRunRow = {
+  outcome: string;
+  summary: string;
+  created_at: string;
 };
 
 function statusLabel(s: IntegrationCsvRevenueJobStatus): string {
@@ -77,35 +69,97 @@ function formatRelativeTime(iso: string): string {
   return `há ${d} d`;
 }
 
+/**
+ * Banner no dashboard apenas enquanto o primeiro import de receitas (CSV → fila) não
+ * for concluído com sucesso, com integração EPOC ativa.
+ */
 export function DashboardIntegrationCsvRevenueCard({
   companyId,
 }: {
   companyId: string | undefined;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [jobs, setJobs] = useState<JobRow[]>([]);
-  /** `epoc-sync-csv` a correr (ainda sem linha em `integration_csv_revenue_import_jobs`). */
-  const [edgeSyncPending, setEdgeSyncPending] = useState(false);
-  /** Evita sumir em lacunas transitórias entre sync e criação do job. */
-  const [stickyVisible, setStickyVisible] = useState(false);
-  const [acknowledgedJobId, setAcknowledgedJobId] = useState<string | null>(
-    () => (companyId ? loadDashboardAckJobId(companyId) : null),
-  );
+  const [bootLoading, setBootLoading] = useState(true);
+  const [epocEnabled, setEpocEnabled] = useState(false);
+  /** Algum job epoc já chegou a COMPLETED alguma vez nesta empresa. */
+  const [hadCompletedEpocImport, setHadCompletedEpocImport] = useState(false);
 
-  const load = useCallback(
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobs, setJobs] = useState<JobRow[]>([]);
+  /** Última tentativa registada na tabela epoc_csv_sync_runs (ex.: no_tbl_export). */
+  const [latestSyncRun, setLatestSyncRun] = useState<SyncRunRow | null>(null);
+
+  const [edgeSyncPending, setEdgeSyncPending] = useState(false);
+  const [retryBusy, setRetryBusy] = useState(false);
+  /** Evita flicker entre fim da edge e aparecimento do job. */
+  const [stickyVisible, setStickyVisible] = useState(false);
+
+  const loadBootstrap = useCallback(async () => {
+    if (!companyId) {
+      setEpocEnabled(false);
+      setHadCompletedEpocImport(false);
+      setLatestSyncRun(null);
+      setBootLoading(false);
+      return;
+    }
+    setBootLoading(true);
+    const [intRes, completedRes, runRes] = await Promise.all([
+      supabase
+        .from("company_integrations")
+        .select("enabled")
+        .eq("company_id", companyId)
+        .eq("provider", "epoc")
+        .maybeSingle(),
+      supabase
+        .from("integration_csv_revenue_import_jobs")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("provider", "epoc")
+        .eq("status", "COMPLETED")
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("epoc_csv_sync_runs")
+        .select("outcome,summary,created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const enabled =
+      intRes.data?.enabled === true && !intRes.error ? true : false;
+    const hadDone = !!completedRes.data?.id && !completedRes.error;
+    const runErr = !!runRes.error;
+    const run =
+      runErr || !runRes.data
+        ? null
+        : {
+            outcome: String(runRes.data.outcome ?? ""),
+            summary: String(runRes.data.summary ?? ""),
+            created_at: String(runRes.data.created_at ?? ""),
+          };
+
+    setEpocEnabled(enabled);
+    setHadCompletedEpocImport(hadDone);
+    setLatestSyncRun(run);
+    setBootLoading(false);
+  }, [companyId]);
+
+  const loadJobs = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!companyId) {
         setJobs([]);
-        if (!opts?.silent) setLoading(false);
+        if (!opts?.silent) setJobsLoading(false);
         return;
       }
-      if (!opts?.silent) setLoading(true);
+      if (!opts?.silent) setJobsLoading(true);
       const { data, error } = await supabase
         .from("integration_csv_revenue_import_jobs")
         .select(
           "id, status, provider, created_at, updated_at, error_message, csv_resume_row_index, metadata",
         )
         .eq("company_id", companyId)
+        .eq("provider", "epoc")
         .order("created_at", { ascending: false })
         .limit(12);
 
@@ -115,10 +169,14 @@ export function DashboardIntegrationCsvRevenueCard({
       } else {
         setJobs((data ?? []) as JobRow[]);
       }
-      if (!opts?.silent) setLoading(false);
+      if (!opts?.silent) setJobsLoading(false);
     },
     [companyId],
   );
+
+  const load = useCallback(async () => {
+    await Promise.all([loadBootstrap(), loadJobs()]);
+  }, [loadBootstrap, loadJobs]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -136,28 +194,24 @@ export function DashboardIntegrationCsvRevenueCard({
   }, [companyId]);
 
   useEffect(() => {
-    if (!companyId) {
-      queueMicrotask(() => setAcknowledgedJobId(null));
-      return;
-    }
-    queueMicrotask(() =>
-      setAcknowledgedJobId(loadDashboardAckJobId(companyId)),
-    );
-  }, [companyId]);
-
-  useEffect(() => {
     if (!companyId) return;
     const onStorage = (e: StorageEvent) => {
       if (e.key?.startsWith("faro:epocCsvSyncPending:")) {
         setEdgeSyncPending(readEpocCsvSyncPending(companyId));
       }
-      if (e.key === epocCsvDashboardAckKey(companyId)) {
-        setAcknowledgedJobId(loadDashboardAckJobId(companyId));
-      }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [companyId]);
+
+  /** Enquanto houver erro de sync registado mas nenhuma atividade nova, sugere novo sync. */
+  const syncEndedWithIssue = useMemo(() => {
+    if (!latestSyncRun) return false;
+    return (
+      latestSyncRun.outcome === "no_tbl_export" ||
+      latestSyncRun.outcome === "failed"
+    );
+  }, [latestSyncRun]);
 
   const hasActive = useMemo(
     () => jobs.some((j) => j.status === "PENDING" || j.status === "PROCESSING"),
@@ -172,51 +226,105 @@ export function DashboardIntegrationCsvRevenueCard({
     return jobs[0] ?? null;
   }, [jobs]);
 
-  const isTerminal =
-    primary?.status === "COMPLETED" || primary?.status === "FAILED";
+  const isTerminalFailure =
+    primary?.status === "FAILED" ||
+    (syncEndedWithIssue &&
+      !primary &&
+      !hasActive &&
+      !edgeSyncPending);
 
-  const terminalAcked =
-    !!primary && isTerminal && acknowledgedJobId === primary.id;
+  const onboardingBannerEligible =
+    !!companyId && epocEnabled && !hadCompletedEpocImport;
 
   useEffect(() => {
-    if (!companyId) {
+    if (!companyId || !onboardingBannerEligible) {
       queueMicrotask(() => setStickyVisible(false));
       return;
     }
-    if (edgeSyncPending || hasActive || !!primary) {
+    if (
+      edgeSyncPending ||
+      hasActive ||
+      !!primary ||
+      syncEndedWithIssue ||
+      bootLoading ||
+      jobsLoading
+    ) {
       queueMicrotask(() => setStickyVisible(true));
-      return;
     }
-    if (terminalAcked) {
-      queueMicrotask(() => setStickyVisible(false));
-    }
-  }, [companyId, edgeSyncPending, hasActive, primary, terminalAcked]);
+  }, [
+    companyId,
+    onboardingBannerEligible,
+    bootLoading,
+    jobsLoading,
+    edgeSyncPending,
+    hasActive,
+    primary,
+    syncEndedWithIssue,
+  ]);
 
   const pollImportJobs = useMemo(
     () =>
-      hasActive ||
-      edgeSyncPending ||
-      (stickyVisible && !terminalAcked && !isTerminal),
-    [hasActive, edgeSyncPending, stickyVisible, terminalAcked, isTerminal],
+      onboardingBannerEligible &&
+      (hasActive ||
+        edgeSyncPending ||
+        (stickyVisible && primary?.status !== "FAILED")),
+    [
+      onboardingBannerEligible,
+      hasActive,
+      edgeSyncPending,
+      stickyVisible,
+      primary?.status,
+    ],
   );
 
   useEffect(() => {
     if (!companyId || !pollImportJobs) return;
     const ms = edgeSyncPending && !hasActive ? 4000 : 12_000;
-    const id = window.setInterval(() => void load({ silent: true }), ms);
+    const id = window.setInterval(() => {
+      void loadJobs({ silent: true });
+      void loadBootstrap();
+    }, ms);
     return () => window.clearInterval(id);
-  }, [companyId, pollImportJobs, hasActive, edgeSyncPending, load]);
+  }, [companyId, pollImportJobs, hasActive, edgeSyncPending, loadJobs, loadBootstrap]);
+
+  /** Reconsulta rápida quando o primeiro import concluir. */
+  useEffect(() => {
+    if (primary?.status !== "COMPLETED") return;
+    void loadBootstrap();
+  }, [primary?.status, loadBootstrap]);
 
   const showCard =
-    !!companyId &&
-    (loading || stickyVisible) &&
-    (!terminalAcked || edgeSyncPending || hasActive);
+    onboardingBannerEligible &&
+    (bootLoading ||
+      jobsLoading ||
+      stickyVisible ||
+      edgeSyncPending ||
+      retryBusy);
 
-  const onConfirmTerminal = useCallback(() => {
-    if (!companyId || !primary || !isTerminal) return;
-    saveDashboardAckJobId(companyId, primary.id);
-    setAcknowledgedJobId(primary.id);
-  }, [companyId, primary, isTerminal]);
+  const retryOnboardingEpocImport = useCallback(async () => {
+    if (!companyId) return;
+    setRetryBusy(true);
+    try {
+      clearEpocCsvSyncPending(companyId);
+      const res = await invokeEpocCsvSync(companyId, {
+        sync_mode: "onboarding_initial",
+      });
+      if (!res.ok) {
+        toast.error(
+          res.error?.slice(0, 240) ??
+            "Não foi possível repetir a sincronização com o portal EPOC.",
+        );
+      } else {
+        toast.success(
+          "Sincronização iniciada — o CSV será gerado e o import de receitas entrará na fila.",
+          { duration: 5000 },
+        );
+      }
+      await Promise.all([loadBootstrap(), loadJobs()]);
+    } finally {
+      setRetryBusy(false);
+    }
+  }, [companyId, loadBootstrap, loadJobs]);
 
   const progressPercent = useMemo(() => {
     if (edgeSyncPending && !hasActive) return 18;
@@ -230,11 +338,24 @@ export function DashboardIntegrationCsvRevenueCard({
   }, [primary, edgeSyncPending, hasActive]);
 
   const subtitle = useMemo(() => {
+    if (bootLoading || jobsLoading) return "A carregar…";
     if (edgeSyncPending && !hasActive) {
-      return "A função está importando dados da integração. Depois disso o import de receitas entra na fila.";
+      return "A função está a obter dados do portal EPOC. Depois disto o CSV entra na fila de receitas.";
+    }
+    if (primary?.status === "FAILED") {
+      return (
+        primary.error_message?.slice(0, 220) ||
+        "O processamento do CSV falhou; pode tentar de novo ou rever a integração."
+      );
+    }
+    if (syncEndedWithIssue && !hasActive && !edgeSyncPending) {
+      return (
+        latestSyncRun?.summary?.slice(0, 260) ??
+        "A exportação no portal não produziu tabela utilizável nesta sincronização."
+      );
     }
     if (!primary) {
-      return "Quando sincronizar o CSV da EPOC, o progresso do import de receitas aparece aqui.";
+      return "Quando a sincronização EPOC correr, o progresso aparece aqui até à primeira importação estar concluída.";
     }
     const meta = primary.metadata ?? {};
     const created = Number(meta.revenue_entries_created_total ?? 0) || 0;
@@ -243,24 +364,25 @@ export function DashboardIntegrationCsvRevenueCard({
     if (primary.status === "COMPLETED") {
       return `${created} receita(s) criadas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}${totalRows ? ` · ${totalRows} linhas no CSV` : ""}.`;
     }
-    if (primary.status === "FAILED") {
-      return (
-        primary.error_message?.slice(0, 220) ||
-        "O processamento falhou; reveja a integração e os logs."
-      );
-    }
     if (primary.status === "PENDING") {
-      return "Estamos processando as informações da integração. Pode levar alguns segundos.";
+      return "A processar o CSV das receitas na integração. Pode demorar alguns segundos.";
     }
     return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · Total: ${totalRows}` : ""}.`;
-    // return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · linha ${Math.min(primary.csv_resume_row_index ?? 0, totalRows)}/${totalRows}` : ""}.`;
-  }, [primary, edgeSyncPending, hasActive]);
+  }, [
+    primary,
+    edgeSyncPending,
+    hasActive,
+    bootLoading,
+    jobsLoading,
+    syncEndedWithIssue,
+    latestSyncRun?.summary,
+  ]);
 
   const percent = Math.max(0, Math.min(100, progressPercent));
-  const showAnyActive = hasActive || edgeSyncPending;
-  const showSpinner = loading || showAnyActive;
+  const showSpinner =
+    bootLoading || jobsLoading || hasActive || edgeSyncPending || retryBusy;
 
-  if (!showCard) {
+  if (!showCard || (hasActive && !primary && !retryBusy)) {
     return null;
   }
 
@@ -274,7 +396,7 @@ export function DashboardIntegrationCsvRevenueCard({
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : primary?.status === "COMPLETED" ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
-              ) : primary?.status === "FAILED" ? (
+              ) : isTerminalFailure ? (
                 <AlertCircle className="h-5 w-5 text-destructive" />
               ) : (
                 <FileSpreadsheet className="h-5 w-5" />
@@ -282,19 +404,21 @@ export function DashboardIntegrationCsvRevenueCard({
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wider text-sky-900/85 dark:text-sky-100/85">
-                Integração EPOC · receitas
+                Onboarding EPOC · receitas
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActive
                   ? "Import de receitas em curso"
                   : edgeSyncPending
-                    ? "Sincronização EPOC em curso"
+                    ? "Sincronização com o portal EPOC"
                     : primary
-                      ? `Sincronização EPOC: ${statusLabel(primary.status)}`
-                      : "Nenhum import de receitas recente"}
+                      ? `Import: ${statusLabel(primary.status)}`
+                      : syncEndedWithIssue
+                        ? "Sincronização sem CSV utilizável"
+                        : "À espera da sincronização EPOC"}
               </h3>
               <p className="mt-1 text-sm font-medium text-sky-950/90 dark:text-sky-100/90">
-                {loading ? "A carregar…" : subtitle}
+                {subtitle}
               </p>
               {primary && !(edgeSyncPending && !hasActive) ? (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -309,22 +433,27 @@ export function DashboardIntegrationCsvRevenueCard({
           </div>
 
           <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
-            {primary && isTerminal && !terminalAcked ? (
-              <Button size="sm" type="button" onClick={onConfirmTerminal}>
-                Confirmar
+            {(primary?.status === "FAILED" ||
+              (syncEndedWithIssue &&
+                !hasActive &&
+                !edgeSyncPending)) && (
+              <Button
+                size="sm"
+                type="button"
+                disabled={retryBusy}
+                onClick={() => void retryOnboardingEpocImport()}
+              >
+                {retryBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                )}
+                Tentar novamente
               </Button>
-            ) : null}
-            {primary?.status === "FAILED" && !terminalAcked ? (
-              <Button size="sm" variant="secondary" asChild>
-                <Link to="/app/integracoes">
-                  Ver detalhes
-                  <ArrowRight className="ml-1.5 h-4 w-4" />
-                </Link>
-              </Button>
-            ) : null}
+            )}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
               <Link to="/app/integracoes">
-                Abrir integrações
+                Integrações EPOC
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>
             </Button>
@@ -340,25 +469,6 @@ export function DashboardIntegrationCsvRevenueCard({
             aria-hidden
           />
         </div>
-
-        {/* {jobs.length > 1 ? (
-          <ul className="mt-4 space-y-1.5 border-t border-sky-900/10 pt-3 text-xs text-muted-foreground dark:border-sky-100/15">
-            {jobs.slice(0, 5).map((j) => (
-              <li
-                key={j.id}
-                className="flex flex-wrap items-baseline justify-between gap-2"
-              >
-                <span>
-                  <span className="font-medium text-foreground">
-                    {statusLabel(j.status)}
-                  </span>{" "}
-                  <span className="font-mono">{j.id.slice(0, 8)}</span>
-                </span>
-                <span>{formatRelativeTime(j.created_at)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null} */}
       </CardContent>
     </Card>
   );

@@ -1,9 +1,9 @@
 import type { CompanySetupMap, SetupStepNumber } from "@/types/companySetup";
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 3;
 
 function asStep(n: number): SetupStepNumber | null {
-  if (n >= 1 && n <= 4) return n as SetupStepNumber;
+  if (n >= 1 && n <= 3) return n as SetupStepNumber;
   return null;
 }
 
@@ -15,7 +15,7 @@ function isStepCounted(step: SetupStepNumber, setup: CompanySetupMap): boolean {
 }
 
 /**
- * Progresso linear: 4 passos de igual peso.
+ * Progresso linear: 3 passos (empresa, certificado/PDV, integração PDV).
  * Passos em `skipped_steps` (ex.: PDV/EPOC “não usa”) contam como concluídos.
  */
 export function calculateSetupProgress(setup: CompanySetupMap): number {
@@ -28,7 +28,7 @@ export function calculateSetupProgress(setup: CompanySetupMap): number {
 }
 
 /**
- * Próximo passo ainda não contado; se todos contados, retorna 5 (fluxo de finalização).
+ * Próximo passo ainda não contado; se todos contados, retorna `TOTAL_STEPS + 1` (finalização).
  */
 export function getNextPendingStep(setup: CompanySetupMap): number {
   for (let s = 1; s <= TOTAL_STEPS; s++) {

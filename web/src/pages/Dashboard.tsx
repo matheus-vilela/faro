@@ -1,10 +1,10 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
+import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
-import { SetupProgressCard } from "@/components/dashboard/SetupProgressCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -284,7 +284,10 @@ export function Dashboard() {
       {companyId ? (
         <DashboardIntegrationCsvRevenueCard companyId={companyId} />
       ) : null}
-      {currentCompany ? <SetupProgressCard /> : null}
+      {companyId ? (
+        <DashboardEpocDailySyncAlertCard companyId={companyId} />
+      ) : null}
+      {/* {currentCompany ? <SetupProgressCard /> : null} */}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">

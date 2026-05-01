@@ -11,14 +11,17 @@ import {
 } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { maskCpfCnpj, unmask } from "@/lib/masks";
-import { getNextPendingStep, mergeSetupPatch } from "@/lib/setup/setupProgress";
+import {
+  getNextPendingStep,
+  mergeSetupPatch,
+  TOTAL_STEPS,
+} from "@/lib/setup/setupProgress";
 import {
   getStep6EpocState,
   isStep1EmpresaComplete,
   isStep2EnderecoComplete,
   isStep3CertificatePayloadComplete,
   isStep4CertificateComplete,
-  isStep5XmlZipComplete,
   validateStep1Empresa,
 } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
@@ -48,7 +51,6 @@ import {
   normalizeSetupMap,
   patchCompanyMaps,
 } from "@/services/unitSetupService";
-import { processXmlZipImport } from "@/services/xmlZipImportService";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -61,7 +63,6 @@ import type {
   FocusNfeMap,
   RepresentanteLegalMap,
   SetupStepNumber,
-  SetupXmlZipImportState,
 } from "@/types/companySetup";
 import { Building2, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -75,7 +76,6 @@ import {
 import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
 import { StepPdvForm } from "./steps/StepPdvForm";
-import { StepXmlZipForm } from "./steps/StepXmlZipForm";
 
 type Phase = "wizard" | "finalize_loading" | "finalize_summary";
 
@@ -152,7 +152,6 @@ export function UnitSetupWizard({
   const [certPassword, setCertPassword] = useState("");
   /** Base64 do A1 só em memória — não vai para `companies.focusnfe`. */
   const [certFileBase64, setCertFileBase64] = useState("");
-  const [xmlBusy, setXmlBusy] = useState(false);
   const [certBusy, setCertBusy] = useState(false);
   const [cnpjValidating, setCnpjValidating] = useState(false);
 
@@ -162,8 +161,6 @@ export function UnitSetupWizard({
 
   /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
   const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
-  /** Após avançar do PDV (passo 3), não permitir voltar nele. */
-  const lockStepThree = !!companyId && (setup.current_step ?? 1) >= 4;
 
   const load = useCallback(async () => {
     if (!resumeCompanyId) return;
@@ -236,7 +233,7 @@ export function UnitSetupWizard({
 
     setSetup(su);
     setActiveStep(
-      Math.min(4, Math.max(1, su.current_step ?? getNextPendingStep(su))),
+      Math.min(3, Math.max(1, su.current_step ?? getNextPendingStep(su))),
     );
   }, [resumeCompanyId]);
 
@@ -263,7 +260,6 @@ export function UnitSetupWizard({
         ? isStep4CertificateComplete(merged.certificate)
         : isStep3CertificatePayloadComplete(merged.certificate, sec);
       const s3ep = getStep6EpocState(merged.epoc);
-      const s4xml = isStep5XmlZipComplete(merged.xml_zip_import);
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
@@ -271,7 +267,6 @@ export function UnitSetupWizard({
       completed = upsertStep(completed, 2, s2cert);
       completed = upsertStep(completed, 3, s3ep.completed);
       skipped = upsertStep(skipped, 3, s3ep.skipped);
-      completed = upsertStep(completed, 4, s4xml);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
@@ -781,16 +776,18 @@ export function UnitSetupWizard({
             { onConflict: "company_id,provider" },
           );
           if (enabled && (ep.base_url ?? "").trim()) {
-            triggerEpocCsvSyncInBackground(companyId);
+            triggerEpocCsvSyncInBackground(companyId, {
+              sync_mode: "onboarding_initial",
+            });
             toast.message(
-              "Sincronização EPOC em segundo plano: login e exportação do CSV.",
+              "Sincronização EPOC em segundo plano: período desde o início do mês anterior até hoje.",
               { duration: 5500 },
             );
           }
         }
       }
       const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 4, epoc: ep }),
+        mergeSetupPatch(setup, { current_step: 3, epoc: ep }),
       );
       const res = await patchCompanyMaps(companyId, {
         setup: nextSetup,
@@ -802,27 +799,9 @@ export function UnitSetupWizard({
         return;
       }
       setSetup(nextSetup);
-      setActiveStep(4);
-      return;
-    }
-
-    if (activeStep === 4) {
-      if (!companyId) {
-        toast.error("Conclua o certificado para criar a unidade.");
-        return;
-      }
-      setSaving(true);
-      const nextSetup = syncCompletionState(
-        mergeSetupPatch(setup, { current_step: 5 }),
-      );
-      await patchCompanyMaps(companyId, {
-        setup: nextSetup,
-        focusnfe: stripFocusnfeSecrets(focusnfe),
-      });
-      setSetup(nextSetup);
-      setSaving(false);
       setPhase("finalize_loading");
       await finalizeRun(nextSetup, focusnfe);
+      return;
     }
   };
 
@@ -830,7 +809,7 @@ export function UnitSetupWizard({
     if (!companyId) return;
     await syncFocusNfeCompanyProfile(companyId, focus);
     const pending = getNextPendingStep(lastSetup);
-    const allDone = pending > 4;
+    const allDone = pending > TOTAL_STEPS;
     const completed = buildCompletedSetup(lastSetup, {
       allApplicableDone: allDone,
     });
@@ -853,18 +832,12 @@ export function UnitSetupWizard({
       );
       return;
     }
-    if (lockStepThree && target === 3) {
-      toast.message(
-        "Após avançar do passo PDV, não é possível voltar para ele.",
-      );
-      return;
-    }
     setActiveStep((s) => s - 1);
   };
 
   const goToStep = useCallback(
     (step: SetupStepNumber) => {
-      if (step < 1 || step > 4) return;
+      if (step < 1 || step > 3) return;
       if (step > 1 && !companyId && step > 2) return;
       if (lockStepsOneToTwo && step >= 1 && step <= 2) {
         toast.message(
@@ -872,16 +845,10 @@ export function UnitSetupWizard({
         );
         return;
       }
-      if (lockStepThree && step === 3) {
-        toast.message(
-          "Após avançar do passo PDV, não é possível voltar para ele.",
-        );
-        return;
-      }
       setStepError(null);
       setActiveStep(step);
     },
-    [companyId, lockStepsOneToTwo, lockStepThree],
+    [companyId, lockStepsOneToTwo],
   );
 
   const handleRemoveCertificate = useCallback(async () => {
@@ -964,90 +931,6 @@ export function UnitSetupWizard({
     }
   };
 
-  const handleXmlFile = async (file: File) => {
-    if (!companyId) return;
-    setXmlBusy(true);
-    const sanitizedName = file.name
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^\w.\-() ]+/g, "_")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/ /g, "_");
-    const safeName =
-      sanitizedName.length > 0 ? sanitizedName : "import.xml.zip";
-    const path = `${companyId}/imports/xml/${Date.now()}_${safeName}`;
-    const { error } = await supabase.storage
-      .from("company-setup")
-      .upload(path, file, {
-        upsert: true,
-        // Em Windows, arquivos ZIP podem vir como application/x-zip-compressed.
-        // Forçamos application/zip para compatibilizar com bucket e parser.
-        contentType: "application/zip",
-      });
-    if (error) {
-      setXmlBusy(false);
-      toast.error(error.message);
-      return;
-    }
-    let xmlState: SetupXmlZipImportState = {
-      phase: "uploading",
-      storage_path: path,
-      file_name: file.name,
-      file_log: [],
-    };
-    setSetup((s) => mergeSetupPatch(s, { xml_zip_import: xmlState }));
-    const proc = await processXmlZipImport(companyId, file, {
-      onPhase: (ph) => {
-        xmlState = { ...xmlState, phase: ph };
-        setSetup((s) =>
-          mergeSetupPatch(s, { xml_zip_import: { ...xmlState, phase: ph } }),
-        );
-      },
-      onLog: (entries) => {
-        xmlState = { ...xmlState, file_log: entries };
-        setSetup((s) =>
-          mergeSetupPatch(s, {
-            xml_zip_import: { ...xmlState, file_log: entries },
-          }),
-        );
-      },
-    });
-    if (!proc.ok) {
-      xmlState = {
-        ...xmlState,
-        phase: "error",
-        error_message: proc.error ?? "Falha ao importar arquivo ZIP.",
-        updated_at: new Date().toISOString(),
-      };
-      const nextSetupError = syncCompletionState(
-        mergeSetupPatch(setup, { xml_zip_import: xmlState }),
-      );
-      setSetup(nextSetupError);
-      await patchCompanyMaps(companyId, {
-        setup: nextSetupError,
-      });
-      setXmlBusy(false);
-      toast.error(proc.error ?? "Falha ao importar XML/ZIP.");
-      return;
-    }
-    xmlState = {
-      ...xmlState,
-      phase: "done",
-      updated_at: new Date().toISOString(),
-      ...(proc.job_batch_id ? { job_batch_id: proc.job_batch_id } : {}),
-    };
-    const nextSetup = syncCompletionState(
-      mergeSetupPatch(setup, { xml_zip_import: xmlState }),
-    );
-    setSetup(nextSetup);
-    await patchCompanyMaps(companyId, {
-      setup: nextSetup,
-    });
-    setXmlBusy(false);
-    toast.success("Importação de XML/ZIP concluída.");
-  };
-
   const loadingMinH = isModal ? "min-h-[200px]" : "min-h-[50vh]";
 
   if (loading) {
@@ -1114,12 +997,8 @@ export function UnitSetupWizard({
             </p>
           </div>
           <div>
-            <p className="font-medium">Importações</p>
+            <p className="font-medium">PDV</p>
             <p className="text-muted-foreground">
-              XML/ZIP: {setup.xml_zip_import?.phase ?? "—"}
-            </p>
-            <p className="text-muted-foreground">
-              PDV:{" "}
               {setup.epoc?.mode === "no"
                 ? "Sem integração"
                 : setup.epoc?.mode === "credentials"
@@ -1127,6 +1006,10 @@ export function UnitSetupWizard({
                     ? "Integração ativa"
                     : "Credenciais salvas (inativa)"
                   : (setup.epoc?.mode ?? "—")}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Notas fiscais (XML/ZIP) podem ser importadas depois na página{" "}
+              Importações.
             </p>
           </div>
           <p className="pt-2 font-semibold">
@@ -1144,7 +1027,7 @@ export function UnitSetupWizard({
   }
 
   const stepKey = (
-    activeStep >= 1 && activeStep <= 4 ? activeStep : 1
+    activeStep >= 1 && activeStep <= 3 ? activeStep : 1
   ) as SetupStepNumber;
 
   const wizardBody = (
@@ -1173,7 +1056,7 @@ export function UnitSetupWizard({
       <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
         <div className="border-b border-border/60 bg-muted/20 px-4 py-3 sm:px-6 sm:py-3.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Etapa {activeStep} de 4
+            Etapa {activeStep} de 3
           </p>
           <h2 className="text-base font-semibold leading-snug sm:text-lg">
             {SETUP_STEP_LABELS[stepKey]}
@@ -1232,13 +1115,6 @@ export function UnitSetupWizard({
               }
             />
           ) : null}
-          {activeStep === 4 ? (
-            <StepXmlZipForm
-              state={setup.xml_zip_import}
-              onPickFile={(f) => void handleXmlFile(f)}
-              busy={xmlBusy}
-            />
-          ) : null}
         </div>
       </div>
 
@@ -1280,7 +1156,7 @@ export function UnitSetupWizard({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Salvando…
               </>
-            ) : activeStep === 4 ? (
+            ) : activeStep === 3 ? (
               "Concluir"
             ) : (
               "Continuar"

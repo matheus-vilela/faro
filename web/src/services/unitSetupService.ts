@@ -16,7 +16,7 @@ import type {
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
-  setup_schema_version: 4,
+  setup_schema_version: 5,
   current_step: 1,
   completed_steps: [],
   skipped_steps: [],
@@ -28,7 +28,7 @@ export const EMPTY_SETUP_BASE: CompanySetupMap = {
 
 /**
  * Converte o modelo de 5 etapas (com endereço) para 4 (endereço só via consulta CNPJ).
- * Antigo: 1=emp, 2=end, 3=cert, 4=xml, 5=PDV. Novo: 1=emp, 2=cert, 3=PDV, 4=xml.
+ * Antigo: 1=emp, 2=end, 3=cert, 4=xml, 5=PDV. Novo (v4): 1=emp, 2=cert, 3=PDV, 4=xml.
  */
 function migrateFromFiveToFourStep(setup: CompanySetupMap): CompanySetupMap {
   if ((setup.setup_schema_version ?? 0) >= 3) return setup;
@@ -84,6 +84,31 @@ function migrateFromThreeOrderToFour(setup: CompanySetupMap): CompanySetupMap {
     skipped_steps: remap(setup.skipped_steps ?? []),
     current_step: Math.min(5, Math.max(1, newCur)),
     setup_schema_version: 4,
+  });
+}
+
+/**
+ * v5: onboarding com 3 passos apenas (sem XML/ZIP no wizard).
+ * Remove o passo 4 do progresso e reencaminha estados «no XML» para o último passo válido (3).
+ */
+function migrateWizardFourToThreeStepsOnly(
+  setup: CompanySetupMap,
+): CompanySetupMap {
+  if ((setup.setup_schema_version ?? 0) >= 5) return setup;
+  const completed = [
+    ...new Set((setup.completed_steps ?? []).filter((s) => s !== 4)),
+  ].sort((a, b) => a - b);
+  const skipped = [
+    ...new Set((setup.skipped_steps ?? []).filter((s) => s !== 4)),
+  ].sort((a, b) => a - b);
+  let cur = setup.current_step ?? 1;
+  if (setup.status !== "completed" && cur >= 4) cur = 3;
+  if (setup.status === "completed" && cur > 3) cur = 3;
+  return mergeSetupPatch(setup, {
+    completed_steps: completed,
+    skipped_steps: skipped,
+    current_step: Math.max(1, Math.min(cur, 3)),
+    setup_schema_version: 5,
   });
 }
 
@@ -379,6 +404,9 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
   }
   if ((migrated.setup_schema_version ?? 0) < 4) {
     migrated = migrateFromThreeOrderToFour(migrated);
+  }
+  if ((migrated.setup_schema_version ?? 0) < 5) {
+    migrated = migrateWizardFourToThreeStepsOnly(migrated);
   }
   migrated.progress_percent = calculateSetupProgress(migrated);
   return migrated;

@@ -997,7 +997,9 @@ export function StepItemClassificationForm({
     return (
       <div className="space-y-2 text-sm text-muted-foreground">
         <p>Nenhum produto ativo nesta unidade. Você pode avançar — não há itens a classificar.</p>
-        <p className="text-xs">Importe XMLs no passo anterior ou cadastre produtos no catálogo.</p>
+        <p className="text-xs">
+          Importe XMLs na página Importações ou cadastre produtos no catálogo.
+        </p>
       </div>
     );
   }

@@ -13,6 +13,10 @@ export type EpocIntegrationSettings = {
   /** Preenchido pela edge `epoc-sync-csv` após sucesso. */
   last_epoc_csv_sync_at?: string;
   last_epoc_csv_storage_path?: string;
+  /** Última tentativa da rotina diária (`epoc-daily-sync`); uso no dashboard. */
+  epoc_daily_sync_last_attempt_at?: string;
+  epoc_daily_sync_last_attempt_ok?: boolean;
+  epoc_daily_sync_last_attempt_error?: string | null;
   /**
    * Legado: ignorado pelo import; a edge escolhe automaticamente a primeira folha de
    * receita operacional (excl. dedução DRE).
@@ -50,6 +54,20 @@ export function parseEpocSettings(
       typeof raw.last_epoc_csv_storage_path === "string"
         ? raw.last_epoc_csv_storage_path
         : "",
+    epoc_daily_sync_last_attempt_at:
+      typeof raw.epoc_daily_sync_last_attempt_at === "string"
+        ? raw.epoc_daily_sync_last_attempt_at
+        : "",
+    epoc_daily_sync_last_attempt_ok:
+      typeof raw.epoc_daily_sync_last_attempt_ok === "boolean"
+        ? raw.epoc_daily_sync_last_attempt_ok
+        : undefined,
+    epoc_daily_sync_last_attempt_error:
+      raw.epoc_daily_sync_last_attempt_error === null
+        ? null
+        : typeof raw.epoc_daily_sync_last_attempt_error === "string"
+          ? raw.epoc_daily_sync_last_attempt_error
+          : undefined,
     epoc_csv_revenue_subcategory_id:
       typeof raw.epoc_csv_revenue_subcategory_id === "string"
         ? raw.epoc_csv_revenue_subcategory_id

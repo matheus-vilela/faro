@@ -35,7 +35,9 @@ export function SetupProgressCard() {
           <div className="min-w-0 flex-1 space-y-1">
             <CardTitle className="text-base">Setup em andamento</CardTitle>
             <CardDescription>
-              Etapa atual: {pct % 4} de 4 · {pct}% concluído
+              Etapa atual:{" "}
+              {Math.min(3, Math.max(1, s.current_step ?? 1))} de 3 · {pct}%{" "}
+              concluído
             </CardDescription>
           </div>
         </div>

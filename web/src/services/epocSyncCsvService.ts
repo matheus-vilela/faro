@@ -25,6 +25,17 @@ export type EpocSyncStep = {
   detalhes?: Record<string, unknown>;
 };
 
+export type InvokeEpocCsvSyncOptions = {
+  /**
+   * - full: últimos 10 dias
+   * - previous_day: dia civil anterior em America/Sao_Paulo
+   * - onboarding_initial: do 1.º dia do mês anterior até hoje (SP); usado no setup da unidade
+   */
+  sync_mode?: "full" | "previous_day" | "onboarding_initial";
+  /** Datas no formato EPOC dd/MM/aaaa (repetição a partir do histórico). */
+  consulta_dias_br?: string[];
+};
+
 export type EpocSyncCsvResponse = {
   ok: boolean;
   error?: string;
@@ -47,12 +58,24 @@ export type EpocSyncCsvResponse = {
 /** Invoca a edge e devolve a resposta (URLs assinadas após sucesso). */
 export async function invokeEpocCsvSync(
   companyId: string,
+  options?: InvokeEpocCsvSyncOptions,
 ): Promise<EpocSyncCsvResponse> {
   markEpocCsvSyncPending(companyId);
+  const body: Record<string, unknown> = { company_id: companyId };
+  if (options?.sync_mode === "previous_day") {
+    body.sync_mode = "previous_day";
+  } else if (options?.sync_mode === "onboarding_initial") {
+    body.sync_mode = "onboarding_initial";
+  } else if (options?.sync_mode === "full") {
+    body.sync_mode = "full";
+  }
+  if (options?.consulta_dias_br?.length) {
+    body.consulta_dias_br = options.consulta_dias_br.slice(0, 10);
+  }
   try {
     const { data, error } = await supabase.functions.invoke<EpocSyncCsvResponse>(
       "epoc-sync-csv",
-      { body: { company_id: companyId } },
+      { body },
     );
     if (error) {
       clearEpocCsvSyncPending(companyId);
@@ -79,9 +102,12 @@ export async function invokeEpocCsvSync(
   }
 }
 
-export function triggerEpocCsvSyncInBackground(companyId: string): void {
+export function triggerEpocCsvSyncInBackground(
+  companyId: string,
+  options?: InvokeEpocCsvSyncOptions,
+): void {
   void (async () => {
-    const data = await invokeEpocCsvSync(companyId);
+    const data = await invokeEpocCsvSync(companyId, options);
     if (!data.ok && data.error) {
       console.warn("[epoc-sync-csv]", data.error);
       return;

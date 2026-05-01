@@ -98,6 +98,18 @@ function unwrapAcoesHtml(text: string): string {
   return t;
 }
 
+/** Texto típico do EPOC quando não há dados no intervalo / filtro (aparece em `previa` da resposta). */
+const EPOC_MSG_SEM_EVENTO_COM_FILTRO =
+  "Não foi encontrado nenhum evento com esse filtro";
+
+/** Devolve a mensagem canónica do portal quando o texto bruto/HTML a contém. */
+function mensagemPortalSemEventosPorFiltro(rawText: string): string | null {
+  const t = unwrapAcoesHtml(rawText);
+  return t.includes(EPOC_MSG_SEM_EVENTO_COM_FILTRO)
+    ? EPOC_MSG_SEM_EVENTO_COM_FILTRO
+    : null;
+}
+
 /**
  * Só procura o par atributo `id` = valor (valor fixo, exato). Ignora tag, classes, etc.
  * Ex.: `<div id="ConteudoTela" class="...">` e `<table class="a" id="tblExport" …>`.
@@ -413,6 +425,20 @@ function lastNDaysBr(n: number): string[] {
  * Ontem civil no fuso `tz` (ex.: America/Sao_Paulo), em dd/MM/aaaa como o EPOC espera em data_de/data_ate.
  * Caminha para trás em passos de 1h até o calendário no fuso mudar em relação a “hoje”.
  */
+/** Até 10 datas dd/MM/aaaa para repetir uma janela (UI / histórico). */
+function normalizeConsultaDiasBrInput(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x !== "string") return null;
+    const t = x.trim();
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(t)) return null;
+    out.push(t);
+  }
+  if (out.length === 0) return null;
+  return out.slice(0, 10);
+}
+
 function yesterdayDateBrInTz(tz: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   const ymdInTz = (d: Date) =>
@@ -435,6 +461,57 @@ function yesterdayDateBrInTz(tz: string): string {
   const [y0, m0, d0] = today.split("-").map((x) => parseInt(x, 10));
   const fb = new Date(Date.UTC(y0, m0 - 1, d0 - 1));
   return `${pad(fb.getUTCDate())}/${pad(fb.getUTCMonth() + 1)}/${fb.getUTCFullYear()}`;
+}
+
+function daysInCalendarMonth(y: number, m: number): number {
+  return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Onboarding EPOC: do 1.º dia do mês civil anterior até hoje (America/Sao_Paulo), inclusive.
+ * Ex.: 15/05/2026 → 01/04/2026 … 15/05/2026.
+ */
+function onboardingEpocConsultaDaysSaoPaulo(): string[] {
+  const tz = "America/Sao_Paulo";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const getPart = (t: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const ty = getPart("year");
+  const tm = getPart("month");
+  const td = getPart("day");
+
+  let sy = ty;
+  let sm = tm - 1;
+  if (sm < 1) {
+    sm = 12;
+    sy = ty - 1;
+  }
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const out: string[] = [];
+  let y = sy;
+  let mm = sm;
+  let dd = 1;
+  for (;;) {
+    out.push(`${pad(dd)}/${pad(mm)}/${y}`);
+    if (y === ty && mm === tm && dd === td) break;
+    const dim = daysInCalendarMonth(y, mm);
+    dd++;
+    if (dd > dim) {
+      dd = 1;
+      mm++;
+      if (mm > 12) {
+        mm = 1;
+        y++;
+      }
+    }
+  }
+  return out;
 }
 
 function extractTokenFromHtml(html: string): string {
@@ -650,6 +727,7 @@ Deno.serve(async (req) => {
     company_id?: string;
     sync_mode?: string;
     requested_by?: string;
+    consulta_dias_br?: unknown;
   };
   let body: SyncBody = {};
   try {
@@ -663,8 +741,13 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "company_id é obrigatório" }, 400);
   }
 
-  const syncMode: "full" | "previous_day" =
-    body.sync_mode === "previous_day" ? "previous_day" : "full";
+  const syncMode: "full" | "previous_day" | "onboarding_initial" =
+    body.sync_mode === "previous_day"
+      ? "previous_day"
+      : body.sync_mode === "onboarding_initial"
+        ? "onboarding_initial"
+        : "full";
+  const manualConsultaDias = normalizeConsultaDiasBrInput(body.consulta_dias_br);
 
   const admin = createClient(supabaseUrl, serviceKey);
   const serviceKeyNorm = serviceKey.trim();
@@ -1384,20 +1467,37 @@ Deno.serve(async (req) => {
   );
 
   // --- Fase 2: janela de dias (consulta diária no EPOC) ----------------------
-  const diasConsulta =
-    syncMode === "previous_day"
-      ? [yesterdayDateBrInTz("America/Sao_Paulo")]
-      : lastNDaysBr(10);
-  const diasConsultaLabel =
-    syncMode === "previous_day"
-      ? "dia anterior (America/Sao_Paulo)"
-      : "últimos 10 dias";
+  let diasConsulta: string[];
+  let diasConsultaLabel: string;
+  if (manualConsultaDias?.length) {
+    diasConsulta = manualConsultaDias;
+    diasConsultaLabel =
+      diasConsulta.length === 1
+        ? `dia ${diasConsulta[0]} (repetição)`
+        : `${diasConsulta.length} dia(s) (repetição)`;
+  } else if (syncMode === "onboarding_initial") {
+    diasConsulta = onboardingEpocConsultaDaysSaoPaulo();
+    diasConsultaLabel =
+      diasConsulta.length >= 2
+        ? `onboarding: ${diasConsulta[0]} → ${diasConsulta[diasConsulta.length - 1]} (America/Sao_Paulo)`
+        : diasConsulta.length === 1
+          ? `onboarding: ${diasConsulta[0]} (America/Sao_Paulo)`
+          : "onboarding (sem dias)";
+  } else if (syncMode === "previous_day") {
+    diasConsulta = [yesterdayDateBrInTz("America/Sao_Paulo")];
+    diasConsultaLabel = "dia anterior (America/Sao_Paulo)";
+  } else {
+    diasConsulta = lastNDaysBr(10);
+    diasConsultaLabel = "últimos 10 dias";
+  }
   const headerBase: string[] = [];
   const linhasCsvFinal: string[][] = [];
   /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
   let totalRecebidoColIndex = -1;
   let totalDiasComTabela = 0;
   let totalLinhasDados = 0;
+  /** Erro textual do próprio portal (ex.: «sem eventos com esse filtro»), por dia consultado. */
+  const mensagemPortalPorDiaBr: Record<string, string> = {};
 
   const BATCH_SIZE = 20;
   for (
@@ -1450,11 +1550,15 @@ Deno.serve(async (req) => {
 
         const htmlDia = unwrapAcoesHtml(acoesDia.text);
         if (!htmlHasId(htmlDia, EPOC_ID_TBL_EXPORT)) {
+          const portalMsg =
+            mensagemPortalSemEventosPorFiltro(acoesDia.text);
           return {
             dia,
             suffix,
             ok: false as const,
-            message: "Sem id=tblExport para este dia.",
+            message:
+              portalMsg ?? "Sem id=tblExport para este dia.",
+            portal_feedback: portalMsg ?? undefined,
           };
         }
 
@@ -1491,13 +1595,25 @@ Deno.serve(async (req) => {
 
     for (const result of batchResults) {
       if (!result.ok) {
+        const portalFb =
+          "portal_feedback" in result && result.portal_feedback
+            ? result.portal_feedback
+            : null;
+        if (portalFb) mensagemPortalPorDiaBr[result.dia] = portalFb;
         recordStepWithoutUpload(
           `fase2_${result.suffix}_resumo`,
           `Resumo consulta diária ${result.dia}`,
           {
             status: "warn",
-            message: result.message,
-            detalhes: { dia: result.dia },
+            message: portalFb
+              ? `${result.dia}: ${portalFb}`
+              : result.message,
+            detalhes: {
+              dia: result.dia,
+              ...(portalFb
+                ? { mensagem_portal_epoc: portalFb }
+                : {}),
+            },
           },
         );
         continue;
@@ -1537,10 +1653,29 @@ Deno.serve(async (req) => {
   }
 
   if (headerBase.length === 0) {
-    const summary =
-      syncMode === "previous_day" && diasConsulta.length === 1
-        ? `Sem dados de receitas no EPOC para o dia ${diasConsulta[0]}.`
-        : `Sem tabela #tblExport no EPOC na janela consultada (${diasConsultaLabel}); não foi possível extrair receitas para importação.`;
+    const diasComFeedbackPortal = diasConsulta
+      .map((d) => {
+        const m = mensagemPortalPorDiaBr[d];
+        return m ? `${d}: ${m}` : null;
+      })
+      .filter((x): x is string => x != null);
+
+    let summary: string;
+    if (diasConsulta.length === 1) {
+      const d0 = diasConsulta[0];
+      const mPortal = mensagemPortalPorDiaBr[d0];
+      summary = mPortal
+        ? `${d0}: ${mPortal}`
+        : `Sem dados de receitas no EPOC para o dia ${d0}.`;
+    } else if (diasComFeedbackPortal.length > 0) {
+      summary = diasComFeedbackPortal.join(" · ");
+      if (diasComFeedbackPortal.length < diasConsulta.length) {
+        summary +=
+          " — demais dias na janela sem mensagem explícita do portal (sem #tblExport).";
+      }
+    } else {
+      summary = `Sem tabela #tblExport no EPOC na janela consultada (${diasConsultaLabel}); não foi possível extrair receitas para importação.`;
+    }
 
     recordStepWithoutUpload("sync_outcome", "Resultado da sincronização EPOC", {
       status: "warn",
@@ -1550,6 +1685,9 @@ Deno.serve(async (req) => {
         dias: diasConsulta,
         sync_mode: syncMode,
         dias_consulta_label: diasConsultaLabel,
+        ...(Object.keys(mensagemPortalPorDiaBr).length > 0
+          ? { portal_por_dia: mensagemPortalPorDiaBr }
+          : {}),
       },
     });
 
@@ -1569,6 +1707,10 @@ Deno.serve(async (req) => {
           dias_consulta_label: diasConsultaLabel,
           tbl_export_found: false,
           source: "epoc-sync-csv",
+          manual_consulta: !!manualConsultaDias?.length,
+          ...(Object.keys(mensagemPortalPorDiaBr).length > 0
+            ? { portal_por_dia: mensagemPortalPorDiaBr }
+            : {}),
         },
       })
       .select("id")
@@ -1599,13 +1741,33 @@ Deno.serve(async (req) => {
   let csvDownloadUrl: string | null = null;
 
   const csvFileNameFinal =
-    syncMode === "previous_day"
-      ? "tblExport-dia-anterior.csv"
-      : "tblExport-ultimos-10-dias.csv";
+    manualConsultaDias?.length === 1
+      ? `tblExport-replay-${manualConsultaDias[0].replace(/\//g, "-")}.csv`
+      : manualConsultaDias?.length
+        ? `tblExport-replay-${String(manualConsultaDias.length)}dias.csv`
+        : syncMode === "onboarding_initial"
+          ? "tblExport-onboarding-inicial.csv"
+          : syncMode === "previous_day"
+            ? "tblExport-dia-anterior.csv"
+            : "tblExport-ultimos-10-dias.csv";
   const csvStepLabel =
-    syncMode === "previous_day"
-      ? "CSV final (dia anterior)"
-      : "CSV final consolidado (últimos 10 dias)";
+    manualConsultaDias?.length === 1
+      ? `CSV final (repetição ${manualConsultaDias[0]})`
+      : manualConsultaDias?.length
+        ? `CSV final (repetição ${manualConsultaDias.length} dia(s))`
+        : syncMode === "onboarding_initial"
+          ? "CSV onboarding (mês anterior → hoje, SP)"
+          : syncMode === "previous_day"
+            ? "CSV final (dia anterior)"
+            : "CSV final consolidado (últimos 10 dias)";
+
+  const csvOrigemMeta = manualConsultaDias?.length
+    ? "table_to_csv_manual_replay"
+    : syncMode === "onboarding_initial"
+      ? "table_to_csv_onboarding_range_sp"
+      : syncMode === "previous_day"
+        ? "table_to_csv_previous_day"
+        : "table_to_csv_10_days";
 
   if (csvGenerated.trim().length > 0) {
     const csvStep = await recordStepWithUpload(
@@ -1617,10 +1779,7 @@ Deno.serve(async (req) => {
       {
         status: "ok",
         detalhes: {
-          origem:
-            syncMode === "previous_day"
-              ? "table_to_csv_previous_day"
-              : "table_to_csv_10_days",
+          origem: csvOrigemMeta,
           dias_consultados: diasConsulta.length,
           dias_com_tabela: totalDiasComTabela,
           linhas_dados: totalLinhasDados,
@@ -1652,6 +1811,14 @@ Deno.serve(async (req) => {
   if (csvStoragePath) {
     nextSettings.last_epoc_csv_sync_at = nowIso;
     nextSettings.last_epoc_csv_storage_path = csvStoragePath;
+  }
+  if (
+    csvStoragePath &&
+    (syncMode === "previous_day" || manualConsultaDias?.length)
+  ) {
+    nextSettings.epoc_daily_sync_last_attempt_at = nowIso;
+    nextSettings.epoc_daily_sync_last_attempt_ok = true;
+    nextSettings.epoc_daily_sync_last_attempt_error = null;
   }
 
   const { error: upIntegErr } = await admin
@@ -1686,6 +1853,9 @@ Deno.serve(async (req) => {
           steps_prefix: stepsPrefix,
           source: "epoc-sync-csv",
           sync_mode: syncMode,
+          ...(manualConsultaDias?.length
+            ? { consulta_dias_br: manualConsultaDias }
+            : {}),
         },
       })
       .select("id")

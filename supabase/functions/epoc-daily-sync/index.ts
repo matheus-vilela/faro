@@ -4,6 +4,10 @@
  * Authorization (verify_jwt = false). Cada unidade chama `epoc-sync-csv` com a
  * service role e `sync_mode: "previous_day"`.
  *
+ * Após cada tentativa atualiza `company_integrations.settings` com os campos:
+ * epoc_daily_sync_last_attempt_at, epoc_daily_sync_last_attempt_ok,
+ * epoc_daily_sync_last_attempt_error (para o dashboard mostrar falhas/atrasos).
+ *
  * Agendar às 05:00 em São Paulo (≈ 08:00 UTC em horário padrão Brasília): no Dashboard
  * Supabase (Cron / pg_net) ou serviço externo, POST nesta função com o secret.
  */
@@ -26,6 +30,45 @@ function json(body: unknown, status = 200): Response {
       "Content-Type": "application/json; charset=utf-8",
     },
   });
+}
+
+async function persistDailyAttempt(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  ok: boolean,
+  errorSummary: string | null,
+): Promise<void> {
+  const { data: fresh } = await admin
+    .from("company_integrations")
+    .select("settings")
+    .eq("company_id", companyId)
+    .eq("provider", "epoc")
+    .maybeSingle();
+  const base = (fresh?.settings ?? {}) as Record<string, unknown>;
+  const nowIso = new Date().toISOString();
+  const nextSettings: Record<string, unknown> = {
+    ...base,
+    epoc_daily_sync_last_attempt_at: nowIso,
+    epoc_daily_sync_last_attempt_ok: ok,
+    epoc_daily_sync_last_attempt_error: ok ? null : (errorSummary ?? "Erro").slice(
+      0,
+      900,
+    ),
+  };
+  const { error } = await admin
+    .from("company_integrations")
+    .update({
+      settings: nextSettings,
+      updated_at: nowIso,
+    })
+    .eq("company_id", companyId)
+    .eq("provider", "epoc");
+  if (error) {
+    console.error(LOG, "persist_daily_attempt_falhou", {
+      company_id: companyId,
+      message: error.message,
+    });
+  }
 }
 
 Deno.serve(async (req) => {
@@ -90,6 +133,8 @@ Deno.serve(async (req) => {
   }[] = [];
 
   for (const companyId of companyIds) {
+    let syncOk = false;
+    let errText: string | null = null;
     try {
       const res = await fetch(syncUrl, {
         method: "POST",
@@ -109,26 +154,34 @@ Deno.serve(async (req) => {
         csv_revenue_import_job_id?: string | null;
         epoc_csv_sync_run_id?: string | null;
       };
-      const ok = res.ok && data?.ok === true;
+      syncOk = res.ok && data?.ok === true;
+      errText = syncOk ? null : (data?.error ?? `HTTP ${res.status}`);
       results.push({
         company_id: companyId,
-        ok,
-        error: ok ? undefined : (data?.error ?? `HTTP ${res.status}`),
+        ok: syncOk,
+        error: errText ?? undefined,
         csv_revenue_import_job_id: data?.csv_revenue_import_job_id ?? null,
         epoc_csv_sync_run_id: data?.epoc_csv_sync_run_id ?? null,
       });
-      if (!ok) {
+      if (!syncOk) {
         console.warn(LOG, "unidade_falhou", {
           company_id: companyId,
-          error: data?.error ?? res.status,
+          error: errText,
           epoc_csv_sync_run_id: data?.epoc_csv_sync_run_id ?? null,
         });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      results.push({ company_id: companyId, ok: false, error: msg });
+      errText = msg;
+      results.push({
+        company_id: companyId,
+        ok: false,
+        error: msg,
+      });
       console.error(LOG, "unidade_excecao", { company_id: companyId, msg });
     }
+
+    await persistDailyAttempt(admin, companyId, syncOk, errText);
   }
 
   const failed = results.filter((r) => !r.ok).length;

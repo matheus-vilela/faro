@@ -110,6 +110,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     | null
   >(null);
   const [historyDeleteLoading, setHistoryDeleteLoading] = useState(false);
+  const [replayRunId, setReplayRunId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -269,6 +270,50 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         .join(", ");
     }
     return "";
+  };
+
+  const diasBrListFromConsulted = (v: unknown): string[] => {
+    if (!Array.isArray(v)) return [];
+    const re = /^\d{2}\/\d{2}\/\d{4}$/;
+    const out: string[] = [];
+    for (const x of v) {
+      const t = String(x).trim();
+      if (re.test(t)) out.push(t);
+    }
+    return out.slice(0, 10);
+  };
+
+  const portalPorDiaFromMeta = (
+    meta: Record<string, unknown> | null,
+  ): Record<string, string> | null => {
+    if (!meta) return null;
+    const raw = meta.portal_por_dia;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === "string" && v.trim()) out[String(k)] = v.trim();
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  };
+
+  const portalPorDiaEntriesOrdered = (
+    portalPorDia: Record<string, string>,
+    datesConsulted: unknown,
+  ): Array<{ dia: string; mensagem: string }> => {
+    const order = diasBrListFromConsulted(datesConsulted);
+    const used = new Set<string>();
+    const rows: Array<{ dia: string; mensagem: string }> = [];
+    for (const d of order) {
+      const m = portalPorDia[d];
+      if (m) {
+        rows.push({ dia: d, mensagem: m });
+        used.add(d);
+      }
+    }
+    for (const [d, mensagem] of Object.entries(portalPorDia)) {
+      if (!used.has(d)) rows.push({ dia: d, mensagem });
+    }
+    return rows;
   };
 
   const openHistoryDelete = (
@@ -452,6 +497,49 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           duration: 5000,
         },
       );
+    }
+  };
+
+  const handleReplaySyncRun = async (run: EpocSyncRunHistoryRow) => {
+    if (!enabled || !baseUrl.trim()) {
+      toast.error("Ative a integração e indique a URL base do portal EPOC.");
+      return;
+    }
+    const dias = diasBrListFromConsulted(run.dates_consulted);
+    if (dias.length === 0) {
+      toast.error(
+        "Este registo não tem datas válidas para repetir a sincronização.",
+      );
+      return;
+    }
+    setReplayRunId(run.id);
+    try {
+      const res = await invokeEpocCsvSync(companyId, {
+        consulta_dias_br: dias,
+      });
+      if (res.steps?.length) {
+        console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
+        for (const st of res.steps) {
+          console.info(
+            `#${st.index} ${st.name} [${st.status}]`,
+            st.message ?? "",
+          );
+        }
+        console.groupEnd();
+      }
+      if (!res.ok) {
+        toast.error(res.error ?? "Falha ao repetir a sincronização desta(s) data(s).");
+        return;
+      }
+      toast.success(
+        res.csv_uploaded
+          ? "Exportação repetida — CSV guardado; o import pode demorar."
+          : "Pedido enviado; verifique os passos nos logs.",
+      );
+      await load();
+      void loadHistory();
+    } finally {
+      setReplayRunId(null);
     }
   };
 
@@ -910,6 +998,18 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                         const datesLine = formatDatesConsulted(
                           item.dates_consulted,
                         );
+                        const replayDias = diasBrListFromConsulted(
+                          item.dates_consulted,
+                        );
+                        const portalPorDia = portalPorDiaFromMeta(
+                          item.metadata,
+                        );
+                        const portalLinhas =
+                          portalPorDia &&
+                          portalPorDiaEntriesOrdered(
+                            portalPorDia,
+                            item.dates_consulted,
+                          );
                         return (
                           <div
                             key={`run-${item.id}`}
@@ -951,16 +1051,42 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                             <p className="mt-2 text-sm text-foreground">
                               {item.summary}
                             </p>
+                            {portalLinhas && portalLinhas.length > 1 ? (
+                              <ul className="mt-2 space-y-1 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                                <li className="font-medium text-foreground/80">
+                                  Retorno do portal por dia consultado
+                                </li>
+                                {portalLinhas.map(({ dia, mensagem }) => (
+                                  <li key={dia}>
+                                    <span className="font-mono">{dia}</span>
+                                    {": "}
+                                    {mensagem}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
                             {datesLine ? (
                               <p className="mt-1 text-xs text-muted-foreground">
                                 Data(s) consultada(s): {datesLine}
                               </p>
                             ) : null}
-                            {/* {item.steps_prefix?.trim() ? (
-                              <p className="mt-1 font-mono text-[11px] text-muted-foreground break-all">
-                                Trace: {item.steps_prefix.trim()}
-                              </p>
-                            ) : null} */}
+                            {replayDias.length > 0 ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 w-full"
+                                disabled={!enabled || replayRunId === item.id}
+                                onClick={() => void handleReplaySyncRun(item)}
+                              >
+                                {replayRunId === item.id ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                )}
+                                Sincronizar esta(s) data(s) novamente
+                              </Button>
+                            ) : null}
                           </div>
                         );
                       }
