@@ -64,8 +64,14 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   const nfeAccessKey = infNFeId?.startsWith("NFe") ? infNFeId.slice(3) : infNFeId;
 
   const total = infNFe.total as Record<string, unknown> | undefined;
-  const icmsTot = total?.ICMSTot as Record<string, unknown> | undefined;
-  const totalAmount = num(icmsTot?.vNF);
+  const icmsRaw = total?.ICMSTot;
+  const icmsTot = (
+    Array.isArray(icmsRaw) ? icmsRaw[0] : icmsRaw
+  ) as Record<string, unknown> | undefined;
+  let totalAmount = num(icmsTot?.vNF);
+  if (!(totalAmount > 0)) {
+    totalAmount = num((total as Record<string, unknown> | undefined)?.vNF);
+  }
 
   let detRaw = infNFe.det;
   if (!detRaw) return null;
@@ -104,6 +110,19 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     return null;
   }
 
+  const itemsSum = items.reduce((acc, it) => {
+    const lt = Number(it.lineTotal ?? 0);
+    if (Number.isFinite(lt) && lt > 0) return acc + lt;
+    const q = Number(it.quantity ?? 0);
+    const uv = Number(it.unitValue ?? 0);
+    if (Number.isFinite(q) && Number.isFinite(uv)) return acc + q * uv;
+    return acc;
+  }, 0);
+  const roundedSum = Math.round(itemsSum * 100) / 100;
+  if (!(totalAmount > 0) && roundedSum > 0) {
+    totalAmount = roundedSum;
+  }
+
   return {
     validDocument: true,
     invalidReason: undefined,
@@ -114,7 +133,7 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     invoiceSeries,
     nfeAccessKey: nfeAccessKey ?? null,
     emissionDate: emissionDate ?? null,
-    totalAmount: totalAmount > 0 ? totalAmount : null,
+    totalAmount: totalAmount > 0 ? totalAmount : roundedSum > 0 ? roundedSum : null,
     items,
     notes: "Importado de XML NF-e",
     likelyNotEffectivePurchase: false,

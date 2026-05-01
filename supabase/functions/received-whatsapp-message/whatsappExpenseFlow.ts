@@ -350,6 +350,15 @@ async function insertExpense(
     return { status: "duplicate" };
   }
 
+  const emissionRaw = String(extracted.emissionDate ?? "").trim().slice(0, 10);
+  const referenceDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(emissionRaw)
+      ? emissionRaw
+      : new Date().toISOString().slice(0, 10);
+  const docTotalRaw = Number(extracted.totalAmount ?? 0);
+  const documentTotal =
+    Number.isFinite(docTotalRaw) && docTotalRaw > 0 ? docTotalRaw : null;
+
   const { data: exp, error: e1 } = await supabase
     .from("expenses")
     .insert({
@@ -364,6 +373,8 @@ async function insertExpense(
       supplier_document: supplierDocumentRow,
       status: "pending",
       expense_source: "whatsapp",
+      reference_date: referenceDate,
+      document_total: documentTotal,
       notes:
         [extracted.notes, "Importado via WhatsApp"]
           .filter(Boolean)

@@ -237,6 +237,21 @@ async function findOrCreateProduct(
   return { productId: (created?.id as string) ?? null, needsReview: false };
 }
 
+function sumExpenseLineTotals(rows: Array<Record<string, unknown>>): number {
+  let s = 0;
+  for (const row of rows) {
+    const lt = Number((row as { lineTotal?: unknown }).lineTotal ?? 0);
+    if (Number.isFinite(lt) && lt > 0) {
+      s += lt;
+      continue;
+    }
+    const q = Number((row as { quantity?: unknown }).quantity ?? 0);
+    const uv = Number((row as { unitValue?: unknown }).unitValue ?? 0);
+    if (Number.isFinite(q) && Number.isFinite(uv)) s += q * uv;
+  }
+  return Math.round(s * 100) / 100;
+}
+
 function decodeBase64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const out = new Uint8Array(binary.length);
@@ -686,6 +701,19 @@ Deno.serve(async (req) => {
             );
           }
 
+          const fromXmlTotal = Number(data.totalAmount ?? 0);
+          const summedLines = sumExpenseLineTotals(finalItems);
+          const documentTotalResolved =
+            Number.isFinite(fromXmlTotal) && fromXmlTotal > 0
+              ? fromXmlTotal
+              : summedLines > 0
+                ? summedLines
+                : null;
+          const referenceDateIso =
+            emissionDate && /^\d{4}-\d{2}-\d{2}$/.test(emissionDate)
+              ? emissionDate
+              : new Date().toISOString().slice(0, 10);
+
           const { data: expense, error: expErr } = await supabase
             .from("expenses")
             .insert({
@@ -700,7 +728,8 @@ Deno.serve(async (req) => {
               supplier_name: data.supplierName,
               status: "pending",
               notes: nfeAccessKey ? `Importado em background — chave ${nfeAccessKey}` : "Importado em background",
-              document_total: Number(data.totalAmount ?? 0) || null,
+              document_total: documentTotalResolved,
+              reference_date: referenceDateIso,
             })
             .select("id")
             .single();
@@ -723,7 +752,8 @@ Deno.serve(async (req) => {
             {
               expense_id: expenseId,
               supplier_id: supplierId,
-              document_total: Number(data.totalAmount ?? 0) || null,
+              document_total: documentTotalResolved,
+              reference_date: referenceDateIso,
             },
           );
           marcador(companyId, "DESPESA_CRIADA", {

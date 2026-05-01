@@ -135,6 +135,15 @@ function formatFileSizeShort(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Data local YYYY-MM-DD (competência ao criar despesa manual). */
+function localDateYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const STATUS_LABELS = {
   pending: "Pendente",
   approved: "Aprovada",
@@ -297,6 +306,8 @@ export function Despesas() {
     if (!currentCompany?.id) return;
     setLoading(true);
     const { start, end } = getMonthRange(period.month, period.year);
+    const startDate = start.slice(0, 10);
+    const endDate = end.slice(0, 10);
     let exQuery = supabase
       .from("expenses")
       .select(
@@ -308,8 +319,9 @@ export function Despesas() {
         { count: "exact" },
       )
       .eq("company_id", currentCompany.id)
-      .gte("created_at", start)
-      .lte("created_at", end)
+      .gte("reference_date", startDate)
+      .lte("reference_date", endDate)
+      .order("reference_date", { ascending: false })
       .order("created_at", { ascending: false });
     if (onlyPendingApproval) {
       exQuery = exQuery
@@ -478,6 +490,7 @@ export function Despesas() {
         notes: notes || null,
         status: "pending",
         expense_source: "manual",
+        reference_date: localDateYmd(),
         document_total: importDocumentTotal,
         divergence_reason: divergenceReasonValue.trim()
           ? divergenceReasonLabel(divergenceReasonValue)
@@ -811,7 +824,7 @@ export function Despesas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pelo mês de cadastro da despesa"
+        description="Lista filtrada pelo mês de competência da despesa (data do documento / emissão da NF)"
       />
 
       <Sheet
@@ -1553,6 +1566,13 @@ export function Despesas() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground mt-1">
+                        <span className="font-medium text-muted-foreground">
+                          Competência:{" "}
+                        </span>
+                        {exp.reference_date
+                          ? formatDate(`${exp.reference_date}T12:00:00`)
+                          : "—"}
+                        <span className="text-muted-foreground/70 mx-1">·</span>
                         <span className="font-medium text-muted-foreground">
                           Quem lançou:{" "}
                         </span>
