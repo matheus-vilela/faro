@@ -74,6 +74,42 @@ function normalizeCnpjDigits(v: unknown): string | null {
   return digits.length === 14 ? digits : null;
 }
 
+/**
+ * Primeiro dia do mês civil **anterior** à data de referência, em `America/Sao_Paulo`,
+ * formato `dd/MM/yyyy` esperado pela Focus em `data_inicio_recebimento_nfe`.
+ */
+function firstDayOfPreviousMonthFocusBr(reference: Date): string {
+  const dtf = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const bits = dtf.formatToParts(reference);
+  const n = (t: Intl.DateTimeFormatPart["type"]) =>
+    parseInt(bits.find((b) => b.type === t)?.value ?? "", 10);
+  const month = n("month");
+  const year = n("year");
+  if (!Number.isFinite(month) || !Number.isFinite(year)) {
+    const y = reference.getUTCFullYear();
+    const m = reference.getUTCMonth();
+    let prevMIdx = m - 1;
+    let prevY = y;
+    if (prevMIdx < 0) {
+      prevMIdx = 11;
+      prevY -= 1;
+    }
+    return `01/${String(prevMIdx + 1).padStart(2, "0")}/${prevY}`;
+  }
+  let prevMonth = month - 1;
+  let prevYear = year;
+  if (prevMonth < 1) {
+    prevMonth = 12;
+    prevYear -= 1;
+  }
+  return `01/${String(prevMonth).padStart(2, "0")}/${prevYear}`;
+}
+
 /** Senha do certificado: número JSON ou string; strings só dígitos viram número (como no exemplo da Focus). */
 function coerceSenhaCertificado(v: unknown): string | number | undefined {
   if (v === undefined || v === null) return undefined;
@@ -109,7 +145,9 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
       ? String(Math.trunc(raw.telefone))
       : undefined);
   const fallbackEmail =
-    cnpj != null ? `naoresponder+${cnpj}@faro.local` : "naoresponder@faro.local";
+    cnpj != null
+      ? `naoresponder+${cnpj}@faro.local`
+      : "naoresponder@faro.local";
   const emailFinal = email ?? fallbackEmail;
   const telefoneFinal = telefone ?? "0000000000";
 
@@ -153,13 +191,11 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
   const ufUpper = uf!.toUpperCase();
 
   const complemento = optString(raw.complemento) ?? "";
-  const discriminaImpostos = true;
   const enviarEmailDestinatario = false;
-  const habilitaNfe = false;
-  const habilitaNfce = false;
-  const habilitaManifestacao = true;
 
-  let dataInicioRecebimentoNfe = "01/01/2026";
+  /** Sempre pela data atual do pedido (criação na Focus): 1º dia do mês civil anterior em SP. */
+  const dataInicioRecebimentoNfe =
+    firstDayOfPreviousMonthFocusBr(new Date());
 
   const knownKeys = new Set([
     "dry_run",
@@ -182,6 +218,7 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
     "uf",
     "arquivo_certificado_base64",
     "senha_certificado",
+    "data_inicio_recebimento_nfe",
   ]);
 
   const body: Record<string, unknown> = {
@@ -205,7 +242,7 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
     habilita_nfe: false,
     habilita_nfce: false,
     habilita_manifestacao: true,
-    data_inicio_recebimento_nfe: "01/01/2026",
+    data_inicio_recebimento_nfe: dataInicioRecebimentoNfe,
     arquivo_certificado_base64: arquivoCertificadoBase64,
     senha_certificado: senhaCertificado,
   };
