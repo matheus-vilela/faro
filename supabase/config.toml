@@ -47,8 +47,10 @@ verify_jwt = false
 [functions.enqueue-nfe-import]
 verify_jwt = true
 
+# Chamadas internas (`focus-sync-nfe-recebidas`, chaining no próprio processor) usam o service role;
+# a função valida Authorization no código — evita o gateway rejeitar antes do handler.
 [functions.process-import-job-batch]
-verify_jwt = true
+verify_jwt = false
 
 [functions.focus-cria-empresa]
 verify_jwt = false
@@ -61,6 +63,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.epoc-daily-sync]
+verify_jwt = false
+
+# Secret no header Authorization (cron) — igual epoc-daily-sync.
+[functions.focus-sync-nfe-recebidas]
 verify_jwt = false
 
 [functions.process-integration-csv-revenue-job]

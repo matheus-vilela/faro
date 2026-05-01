@@ -72,6 +72,10 @@ export type FocusNfeMap = {
   token_producao?: string;
   /** Id da empresa na API Focus NFe (preenchido após `focus-cria-empresa`). */
   id_empresa?: number;
+  /** Cursor `versao` da API Focus NF-e recebidas (último valor persistido após sync). */
+  nfes_recebidas_ultima_versao?: number;
+  /** ISO da última sincronização de NF-e recebidas (Focus). */
+  nfes_recebidas_ultima_sync_at?: string;
   /**
    * Uso apenas em memória / body para APIs Focus — **nunca** persistir em `companies.focusnfe`.
    */

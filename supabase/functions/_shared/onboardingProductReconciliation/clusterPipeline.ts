@@ -1,5 +1,5 @@
-import type { AiEquivalenceResult, MergeStrength, RawLineInput } from "./types";
-import { deterministicPairDecision } from "./deterministicRules";
+import type { AiEquivalenceResult, MergeStrength, RawLineInput } from "./types.ts";
+import { deterministicPairDecision } from "./deterministicRules.ts";
 
 export type PairDecision = {
   aId: string;

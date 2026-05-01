@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FiscalNfeRecebidasManualSyncCard } from "@/components/fiscal/FiscalNfeRecebidasManualSyncCard";
 import { StepCertificateForm } from "@/components/unit-setup/steps/StepCertificateForm";
 import { useCompany } from "@/contexts/CompanyContext";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
@@ -433,6 +434,12 @@ export function ConfiguracoesFiscal() {
           </div>
         </CardContent>
       </Card>
+
+      <FiscalNfeRecebidasManualSyncCard
+        companyId={companyId}
+        focusnfe={focusRaw}
+        onSynced={refetchCompanies}
+      />
 
       {!(!onboardingBatchId || purging) && (
         <Card className="border-destructive/30">

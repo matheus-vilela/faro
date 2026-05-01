@@ -47,13 +47,13 @@ async function enrichForCompany(
       items: ex0.items ?? [],
       _requiresProductConfirmation: false,
     };
-    const resolvedSupplierId = await ensureSupplierFromExtracted(
+    const sr = await ensureSupplierFromExtracted(
       supabase,
       companyId,
       data,
       "Cadastrado automaticamente — leitura de comprovante no Faro",
     );
-    return { data, resolvedSupplierId };
+    return { data, resolvedSupplierId: sr.supplierId };
   }
   const matchResult = await resolveProductMatches(supabase, companyId, ex0.items);
   const data: ExtractedDocumentResult & {
@@ -63,13 +63,13 @@ async function enrichForCompany(
     items: matchResult.items,
     _requiresProductConfirmation: matchResult.requiresProductConfirmation,
   };
-  const resolvedSupplierId = await ensureSupplierFromExtracted(
+  const sr = await ensureSupplierFromExtracted(
     supabase,
     companyId,
     data,
     "Cadastrado automaticamente — leitura de comprovante no Faro",
   );
-  return { data, resolvedSupplierId };
+  return { data, resolvedSupplierId: sr.supplierId };
 }
 
 Deno.serve(async (req) => {

@@ -106,6 +106,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
   if (!supabaseUrl || !anonKey) {
     return json({ ok: false, error: "Configuração do servidor incompleta." }, 500);
   }
@@ -114,10 +115,15 @@ Deno.serve(async (req) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return json({ ok: false, error: "Não autenticado." }, 401);
   }
-
-  const supabase = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const isServiceCaller = !!(serviceRole && bearer === serviceRole);
+  const supabase = isServiceCaller
+    ? createClient(supabaseUrl, serviceRole, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    : createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
 
   const body = await req.json().catch(() => ({}));
   const companyId = String((body as { company_id?: string }).company_id ?? "").trim();
@@ -126,19 +132,21 @@ Deno.serve(async (req) => {
   ).trim() || null;
   if (!companyId) return json({ ok: false, error: "company_id obrigatório." }, 400);
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "Sessão inválida." }, 401);
+  if (!isServiceCaller) {
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) return json({ ok: false, error: "Sessão inválida." }, 401);
 
-  const { data: member, error: memErr } = await supabase
-    .from("user_companies")
-    .select("company_id")
-    .eq("user_id", user.id)
-    .eq("company_id", companyId)
-    .maybeSingle();
-  if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
+    const { data: member, error: memErr } = await supabase
+      .from("user_companies")
+      .select("company_id")
+      .eq("user_id", user.id)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
+  }
 
   const openaiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
   const model =

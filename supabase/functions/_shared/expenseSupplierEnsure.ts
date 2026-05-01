@@ -61,18 +61,26 @@ export function enrichExtractedWithTaxId(
 const NOTES_WHATSAPP_DEFAULT =
   "Cadastrado automaticamente — importação WhatsApp";
 
+export type EnsureSupplierFromExtractedResult = {
+  supplierId: string | null;
+  /** Novo registo em `suppliers`. */
+  createdNew: boolean;
+};
+
 /**
  * Localiza fornecedor pelo documento ou cria com nome e documento.
- * Retorna null se não houver CPF/CNPJ válido (11 ou 14 dígitos).
+ * `supplierId` fica null se não houver CPF/CNPJ válido (11 ou 14 dígitos) ou erro.
  */
 export async function ensureSupplierFromExtracted(
   supabase: SupabaseClient,
   companyId: string,
   extracted: ExtractedDocumentResult,
   autoRegisterNotes: string = NOTES_WHATSAPP_DEFAULT,
-): Promise<string | null> {
+): Promise<EnsureSupplierFromExtractedResult> {
   const digits = extractTaxIdDigits(extracted);
-  if (!digits || (digits.length !== 11 && digits.length !== 14)) return null;
+  if (!digits || (digits.length !== 11 && digits.length !== 14)) {
+    return { supplierId: null, createdNew: false };
+  }
 
   const { data: rows, error } = await supabase
     .from("suppliers")
@@ -81,14 +89,14 @@ export async function ensureSupplierFromExtracted(
 
   if (error) {
     console.error("[expenseSupplierEnsure] suppliers list:", error.message);
-    return null;
+    return { supplierId: null, createdNew: false };
   }
 
   const norm = (d: string | null | undefined) => normalizeDocumentDigits(d);
   const found = rows?.find((r: { document: string | null }) =>
     norm(r.document) === digits
   );
-  if (found) return found.id as string;
+  if (found) return { supplierId: found.id as string, createdNew: false };
 
   const name =
     (extracted.supplierName ?? "").trim() ||
@@ -108,7 +116,8 @@ export async function ensureSupplierFromExtracted(
 
   if (insErr) {
     console.error("[expenseSupplierEnsure] insert supplier:", insErr.message);
-    return null;
+    return { supplierId: null, createdNew: false };
   }
-  return (inserted?.id as string) ?? null;
+  const id = (inserted?.id as string) ?? null;
+  return { supplierId: id, createdNew: !!id };
 }

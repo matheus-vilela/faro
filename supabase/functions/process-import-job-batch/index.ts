@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
 import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
+import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.ts";
 import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -13,7 +14,33 @@ const corsHeaders: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const MAX_FILES_PER_RUN = 8;
+/** Uma sub-ronda curta por invoke (quota CPU da Edge); o resto encadeia via `stillActive`. */
+const MAX_FILES_PER_RUN = 4;
+
+const LOG = "[process-import-job-batch]";
+
+/** Marcador grepável nos logs (`acao` fixo): sempre inclui `unidade` = company_id. */
+function marcador(unidadeId: string, acao: string, detalhes: Record<string, unknown>): void {
+  console.log(LOG, JSON.stringify({ unidade: unidadeId, acao, ...detalhes }));
+}
+
+/** Logs JSON — filtrar por `[process-import-job-batch]` e campo `fase`. */
+function pibLog(
+  execId: string,
+  fase: string,
+  ctx: { company_id: string; batch_id: string; file_id?: string | null },
+  mensagem: string,
+  extras?: Record<string, unknown>,
+): void {
+  const line = {
+    exec_id: execId,
+    fase,
+    mensagem,
+    ...ctx,
+    ...(extras && Object.keys(extras).length ? extras : {}),
+  };
+  console.log(LOG, JSON.stringify(line));
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -225,6 +252,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
   if (!supabaseUrl || !anonKey) {
     return json({ ok: false, error: "Configuração do servidor incompleta." }, 500);
   }
@@ -232,34 +260,69 @@ Deno.serve(async (req) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return json({ ok: false, error: "Não autenticado." }, 401);
   }
-  const supabase = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const isServiceCaller = !!(serviceRole && bearer === serviceRole);
+  const supabase = isServiceCaller
+    ? createClient(supabaseUrl, serviceRole, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    : createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
 
   const body = await req.json().catch(() => ({}));
   const batchId = String((body as { batch_id?: string }).batch_id ?? "").trim();
-  if (!batchId) return json({ ok: false, error: "batch_id obrigatório." }, 400);
+  const execId = crypto.randomUUID();
+  if (!batchId) {
+    console.warn(
+      LOG,
+      JSON.stringify({ exec_id: execId, fase: "request_invalido", mensagem: "body sem batch_id" }),
+    );
+    return json({ ok: false, error: "batch_id obrigatório." }, 400);
+  }
 
   const { data: batch, error: batchErr } = await supabase
     .from("import_job_batches")
     .select("id, company_id, requested_by, total_files, processed_files, success_files, failed_files, pending_review_files, status")
     .eq("id", batchId)
     .maybeSingle();
-  if (batchErr || !batch?.id) return json({ ok: false, error: "lote não encontrado." }, 404);
+  if (batchErr || !batch?.id) {
+    console.warn(
+      LOG,
+      JSON.stringify({
+        exec_id: execId,
+        fase: "batch_nao_encontrado",
+        batch_id: batchId,
+        erro: batchErr?.message ?? "null",
+      }),
+    );
+    return json({ ok: false, error: "lote não encontrado." }, 404);
+  }
   const companyId = String(batch.company_id);
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "Sessão inválida." }, 401);
-  const { data: member, error: memErr } = await supabase
-    .from("user_companies")
-    .select("company_id")
-    .eq("user_id", user.id)
-    .eq("company_id", companyId)
-    .maybeSingle();
-  if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
+  pibLog(execId, "batch_carregado", { company_id: companyId, batch_id: batchId }, "lote encontrado; início processamento", {
+    caller_service_role: isServiceCaller,
+    batch_status: batch.status,
+    total_files: batch.total_files,
+    processed_files: batch.processed_files,
+    success_files: batch.success_files,
+    failed_files: batch.failed_files,
+  });
+
+  if (!isServiceCaller) {
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) return json({ ok: false, error: "Sessão inválida." }, 401);
+    const { data: member, error: memErr } = await supabase
+      .from("user_companies")
+      .select("company_id")
+      .eq("user_id", user.id)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (memErr || !member) return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
+  }
 
   const nowIso = new Date().toISOString();
 
@@ -300,6 +363,17 @@ Deno.serve(async (req) => {
     await appendTimeline(supabase, batchId, "UPLOAD", "Lote enfileirado para processamento.");
   }
 
+  let processed = Number(batch.processed_files ?? 0);
+  let success = Number(batch.success_files ?? 0);
+  let failed = Number(batch.failed_files ?? 0);
+  let pendingReviewFiles = Number(batch.pending_review_files ?? 0);
+
+  marcador(companyId, "LOTE_INICIO", {
+    batch_id: batchId,
+    exec_id: execId,
+    max_ficheiros_neste_invoke: MAX_FILES_PER_RUN,
+  });
+
   const { data: files } = await supabase
     .from("import_job_files")
     .select("id, file_name, xml_hash, xml_content_base64")
@@ -307,10 +381,26 @@ Deno.serve(async (req) => {
     .in("status", ["QUEUED", "PROCESSING"])
     .order("created_at", { ascending: true });
 
-  let processed = Number(batch.processed_files ?? 0);
-  let success = Number(batch.success_files ?? 0);
-  let failed = Number(batch.failed_files ?? 0);
-  let pendingReviewFiles = Number(batch.pending_review_files ?? 0);
+  const filesQueued = (files ?? []).length;
+  const chunkLen = Math.min(MAX_FILES_PER_RUN, filesQueued);
+  if (filesQueued === 0) {
+    marcador(companyId, "FILA_ESGOTADA", { batch_id: batchId });
+  }
+  pibLog(
+    execId,
+    "ficheiros_para_processar",
+    { company_id: companyId, batch_id: batchId },
+    `${filesQueued} ficheiro(s) QUEUED/PROCESSING; neste invoke processa até ${chunkLen}`,
+    {
+      max_por_invoke: MAX_FILES_PER_RUN,
+      ids_preview: (files ?? []).slice(0, 3).map((f: { id: string }) => f.id),
+    },
+  );
+  marcador(companyId, "SUBRONDA", {
+    batch_id: batchId,
+    na_fila: filesQueued,
+    processar_agora: chunkLen,
+  });
 
   const chunkFiles = (files ?? []).slice(0, MAX_FILES_PER_RUN);
 
@@ -359,6 +449,13 @@ Deno.serve(async (req) => {
 
     const file = fRaw as { id: string; file_name: string; xml_hash: string; xml_content_base64: string };
     const fileId = file.id;
+    pibLog(
+      execId,
+      "ficheiro_inicio",
+      { company_id: companyId, batch_id: batchId, file_id: fileId },
+      `a processar ${file.file_name}`,
+      { xml_hash_prefix: `${String(file.xml_hash ?? "").slice(0, 12)}…` },
+    );
     await supabase
       .from("import_job_files")
       .update({ status: "PROCESSING", started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -383,6 +480,23 @@ Deno.serve(async (req) => {
       const supplierDocument = digitsOnly(data.supplierDocument);
       const emissionDate = String(data.emissionDate ?? "").slice(0, 10) || null;
 
+      pibLog(
+        execId,
+        "xml_parseado",
+        { company_id: companyId, batch_id: batchId, file_id: fileId },
+        "parseNfeXmlToExtracted OK",
+        {
+          tem_chave_nfe: !!nfeAccessKey,
+          chave_nfe_44: nfeAccessKey,
+          invoice_series: invoiceSeries,
+          invoice_number: invoiceNumber,
+          supplier_document: supplierDocument,
+          supplier_name_preview: String(data.supplierName ?? "").slice(0, 80),
+          total_amount: data.totalAmount ?? null,
+          itens_extraidos: Array.isArray(data.items) ? data.items.length : 0,
+        },
+      );
+
       const { data: alreadyByHash } = await supabase
         .from("company_nfe_import_logs")
         .select("id")
@@ -390,6 +504,13 @@ Deno.serve(async (req) => {
         .eq("xml_hash", file.xml_hash)
         .maybeSingle();
       if (alreadyByHash) {
+        pibLog(
+          execId,
+          "skip_ja_importado_hash",
+          { company_id: companyId, batch_id: batchId, file_id: fileId },
+          "company_nfe_import_logs já tem este xml_hash — não cria despesa nem fornecedor de novo",
+          {},
+        );
         await appendTimeline(supabase, batchId, "DONE", "Arquivo já importado (hash).", {}, fileId);
         fileStatus = "COMPLETED";
       } else if (nfeAccessKey) {
@@ -400,6 +521,13 @@ Deno.serve(async (req) => {
           .eq("nfe_access_key", nfeAccessKey)
           .maybeSingle();
         if (byKey) {
+          pibLog(
+            execId,
+            "skip_duplicado_chave_nfe",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "já existe log com mesma nfe_access_key — regista duplicate, não cria despesa",
+            { chave_nfe_44: nfeAccessKey },
+          );
           await insertImportLog(supabase, {
             company_id: companyId,
             file_name: file.file_name,
@@ -415,14 +543,58 @@ Deno.serve(async (req) => {
             import_job_file_id: fileId,
           });
         } else {
-          const supplierId = await ensureSupplierFromExtracted(
+          const sr = await ensureSupplierFromExtracted(
             supabase,
             companyId,
             data,
             "Cadastrado automaticamente — importação XML/ZIP NF-e",
           );
+          const supplierId = sr.supplierId;
+          if (sr.createdNew && supplierId) {
+            marcador(companyId, "FORNECEDOR_CRIADO", {
+              batch_id: batchId,
+              file_id: fileId,
+              supplier_id: supplierId,
+              supplier_document: supplierDocument ?? null,
+            });
+          } else if (supplierId) {
+            marcador(companyId, "FORNECEDOR_JA_EXISTIA", {
+              batch_id: batchId,
+              file_id: fileId,
+              supplier_id: supplierId,
+              supplier_document: supplierDocument ?? null,
+            });
+          } else {
+            marcador(companyId, "FORNECEDOR_NAO_RESOLVIDO", {
+              batch_id: batchId,
+              file_id: fileId,
+              supplier_document: supplierDocument ?? null,
+            });
+          }
+          pibLog(
+            execId,
+            "fornecedor_resolvido",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "ensureSupplierFromExtracted concluído",
+            {
+              supplier_id: supplierId,
+              created_new: sr.createdNew,
+              supplier_document: supplierDocument,
+            },
+          );
           const match = await resolveProductMatches(supabase, companyId, data.items ?? []);
           const deferProductCreation = match.deferProductCreationToReconciliation === true;
+          pibLog(
+            execId,
+            "match_produtos",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "resolveProductMatches concluído",
+            {
+              itens_match: (match.items ?? []).length,
+              defer_product_creation: deferProductCreation,
+              borderline_llm_calls: match.borderlineLlmCalls ?? 0,
+            },
+          );
           const finalItems: Array<Record<string, unknown>> = [];
           const rawRowIdsOrdered: string[] = [];
           let needsReviewReason: string | null = null;
@@ -504,6 +676,16 @@ Deno.serve(async (req) => {
             });
           }
 
+          if (needsReviewReason) {
+            pibLog(
+              execId,
+              "aviso_revisao_produto",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              "pelo menos um item ficou sem produto resolvido",
+              { needs_review_reason: needsReviewReason, pending_for_file: pendingForFile },
+            );
+          }
+
           const { data: expense, error: expErr } = await supabase
             .from("expenses")
             .insert({
@@ -522,8 +704,35 @@ Deno.serve(async (req) => {
             })
             .select("id")
             .single();
-          if (expErr || !expense?.id) throw new Error(expErr?.message ?? "Falha ao criar despesa.");
+          if (expErr || !expense?.id) {
+            pibLog(
+              execId,
+              "despesa_insert_FALHOU",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              expErr?.message ?? "sem id na resposta insert expenses",
+              { postgres: expErr ?? null },
+            );
+            throw new Error(expErr?.message ?? "Falha ao criar despesa.");
+          }
           expenseId = String(expense.id);
+          pibLog(
+            execId,
+            "despesa_criada",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "expenses.insert OK",
+            {
+              expense_id: expenseId,
+              supplier_id: supplierId,
+              document_total: Number(data.totalAmount ?? 0) || null,
+            },
+          );
+          marcador(companyId, "DESPESA_CRIADA", {
+            batch_id: batchId,
+            file_id: fileId,
+            expense_id: expenseId,
+            supplier_id: supplierId,
+            chave_nfe_44: nfeAccessKey,
+          });
           await appendTimeline(supabase, batchId, "UPSERT_EXPENSE", "Despesa criada.", { expense_id: expenseId }, fileId);
 
           for (let idx = 0; idx < finalItems.length; idx++) {
@@ -594,10 +803,85 @@ Deno.serve(async (req) => {
             }
           }
 
+          pibLog(
+            execId,
+            "expense_items_concluido",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "linhas expense_items inseridas",
+            {
+              expense_id: expenseId,
+              linhas: finalItems.length,
+              pending_for_file_apos_itens: pendingForFile,
+            },
+          );
+          marcador(companyId, "N_ITENS_DESPESA", {
+            batch_id: batchId,
+            file_id: fileId,
+            expense_id: expenseId,
+            quantidade: finalItems.length,
+          });
+
           const { error: recErr } = await supabase
             .from("recebimentos")
             .insert({ expense_id: expenseId });
-          if (recErr) throw new Error(recErr.message);
+          if (recErr) {
+            pibLog(
+              execId,
+              "recebimento_insert_FALHOU",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              recErr.message,
+              {},
+            );
+            throw new Error(recErr.message);
+          }
+          pibLog(
+            execId,
+            "recebimento_criado",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "recebimentos.insert OK",
+            { expense_id: expenseId },
+          );
+          marcador(companyId, "RECEBIMENTO_CRIADO", {
+            batch_id: batchId,
+            file_id: fileId,
+            expense_id: expenseId,
+          });
+
+          const invRefParts = [invoiceSeries, invoiceNumber].filter(
+            (x) => !!String(x ?? "").trim(),
+          );
+          const invoiceRefLabel =
+            invRefParts.length > 0 ? invRefParts.join("/") : (nfeAccessKey ?? "").slice(-12);
+          const boRes = await insertBoletosFromNfeDupXml(
+            supabase,
+            companyId,
+            expenseId,
+            xmlText,
+            invoiceRefLabel || "NF-e",
+          );
+          if (boRes.inserted > 0) {
+            marcador(companyId, "BOLETO_CRIADO", {
+              batch_id: batchId,
+              file_id: fileId,
+              expense_id: expenseId,
+              parcelas: boRes.inserted,
+            });
+            pibLog(
+              execId,
+              "boletos_dup_xml",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              `insertBoletosFromNfeDupXml: ${boRes.inserted} parcela(s)`,
+              { rows: boRes.rows },
+            );
+            await appendTimeline(
+              supabase,
+              batchId,
+              "BOLETOS",
+              `${boRes.inserted} parcela(s) da cobrança registrada(s).`,
+              { duplicatas: boRes.rows },
+              fileId,
+            );
+          }
 
           await insertImportLog(supabase, {
             company_id: companyId,
@@ -615,7 +899,38 @@ Deno.serve(async (req) => {
             import_job_batch_id: batchId,
             import_job_file_id: fileId,
           });
+          pibLog(
+            execId,
+            "import_log_gravado",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "company_nfe_import_logs insert OK",
+            {
+              expense_id: expenseId,
+              log_status: needsReviewReason || pendingForFile > 0 ? "needs_review" : "success",
+            },
+          );
+          marcador(companyId, "IMPORT_NFE_LOG_GRAVADO", {
+            batch_id: batchId,
+            file_id: fileId,
+            expense_id: expenseId,
+          });
         }
+      } else {
+        pibLog(
+          execId,
+          "skip_sem_chave_nfe",
+          { company_id: companyId, batch_id: batchId, file_id: fileId },
+          "XML válido mas extracted sem chave de acesso (nfeAccessKey) — não entra no fluxo despesa/fornecedor",
+          { file_name: file.file_name },
+        );
+        await appendTimeline(
+          supabase,
+          batchId,
+          "VALIDATE",
+          "Sem chave de acesso da NF-e no XML parseado — despesa não criada.",
+          { file_name: file.file_name },
+          fileId,
+        );
       }
 
       if (pendingForFile > 0) {
@@ -624,10 +939,33 @@ Deno.serve(async (req) => {
       } else {
         fileStatus = "COMPLETED";
       }
+      pibLog(
+        execId,
+        "ficheiro_fim_try",
+        { company_id: companyId, batch_id: batchId, file_id: fileId },
+        "try concluído sem throw",
+        {
+          file_status: fileStatus,
+          expense_id: expenseId,
+          pending_for_file: pendingForFile,
+        },
+      );
       await appendTimeline(supabase, batchId, "DONE", "Arquivo processado.", { pending_count: pendingForFile, expense_id: expenseId }, fileId);
     } catch (e) {
       fileStatus = "FAILED";
       fileError = e instanceof Error ? e.message : "Falha ao processar arquivo";
+      console.error(
+        LOG,
+        JSON.stringify({
+          exec_id: execId,
+          fase: "ficheiro_ERRO",
+          company_id: companyId,
+          batch_id: batchId,
+          file_id: fileId,
+          mensagem: fileError,
+          stack: e instanceof Error ? e.stack : undefined,
+        }),
+      );
       await appendTimeline(supabase, batchId, "ERROR", fileError, {}, fileId);
     }
 
@@ -685,27 +1023,103 @@ Deno.serve(async (req) => {
   }
 
   if ((stillActive ?? 0) > 0) {
-    const nextTrigger = fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
-      method: "POST",
-      headers: {
-        Authorization: authHeader,
-        apikey: anonKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ batch_id: batchId }),
-    }).catch(() => undefined);
+    pibLog(
+      execId,
+      "chain_proxima_ronda",
+      { company_id: companyId, batch_id: batchId },
+      `ainda ${stillActive} ficheiro(s) QUEUED/PROCESSING — invoke process-import-job-batch`,
+      { remaining_files: stillActive },
+    );
+    marcador(companyId, "ENCADEAMENTO_INVOKE_INICIO", {
+      batch_id: batchId,
+      remaining_files: stillActive,
+    });
+
+    /** Não faz `await` no invoke seguinte para não empilhar ~2× o wall-clock na mesma instância. */
+    const fallbackFetchChain = (): Promise<Response | undefined> =>
+      fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
+        method: "POST",
+        headers: {
+          Authorization: authHeader,
+          apikey: anonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ batch_id: batchId }),
+      }).catch(() => undefined);
+
+    const chainPromise = supabase.functions
+      .invoke("process-import-job-batch", { body: { batch_id: batchId } })
+      .then(({ data: chainData, error: chainErr }) => {
+        if (chainErr) {
+          const errMsg = chainErr.message ?? String(chainErr);
+          marcador(companyId, "ENCADEAMENTO_INVOKE_ERRO", { batch_id: batchId, erro: errMsg });
+          pibLog(execId, "chain_invoke_erro", { company_id: companyId, batch_id: batchId }, errMsg, {
+            chain_invoke: chainErr,
+          });
+          const fb = fallbackFetchChain();
+          try {
+            // @ts-ignore Edge runtime helper (quando disponível)
+            if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+              // @ts-ignore
+              EdgeRuntime.waitUntil(fb);
+              pibLog(
+                execId,
+                "chain_fallback_waitUntil",
+                { company_id: companyId, batch_id: batchId },
+                "invoke falhou — waitUntil(fetch fallback)",
+                {},
+              );
+            } else {
+              void fb.catch(() => undefined);
+            }
+          } catch (_) {
+            void fb.catch(() => undefined);
+          }
+          return;
+        }
+        marcador(companyId, "ENCADEAMENTO_INVOKE_OK", { batch_id: batchId });
+        pibLog(execId, "chain_invoke_ok", { company_id: companyId, batch_id: batchId }, "invoke agendado (resolvido)", {
+          resumo: typeof chainData === "object" && chainData !== null ? chainData : { raw: chainData },
+        });
+      })
+      .catch((e) => {
+        marcador(companyId, "ENCADEAMENTO_INVOKE_EXCECAO", { batch_id: batchId, erro: String(e) });
+        pibLog(execId, "chain_invoke_excecao", { company_id: companyId, batch_id: batchId }, String(e), {});
+        void fallbackFetchChain();
+      });
+
     try {
       // @ts-ignore Edge runtime helper (quando disponível)
       if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
         // @ts-ignore
-        EdgeRuntime.waitUntil(nextTrigger);
+        EdgeRuntime.waitUntil(chainPromise);
+        pibLog(
+          execId,
+          "chain_invoke_waitUntil",
+          { company_id: companyId, batch_id: batchId },
+          "waitUntil(invoke process-import-job-batch)",
+          {},
+        );
+      } else {
+        void chainPromise;
+        pibLog(
+          execId,
+          "chain_invoke_fire_and_forget",
+          { company_id: companyId, batch_id: batchId },
+          "sem EdgeRuntime.waitUntil — invoke em void",
+          {},
+        );
       }
-    } catch {
-      // no-op
+    } catch (chErr) {
+      console.warn(
+        LOG,
+        JSON.stringify({ exec_id: execId, fase: "chain_agendar_erro", batch_id: batchId, erro: String(chErr) }),
+      );
     }
     return json({
       ok: true,
       batch_id: batchId,
+      exec_id: execId,
       status: "PROCESSING",
       processed_files: processed,
       success_files: success,
@@ -798,9 +1212,24 @@ Deno.serve(async (req) => {
     }, { onConflict: "company_id,dedupe_key" });
   }
 
+  pibLog(
+    execId,
+    "request_fim_terminal",
+    { company_id: companyId, batch_id: batchId },
+    "lote sem ficheiros pendentes — estado final",
+    {
+      final_status: finalStatus,
+      processed_files: processed,
+      success_files: success,
+      failed_files: failed,
+      pending_review_files: pendingReviewFiles,
+    },
+  );
+
   return json({
     ok: true,
     batch_id: batchId,
+    exec_id: execId,
     status: finalStatus,
     processed_files: processed,
     success_files: success,

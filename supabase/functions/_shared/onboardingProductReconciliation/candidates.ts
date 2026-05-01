@@ -1,5 +1,5 @@
-import { jaccard, tokenizeNormalized } from "./normalize";
-import type { CandidatePair, RawLineInput } from "./types";
+import { jaccard, tokenizeNormalized } from "./normalize.ts";
+import type { CandidatePair, RawLineInput } from "./types.ts";
 
 /**
  * Gera pares candidatos (blocking) sem enviar o universo completo à IA.

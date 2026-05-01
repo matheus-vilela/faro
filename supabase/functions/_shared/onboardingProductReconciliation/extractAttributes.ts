@@ -1,5 +1,5 @@
-import { digitsOnly } from "./normalize";
-import type { DetectedAttributes } from "./types";
+import { digitsOnly } from "./normalize.ts";
+import type { DetectedAttributes } from "./types.ts";
 
 const DOMAIN_TERMS = [
   "long neck",

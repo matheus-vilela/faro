@@ -322,7 +322,7 @@ async function insertExpense(
 ): Promise<InsertExpenseOutcome> {
   const type = mapDocumentKindToExpenseType(extracted.documentKind);
   const taxIdDigits = extractTaxIdDigits(extracted);
-  const supplierId = await ensureSupplierFromExtracted(
+  const { supplierId } = await ensureSupplierFromExtracted(
     supabase,
     companyId,
     extracted,

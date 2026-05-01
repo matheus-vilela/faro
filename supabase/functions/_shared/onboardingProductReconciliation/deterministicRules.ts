@@ -1,6 +1,6 @@
-import type { AiEquivalenceResult, RawLineInput } from "./types";
-import { extractAttributesFromDescription } from "./extractAttributes";
-import { normalizeProductDescription } from "./normalize";
+import type { AiEquivalenceResult, RawLineInput } from "./types.ts";
+import { extractAttributesFromDescription } from "./extractAttributes.ts";
+import { normalizeProductDescription } from "./normalize.ts";
 
 const BEVERAGE_BRAND_BUDGET = new Set([
   "coca",
