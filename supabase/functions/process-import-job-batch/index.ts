@@ -7,6 +7,7 @@ import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
 import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
 import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.ts";
 import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
+import { embedSingleProductIfMissing } from "../_shared/productEmbedding.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -172,7 +173,13 @@ async function findOrCreateProduct(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   item: Record<string, unknown>,
-): Promise<{ productId: string | null; needsReview: boolean; reason?: string }> {
+  options?: { relaxedDuplicateName?: boolean },
+): Promise<{
+  productId: string | null;
+  needsReview: boolean;
+  reason?: string;
+  createdNew: boolean;
+}> {
   const name = String(item.productName ?? "").trim() || "Item";
   const mappedUnit = mapInvoiceUnitToSystem(
     String(item.unitCommercial ?? "").trim() || "un",
@@ -185,7 +192,7 @@ async function findOrCreateProduct(
     .from("products")
     .select("id, name, unit, sku")
     .eq("company_id", companyId);
-  if (pErr) return { productId: null, needsReview: true, reason: pErr.message };
+  if (pErr) return { productId: null, needsReview: true, reason: pErr.message, createdNew: false };
   const rows = (products ?? []) as Array<{ id: string; name: string; unit?: string | null; sku?: string | null }>;
 
   const bySku = sku
@@ -198,25 +205,56 @@ async function findOrCreateProduct(
         productId: null,
         needsReview: true,
         reason: `Conflito de unidade para SKU ${sku} (${existingUnit} x ${unit})`,
+        createdNew: false,
       };
     }
-    return { productId: bySku.id, needsReview: false };
+    return { productId: bySku.id, needsReview: false, createdNew: false };
   }
   const exact = rows.find((p) =>
     normalizeName(String(p.name ?? "")) === nname &&
     String(p.unit ?? "un").trim().toLowerCase() === unit.toLowerCase()
   );
-  if (exact) return { productId: exact.id, needsReview: false };
+  if (exact) return { productId: exact.id, needsReview: false, createdNew: false };
 
   const sameNameDifferentUnit = rows.find((p) =>
     normalizeName(String(p.name ?? "")) === nname &&
     String(p.unit ?? "un").trim().toLowerCase() !== unit.toLowerCase()
   );
   if (sameNameDifferentUnit) {
+    if (options?.relaxedDuplicateName) {
+      const altName = `${name} (${unit})`.slice(0, 240);
+      const { data: createdAlt, error: altErr } = await supabase
+        .from("products")
+        .insert({
+          company_id: companyId,
+          name: altName,
+          unit,
+          sku: sku || null,
+          current_quantity: 0,
+          import_unit_raw: mappedUnit.rawUnit,
+          import_unit_needs_review: mappedUnit.needsReview,
+        })
+        .select("id")
+        .single();
+      if (altErr) {
+        return {
+          productId: null,
+          needsReview: true,
+          reason: altErr.message,
+          createdNew: false,
+        };
+      }
+      return {
+        productId: (createdAlt?.id as string) ?? null,
+        needsReview: false,
+        createdNew: true,
+      };
+    }
     return {
       productId: null,
       needsReview: true,
       reason: `Produto "${name}" com unidade divergente (${sameNameDifferentUnit.unit} x ${unit})`,
+      createdNew: false,
     };
   }
 
@@ -233,8 +271,10 @@ async function findOrCreateProduct(
     })
     .select("id")
     .single();
-  if (cErr) return { productId: null, needsReview: true, reason: cErr.message };
-  return { productId: (created?.id as string) ?? null, needsReview: false };
+  if (cErr) {
+    return { productId: null, needsReview: true, reason: cErr.message, createdNew: false };
+  }
+  return { productId: (created?.id as string) ?? null, needsReview: false, createdNew: true };
 }
 
 function sumExpenseLineTotals(rows: Array<Record<string, unknown>>): number {
@@ -597,7 +637,9 @@ Deno.serve(async (req) => {
               supplier_document: supplierDocument,
             },
           );
-          const match = await resolveProductMatches(supabase, companyId, data.items ?? []);
+          const match = await resolveProductMatches(supabase, companyId, data.items ?? [], {
+            importBatch: true,
+          });
           const deferProductCreation = match.deferProductCreationToReconciliation === true;
           pibLog(
             execId,
@@ -620,11 +662,28 @@ Deno.serve(async (req) => {
             const needsConfirmation = pm?.needsConfirmation === true;
             let productId = resolvedProductId;
             if (!productId && !deferProductCreation) {
-              const created = await findOrCreateProduct(supabase, companyId, item as Record<string, unknown>);
+              const llmSuggested = String(pm?.["borderlineLlmSuggestedName"] ?? "").trim();
+              const rowForProduct = llmSuggested
+                ? { ...(item as Record<string, unknown>), productName: llmSuggested }
+                : (item as Record<string, unknown>);
+              const created = await findOrCreateProduct(
+                supabase,
+                companyId,
+                rowForProduct,
+                { relaxedDuplicateName: true },
+              );
               if (created.needsReview || !created.productId) {
                 needsReviewReason = created.reason ?? `Não foi possível resolver "${item.productName}"`;
               } else {
                 productId = created.productId;
+                if (created.createdNew) {
+                  await embedSingleProductIfMissing(
+                    supabase,
+                    companyId,
+                    created.productId,
+                    String(rowForProduct.productName ?? "Item"),
+                  );
+                }
               }
             }
             const { data: ijInserted, error: ijInsErr } = await supabase

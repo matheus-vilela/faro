@@ -439,7 +439,7 @@ Deno.serve(async (req) => {
     const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
     const cursorPersistido =
       Number.isFinite(storedRaw) && storedRaw >= 0 ? Math.floor(storedRaw) : 0;
-    const cursor =
+    let cursor =
       isManualSingle && manualVersaoInicial !== undefined
         ? manualVersaoInicial
         : cursorPersistido;

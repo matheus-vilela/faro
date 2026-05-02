@@ -15,6 +15,8 @@ export type BorderlineAssistInput = {
   invoice_unit_raw: string | null;
   invoice_ean: string | null;
   candidates: BorderlineCandidate[];
+  /** `import_xml_batch`: nomes na nota podem divergir do cadastro; favoreça LINK semântico. */
+  mode?: "borderline" | "import_xml_batch";
 };
 
 export type BorderlineAssistResult =
@@ -37,15 +39,25 @@ export type BorderlineAssistResult =
       message: string;
     };
 
-const SYSTEM =
+const SYSTEM_BORDERLINE =
   `Você ajuda a decidir vínculo de uma linha de NF-e ao catálogo.\n` +
-  `Recebe descrição/unidade/EAN da nota e até 5 produtos candidatos com score de similaridade.\n` +
+  `Recebe descrição/unidade/EAN da nota e produtos candidatos com score de similaridade.\n` +
   `Responda SEMPRE um JSON único:\n` +
   `{"decision":"LINK","product_id":"<uuid exato de um candidato>","rationale":"..."}\n` +
   `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"...","rationale":"..."}\n` +
   `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
   `Regra: LINK só se o candidato for claramente o mesmo item (mesmo produto). ` +
   `NEW_PRODUCT se nenhum candidato for adequado. UNCERTAIN se não houver confiança.`;
+
+const SYSTEM_IMPORT_BATCH =
+  `Importação XML em lote: vincule linha da NF-e ao catálogo do cliente.\n` +
+  `Nomes na nota costumam abreviar, trocar ordem ou usar marca diferente do cadastro.\n` +
+  `Responda SEMPRE um JSON único (mesmo formato que o modo borderline):\n` +
+  `{"decision":"LINK","product_id":"<uuid de um candidato>","rationale":"..."}\n` +
+  `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"...","rationale":"..."}\n` +
+  `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
+  `Prefira LINK quando for semanticamente o mesmo produto (ex.: "ACUCAR CRISTAL 1KG" vs "Açúcar cristal 1 kg"). ` +
+  `NEW_PRODUCT só se for claramente outro item. UNCERTAIN se não houver base suficiente.`;
 
 export async function assistBorderlineProductMatch(
   apiKey: string,
@@ -73,6 +85,9 @@ export async function assistBorderlineProductMatch(
     })),
   };
 
+  const system =
+    input.mode === "import_xml_batch" ? SYSTEM_IMPORT_BATCH : SYSTEM_BORDERLINE;
+
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -84,7 +99,7 @@ export async function assistBorderlineProductMatch(
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: system },
         {
           role: "user",
           content: JSON.stringify(userPayload),

@@ -31,6 +31,11 @@ import {
   type NormalizedUnitCode,
 } from "../_shared/productImport/unitNormalize.ts";
 import { assistBorderlineProductMatch } from "../_shared/productImport/productMatchLlmAssist.ts";
+import {
+  augmentScoredListWithVectorNeighbors,
+  ensureCompanyProductNameEmbeddings,
+  embeddingModelFromEnv,
+} from "../_shared/productEmbedding.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -309,17 +314,29 @@ function decideWithUnits(params: {
   };
 }
 
+export type ResolveProductMatchesOptions = {
+  /**
+   * Import XML/ZIP em lote: não adia criação de produto à reconciliação;
+   * usa IA também fora da faixa borderline (scores baixos) com mais candidatos.
+   */
+  importBatch?: boolean;
+};
+
 export async function resolveProductMatches(
   supabase: SupabaseClient,
   companyId: string,
   items: ExtractedExpenseItem[],
+  opts?: ResolveProductMatchesOptions,
 ): Promise<ResolveProductMatchesResult> {
-  const {
+  let {
     thresholds,
     autoApplyGlobalMassVolume,
     llmBorderlineMatchEnabled,
     deferProductCreationToReconciliation,
   } = await loadImportSettings(supabase, companyId);
+  if (opts?.importBatch) {
+    deferProductCreationToReconciliation = false;
+  }
 
   let borderlineLlmRemaining = envProductMatchLlmMaxCalls();
   let borderlineLlmCalls = 0;
@@ -335,6 +352,8 @@ export async function resolveProductMatches(
   } catch {
     openaiKey = "";
   }
+
+  const embeddingModel = embeddingModelFromEnv();
 
   const merged = consolidateInvoiceItems(
     items as ExtractedItemWithInvoiceMeta[],
@@ -414,6 +433,25 @@ export async function resolveProductMatches(
 
   const products = (prodRows ?? []) as ProductRow[];
   const productById = new Map(products.map((p) => [p.id, p]));
+
+  if (opts?.importBatch && openaiKey && products.length > 0) {
+    try {
+      const { updated, errors } = await ensureCompanyProductNameEmbeddings(
+        supabase,
+        companyId,
+        openaiKey,
+        embeddingModel,
+      );
+      if (updated > 0 || errors > 0) {
+        console.log(
+          "[productMatch] name_embedding backfill",
+          JSON.stringify({ company_id: companyId, updated, errors }),
+        );
+      }
+    } catch (e) {
+      console.error("[productMatch] name_embedding backfill:", e);
+    }
+  }
 
   const out: ItemWithProductMatch[] = [];
   let requiresProductConfirmation = false;
@@ -596,6 +634,22 @@ export async function resolveProductMatches(
 
     scoredList.sort((a, b) => b.score - a.score);
 
+    if (opts?.importBatch && openaiKey && products.length > 0 && name.trim()) {
+      try {
+        await augmentScoredListWithVectorNeighbors({
+          supabase,
+          companyId,
+          invoiceLineName: name,
+          scoredList,
+          productById,
+          openaiKey,
+          model: embeddingModel,
+        });
+      } catch (e) {
+        console.error("[productMatch] vector RAG:", e);
+      }
+    }
+
     if (!scoredList.length) {
       requiresProductConfirmation = true;
       out.push({
@@ -639,15 +693,21 @@ export async function resolveProductMatches(
     let borderlineLlmSuggestedName: string | undefined;
 
     const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
-
-    if (
-      inBorderlineScoreBand &&
-      llmBorderlineMatchEnabled &&
+    const importXmlColdLlm =
+      opts?.importBatch === true &&
+      bestScore < autoTh &&
       openaiKey &&
-      borderlineLlmRemaining > 0
-    ) {
-      const top5 = scoredList.slice(0, 5);
-      const candidates = top5.map((s) => ({
+      borderlineLlmRemaining > 0;
+
+    const runBorderlineLlm =
+      inBorderlineScoreBand && llmBorderlineMatchEnabled && openaiKey &&
+      borderlineLlmRemaining > 0;
+    const runImportColdLlm = importXmlColdLlm;
+
+    if (runBorderlineLlm || runImportColdLlm) {
+      const topK = opts?.importBatch ? 12 : 5;
+      const topN = scoredList.slice(0, topK);
+      const candidates = topN.map((s) => ({
         product_id: s.product.id,
         product_name: s.product.name,
         catalog_unit: s.product.unit ?? null,
@@ -662,6 +722,7 @@ export async function resolveProductMatches(
         invoice_unit_raw: rawUnit ?? null,
         invoice_ean: itemEan ? String(itemEan) : null,
         candidates,
+        mode: opts?.importBatch ? "import_xml_batch" : "borderline",
       });
 
       if (assist.kind === "LINK") {
@@ -695,8 +756,10 @@ export async function resolveProductMatches(
         decisionPath = "borderline_llm_error";
         borderlineLlmRationale = assist.message;
       }
-    } else if (inBorderlineScoreBand) {
+    } else if (inBorderlineScoreBand && !importXmlColdLlm) {
       decisionPath = "scored_borderline_no_llm";
+    } else if (opts?.importBatch && bestScore < autoTh && !openaiKey) {
+      decisionPath = "import_batch_no_openai_key";
     }
 
     let resolvedId: string | null = null;
