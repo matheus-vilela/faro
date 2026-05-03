@@ -65,8 +65,22 @@ verify_jwt = false
 [functions.epoc-daily-sync]
 verify_jwt = false
 
+# JWT validado no código (sessão + user_companies), como epoc-sync-csv para utilizadores.
+[functions.epoc-validate-login]
+verify_jwt = false
+
 # Secret no header Authorization (cron) — igual epoc-daily-sync.
 [functions.focus-sync-nfe-recebidas]
+verify_jwt = false
+
+# JWT validado no handler (sessão + user_companies).
+# Secrets (produção): `supabase secrets set OPENAI_API_KEY=...` — usado com ai_line_units_preview.
+# Local: `supabase/functions/.env` ou painel; a resposta JSON inclui `openai_api_key_configured` (boolean).
+#
+# CORS a partir do browser: o gateway NÃO pode exigir JWT no OPTIONS (preflight sem Authorization).
+# Se vires "preflight doesn't have HTTP ok status", faz deploy com JWT desligado no gateway, p.ex.:
+#   supabase functions deploy dev-preview-nfe-xml --no-verify-jwt
+[functions.dev-preview-nfe-xml]
 verify_jwt = false
 
 [functions.process-integration-csv-revenue-job]

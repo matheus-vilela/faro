@@ -282,11 +282,11 @@ export function Dashboard() {
           activeImportPercent={activeImportPercent}
         />
       ) : null}
-      {companyId ? (
-        <DashboardIntegrationCsvRevenueCard companyId={companyId} />
+      {currentCompany && !currentCompany.onboarding_fiscal_completed ? (
+        <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
       {currentCompany ? (
-        <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
+        <DashboardIntegrationCsvRevenueCard company={currentCompany} />
       ) : null}
       {companyId ? (
         <DashboardEpocDailySyncAlertCard companyId={companyId} />

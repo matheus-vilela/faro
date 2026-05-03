@@ -3,6 +3,46 @@ import {
   markEpocCsvSyncPending,
 } from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
+import { patchCompanyMaps } from "@/services/unitSetupService";
+import { toast } from "sonner";
+
+function coerceInvokeResponse(
+  response: Response | undefined,
+  error: unknown,
+): Response | undefined {
+  if (response instanceof Response) return response;
+  const ctx = (error as { context?: unknown })?.context;
+  return ctx instanceof Response ? ctx : undefined;
+}
+
+/** Prefer JSON `{ error }` / `{ message }` from the edge on non-2xx. */
+async function messageFromInvokeFailure(
+  error: unknown,
+  response: Response | undefined,
+): Promise<string> {
+  const res = coerceInvokeResponse(response, error);
+  if (res) {
+    try {
+      const raw = (await res.clone().text()).trim();
+      if (raw) {
+        try {
+          const j = JSON.parse(raw) as Record<string, unknown>;
+          const msg =
+            (typeof j.error === "string" && j.error.trim()) ||
+            (typeof j.message === "string" && j.message.trim());
+          if (msg) return msg.slice(0, 2000);
+        } catch {
+          /* not JSON */
+        }
+        return raw.slice(0, 2000);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "Falha ao executar sincronização.";
+}
 
 /**
  * Chama a edge `epoc-sync-csv`: cada etapa (login, index, validadorOz/acoes nas duas fases) é
@@ -29,11 +69,23 @@ export type InvokeEpocCsvSyncOptions = {
   /**
    * - full: últimos 10 dias
    * - previous_day: dia civil anterior em America/Sao_Paulo
-   * - onboarding_initial: do 1.º dia do mês anterior até hoje (SP); usado no setup da unidade
+   * - onboarding_initial: do 1.º dia do mês anterior até ontem em SP; usado no setup da unidade
    */
   sync_mode?: "full" | "previous_day" | "onboarding_initial";
   /** Datas no formato EPOC dd/MM/aaaa (repetição a partir do histórico). */
   consulta_dias_br?: string[];
+  /**
+   * Se true: em sucesso mantém `companies.syncing_pdv` até
+   * `completeCompanyOnboardingIntegrationPdvStep`. Se false: em sucesso repõe `syncing_pdv`
+   * logo após a edge concluir (sync manual pós-onboarding).
+   * Qualquer invocação define `syncing_pdv` a true no arranque e repõe false em falha.
+   */
+  lockOnboardingPdv?: boolean;
+  /**
+   * Sync disparado explicitamente na UI: volta a marcar a etapa PDV como em aberto até
+   * «Concluir integração» (não usar em sync em segundo plano do assistente).
+   */
+  resetPdvOnboardingCompleted?: boolean;
 };
 
 export type EpocSyncCsvResponse = {
@@ -60,6 +112,23 @@ export async function invokeEpocCsvSync(
   companyId: string,
   options?: InvokeEpocCsvSyncOptions,
 ): Promise<EpocSyncCsvResponse> {
+  const lockOnboardingPdv = options?.lockOnboardingPdv === true;
+  const resetPdvOnboarding =
+    options?.resetPdvOnboardingCompleted === true;
+
+  const { error: syncStartErr } = await patchCompanyMaps(companyId, {
+    syncing_pdv: true,
+    ...(resetPdvOnboarding
+      ? { onboarding_integration_pdv_completed: false }
+      : {}),
+  });
+  if (syncStartErr) {
+    return {
+      ok: false,
+      error: syncStartErr.slice(0, 500),
+    };
+  }
+
   markEpocCsvSyncPending(companyId);
   const body: Record<string, unknown> = { company_id: companyId };
   if (options?.sync_mode === "previous_day") {
@@ -73,28 +142,39 @@ export async function invokeEpocCsvSync(
     body.consulta_dias_br = options.consulta_dias_br.slice(0, 10);
   }
   try {
-    const { data, error } = await supabase.functions.invoke<EpocSyncCsvResponse>(
-      "epoc-sync-csv",
-      { body },
-    );
+    const { data, error, response } =
+      await supabase.functions.invoke<EpocSyncCsvResponse>("epoc-sync-csv", {
+        body,
+      });
     if (error) {
       clearEpocCsvSyncPending(companyId);
-      return { ok: false, error: error.message };
+      await patchCompanyMaps(companyId, { syncing_pdv: false });
+      return {
+        ok: false,
+        error: await messageFromInvokeFailure(error, response),
+      };
     }
     if (!data) {
       clearEpocCsvSyncPending(companyId);
+      await patchCompanyMaps(companyId, { syncing_pdv: false });
       return { ok: false, error: "Resposta vazia da função" };
     }
     if (!data.ok) {
       clearEpocCsvSyncPending(companyId);
+      await patchCompanyMaps(companyId, { syncing_pdv: false });
       return data;
     }
     // Mantém o card do dashboard visível durante a janela de transição
     // entre o fim da sync EPOC e a criação do job de importação CSV.
     window.setTimeout(() => clearEpocCsvSyncPending(companyId), 120_000);
+    // Com onboarding PDV concluído, o lock já não aplica — repõe para o dash/UI refletirem o fim da sync.
+    if (!lockOnboardingPdv) {
+      await patchCompanyMaps(companyId, { syncing_pdv: false });
+    }
     return data;
   } catch (e) {
     clearEpocCsvSyncPending(companyId);
+    await patchCompanyMaps(companyId, { syncing_pdv: false });
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Falha ao executar sincronização.",
@@ -110,6 +190,10 @@ export function triggerEpocCsvSyncInBackground(
     const data = await invokeEpocCsvSync(companyId, options);
     if (!data.ok && data.error) {
       console.warn("[epoc-sync-csv]", data.error);
+      toast.error(
+        `Sincronização EPOC em segundo plano falhou: ${data.error}`,
+        { duration: 10_000 },
+      );
       return;
     }
     if (data.ok) {

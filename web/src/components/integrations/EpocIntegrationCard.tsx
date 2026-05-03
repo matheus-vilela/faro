@@ -15,17 +15,19 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
-  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
+import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
 import { cn } from "@/lib/utils";
 import {
   invokeEpocCsvSync,
   triggerEpocCsvSyncInBackground,
 } from "@/services/epocSyncCsvService";
+import { patchCompanyMaps } from "@/services/unitSetupService";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -43,7 +45,7 @@ import {
   SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 /** Fila após CSV gerado → importação de receitas. */
@@ -74,7 +76,23 @@ type EpocSyncRunHistoryRow = {
 
 type EpocSyncHistoryRow = EpocImportJobHistoryRow | EpocSyncRunHistoryRow;
 
+type EpocSheetConfigBaseline = {
+  enabled: boolean;
+  baseUrl: string;
+  username: string;
+};
+
 export function EpocIntegrationCard({ companyId }: { companyId: string }) {
+  const { userCompanies, refetchCompanies } = useCompany();
+  const companyMeta = useMemo(
+    () => userCompanies.find((uc) => uc.company.id === companyId)?.company,
+    [userCompanies, companyId],
+  );
+  const lockOnboardingPdv = companyMeta
+    ? companyMeta.onboarding_integration_pdv_completed !== true
+    : false;
+  const syncingPdvServer = companyMeta?.syncing_pdv === true;
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -111,6 +129,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   >(null);
   const [historyDeleteLoading, setHistoryDeleteLoading] = useState(false);
   const [replayRunId, setReplayRunId] = useState<string | null>(null);
+  const [sheetConfigBaseline, setSheetConfigBaseline] =
+    useState<EpocSheetConfigBaseline | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +164,11 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       );
       setLastEpocCsvSyncAt(s.last_epoc_csv_sync_at ?? null);
       setLastEpocCsvStoragePath(s.last_epoc_csv_storage_path ?? null);
+      setSheetConfigBaseline({
+        enabled: r.enabled,
+        baseUrl: (s.base_url ?? "").trim(),
+        username: (s.username ?? "").trim(),
+      });
     } else {
       setEnabled(false);
       setUsername("");
@@ -154,6 +179,11 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setExistingPassword(null);
       setLastEpocCsvSyncAt(null);
       setLastEpocCsvStoragePath(null);
+      setSheetConfigBaseline({
+        enabled: false,
+        baseUrl: "",
+        username: "",
+      });
     }
     setLoading(false);
   }, [companyId]);
@@ -233,6 +263,22 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     if (!sheetOpen || activeTab !== "history") return;
     queueMicrotask(() => void loadHistory());
   }, [sheetOpen, activeTab, loadHistory]);
+
+  const isSheetConfigDirty = useMemo(() => {
+    if (!sheetConfigBaseline) return false;
+    return (
+      enabled !== sheetConfigBaseline.enabled ||
+      baseUrl.trim() !== sheetConfigBaseline.baseUrl ||
+      username.trim() !== sheetConfigBaseline.username ||
+      password.trim().length > 0
+    );
+  }, [
+    sheetConfigBaseline,
+    enabled,
+    baseUrl,
+    username,
+    password,
+  ]);
 
   const fileNameFromStoragePath = (path: string, fallback: string) => {
     const t = path.trim();
@@ -420,6 +466,18 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
+    const { error: lockErr } = await patchCompanyMaps(companyId, {
+      syncing_pdv: true,
+      onboarding_integration_pdv_completed: false,
+    });
+    if (lockErr) {
+      toast.error(
+        lockErr.slice(0, 220) ??
+          "Não foi possível iniciar a sincronização (trava PDV).",
+      );
+      return;
+    }
+    await refetchCompanies();
     const oldPaths = [lastEpocCsvStoragePath?.trim() ?? ""].filter(Boolean);
     const uniqueOldPaths = Array.from(new Set(oldPaths));
     if (uniqueOldPaths.length > 0) {
@@ -446,9 +504,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSyncingFull(true);
     let res: Awaited<ReturnType<typeof invokeEpocCsvSync>>;
     try {
-      res = await invokeEpocCsvSync(companyId);
+      res = await invokeEpocCsvSync(companyId, {
+        lockOnboardingPdv,
+      });
     } finally {
       setSyncingFull(false);
+      await refetchCompanies();
     }
     if (res.steps?.length) {
       console.groupCollapsed(`[epoc-sync-csv] steps (${res.steps.length})`);
@@ -516,6 +577,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     try {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
+        lockOnboardingPdv,
+        resetPdvOnboardingCompleted: true,
       });
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
@@ -540,6 +603,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       void loadHistory();
     } finally {
       setReplayRunId(null);
+      await refetchCompanies();
     }
   };
 
@@ -655,12 +719,20 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     }
 
     toast.success("Integração EPOC salva.");
+    emitCompanyIntegrationUpdated({
+      companyId,
+      provider: "epoc",
+      enabled,
+    });
     setPassword("");
     await load();
     setSheetOpen(false);
 
     if (enabled && baseUrl.trim()) {
-      triggerEpocCsvSyncInBackground(companyId);
+      triggerEpocCsvSyncInBackground(companyId, {
+        lockOnboardingPdv,
+      });
+      void refetchCompanies();
       toast.message(
         "Sincronização EPOC em segundo plano: login e exportação do CSV.",
         { duration: 6000 },
@@ -860,6 +932,20 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   </div>
                 </div>
 
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !isSheetConfigDirty}
+                >
+                  {saving ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  Salvar
+                </Button>
+
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {/* <div className="space-y-2">
                     <Label htmlFor="epoc-filial">Código da filial</Label>
@@ -910,7 +996,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     type="button"
                     className="w-full"
                     onClick={() => void handleSyncNow()}
-                    disabled={!enabled || !baseUrl.trim() || syncingFull}
+                    disabled={
+                      !enabled ||
+                      !baseUrl.trim() ||
+                      syncingFull ||
+                      syncingPdvServer
+                    }
                   >
                     {syncingFull ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1076,7 +1167,11 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 variant="outline"
                                 size="sm"
                                 className="mt-2 w-full"
-                                disabled={!enabled || replayRunId === item.id}
+                                disabled={
+                                  !enabled ||
+                                  replayRunId === item.id ||
+                                  syncingPdvServer
+                                }
                                 onClick={() => void handleReplaySyncRun(item)}
                               >
                                 {replayRunId === item.id ? (
@@ -1214,26 +1309,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
               </div>
             )}
           </div>
-
-          <SheetFooter className="gap-2 border-t pt-4 sm:flex-col sm:space-x-0">
-            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
-              {activeTab === "config" ? (
-                <Button
-                  type="button"
-                  className="w-full sm:w-auto"
-                  onClick={() => void handleSave()}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="mr-2 h-4 w-4" />
-                  )}
-                  Salvar
-                </Button>
-              ) : null}
-            </div>
-          </SheetFooter>
         </SheetContent>
       </Sheet>
 

@@ -32,7 +32,7 @@ export const UNIT_FAMILY_WEIGHT: Record<NormalizedUnitCode, string> = {
 }
 
 const RAW_ALIASES: Array<{ re: RegExp; code: NormalizedUnitCode }> = [
-  { re: /^(und|un|unid|unit|pc|peca|peça|pt)$/i, code: "UND" },
+  { re: /^(und|un|uni|unid|unit|pc|peca|peça|pt)$/i, code: "UND" },
   { re: /^(kg|kgs|quilo|kilos?)$/i, code: "KG" },
   { re: /^(g|gr|grama|gramas)$/i, code: "G" },
   { re: /^(l|lt|litro|litros)$/i, code: "L" },
@@ -53,6 +53,34 @@ function stripNoise(raw: string): string {
     .replace(/\./g, "")
     .replace(/,/g, ".")
     .replace(/\s+/g, " ")
+}
+
+/** Chave alinhada a `normalize_unit_alias_text` (Postgres): só a-z0-9. */
+export function normalizeUnitAliasKey(raw: string | null | undefined): string {
+  if (raw == null) return "";
+  return raw
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Se o rótulo da nota bater com alias da empresa, devolve `unit_code` do cadastro;
+ * caso contrário devolve o texto original trimado.
+ */
+export function applyCompanyUnitAlias(
+  raw: string | null | undefined,
+  aliasNormKeyToUnitCode: Map<string, string>,
+): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  const key = normalizeUnitAliasKey(t);
+  if (key && aliasNormKeyToUnitCode.has(key)) {
+    return aliasNormKeyToUnitCode.get(key)!.trim();
+  }
+  return t;
 }
 
 /** Normaliza texto de unidade vindo da nota ou do cadastro. */

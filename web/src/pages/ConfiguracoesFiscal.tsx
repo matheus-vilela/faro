@@ -439,6 +439,10 @@ export function ConfiguracoesFiscal() {
         companyId={companyId}
         focusnfe={focusRaw}
         onSynced={refetchCompanies}
+        lockFiscalOnboarding={
+          currentCompany ? !currentCompany.onboarding_fiscal_completed : false
+        }
+        serverSyncingFiscal={currentCompany?.syncing_fiscal === true}
       />
 
       {!(!onboardingBatchId || purging) && (

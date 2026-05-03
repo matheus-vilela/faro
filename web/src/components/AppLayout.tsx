@@ -36,6 +36,7 @@ import {
   Building2,
   CircleDollarSign,
   FileText,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -150,6 +151,17 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         url: "/app/integracoes",
         icon: Plug,
         roles: ["gestor", "owner"],
+      },
+    ],
+  },
+  {
+    label: "Desenvolvimento",
+    items: [
+      {
+        title: "Ferramentas",
+        url: "/app/desenvolvimento",
+        icon: FlaskConical,
+        roles: ["operador", "gestor", "owner"],
       },
     ],
   },

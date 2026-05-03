@@ -24,6 +24,14 @@ export interface Company {
   setup?: Record<string, unknown> | null
   focus_cnpj_consulta?: Record<string, unknown> | null
   representante_legal?: Record<string, unknown> | null
+  /** Onboarding: ver migration `company_onboarding_flags`; `onboarding_completed` é derivado no Postgres. */
+  onboarding_completed?: boolean
+  onboarding_fiscal_completed?: boolean
+  onboarding_integration_pdv_completed?: boolean
+  /** Onboarding fiscal: sincronização manual em curso — desativa outros disparos na UI. */
+  syncing_fiscal?: boolean
+  /** Onboarding PDV: sincronização EPOC em curso — desativa disparos manuais na UI. */
+  syncing_pdv?: boolean
 }
 
 export interface UserCompany {

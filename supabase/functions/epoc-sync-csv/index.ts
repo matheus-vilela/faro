@@ -10,6 +10,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -20,11 +21,7 @@ const corsHeaders: Record<string, string> = {
 const LOG = "[epoc-sync-csv]";
 
 const DEFAULT_LOGIN_PATH = "/index.php";
-/** Muitas instalações usam `user` (HAR); defina `portal_user_field` se for `usuario`. */
-const DEFAULT_USER_FIELD = "user";
-const DEFAULT_PASS_FIELD = "senha";
 
-const PATH_INDEX = "/index.php";
 /** POST com NaoMenu+token, como no curl do browser, antes de `acoes.php`. */
 const PATH_VALIDADOR_OZ = "/validadorOz.php";
 const PATH_ACOES = "/acoes.php";
@@ -167,10 +164,18 @@ function trimBaseUrl(base: string): string {
   return base.trim().replace(/\/$/, "");
 }
 
-function buildActionUrl(baseUrl: string, loginPath: string): string {
-  const b = trimBaseUrl(baseUrl);
-  const p = (loginPath.trim() || DEFAULT_LOGIN_PATH).replace(/^\//, "");
-  return `${b}/${p}`;
+/**
+ * Se o utilizador colar a URL completa do portal (`.../index.php`), usa só a origem
+ * para compor paths (`/index.php`, `acoes.php`, etc.) e evita `.../index.php/index.php`.
+ */
+function normalizeEpocBaseUrl(base: string): string {
+  const t = trimBaseUrl(base);
+  const lower = t.toLowerCase();
+  const suf = "/index.php";
+  if (lower.endsWith(suf)) {
+    return t.slice(0, -suf.length).replace(/\/$/, "") || t.slice(0, -suf.length);
+  }
+  return t;
 }
 
 function resolveUrlAgainstBase(baseUrl: string, pathOrUrl: string): string {
@@ -334,36 +339,6 @@ function extractElementOuterHtmlById(
   return null;
 }
 
-function escapeHtmlForPre(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** Documento HTML com a resposta bruta de um passo, para revisão pelo utilizador. */
-function buildRawDebugDocument(
-  title: string,
-  note: string,
-  rawText: string,
-): string {
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<style>
-body{font-family:system-ui,Segoe UI,sans-serif;padding:12px 16px;margin:0}
-pre{white-space:pre-wrap;word-break:break-all;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:12px;max-width:100%}
-p.note{color:#666;font-size:0.9rem}
-</style>
-</head>
-<body>
-<p class="note">${note}</p>
-<pre>${escapeHtmlForPre(rawText)}</pre>
-</body>
-</html>
-`;
-}
-
 /** Detalhes simples sobre o conteúdo de uma resposta. */
 function inspectResponseHtml(text: string): {
   has_id_conteudo_tela: boolean;
@@ -468,8 +443,8 @@ function daysInCalendarMonth(y: number, m: number): number {
 }
 
 /**
- * Onboarding EPOC: do 1.º dia do mês civil anterior até hoje (America/Sao_Paulo), inclusive.
- * Ex.: 15/05/2026 → 01/04/2026 … 15/05/2026.
+ * Onboarding EPOC: do 1.º dia do mês civil anterior até ontem (America/Sao_Paulo), inclusive.
+ * Ex.: 02/05/2026 → 01/04/2026 … 01/05/2026; 15/06/2026 → 01/05/2026 … 14/06/2026.
  */
 function onboardingEpocConsultaDaysSaoPaulo(): string[] {
   const tz = "America/Sao_Paulo";
@@ -483,7 +458,12 @@ function onboardingEpocConsultaDaysSaoPaulo(): string[] {
     Number(parts.find((p) => p.type === t)?.value ?? 0);
   const ty = getPart("year");
   const tm = getPart("month");
-  const td = getPart("day");
+
+  const yBr = yesterdayDateBrInTz(tz);
+  const yParts = yBr.split("/");
+  const ey = parseInt(yParts[2] ?? "0", 10);
+  const em = parseInt(yParts[1] ?? "0", 10);
+  const ed = parseInt(yParts[0] ?? "0", 10);
 
   let sy = ty;
   let sm = tm - 1;
@@ -499,7 +479,7 @@ function onboardingEpocConsultaDaysSaoPaulo(): string[] {
   let dd = 1;
   for (;;) {
     out.push(`${pad(dd)}/${pad(mm)}/${y}`);
-    if (y === ty && mm === tm && dd === td) break;
+    if (y === ey && mm === em && dd === ed) break;
     const dim = daysInCalendarMonth(y, mm);
     dd++;
     if (dd > dim) {
@@ -512,73 +492,6 @@ function onboardingEpocConsultaDaysSaoPaulo(): string[] {
     }
   }
   return out;
-}
-
-function extractTokenFromHtml(html: string): string {
-  const patterns: RegExp[] = [
-    /name=["']token["'][^>]*value=["']([^"']*)/i,
-    /id=["']token["'][^>]*value=["']([^"']+)/i,
-    /value=["']([^"']+)["'][^>]*name=["']token["']/i,
-  ];
-  for (const p of patterns) {
-    const m = p.exec(html);
-    if (m && m[1] !== undefined && m[1].length > 0) return m[1];
-  }
-  const tente = /Tente_A_Vontade_[^\s"'<>&]+/.exec(html);
-  if (tente) return tente[0].trim();
-  return "";
-}
-
-/** Coleta campos hidden de um formulário HTML (name+value). */
-function extractHiddenInputsFromHtml(html: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const re =
-    /<input\b[^>]*\btype\s*=\s*["']?hidden["']?[^>]*>|<input\b[^>]*\bname\s*=\s*["'][^"']+["'][^>]*\btype\s*=\s*["']?hidden["']?[^>]*>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const tag = m[0];
-    const nameM = /\bname\s*=\s*["']([^"']+)["']/i.exec(tag);
-    if (!nameM || !nameM[1]) continue;
-    const valueM = /\bvalue\s*=\s*["']([^"']*)["']/i.exec(tag);
-    out[nameM[1]] = valueM?.[1] ?? "";
-  }
-  return out;
-}
-
-function extractLoginFormHints(html: string): {
-  action: string | null;
-  userField: string | null;
-  passField: string | null;
-} {
-  const formMatch = /<form\b[^>]*>/i.exec(html);
-  const formTag = formMatch?.[0] ?? "";
-  const actionMatch = /\baction\s*=\s*["']([^"']+)["']/i.exec(formTag);
-  const action = actionMatch?.[1]?.trim() || null;
-
-  let passField: string | null = null;
-  let userField: string | null = null;
-
-  const inputRe = /<input\b[^>]*>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = inputRe.exec(html)) !== null) {
-    const tag = m[0];
-    const type = (
-      /\btype\s*=\s*["']?([^"'\s>]+)["']?/i.exec(tag)?.[1] ?? ""
-    ).toLowerCase();
-    const name = /\bname\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] ?? "";
-    if (!name) continue;
-    if (!passField && type === "password") {
-      passField = name;
-      continue;
-    }
-    if (
-      !userField &&
-      (type === "text" || type === "email" || type === "" || type === "tel")
-    ) {
-      userField = name;
-    }
-  }
-  return { action, userField, passField };
 }
 
 function decodeHtmlEntities(text: string): string {
@@ -848,7 +761,7 @@ Deno.serve(async (req) => {
   }
 
   const raw = (integ.settings ?? {}) as Record<string, unknown>;
-  const baseUrl = String(raw.base_url ?? "").trim();
+  const baseUrl = normalizeEpocBaseUrl(String(raw.base_url ?? "").trim());
   const username = String(raw.username ?? "");
   const password = String(raw.password ?? "");
   const naoMenu = String(raw.codigo_filial ?? "").trim() || DEFAULT_NAOMENU;
@@ -876,9 +789,6 @@ Deno.serve(async (req) => {
       if (v != null) hidden[k] = String(v);
     }
   }
-
-  const actionUrl = buildActionUrl(baseUrl, loginPath);
-  const form = new URLSearchParams();
 
   const fileStamp = new Date().toISOString().replace(/[:.]/g, "-");
   const stepsPrefix = `${companyId}/epoc-sync/${fileStamp}/`;
@@ -1020,294 +930,39 @@ Deno.serve(async (req) => {
     steps_prefix: stepsPrefix,
   });
 
-  // --- Step 0: GET página de login para capturar hidden fields dinâmicos ----
-  let cookies = "";
-  let hiddenFromPage: Record<string, string> = {};
-  let loginActionOverride: string | null = null;
-  let userFieldAuto: string | null = null;
-  let passFieldAuto: string | null = null;
-  try {
-    const preLoginRes = await fetch(actionUrl, {
-      method: "GET",
-      headers: {
-        Accept: "text/html,application/xhtml+xml,*/*",
-        "User-Agent": BROWSER_UA,
-      },
-      redirect: "follow",
-    });
-    {
-      const more = collectSetCookieHeader(preLoginRes.headers);
-      if (more) cookies = mergeCookieStrings(cookies, more);
-    }
-    const preLoginText = await preLoginRes.text();
-    hiddenFromPage = extractHiddenInputsFromHtml(preLoginText);
-    const hints = extractLoginFormHints(preLoginText);
-    loginActionOverride = hints.action;
-    userFieldAuto = hints.userField;
-    passFieldAuto = hints.passField;
-    await recordStepWithUpload(
-      "pre_login_get",
-      "GET página de login (capturar hidden)",
-      "pre-login.html",
-      new TextEncoder().encode(preLoginText),
-      preLoginRes.headers.get("Content-Type") ?? "text/html",
-      {
-        http_status: preLoginRes.status,
-        status: preLoginRes.ok ? "ok" : "warn",
-        detalhes: {
-          cookies: cookieNameList(cookies),
-          hidden_count: Object.keys(hiddenFromPage).length,
-          hidden_keys: Object.keys(hiddenFromPage).slice(0, 40),
-          form_action: loginActionOverride,
-          user_field_auto: userFieldAuto,
-          pass_field_auto: passFieldAuto,
-          ...inspectResponseHtml(preLoginText),
-        },
-      },
-    );
-  } catch (e) {
-    recordStepWithoutUpload("pre_login_get", "GET página de login", {
-      status: "warn",
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
-
-  // Prioriza hidden dinâmico da página e completa com configuração persistida.
-  for (const [k, v] of Object.entries(hiddenFromPage)) {
-    form.set(k, v);
-  }
-  for (const [k, v] of Object.entries(hidden)) {
-    if (!form.has(k)) form.set(k, v);
-  }
-  const userField =
-    userFieldFromSettings || userFieldAuto || DEFAULT_USER_FIELD;
-  const passField =
-    passFieldFromSettings || passFieldAuto || DEFAULT_PASS_FIELD;
-  form.set(userField, username);
-  form.set(passField, password);
-  const loginSubmitUrl = loginActionOverride
-    ? resolveUrlAgainstBase(baseUrl, loginActionOverride)
-    : actionUrl;
-
-  // --- Step 1: login (POST com formulário) ----------------------------------
-  let loginRes: Response;
-  try {
-    loginRes = await fetch(loginSubmitUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "text/html,application/xhtml+xml,*/*",
-        Origin: trimBaseUrl(baseUrl),
-        Referer: actionUrl,
-        "User-Agent": BROWSER_UA,
-        Cookie: cookies,
-      },
-      body: form.toString(),
-      redirect: "manual",
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha de rede no login EPOC";
-    recordStepWithoutUpload("login", "POST login", {
-      status: "fail",
-      message: msg,
-    });
-    return failJson(502, msg);
-  }
-  {
-    const more = collectSetCookieHeader(loginRes.headers);
-    if (more) cookies = mergeCookieStrings(cookies, more);
-  }
-  const loginLocation = loginRes.headers.get("Location") ?? null;
-  let tokenFromSession = "";
-  const loginBuf = await loginRes.arrayBuffer();
-  const loginText = new TextDecoder("utf-8", { fatal: false })
-    .decode(loginBuf)
-    .replace(/^\uFEFF/, "");
-  const loginInsight = inspectResponseHtml(loginText);
-  const loginToken = extractTokenFromHtml(loginText);
-  if (loginToken) tokenFromSession = loginToken;
-  await recordStepWithUpload(
-    "login",
-    "POST de login com user/senha",
-    "login.html",
-    new TextEncoder().encode(
-      buildRawDebugDocument(
-        "EPOC — POST login",
-        `URL: ${loginSubmitUrl}. Status: ${loginRes.status}. Location: ${loginLocation ?? "(nenhum)"}. Campos: user=${userField}, pass=${passField}. Cookies recebidos: ${cookieNameList(cookies) || "(vazio)"}.`,
-        loginText,
-      ),
-    ),
-    "text/html; charset=utf-8",
-    {
-      http_status: loginRes.status,
-      status: loginRes.status >= 200 && loginRes.status < 400 ? "ok" : "fail",
-      message:
-        loginRes.status >= 300 && loginRes.status < 400
-          ? "Redirect — a seguir Location."
-          : loginToken
-            ? `Token detectado no login (len=${loginToken.length}).`
-            : undefined,
-      detalhes: {
-        location: loginLocation,
-        submit_url: loginSubmitUrl,
-        form_action: loginActionOverride,
-        user_field: userField,
-        pass_field: passField,
-        token_len: loginToken.length,
-        token_previa: previewText(loginToken, 24),
-        cookies: cookieNameList(cookies),
-        ...loginInsight,
-      },
-    },
-  );
-  if (loginRes.status >= 400) {
-    return failJson(502, `Login HTTP ${loginRes.status}.`);
-  }
-
-  // --- Step 2 (opcional): seguir redirect manualmente para apanhar cookies --
-  if (loginRes.status >= 300 && loginRes.status < 400 && loginLocation) {
-    try {
-      const nextUrl = new URL(loginLocation, loginSubmitUrl);
-      const follow = await fetch(nextUrl.toString(), {
-        method: "GET",
-        headers: {
-          Cookie: cookies,
-          Accept: "text/html",
-          "User-Agent": BROWSER_UA,
-        },
-        redirect: "manual",
-      });
-      const moreCookies = collectSetCookieHeader(follow.headers);
-      if (moreCookies) cookies = mergeCookieStrings(cookies, moreCookies);
-      const followBuf = await follow.arrayBuffer();
-      const followText = new TextDecoder("utf-8", { fatal: false })
-        .decode(followBuf)
-        .replace(/^\uFEFF/, "");
-      await recordStepWithUpload(
-        "login_redirect",
-        `GET ${nextUrl.pathname}`,
-        "login-redirect.html",
-        new TextEncoder().encode(
-          buildRawDebugDocument(
-            "EPOC — login redirect",
-            `URL: ${nextUrl.toString()}. Status: ${follow.status}. Cookies pós-redirect: ${cookieNameList(cookies) || "(vazio)"}.`,
-            followText,
-          ),
+  const loginResult = await performEpocPortalLogin({
+    normalizedBaseUrl: baseUrl,
+    username,
+    password,
+    loginPath,
+    userFieldFromSettings,
+    passFieldFromSettings,
+    hidden,
+    recording: {
+      recordUpload: (name, label, fileName, bytes, contentType, base) =>
+        recordStepWithUpload(
+          name,
+          label,
+          fileName,
+          bytes,
+          contentType,
+          base as Partial<StepRecord>,
         ),
-        "text/html; charset=utf-8",
-        {
-          http_status: follow.status,
-          status: follow.ok ? "ok" : "warn",
-          detalhes: {
-            cookies: cookieNameList(cookies),
-            ...inspectResponseHtml(followText),
-            token_len: extractTokenFromHtml(followText).length,
-          },
-        },
-      );
-      if (!tokenFromSession) {
-        const followToken = extractTokenFromHtml(followText);
-        if (followToken) tokenFromSession = followToken;
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      recordStepWithoutUpload("login_redirect", "GET (Location)", {
-        status: "warn",
-        message: msg,
-      });
-    }
-  }
-
-  // Sem cookies de sessão é fútil continuar.
-  if (!cookies.trim()) {
-    return failJson(
-      502,
-      "Login não devolveu cookies de sessão (PHPSESSID). Verifique credenciais e URL base.",
-    );
-  }
-
-  const origin = trimBaseUrl(baseUrl);
-  const refererIndex = `${origin}/index.php`;
-
-  // --- Step 3: token da sessão; só chama index se ainda não tiver token ------
-  let token = tokenFromSession;
-  if (!token) {
-    const indexUrl = resolveUrlAgainstBase(baseUrl, PATH_INDEX);
-    let indexHtml = "";
-    try {
-      const indexRes = await fetch(indexUrl, {
-        method: "GET",
-        headers: {
-          Cookie: cookies,
-          Accept: "text/html,application/xhtml+xml,*/*",
-          "User-Agent": BROWSER_UA,
-        },
-        redirect: "follow",
-      });
-      const more = collectSetCookieHeader(indexRes.headers);
-      if (more) cookies = mergeCookieStrings(cookies, more);
-      indexHtml = await indexRes.text();
-      const insight = inspectResponseHtml(indexHtml);
-      await recordStepWithUpload(
-        "index",
-        "GET /index.php (após login)",
-        "index.html",
-        new TextEncoder().encode(indexHtml),
-        "text/html; charset=utf-8",
-        {
-          http_status: indexRes.status,
-          status: indexRes.ok ? "ok" : "fail",
-          message: !indexRes.ok
-            ? `HTTP ${indexRes.status}`
-            : !insight.has_token_field
-              ? "index.php não tem campo `token` nem `Tente_A_Vontade_…`."
-              : undefined,
-          detalhes: { cookies: cookieNameList(cookies), ...insight },
-        },
-      );
-      if (!indexRes.ok) {
-        return failJson(
-          502,
-          `Não foi possível carregar ${PATH_INDEX}: HTTP ${indexRes.status}.`,
-        );
-      }
-      token = extractTokenFromHtml(indexHtml);
-      if (insight.has_login_form && !token) {
-        return failJson(
-          502,
-          "Login parece ter falhado: index.php devolveu o formulário de login sem token.",
-        );
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "rede";
-      recordStepWithoutUpload("index", "GET /index.php", {
-        status: "fail",
-        message: msg,
-      });
-      return failJson(502, `Falha ao obter ${PATH_INDEX}: ${msg}`);
-    }
-  } else {
-    recordStepWithoutUpload("index_skip_com_token", "Pular GET /index.php", {
-      status: "ok",
-      message:
-        "Token já encontrado no passo 2; seguindo para validadorOz + acoes.",
-      detalhes: {
-        token_len: token.length,
-        token_previa: previewText(token, 24),
-      },
-    });
-  }
-
-  recordStepWithoutUpload("token", "Token de sessão consolidado", {
-    status: token ? "ok" : "warn",
-    message: token
-      ? `token len=${token.length}, prévia=${previewText(token, 12)}`
-      : "Sem token explícito na sessão (login/index).",
-    detalhes: {
-      vazio: !token,
-      previa: previewText(token, 24),
+      recordPlain: (name, label, base) =>
+        recordStepWithoutUpload(name, label, base as Partial<StepRecord>),
     },
   });
+
+  if (!loginResult.ok) {
+    return failJson(502, loginResult.message, {
+      epoc_error_code: loginResult.errorCode,
+    });
+  }
+
+  let cookies = loginResult.cookies;
+  let token = loginResult.token;
+  const origin = loginResult.origin;
+  const refererIndex = loginResult.refererIndex;
 
   // Volta ao comportamento padrão de enviar o token de sessão quando extraído.
   // Para depuração, `send_token: false` em settings força `token=` vazio.
@@ -1447,14 +1102,13 @@ Deno.serve(async (req) => {
   }
   if (!hasConteudoTela(acoes1.text)) {
     acoes1.step.status = "fail";
-    acoes1.step.message =
-      "Resposta de acoes.php (fase1) não contém id=ConteudoTela.";
+    //acoes1.step.message = "Verifique credenciais, NaoMenu e o módulo configurado.";
     log("conteudo_tela_nao_encontrado", {
       previa: previewText(acoes1.text, 800),
     });
     return failJson(
       502,
-      "Resposta de acoes.php (fase1) não contém id=ConteudoTela. Verifique credenciais, NaoMenu e o módulo configurado.",
+      "Verifique credenciais, NaoMenu e o módulo configurado.",
     );
   }
   recordStepWithoutUpload(
@@ -1756,7 +1410,7 @@ Deno.serve(async (req) => {
       : manualConsultaDias?.length
         ? `CSV final (repetição ${manualConsultaDias.length} dia(s))`
         : syncMode === "onboarding_initial"
-          ? "CSV onboarding (mês anterior → hoje, SP)"
+          ? "CSV onboarding (mês anterior → ontem, SP)"
           : syncMode === "previous_day"
             ? "CSV final (dia anterior)"
             : "CSV final consolidado (últimos 10 dias)";

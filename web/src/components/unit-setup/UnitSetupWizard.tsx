@@ -3,6 +3,7 @@ import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import {
   applyFocusCnpjConsulta,
   buildFocusCnpjConsultaRecord,
@@ -16,6 +17,7 @@ import {
   mergeSetupPatch,
   TOTAL_STEPS,
 } from "@/lib/setup/setupProgress";
+import { shouldValidateEpocBeforeStep3Complete } from "@/lib/setup/epocStep3ValidationGate";
 import {
   getStep6EpocState,
   isStep1EmpresaComplete,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/setup/validation";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { invokeValidateEpocLogin } from "@/services/epocValidateLoginService";
 import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
 import {
   focusAtualizarCertificado,
@@ -123,6 +126,7 @@ export function UnitSetupWizard({
 }) {
   const { user } = useAuth();
   const { refetchCompanies } = useCompany();
+  const { requestLeaveConfirm } = useUnitSetupModal();
   const navigate = useNavigate();
   const isModal = variant === "modal";
   const exitApp = (payload?: { companyId?: string; completed?: boolean }) => {
@@ -158,6 +162,10 @@ export function UnitSetupWizard({
   const [loading, setLoading] = useState(!!resumeCompanyId);
   const [saving, setSaving] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+  const [epocValidateError, setEpocValidateError] = useState<{
+    message: string;
+    errorCode: string;
+  } | null>(null);
 
   /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
   const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
@@ -751,6 +759,32 @@ export function UnitSetupWizard({
           if (prev.password) pwdFinal = prev.password;
         }
 
+        const baseUrlTrimmed = (ep.base_url ?? "").trim();
+        if (
+          shouldValidateEpocBeforeStep3Complete(ep, {
+            hasResolvedPassword: Boolean(pwdFinal && pwdFinal.trim()),
+            baseUrlTrimmed,
+            usernameTrimmed: u,
+          })
+        ) {
+          const v = await invokeValidateEpocLogin({
+            companyId,
+            baseUrl: baseUrlTrimmed,
+            username: u,
+            password: pwdFinal,
+            codigo_filial: (ep.codigo_filial ?? "").trim() || undefined,
+          });
+          if (!v.success) {
+            setEpocValidateError({
+              message: v.message,
+              errorCode: v.errorCode,
+            });
+            setSaving(false);
+            return;
+          }
+          setEpocValidateError(null);
+        }
+
         if (u && (!enabled || pwdFinal)) {
           const settings: EpocIntegrationSettings = {
             username: u,
@@ -765,22 +799,31 @@ export function UnitSetupWizard({
             settings,
           );
 
-          await supabase.from("company_integrations").upsert(
-            {
-              company_id: companyId,
-              provider: "epoc",
-              enabled,
-              settings: merged,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "company_id,provider" },
-          );
+          const { error: epocUpsertError } = await supabase
+            .from("company_integrations")
+            .upsert(
+              {
+                company_id: companyId,
+                provider: "epoc",
+                enabled,
+                settings: merged,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "company_id,provider" },
+            );
+          if (epocUpsertError) {
+            setSaving(false);
+            toast.error(epocUpsertError.message);
+            return;
+          }
           if (enabled && (ep.base_url ?? "").trim()) {
             triggerEpocCsvSyncInBackground(companyId, {
               sync_mode: "onboarding_initial",
+              lockOnboardingPdv: true,
             });
+            void refetchCompanies();
             toast.message(
-              "Sincronização EPOC em segundo plano: período desde o início do mês anterior até hoje.",
+              "Sincronização EPOC em segundo plano: período desde o início do mês anterior até ontem.",
               { duration: 5500 },
             );
           }
@@ -813,7 +856,12 @@ export function UnitSetupWizard({
     const completed = buildCompletedSetup(lastSetup, {
       allApplicableDone: allDone,
     });
-    await patchCompanyMaps(companyId, { setup: completed });
+    await patchCompanyMaps(companyId, {
+      setup: completed,
+      ...(lastSetup.epoc?.mode === "no"
+        ? { onboarding_integration_pdv_completed: true }
+        : {}),
+    });
     setSetup(completed);
     await refetchCompanies();
     if (isModal) {
@@ -832,6 +880,7 @@ export function UnitSetupWizard({
       );
       return;
     }
+    if (activeStep === 3) setEpocValidateError(null);
     setActiveStep((s) => s - 1);
   };
 
@@ -846,6 +895,7 @@ export function UnitSetupWizard({
         return;
       }
       setStepError(null);
+      if (step !== 3) setEpocValidateError(null);
       setActiveStep(step);
     },
     [companyId, lockStepsOneToTwo],
@@ -1106,13 +1156,15 @@ export function UnitSetupWizard({
           {activeStep === 3 ? (
             <StepPdvForm
               epoc={setup.epoc}
-              onEpocChange={(patch) =>
+              validationError={epocValidateError}
+              onEpocChange={(patch) => {
+                setEpocValidateError(null);
                 setSetup((s) =>
                   mergeSetupPatch(s, {
                     epoc: { ...(s.epoc ?? { mode: "undecided" }), ...patch },
                   }),
-                )
-              }
+                );
+              }}
             />
           ) : null}
         </div>
@@ -1140,7 +1192,11 @@ export function UnitSetupWizard({
             type="button"
             variant="outline"
             className="w-full sm:w-auto"
-            onClick={activeStep === 1 ? () => exitApp() : handleBack}
+            onClick={
+              activeStep === 1
+                ? () => requestLeaveConfirm(() => exitApp())
+                : handleBack
+            }
             disabled={saving || (lockStepsOneToTwo && activeStep === 3)}
           >
             {activeStep === 1 ? "Cancelar" : "Voltar"}
@@ -1154,7 +1210,7 @@ export function UnitSetupWizard({
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Salvando…
+                {activeStep === 3 ? "A validar e a concluir…" : "Salvando…"}
               </>
             ) : activeStep === 3 ? (
               "Concluir"

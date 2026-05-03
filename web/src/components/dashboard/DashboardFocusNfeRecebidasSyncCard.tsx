@@ -1,8 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCompany } from "@/contexts/CompanyContext";
+import type { Company } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import { hasFocusNfeEmpresaId } from "@/services/focusAtualizarCertificadoService";
-import type { Company } from "@/contexts/CompanyContext";
+import { completeCompanyOnboardingFiscalStep } from "@/services/companyOnboardingFlagsService";
 import {
   ArrowRight,
   CheckCircle2,
@@ -10,7 +13,7 @@ import {
   Loader2,
   Landmark,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 const HOURS_UNTIL_CONSIDER_EMPTY = 4;
@@ -53,29 +56,31 @@ export function DashboardFocusNfeRecebidasSyncCard({
 }: {
   company: Company | null;
 }) {
+  const { refetchCompanies } = useCompany();
   const companyId = company?.id;
   const [loading, setLoading] = useState(true);
   const [nfeLogCount, setNfeLogCount] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const autoFiscalSyncedRef = useRef(false);
 
-  const loadCount = useCallback(async () => {
+  const loadCount = useCallback(async (opts?: { silent?: boolean }) => {
     if (!companyId) {
       setNfeLogCount(null);
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     const { count, error } = await supabase
       .from("company_nfe_import_logs")
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId);
     if (error) {
       console.error("DashboardFocusNfeRecebidasSyncCard", error);
-      setNfeLogCount(null);
+      if (!opts?.silent) setNfeLogCount(null);
     } else {
       setNfeLogCount(count ?? 0);
     }
-    setLoading(false);
+    if (!opts?.silent) setLoading(false);
   }, [companyId]);
 
   useEffect(() => {
@@ -124,19 +129,80 @@ export function DashboardFocusNfeRecebidasSyncCard({
     isSetupCompleted(setup) &&
     daysSinceOnboarding <= MAX_DAYS_SINCE_ONBOARDING;
 
-  const showCard =
+  const showFullContent =
     eligibleBase && !loading && nfeLogCount !== null && nfeLogCount === 0;
+  const showLoadingShell = eligibleBase && loading;
 
   useEffect(() => {
-    if (!showCard) return;
+    if (!showFullContent) return;
     const id = window.setInterval(() => {
-      void loadCount();
+      void loadCount({ silent: true });
     }, 45_000);
     return () => window.clearInterval(id);
-  }, [showCard, loadCount]);
+  }, [showFullContent, loadCount]);
 
-  if (!showCard) {
+  /** Primeira NF-e na base: persistir conclusão fiscal sem obrigar clique extra. */
+  useEffect(() => {
+    if (
+      !companyId ||
+      nfeLogCount === null ||
+      nfeLogCount === 0 ||
+      autoFiscalSyncedRef.current
+    ) {
+      return;
+    }
+    autoFiscalSyncedRef.current = true;
+    void (async () => {
+      const res = await completeCompanyOnboardingFiscalStep(companyId);
+      if (res.error) {
+        autoFiscalSyncedRef.current = false;
+        console.error("DashboardFocusNfeRecebidasSyncCard fiscal sync", res.error);
+        return;
+      }
+      await refetchCompanies();
+    })();
+  }, [companyId, nfeLogCount, refetchCompanies]);
+
+  if (!eligibleBase) {
     return null;
+  }
+
+  if (!loading && nfeLogCount === null) {
+    return null;
+  }
+
+  if (!loading && nfeLogCount !== null && nfeLogCount > 0) {
+    return null;
+  }
+
+  if (showLoadingShell) {
+    return (
+      <Card className="border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md">
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Skeleton className="h-11 w-11 shrink-0 rounded-xl" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-3 w-48" />
+                <Skeleton className="h-6 w-full max-w-md" />
+                <Skeleton className="h-4 w-full max-w-xl" />
+                <Skeleton className="h-3 w-64" />
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              <Skeleton className="h-9 w-40 sm:ml-auto" />
+              <Skeleton className="h-9 w-52 sm:ml-auto" />
+            </div>
+          </div>
+          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18">
+            <Skeleton className="h-full w-1/3 rounded-full" />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            A verificar NF-e na base…
+          </p>
+        </CardContent>
+      </Card>
+    );
   }
 
   const title = withinExpectationWindow

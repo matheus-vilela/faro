@@ -1,4 +1,14 @@
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -11,6 +21,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -18,6 +29,7 @@ import type { Company } from "@/contexts/CompanyContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
+import { XIcon } from "lucide-react";
 
 export type UnitSetupModalPayload =
   | { kind: "new_group" }
@@ -27,25 +39,13 @@ export type UnitSetupModalPayload =
 type UnitSetupModalContextValue = {
   openModal: (payload: UnitSetupModalPayload) => void;
   closeModal: () => void;
+  /** Abre o diálogo de confirmação; em “Sair”, executa `onConfirm`. */
+  requestLeaveConfirm: (onConfirm: () => void) => void;
 };
 
 const UnitSetupModalContext = createContext<
   UnitSetupModalContextValue | undefined
 >(undefined);
-
-/** Select (Radix) renderiza o menu em portal; cliques não podem fechar o Dialog. */
-function isRadixSelectUiTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return !!target.closest(
-    [
-      '[data-slot="select-content"]',
-      '[data-slot="select-item"]',
-      '[data-slot="select-scroll-up-button"]',
-      '[data-slot="select-scroll-down-button"]',
-      '[role="listbox"]',
-    ].join(","),
-  );
-}
 
 export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -53,6 +53,13 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [payload, setPayload] = useState<UnitSetupModalPayload | null>(null);
   const [sessionKey, setSessionKey] = useState(0);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const leaveConfirmActionRef = useRef<(() => void) | null>(null);
+
+  const requestLeaveConfirm = useCallback((onConfirm: () => void) => {
+    leaveConfirmActionRef.current = onConfirm;
+    setLeaveConfirmOpen(true);
+  }, []);
 
   const closeModal = useCallback(() => {
     setOpen(false);
@@ -87,8 +94,8 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ openModal, closeModal }),
-    [openModal, closeModal],
+    () => ({ openModal, closeModal, requestLeaveConfirm }),
+    [openModal, closeModal, requestLeaveConfirm],
   );
 
   const wizardProps =
@@ -115,37 +122,87 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
   return (
     <UnitSetupModalContext.Provider value={value}>
       {children}
-      <Dialog open={open} onOpenChange={(o) => !o && closeModal()}>
+      <AlertDialog
+        open={leaveConfirmOpen}
+        onOpenChange={(next) => {
+          if (!next) setLeaveConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sair do onboarding?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem a certeza que deseja sair? O progresso é guardado e pode
+              retomar mais tarde nas configurações.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                leaveConfirmActionRef.current = null;
+              }}
+            >
+              Continuar a configurar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const fn = leaveConfirmActionRef.current;
+                leaveConfirmActionRef.current = null;
+                fn?.();
+              }}
+            >
+              Sair
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (next) setOpen(true);
+        }}
+      >
         <DialogContent
-          showCloseButton
+          showCloseButton={false}
           className="z-[60] max-h-[min(92vh,880px)] w-[calc(100vw-1.5rem)] max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl"
-          onPointerDownOutside={(e) => {
-            if (isRadixSelectUiTarget(e.target)) e.preventDefault();
-          }}
-          onInteractOutside={(e) => {
-            if (isRadixSelectUiTarget(e.target)) e.preventDefault();
-          }}
-          onFocusOutside={(e) => {
-            if (isRadixSelectUiTarget(e.target)) e.preventDefault();
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          onFocusOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => {
+            e.preventDefault();
+            requestLeaveConfirm(() => closeModal());
           }}
         >
-          <div className="max-h-[min(92vh,880px)] overflow-y-auto p-4 sm:p-6">
-            <DialogHeader className="sr-only">
-              <DialogTitle>Configurar unidade</DialogTitle>
-              <DialogDescription>
-                Assistente de cadastro da unidade em etapas.
-              </DialogDescription>
-            </DialogHeader>
-            {wizardProps ? (
-              <UnitSetupWizard
-                key={sessionKey}
-                variant="modal"
-                createNewGroup={wizardProps.createNewGroup}
-                newUnitGroupId={wizardProps.newUnitGroupId}
-                resumeCompanyId={wizardProps.resumeCompanyId}
-                onExit={handleExitToApp}
-              />
-            ) : null}
+          <div className="flex max-h-[min(92vh,880px)] min-h-0 flex-col">
+            <div className="flex shrink-0 justify-end px-3 pt-3">
+              <button
+                type="button"
+                className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+                onClick={() => requestLeaveConfirm(() => closeModal())}
+                aria-label="Fechar onboarding"
+              >
+                <XIcon />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+              <DialogHeader className="sr-only">
+                <DialogTitle>Configurar unidade</DialogTitle>
+                <DialogDescription>
+                  Assistente de cadastro da unidade em etapas.
+                </DialogDescription>
+              </DialogHeader>
+              {wizardProps ? (
+                <UnitSetupWizard
+                  key={sessionKey}
+                  variant="modal"
+                  createNewGroup={wizardProps.createNewGroup}
+                  newUnitGroupId={wizardProps.newUnitGroupId}
+                  resumeCompanyId={wizardProps.resumeCompanyId}
+                  onExit={handleExitToApp}
+                />
+              ) : null}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

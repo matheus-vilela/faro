@@ -32,7 +32,7 @@ export const UNIT_FAMILY_WEIGHT: Record<NormalizedUnitCode, string> = {
 }
 
 const RAW_ALIASES: Array<{ re: RegExp; code: NormalizedUnitCode }> = [
-  { re: /^(und|un|unid|unit|pc|peca|peça|pt)$/i, code: "UND" },
+  { re: /^(und|un|uni|unid|unit|pc|peca|peça|pt)$/i, code: "UND" },
   { re: /^(kg|kgs|quilo|kilos?)$/i, code: "KG" },
   { re: /^(g|gr|grama|gramas)$/i, code: "G" },
   { re: /^(l|lt|litro|litros)$/i, code: "L" },

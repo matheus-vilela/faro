@@ -11,15 +11,21 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { SetupEpocState } from "@/types/companySetup";
+import type { EpocValidateLoginErrorCode } from "@/lib/setup/epocStep3ValidationGate";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export function StepPdvForm({
   epoc,
   onEpocChange,
+  validationError,
 }: {
   epoc: SetupEpocState | undefined;
   onEpocChange: (patch: Partial<SetupEpocState>) => void;
+  validationError?: {
+    message: string;
+    errorCode: EpocValidateLoginErrorCode | string;
+  } | null;
 }) {
   const mode = epoc?.mode ?? "undecided";
   const enabled = epoc?.enabled ?? false;
@@ -139,6 +145,36 @@ export function StepPdvForm({
 
             <CollapsibleContent>
               <div className="space-y-5 border-t border-border/80 px-5 py-5">
+                {validationError ? (
+                  <div
+                    role="alert"
+                    className="space-y-3 rounded-lg border border-destructive/35 bg-destructive/5 px-4 py-4 text-sm"
+                  >
+                    <p className="font-semibold text-destructive">
+                      Falha ao validar acesso ao EPOC
+                    </p>
+                    <p className="text-muted-foreground">
+                      Não foi possível confirmar a conexão com o EPOC. Revise os
+                      dados abaixo e tente novamente.
+                    </p>
+                    {validationError.message ? (
+                      <p className="text-foreground/90">
+                        {validationError.message}
+                      </p>
+                    ) : null}
+                    <ul className="list-inside list-disc space-y-1.5 text-muted-foreground">
+                      <li>
+                        Verifique se a URL do EPOC está correta.
+                      </li>
+                      <li>
+                        Confirme se o login e a senha estão corretos.
+                      </li>
+                      <li>
+                        Verifique se o servidor do EPOC está disponível.
+                      </li>
+                    </ul>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
                   <div>
                     <Label

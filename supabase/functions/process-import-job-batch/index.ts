@@ -8,6 +8,7 @@ import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_share
 import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.ts";
 import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
 import { embedSingleProductIfMissing } from "../_shared/productEmbedding.ts";
+import { mapInvoiceUnitToCatalogUnit } from "../_shared/productImport/invoiceUnitToCatalogUnit.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -64,15 +65,6 @@ function normalizeName(v: string): string {
     .trim();
 }
 
-function normalizeAscii(v: string): string {
-  return String(v ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "");
-}
-
 /** Igual ao pipeline web de reconciliação — rótulos de catálogo (PT-BR, NF-e). */
 function normalizeCatalogLabel(v: string): string {
   return String(v ?? "")
@@ -82,40 +74,6 @@ function normalizeCatalogLabel(v: string): string {
     .replace(/[^\w\s%/]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function mapInvoiceUnitToSystem(raw: string | null | undefined): {
-  unit: string;
-  needsReview: boolean;
-  rawUnit: string | null;
-} {
-  const original = String(raw ?? "").trim();
-  if (!original) {
-    return { unit: "un", needsReview: true, rawUnit: null };
-  }
-  const t = normalizeAscii(original);
-  const aliases: Record<string, string> = {
-    un: "un",
-    und: "un",
-    unidade: "un",
-    cx: "cx",
-    caixa: "cx",
-    pct: "pct",
-    pacote: "pct",
-    kg: "kg",
-    g: "g",
-    l: "l",
-    litro: "l",
-    ml: "ml",
-    fardo: "fd",
-    fd: "fd",
-  };
-  if (aliases[t]) return { unit: aliases[t], needsReview: false, rawUnit: original };
-  return {
-    unit: original.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "").slice(0, 24) || "un",
-    needsReview: true,
-    rawUnit: original,
-  };
 }
 
 async function insertImportLog(
@@ -181,7 +139,7 @@ async function findOrCreateProduct(
   createdNew: boolean;
 }> {
   const name = String(item.productName ?? "").trim() || "Item";
-  const mappedUnit = mapInvoiceUnitToSystem(
+  const mappedUnit = mapInvoiceUnitToCatalogUnit(
     String(item.unitCommercial ?? "").trim() || "un",
   );
   const unit = mappedUnit.unit;

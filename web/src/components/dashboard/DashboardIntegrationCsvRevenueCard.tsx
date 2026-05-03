@@ -1,10 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useCompany, type Company } from "@/contexts/CompanyContext";
+import {
+  COMPANY_INTEGRATION_UPDATED_EVENT,
+  type CompanyIntegrationUpdatedDetail,
+} from "@/lib/companyIntegrationEvents";
 import {
   clearEpocCsvSyncPending,
   readEpocCsvSyncPending,
 } from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
+import { completeCompanyOnboardingIntegrationPdvStep } from "@/services/companyOnboardingFlagsService";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
 import {
   AlertCircle,
@@ -70,18 +76,19 @@ function formatRelativeTime(iso: string): string {
 }
 
 /**
- * Banner no dashboard apenas enquanto o primeiro import de receitas (CSV → fila) não
- * for concluído com sucesso, com integração EPOC ativa.
+ * Receitas via CSV EPOC: onboarding até `onboarding_integration_pdv_completed`; depois só quando
+ * há sync/import em curso ou estado que precise de ação (erro, retry).
  */
 export function DashboardIntegrationCsvRevenueCard({
-  companyId,
+  company,
 }: {
-  companyId: string | undefined;
+  company: Company;
 }) {
+  const { refetchCompanies } = useCompany();
+  const companyId = company.id;
+  const pdvSyncLocked = company.syncing_pdv === true;
   const [bootLoading, setBootLoading] = useState(true);
   const [epocEnabled, setEpocEnabled] = useState(false);
-  /** Algum job epoc já chegou a COMPLETED alguma vez nesta empresa. */
-  const [hadCompletedEpocImport, setHadCompletedEpocImport] = useState(false);
 
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobs, setJobs] = useState<JobRow[]>([]);
@@ -90,32 +97,24 @@ export function DashboardIntegrationCsvRevenueCard({
 
   const [edgeSyncPending, setEdgeSyncPending] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
-  /** Evita flicker entre fim da edge e aparecimento do job. */
-  const [stickyVisible, setStickyVisible] = useState(false);
+  const [completeIntegrationBusy, setCompleteIntegrationBusy] = useState(false);
 
-  const loadBootstrap = useCallback(async () => {
+  const loadBootstrap = useCallback(async (opts?: { silent?: boolean }) => {
     if (!companyId) {
       setEpocEnabled(false);
-      setHadCompletedEpocImport(false);
       setLatestSyncRun(null);
-      setBootLoading(false);
+      if (!opts?.silent) setBootLoading(false);
       return;
     }
-    setBootLoading(true);
-    const [intRes, completedRes, runRes] = await Promise.all([
+    if (!opts?.silent) {
+      setBootLoading(true);
+    }
+    const [intRes, runRes] = await Promise.all([
       supabase
         .from("company_integrations")
         .select("enabled")
         .eq("company_id", companyId)
         .eq("provider", "epoc")
-        .maybeSingle(),
-      supabase
-        .from("integration_csv_revenue_import_jobs")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("provider", "epoc")
-        .eq("status", "COMPLETED")
-        .limit(1)
         .maybeSingle(),
       supabase
         .from("epoc_csv_sync_runs")
@@ -128,7 +127,6 @@ export function DashboardIntegrationCsvRevenueCard({
 
     const enabled =
       intRes.data?.enabled === true && !intRes.error ? true : false;
-    const hadDone = !!completedRes.data?.id && !completedRes.error;
     const runErr = !!runRes.error;
     const run =
       runErr || !runRes.data
@@ -140,9 +138,8 @@ export function DashboardIntegrationCsvRevenueCard({
           };
 
     setEpocEnabled(enabled);
-    setHadCompletedEpocImport(hadDone);
     setLatestSyncRun(run);
-    setBootLoading(false);
+    if (!opts?.silent) setBootLoading(false);
   }, [companyId]);
 
   const loadJobs = useCallback(
@@ -167,7 +164,11 @@ export function DashboardIntegrationCsvRevenueCard({
         console.error("[DashboardIntegrationCsvRevenueCard]", error);
         setJobs([]);
       } else {
-        setJobs((data ?? []) as JobRow[]);
+        const rows = (data ?? []) as JobRow[];
+        setJobs(rows);
+        if (rows.length > 0) {
+          clearEpocCsvSyncPending(companyId);
+        }
       }
       if (!opts?.silent) setJobsLoading(false);
     },
@@ -181,6 +182,66 @@ export function DashboardIntegrationCsvRevenueCard({
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  useEffect(() => {
+    const onIntegrationUpdated = (ev: Event) => {
+      const d = (ev as CustomEvent<CompanyIntegrationUpdatedDetail>).detail;
+      if (
+        !companyId ||
+        !d ||
+        d.companyId !== companyId ||
+        d.provider !== "epoc"
+      ) {
+        return;
+      }
+      setEpocEnabled(d.enabled);
+      void loadBootstrap({ silent: true });
+    };
+    window.addEventListener(
+      COMPANY_INTEGRATION_UPDATED_EVENT,
+      onIntegrationUpdated,
+    );
+    return () =>
+      window.removeEventListener(
+        COMPANY_INTEGRATION_UPDATED_EVENT,
+        onIntegrationUpdated,
+      );
+  }, [companyId, loadBootstrap]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    const ch = supabase
+      .channel(`company_integrations:${companyId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "company_integrations",
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          void loadBootstrap({ silent: true });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [companyId, loadBootstrap]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !companyId) return;
+      void loadBootstrap({ silent: true });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [companyId, loadBootstrap]);
 
   useEffect(() => {
     if (!companyId) {
@@ -213,6 +274,11 @@ export function DashboardIntegrationCsvRevenueCard({
     );
   }, [latestSyncRun]);
 
+  /** Mesmo separador: sync iniciada em Integrações antes de existir job na fila. */
+  const lsSyncPending =
+    companyId != null ? readEpocCsvSyncPending(companyId) : false;
+  const edgePendingEffective = edgeSyncPending || lsSyncPending;
+
   const hasActive = useMemo(
     () => jobs.some((j) => j.status === "PENDING" || j.status === "PROCESSING"),
     [jobs],
@@ -226,80 +292,103 @@ export function DashboardIntegrationCsvRevenueCard({
     return jobs[0] ?? null;
   }, [jobs]);
 
+  /** Flags só a partir da prop `company` (igual ao cartão fiscal · NF-e): estável ao mudar de ecrã. */
+  const onboardingPdvDone =
+    company.onboarding_integration_pdv_completed === true;
+
+  /**
+   * Mesma fonte que o resto do onboarding: `setup.epoc` no objeto `company` até
+   * `company_integrations` responder.
+   */
+  const epocEnabledEffective = useMemo(() => {
+    if (epocEnabled) return true;
+    const epoc = company.setup?.epoc;
+    if (!epoc || typeof epoc !== "object" || Array.isArray(epoc)) return false;
+    const o = epoc as Record<string, unknown>;
+    if (o.mode === "no") return false;
+    return o.enabled === true;
+  }, [epocEnabled, company.setup?.epoc]);
+
+  /** Em fase de onboarding PDV: critério síncrono a partir da prop `company` (sem esperar re-fetch). */
+  const inPdvIntegrationOnboarding =
+    company.onboarding_integration_pdv_completed !== true;
+
+  /** Após onboarding PDV concluído, não ocupar o dash em estado totalmente idle. */
+  const keepVisibleAfterPdvOnboarding = useMemo(
+    () =>
+      pdvSyncLocked ||
+      edgePendingEffective ||
+      hasActive ||
+      primary?.status === "FAILED" ||
+      syncEndedWithIssue ||
+      retryBusy ||
+      completeIntegrationBusy,
+    [
+      pdvSyncLocked,
+      edgePendingEffective,
+      hasActive,
+      primary?.status,
+      syncEndedWithIssue,
+      retryBusy,
+      completeIntegrationBusy,
+    ],
+  );
+
   const isTerminalFailure =
     primary?.status === "FAILED" ||
     (syncEndedWithIssue &&
       !primary &&
       !hasActive &&
-      !edgeSyncPending);
+      !edgePendingEffective);
 
   const onboardingBannerEligible =
-    !!companyId && epocEnabled && !hadCompletedEpocImport;
+    !!companyId && (!onboardingPdvDone || epocEnabledEffective);
 
-  useEffect(() => {
-    if (!companyId || !onboardingBannerEligible) {
-      queueMicrotask(() => setStickyVisible(false));
-      return;
-    }
-    if (
-      edgeSyncPending ||
-      hasActive ||
-      !!primary ||
-      syncEndedWithIssue ||
-      bootLoading ||
-      jobsLoading
-    ) {
-      queueMicrotask(() => setStickyVisible(true));
-    }
-  }, [
-    companyId,
-    onboardingBannerEligible,
-    bootLoading,
-    jobsLoading,
-    edgeSyncPending,
-    hasActive,
-    primary,
-    syncEndedWithIssue,
-  ]);
-
+  /** Só faz polling quando a integração está ativa ou há sync pendente (localStorage). */
   const pollImportJobs = useMemo(
     () =>
-      onboardingBannerEligible &&
-      (hasActive ||
-        edgeSyncPending ||
-        (stickyVisible && primary?.status !== "FAILED")),
-    [
-      onboardingBannerEligible,
-      hasActive,
-      edgeSyncPending,
-      stickyVisible,
-      primary?.status,
-    ],
+      !!companyId &&
+      (inPdvIntegrationOnboarding ||
+        epocEnabled ||
+        lsSyncPending ||
+        pdvSyncLocked),
+    [companyId, inPdvIntegrationOnboarding, epocEnabled, lsSyncPending, pdvSyncLocked],
   );
 
   useEffect(() => {
     if (!companyId || !pollImportJobs) return;
-    const ms = edgeSyncPending && !hasActive ? 4000 : 12_000;
+    const ms = edgePendingEffective && !hasActive ? 4000 : 12_000;
     const id = window.setInterval(() => {
       void loadJobs({ silent: true });
-      void loadBootstrap();
+      void loadBootstrap({ silent: true });
     }, ms);
     return () => window.clearInterval(id);
-  }, [companyId, pollImportJobs, hasActive, edgeSyncPending, loadJobs, loadBootstrap]);
+  }, [companyId, pollImportJobs, hasActive, edgePendingEffective, loadJobs, loadBootstrap]);
 
   /** Reconsulta rápida quando o primeiro import concluir. */
   useEffect(() => {
     if (primary?.status !== "COMPLETED") return;
-    void loadBootstrap();
+    void loadBootstrap({ silent: true });
   }, [primary?.status, loadBootstrap]);
 
-  const showCard =
-    onboardingBannerEligible &&
-    (bootLoading ||
-      jobsLoading ||
-      stickyVisible ||
-      edgeSyncPending ||
-      retryBusy);
+  const completeIntegrationOnboarding = useCallback(async () => {
+    if (!companyId) return;
+    setCompleteIntegrationBusy(true);
+    try {
+      const res = await completeCompanyOnboardingIntegrationPdvStep(companyId);
+      if (res.error) {
+        toast.error(
+          res.error.slice(0, 220) ||
+            "Não foi possível concluir a etapa de integração.",
+        );
+        return;
+      }
+      toast.success("Integração PDV marcada como concluída.", { duration: 3500 });
+      await refetchCompanies();
+    } finally {
+      setCompleteIntegrationBusy(false);
+    }
+  }, [companyId, refetchCompanies]);
 
   const retryOnboardingEpocImport = useCallback(async () => {
     if (!companyId) return;
@@ -308,6 +397,8 @@ export function DashboardIntegrationCsvRevenueCard({
       clearEpocCsvSyncPending(companyId);
       const res = await invokeEpocCsvSync(companyId, {
         sync_mode: "onboarding_initial",
+        lockOnboardingPdv: true,
+        resetPdvOnboardingCompleted: true,
       });
       if (!res.ok) {
         toast.error(
@@ -320,26 +411,41 @@ export function DashboardIntegrationCsvRevenueCard({
           { duration: 5000 },
         );
       }
-      await Promise.all([loadBootstrap(), loadJobs()]);
+      await Promise.all([
+        loadBootstrap({ silent: true }),
+        loadJobs(),
+        refetchCompanies(),
+      ]);
     } finally {
       setRetryBusy(false);
     }
-  }, [companyId, loadBootstrap, loadJobs]);
+  }, [companyId, loadBootstrap, loadJobs, refetchCompanies]);
 
   const progressPercent = useMemo(() => {
-    if (edgeSyncPending && !hasActive) return 18;
-    if (!primary || primary.status === "FAILED") return 0;
+    if (edgePendingEffective && !hasActive) return 18;
+    if (primary?.status === "FAILED") return 0;
+    if (!primary) {
+      if (isTerminalFailure) return 0;
+      if (onboardingBannerEligible) return 18;
+      return 0;
+    }
     if (primary.status === "COMPLETED") return 100;
     const meta = primary.metadata ?? {};
     const total = Number(meta.csv_total_data_rows ?? 0);
     const cur = Math.max(0, Number(primary.csv_resume_row_index ?? 0));
     if (total <= 0) return primary.status === "PROCESSING" ? 8 : 0;
     return Math.min(100, Math.round((cur / total) * 100));
-  }, [primary, edgeSyncPending, hasActive]);
+  }, [
+    primary,
+    edgePendingEffective,
+    hasActive,
+    isTerminalFailure,
+    onboardingBannerEligible,
+  ]);
 
   const subtitle = useMemo(() => {
     if (bootLoading || jobsLoading) return "A carregar…";
-    if (edgeSyncPending && !hasActive) {
+    if (edgePendingEffective && !hasActive) {
       return "A função está a obter dados do portal EPOC. Depois disto o CSV entra na fila de receitas.";
     }
     if (primary?.status === "FAILED") {
@@ -348,7 +454,7 @@ export function DashboardIntegrationCsvRevenueCard({
         "O processamento do CSV falhou; pode tentar de novo ou rever a integração."
       );
     }
-    if (syncEndedWithIssue && !hasActive && !edgeSyncPending) {
+    if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
       return (
         latestSyncRun?.summary?.slice(0, 260) ??
         "A exportação no portal não produziu tabela utilizável nesta sincronização."
@@ -370,7 +476,7 @@ export function DashboardIntegrationCsvRevenueCard({
     return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · Total: ${totalRows}` : ""}.`;
   }, [
     primary,
-    edgeSyncPending,
+    edgePendingEffective,
     hasActive,
     bootLoading,
     jobsLoading,
@@ -380,9 +486,32 @@ export function DashboardIntegrationCsvRevenueCard({
 
   const percent = Math.max(0, Math.min(100, progressPercent));
   const showSpinner =
-    bootLoading || jobsLoading || hasActive || edgeSyncPending || retryBusy;
+    bootLoading ||
+    jobsLoading ||
+    hasActive ||
+    edgePendingEffective ||
+    retryBusy;
 
-  if (!showCard || (hasActive && !primary && !retryBusy)) {
+  const postPdvShow =
+    onboardingPdvDone &&
+    (epocEnabledEffective || lsSyncPending || pdvSyncLocked) &&
+    (keepVisibleAfterPdvOnboarding || jobsLoading);
+
+  const shouldRenderCard =
+    inPdvIntegrationOnboarding || postPdvShow;
+
+  if (!shouldRenderCard) {
+    return null;
+  }
+
+  /** Durante onboarding PDV ou com `syncing_pdv` ativo, não esconder por estado transitório da fila. */
+  if (
+    hasActive &&
+    !primary &&
+    !retryBusy &&
+    !pdvSyncLocked &&
+    !inPdvIntegrationOnboarding
+  ) {
     return null;
   }
 
@@ -409,7 +538,7 @@ export function DashboardIntegrationCsvRevenueCard({
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActive
                   ? "Import de receitas em curso"
-                  : edgeSyncPending
+                  : edgePendingEffective
                     ? "Sincronização com o portal EPOC"
                     : primary
                       ? `Import: ${statusLabel(primary.status)}`
@@ -420,7 +549,7 @@ export function DashboardIntegrationCsvRevenueCard({
               <p className="mt-1 text-sm font-medium text-sky-950/90 dark:text-sky-100/90">
                 {subtitle}
               </p>
-              {primary && !(edgeSyncPending && !hasActive) ? (
+              {primary && !(edgePendingEffective && !hasActive) ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {formatRelativeTime(primary.created_at)} ·{" "}
                   <span className="font-mono text-[11px]">
@@ -436,11 +565,11 @@ export function DashboardIntegrationCsvRevenueCard({
             {(primary?.status === "FAILED" ||
               (syncEndedWithIssue &&
                 !hasActive &&
-                !edgeSyncPending)) && (
+                !edgePendingEffective)) && (
               <Button
                 size="sm"
                 type="button"
-                disabled={retryBusy}
+                disabled={retryBusy || pdvSyncLocked}
                 onClick={() => void retryOnboardingEpocImport()}
               >
                 {retryBusy ? (
@@ -451,6 +580,23 @@ export function DashboardIntegrationCsvRevenueCard({
                 Tentar novamente
               </Button>
             )}
+            {primary?.status === "COMPLETED" ? (
+              <Button
+                size="sm"
+                type="button"
+                className="shrink-0"
+                variant="default"
+                disabled={completeIntegrationBusy}
+                onClick={() => void completeIntegrationOnboarding()}
+              >
+                {completeIntegrationBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                Concluir integração
+              </Button>
+            ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
               <Link to="/app/integracoes">
                 Integrações EPOC

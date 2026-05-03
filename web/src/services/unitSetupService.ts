@@ -304,6 +304,10 @@ export async function patchCompanyMaps(
     document?: string | null;
     email?: string | null;
     phone?: string | null;
+    onboarding_fiscal_completed?: boolean;
+    onboarding_integration_pdv_completed?: boolean;
+    syncing_fiscal?: boolean;
+    syncing_pdv?: boolean;
   },
 ): Promise<{ error?: string }> {
   const row: Record<string, unknown> = {};
@@ -333,6 +337,19 @@ export async function patchCompanyMaps(
   if (patch.document !== undefined) row.document = patch.document;
   if (patch.email !== undefined) row.email = patch.email;
   if (patch.phone !== undefined) row.phone = patch.phone;
+  if (patch.onboarding_fiscal_completed !== undefined) {
+    row.onboarding_fiscal_completed = patch.onboarding_fiscal_completed;
+  }
+  if (patch.onboarding_integration_pdv_completed !== undefined) {
+    row.onboarding_integration_pdv_completed =
+      patch.onboarding_integration_pdv_completed;
+  }
+  if (patch.syncing_fiscal !== undefined) {
+    row.syncing_fiscal = patch.syncing_fiscal;
+  }
+  if (patch.syncing_pdv !== undefined) {
+    row.syncing_pdv = patch.syncing_pdv;
+  }
 
   const { error } = await supabase
     .from("companies")

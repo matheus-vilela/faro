@@ -1,0 +1,8 @@
+/** CORS partilhado entre o entrypoint (leve) e o handler (import dinâmico). */
+export const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+};

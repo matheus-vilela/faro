@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
+import { patchCompanyMaps } from "@/services/unitSetupService";
 import { parseEpocSettings } from "@/types/companyIntegration";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,6 +18,15 @@ export function DashboardEpocDailySyncAlertCard({
 }: {
   companyId: string | undefined;
 }) {
+  const { currentCompany, refetchCompanies } = useCompany();
+  const pdvOnboardingPending =
+    !!companyId &&
+    currentCompany?.id === companyId &&
+    currentCompany.onboarding_integration_pdv_completed !== true;
+  const pdvSyncLocked =
+    !!companyId &&
+    currentCompany?.id === companyId &&
+    currentCompany.syncing_pdv === true;
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -93,20 +104,35 @@ export function DashboardEpocDailySyncAlertCard({
 
   const handleRetryDaily = async () => {
     if (!companyId) return;
+    const { error: lockErr } = await patchCompanyMaps(companyId, {
+      syncing_pdv: true,
+      onboarding_integration_pdv_completed: false,
+    });
+    if (lockErr) {
+      toast.error(
+        lockErr.slice(0, 220) ??
+          "Não foi possível iniciar a sincronização (trava PDV).",
+      );
+      return;
+    }
+    await refetchCompanies();
     setRetrying(true);
     const data = await invokeEpocCsvSync(companyId, {
       sync_mode: "previous_day",
+      lockOnboardingPdv: pdvOnboardingPending,
     });
     setRetrying(false);
     if (!data.ok) {
       toast.error(data.error ?? "Não foi possível sincronizar.");
       await load();
+      await refetchCompanies();
       return;
     }
     toast.success(
       "Sincronização do dia anterior iniciada. O import de receitas pode demorar alguns minutos.",
     );
     await load();
+    await refetchCompanies();
   };
 
   if (!show) return null;
@@ -143,7 +169,7 @@ export function DashboardEpocDailySyncAlertCard({
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
           <Button
             type="button"
-            disabled={retrying}
+            disabled={retrying || pdvSyncLocked}
             className="w-full sm:w-auto"
             onClick={() => void handleRetryDaily()}
           >
