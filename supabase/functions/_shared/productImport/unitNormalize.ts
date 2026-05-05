@@ -5,6 +5,7 @@
 
 export type NormalizedUnitCode =
   | "UND"
+  | "MG"
   | "KG"
   | "G"
   | "L"
@@ -19,6 +20,7 @@ export type NormalizedUnitCode =
 /** Famílias para checagem de conversão “segura” (ainda assim exige confirmação humana se unidades normalizadas forem diferentes). */
 export const UNIT_FAMILY_WEIGHT: Record<NormalizedUnitCode, string> = {
   UND: "count",
+  MG: "mass",
   KG: "mass",
   G: "mass",
   L: "volume",
@@ -33,6 +35,7 @@ export const UNIT_FAMILY_WEIGHT: Record<NormalizedUnitCode, string> = {
 
 const RAW_ALIASES: Array<{ re: RegExp; code: NormalizedUnitCode }> = [
   { re: /^(und|un|uni|unid|unit|pc|peca|peça|pt)$/i, code: "UND" },
+  { re: /^(mg|miligramas?|miligram|milligrams?)$/i, code: "MG" },
   { re: /^(kg|kgs|quilo|kilos?)$/i, code: "KG" },
   { re: /^(g|gr|grama|gramas)$/i, code: "G" },
   { re: /^(l|lt|litro|litros)$/i, code: "L" },
@@ -109,7 +112,7 @@ export function unitsAreEqual(a: NormalizedUnitCode, b: NormalizedUnitCode): boo
 export function unitsAreConvertible(a: NormalizedUnitCode, b: NormalizedUnitCode): boolean {
   if (a === "UNKN" || b === "UNKN") return false
   if (a === b) return true
-  const mass = new Set<NormalizedUnitCode>(["KG", "G"])
+  const mass = new Set<NormalizedUnitCode>(["MG", "KG", "G"])
   const vol = new Set<NormalizedUnitCode>(["L", "ML"])
   if (mass.has(a) && mass.has(b)) return true
   if (vol.has(a) && vol.has(b)) return true
@@ -122,8 +125,12 @@ export function conversionFactorToA(
   b: NormalizedUnitCode,
 ): number | null {
   if (a === b) return 1
+  if (a === "G" && b === "MG") return 0.001
+  if (a === "MG" && b === "G") return 1000
   if (a === "KG" && b === "G") return 0.001
   if (a === "G" && b === "KG") return 1000
+  if (a === "KG" && b === "MG") return 0.000001
+  if (a === "MG" && b === "KG") return 1000000
   if (a === "L" && b === "ML") return 0.001
   if (a === "ML" && b === "L") return 1000
   return null

@@ -5,6 +5,7 @@ import {
   packSizeFromLabel,
   parsePackagingNameSlashPattern,
   stripPackSizeFromLabel,
+  volumePerCountUnitFromLabelLiters,
 } from "./packSizeFromLabel";
 
 describe("stripPackSizeFromLabel", () => {
@@ -82,5 +83,19 @@ describe("massPerCountUnitFromLabelKg", () => {
     expect(
       massPerCountUnitFromLabelKg("CARVAO VEGETAL DE EUCALIPTO - 8 Kg"),
     ).toBe(8);
+  });
+});
+
+describe("volumePerCountUnitFromLabelLiters", () => {
+  it("lê ml no fim do nome (com espaço)", () => {
+    expect(volumePerCountUnitFromLabelLiters("Cachaça Bakkana 750 ml")).toBe(
+      0.75,
+    );
+  });
+
+  it("lê ml colado ao número no fim do nome", () => {
+    expect(volumePerCountUnitFromLabelLiters("Cachaça Bakkana 750ml")).toBe(
+      0.75,
+    );
   });
 });

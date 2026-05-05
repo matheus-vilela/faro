@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName";
 import { consolidateInvoiceItems, pickInvoiceUnitRaw } from "./consolidateItems";
-import { applySecondarySignals, scoreNameMatch } from "./matchingScore";
+import {
+  applySecondarySignals,
+  isFlavorOnlyCatalogInsideCompositeInvoice,
+  scoreNameMatch,
+} from "./matchingScore";
 import { clampThresholds } from "./matchConfig";
 import {
   conversionFactorToA,
@@ -42,6 +46,19 @@ describe("canonicalName", () => {
 describe("matchingScore", () => {
   it("scores identical names at 100", () => {
     expect(scoreNameMatch("Maionese", "Maionese")).toBe(100);
+  });
+
+  it("does not over-score refrigerante+sabor vs só fruta no cadastro", () => {
+    expect(isFlavorOnlyCatalogInsideCompositeInvoice("Refrigerante de Morango", "Morango")).toBe(
+      true,
+    );
+    const s = scoreNameMatch("Refrigerante de Morango", "Morango");
+    expect(s).toBeLessThan(80);
+  });
+
+  it("keeps strong score for arroz vs arroz branco (sem token de bebida)", () => {
+    expect(isFlavorOnlyCatalogInsideCompositeInvoice("Arroz Branco Tipo 1", "Arroz")).toBe(false);
+    expect(scoreNameMatch("Arroz Branco Tipo 1", "Arroz")).toBeGreaterThanOrEqual(80);
   });
 
   it("boosts score on matching EAN", () => {

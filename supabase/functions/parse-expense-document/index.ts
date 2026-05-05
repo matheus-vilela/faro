@@ -14,6 +14,7 @@ import {
   optimizeExpenseImage,
 } from "../_shared/optimizeExpenseImage.ts";
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
+import { productMatchOptionsForNfeXmlUpload } from "./parseExpenseMatchBatch.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -28,11 +29,12 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Igual ao fluxo WhatsApp: aliases + similaridade ≥95%, e fornecedor por CPF/CNPJ. */
+/** Igual ao fluxo WhatsApp: aliases + similaridade; NF-e XML estruturada usa matcher de lote (`importBatch`). */
 async function enrichForCompany(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   extracted: ExtractedDocumentResult,
+  matchOpts?: { importBatch?: boolean },
 ): Promise<{
   data: ExtractedDocumentResult & { _requiresProductConfirmation?: boolean };
   resolvedSupplierId: string | null;
@@ -55,7 +57,12 @@ async function enrichForCompany(
     );
     return { data, resolvedSupplierId: sr.supplierId };
   }
-  const matchResult = await resolveProductMatches(supabase, companyId, ex0.items);
+  const matchResult = await resolveProductMatches(
+    supabase,
+    companyId,
+    ex0.items,
+    matchOpts?.importBatch ? { importBatch: true } : undefined,
+  );
   const data: ExtractedDocumentResult & {
     _requiresProductConfirmation?: boolean;
   } = {
@@ -164,7 +171,12 @@ Deno.serve(async (req) => {
           "Não foi possível ler a NF-e neste XML. Confira se é o arquivo autorizado (nfeProc).",
       }, 422);
     }
-    const xmlEnriched = await enrichForCompany(supabase, companyId, extracted);
+    const xmlEnriched = await enrichForCompany(
+      supabase,
+      companyId,
+      extracted,
+      productMatchOptionsForNfeXmlUpload(),
+    );
     return json({
       ok: true,
       data: xmlEnriched.data,

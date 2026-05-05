@@ -139,6 +139,8 @@ const LABEL_MASS_VOLUME_PATTERNS: RegExp[] = [
   /\s*[-–—]\s*(\d+(?:[.,]\d+)?)\s*(kg|kgs?|kilo|kilos?|quilo|quilos?|g|gr|gramas?|grama|l|lt|litros?|litro|ml|mililitros?|mililitro)\b/gi,
   /\s*\((\d+(?:[.,]\d+)?)\s*(kg|kgs?|kilo|kilos?|quilo|quilos?|g|gr|gramas?|grama|l|lt|litros?|litro|ml|mililitros?|mililitro)\s*\)/gi,
   /\s+(\d+(?:[.,]\d+)?)\s*(kg|kgs?|kilo|kilos?|quilo|quilos?|g|gr|gramas?|grama)\s*$/i,
+  /** Volume no fim do nome: `750 ml`, `750ml`, `1 L` (par com massa na linha acima). */
+  /\s+(\d+(?:[.,]\d+)?)\s*(ml|mililitros?|mililitro|l|lt|litros?|litro)\s*$/i,
 ]
 
 type PackLabelMatch = {

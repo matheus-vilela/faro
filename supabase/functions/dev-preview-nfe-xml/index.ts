@@ -60,7 +60,9 @@ Deno.serve(async (req) => {
 
   const companyId = String(form.get("company_id") ?? "").trim();
   const file = form.get("file");
-  const simulateImportBatch = formBool(form.get("simulate_import_batch"));
+  const simRaw = form.get("simulate_import_batch");
+  /** Ausência do campo = simular batch (alinhado ao fluxo XML real); explícito `false` desliga. */
+  const simulateImportBatch = simRaw == null ? true : formBool(simRaw);
   const aiLineUnitsPreview = formBool(form.get("ai_line_units_preview"));
   if (!companyId) return json({ ok: false, error: "company_id é obrigatório." }, 400);
   if (!(file instanceof File) || file.size === 0) {

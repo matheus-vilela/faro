@@ -26,6 +26,7 @@ import {
   supabaseUrl,
 } from "@/lib/supabase";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
+import { consolidationKey } from "@/lib/productImport/consolidateItems";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -70,6 +71,31 @@ function formatPreviewBrl(v: unknown): string {
   const n = typeof v === "number" ? v : Number(String(v ?? "").replace(",", "."));
   if (!Number.isFinite(n)) return "—";
   return BRL_PREVIEW.format(n);
+}
+
+/** Códigos de `previewLineDecision.manual_review.reason_codes` → rótulos em PT-BR (somente UI). */
+const LAB_REVIEW_REASON_PT: Record<string, string> = {
+  PRODUCT_MATCH_NEEDS_CONFIRMATION: "Confirmação do vínculo do produto necessária",
+  UNIT_CONFLICT_OR_VALIDATION: "Conflito ou validação de unidade",
+  PRIMARY_UNIT_NOT_UN:
+    "Unidade primária sugerida não é UN — confirmar cadastro",
+  NO_CLEAR_EXISTING_PRODUCT: "Sem produto existente claro (possível item novo)",
+  POSSIBLE_FICHA_TECNICA_NAME: "Possível ficha técnica ou preparo (nome)",
+  NO_RECIPE_LINK_EVIDENCE: "Sem evidência de vínculo com receita",
+  LINE_TOTAL_NUMERIC_MISMATCH: "Inconsistência numérica na linha (quantidade × valor ≠ total)",
+};
+
+function labReasonLabelPt(code: string): string {
+  return LAB_REVIEW_REASON_PT[code] ?? code;
+}
+
+const LAB_MANUAL_STATUS_PT: Record<string, string> = {
+  REVIEW_REQUIRED: "Revisão necessária",
+  OK: "OK",
+};
+
+function labManualStatusLabelPt(status: string): string {
+  return LAB_MANUAL_STATUS_PT[status] ?? status;
 }
 
 /** Igual à lógica do Edge (`invoiceLineUnitsLlmAssist`): nome para card sem unidade no rótulo. */
@@ -119,7 +145,7 @@ export function Desenvolvimento() {
   const [previewResult, setPreviewResult] = useState<PreviewOkResponse | null>(
     null,
   );
-  const [simulateImportBatch, setSimulateImportBatch] = useState(false);
+  const [simulateImportBatch, setSimulateImportBatch] = useState(true);
   const [aiLineUnitsPreview, setAiLineUnitsPreview] = useState(false);
 
   const runFocus = useCallback(async () => {
@@ -244,9 +270,10 @@ export function Desenvolvimento() {
       const form = new FormData();
       form.append("company_id", companyId);
       form.append("file", file);
-      if (simulateImportBatch) {
-        form.append("simulate_import_batch", "true");
-      }
+      form.append(
+        "simulate_import_batch",
+        simulateImportBatch ? "true" : "false",
+      );
       if (aiLineUnitsPreview) {
         form.append("ai_line_units_preview", "true");
       }
@@ -612,6 +639,7 @@ export function Desenvolvimento() {
 
                 <NfePreviewSimulationTable
                   enriched={previewResult.enriched}
+                  raw={previewResult.raw}
                   lineUnitsAi={previewResult.line_units_ai ?? null}
                 />
 
@@ -657,14 +685,40 @@ export function Desenvolvimento() {
 
 function NfePreviewSimulationTable({
   enriched,
+  raw,
   lineUnitsAi,
 }: {
   enriched: Record<string, unknown>;
+  raw: Record<string, unknown>;
   lineUnitsAi: Record<string, unknown> | null;
 }) {
   const items = Array.isArray(enriched.items)
     ? (enriched.items as Record<string, unknown>[])
     : [];
+  const rawItems = Array.isArray(raw.items)
+    ? (raw.items as Record<string, unknown>[])
+    : [];
+  const rawNameByConsolidationKey = new Map<string, string>();
+  for (const r of rawItems) {
+    const maybeName =
+      r?.productName != null ? String(r.productName) : "";
+    if (!maybeName) continue;
+    const key = consolidationKey({
+      productName: maybeName,
+      quantity: Number(r?.quantity ?? 0) || 0,
+      unitValue: Number(r?.unitValue ?? 0) || 0,
+      lineTotal: Number(r?.lineTotal ?? 0) || 0,
+      unitCommercial:
+        r?.unitCommercial != null ? String(r.unitCommercial) : null,
+      unitTax: r?.unitTax != null ? String(r.unitTax) : null,
+      invoiceUnitRaw: null,
+      ncm: r?.ncm != null ? String(r.ncm) : null,
+      ean: r?.ean != null ? String(r.ean) : null,
+    });
+    if (!rawNameByConsolidationKey.has(key)) {
+      rawNameByConsolidationKey.set(key, maybeName);
+    }
+  }
 
   if (items.length === 0) {
     return null;
@@ -682,6 +736,7 @@ function NfePreviewSimulationTable({
   }
 
   const aiMeta = lineUnitsAi;
+  const aiValidationMode = aiMeta?.enabled === true;
   const aiCalls =
     typeof aiMeta?.calls_made === "number" ? aiMeta.calls_made : null;
   const aiThreshold =
@@ -707,13 +762,28 @@ function NfePreviewSimulationTable({
           <strong className="font-medium text-foreground">Novo cadastro</strong>{" "}
           combina heurística do nome da nota; a{" "}
           <strong className="font-medium text-foreground">unidade de cadastro</strong>{" "}
-          segue a NF-e (mapeamento do sistema). Com IA ativa, o laboratório ajusta o
-          nome e sugere interpretação/conversões. O valor é o{" "}
+          é validada pelo contexto do laboratório. Com IA ativa, esta tela prioriza
+          os campos finais de contexto (`unitSuggestion`/`previewLineDecision`) para
+          validação. O valor é o{" "}
           <strong className="font-medium text-foreground">unitário ajustado</strong>{" "}
           (após fator de embalagem na linha, quando aplicável).
         </p>
         <div className="grid w-full min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((it, i) => {
+            const rawIt = rawItems[i] ?? null;
+            const rawKey = consolidationKey({
+              productName: String(it.productName ?? ""),
+              quantity: Number(it.quantity ?? 0) || 0,
+              unitValue: Number(it.unitValue ?? 0) || 0,
+              lineTotal: Number(it.lineTotal ?? 0) || 0,
+              unitCommercial:
+                it.unitCommercial != null ? String(it.unitCommercial) : null,
+              unitTax: it.unitTax != null ? String(it.unitTax) : null,
+              invoiceUnitRaw: null,
+              ncm: it.ncm != null ? String(it.ncm) : null,
+              ean: it.ean != null ? String(it.ean) : null,
+            });
+            const rawNameByKey = rawNameByConsolidationKey.get(rawKey) ?? null;
             const sim = it._preview_line_simulation as
               | Record<string, unknown>
               | undefined;
@@ -753,21 +823,81 @@ function NfePreviewSimulationTable({
               pm?.catalogUnitNormalized != null
                 ? String(pm.catalogUnitNormalized)
                 : "—";
-            const aiUnit =
-              aiKind === "OK" && ai?.catalog_unit_target != null
-                ? String(ai.catalog_unit_target)
-                : "";
-            const aiUnitNeedsReview =
-              aiKind === "OK" && ai?.catalog_unit_needs_review === true;
             const unitNote =
               sim?.invoiceUnitRaw != null
                 ? String(sim.invoiceUnitRaw)
                 : String(it.unitCommercial ?? it.unitTax ?? "—");
+            const unitSuggestion = sim?.unitSuggestion as
+              | Record<string, unknown>
+              | undefined;
+            const suggestedPrimaryUnit =
+              unitSuggestion?.primary_unit_code != null
+                ? String(unitSuggestion.primary_unit_code)
+                : null;
+            const suggestedSource =
+              unitSuggestion?.source != null
+                ? String(unitSuggestion.source)
+                : null;
+            const suggestedConversions = Array.isArray(
+              unitSuggestion?.suggested_conversions,
+            )
+              ? (unitSuggestion.suggested_conversions as Array<Record<string, unknown>>)
+              : [];
+            const suggestionNote =
+              unitSuggestion?.note != null ? String(unitSuggestion.note) : null;
+            const previewLineDecision = sim?.previewLineDecision as
+              | Record<string, unknown>
+              | undefined;
+            const pldManual = previewLineDecision?.manual_review as
+              | Record<string, unknown>
+              | undefined;
+            const pldCost = previewLineDecision?.cost_suggestion as
+              | Record<string, unknown>
+              | undefined;
+            const pldReuse = previewLineDecision?.match_reuse as
+              | Record<string, unknown>
+              | undefined;
+            const labReviewRequired = pldManual?.required === true;
+            const labStatus =
+              pldManual?.status != null ? String(pldManual.status) : null;
+            const labReasonCodesRaw = Array.isArray(pldManual?.reason_codes)
+              ? (pldManual.reason_codes as unknown[]).map((x) => String(x))
+              : [];
+            const labReasons = labReasonCodesRaw.map(labReasonLabelPt);
+            const labActions = Array.isArray(pldManual?.recommended_actions)
+              ? (pldManual.recommended_actions as unknown[]).map((x) => String(x))
+              : [];
+            const labCostPrimary =
+              pldCost?.unit_cost_in_primary != null &&
+              Number.isFinite(Number(pldCost.unit_cost_in_primary))
+                ? Number(pldCost.unit_cost_in_primary)
+                : null;
+            const labQtyPrimary =
+              pldCost?.quantity_in_primary != null &&
+              Number.isFinite(Number(pldCost.quantity_in_primary))
+                ? Number(pldCost.quantity_in_primary)
+                : null;
+            const labLineOk = pldCost?.line_total_check_ok === true;
+            const labTrace =
+              pldCost?.calculation_trace != null
+                ? String(pldCost.calculation_trace)
+                : null;
+            const labBlockedNew =
+              pldReuse?.blocked_new_product_suggestion === true;
+            const labPlannedAutoCreate =
+              pldReuse?.planned_auto_catalog_create === true;
+            const labSuggestedNewName =
+              pldReuse?.suggested_new_catalog_name != null
+                ? String(pldReuse.suggested_new_catalog_name).trim()
+                : "";
+            const hasUnitConflictReason = labReasonCodesRaw.some(
+              (r) => r === "UNIT_CONFLICT_OR_VALIDATION",
+            );
             const displayUnit = isExisting
               ? catUnit !== "—"
                 ? catUnit
                 : unitNote
-              : aiUnit || (catUnit !== "—" ? catUnit : unitNote);
+              : suggestedPrimaryUnit || (catUnit !== "—" ? catUnit : unitNote);
             const vuRaw = sim?.unitValueAdjusted ?? it.unitValue;
             const lineTotal = it.lineTotal;
             const stockMatch =
@@ -782,24 +912,34 @@ function NfePreviewSimulationTable({
                 : null;
             const stockLabel = isExisting
               ? stockMatch
+              : unitSuggestion?.suggested_stock_quantity_in_primary != null
+              ? String(unitSuggestion.suggested_stock_quantity_in_primary)
               : aiStock ?? stockMatch ?? qtyAdj;
             const stockCaption = isExisting
               ? "Quantidade (match)"
-              : aiStock != null
-                ? "Quantidade (IA)"
+              : aiValidationMode
+                ? "Quantidade (IA contexto)"
+                : aiStock != null
+                ? "Quantidade (IA bruto)"
                 : "Quantidade (nota)";
-            const invoiceName = String(it.productName ?? "—");
+            const invoiceName = rawNameByKey != null
+              ? rawNameByKey
+              : rawIt?.productName != null
+              ? String(rawIt.productName)
+              : "—";
             const hasLineTotal =
               lineTotal != null && String(lineTotal).trim() !== "";
             const stockUnitSuffix =
-              !isExisting && aiUnit ? aiUnit : displayUnit;
+              displayUnit;
             return (
               <div key={i} className="flex h-full min-h-0 min-w-0 w-full">
                 <div
                   className={cn(
                     "relative flex w-full max-w-full min-h-[17rem] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/25 text-left shadow-sm transition-colors",
                     "p-4 sm:p-5 md:p-6",
-                    "border-border/80",
+                    labReviewRequired
+                      ? "border-amber-500/55 ring-1 ring-amber-500/25"
+                      : "border-border/80",
                   )}
                 >
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 sm:gap-4">
@@ -830,12 +970,27 @@ function NfePreviewSimulationTable({
                               >
                                 {isExisting ? "Catálogo" : "Novo cadastro"}
                               </Badge>
-                              {aiUnitNeedsReview ? (
+                              {hasUnitConflictReason ? (
                                 <Badge
                                   variant="outline"
                                   className="h-6 gap-1 border-amber-500/60 bg-amber-500/10 px-2 text-[0.65rem] font-normal text-amber-950 dark:text-amber-100"
                                 >
-                                  Unidade a rever
+                                  Unidade a rever (contexto)
+                                </Badge>
+                              ) : null}
+                              {labStatus === "REVIEW_REQUIRED" ? (
+                                <Badge
+                                  variant="outline"
+                                  className="h-6 gap-1 border-amber-600/70 bg-amber-500/15 px-2 text-[0.65rem] font-normal text-amber-950 dark:text-amber-100"
+                                >
+                                  {labManualStatusLabelPt("REVIEW_REQUIRED")} (lab)
+                                </Badge>
+                              ) : previewLineDecision ? (
+                                <Badge
+                                  variant="outline"
+                                  className="h-6 gap-1 border-emerald-600/40 bg-emerald-500/10 px-2 text-[0.65rem] font-normal text-emerald-950 dark:text-emerald-100"
+                                >
+                                  {labManualStatusLabelPt("OK")} (lab)
                                 </Badge>
                               ) : null}
                             </div>
@@ -863,6 +1018,115 @@ function NfePreviewSimulationTable({
                               <span className="mx-2 text-border">·</span>
                               <span>Compra (NF-e): {unitNote}</span>
                             </p>
+                            {suggestedPrimaryUnit ? (
+                              <p className="break-words text-xs text-muted-foreground sm:text-[0.8rem]">
+                                <span className="font-medium text-foreground/80">
+                                  Unidade sugerida:
+                                </span>{" "}
+                                <span className="font-mono">{suggestedPrimaryUnit}</span>
+                                {suggestedSource ? (
+                                  <>
+                                    {" "}
+                                    <span className="text-border">·</span>{" "}
+                                    {suggestedSource === "existing_product"
+                                      ? "produto existente"
+                                      : "padrão UN"}
+                                  </>
+                                ) : null}
+                              </p>
+                            ) : null}
+                            {suggestedConversions.length > 0 ? (
+                              <p className="break-words text-xs text-emerald-700 dark:text-emerald-400 sm:text-[0.8rem]">
+                                <span className="font-medium">Conversões sugeridas:</span>{" "}
+                                {suggestedConversions.map((c) =>
+                                  String(c.relation ?? "—")
+                                ).join(" | ")}
+                              </p>
+                            ) : suggestionNote ? (
+                              <p className="break-words text-xs text-muted-foreground sm:text-[0.8rem]">
+                                {suggestionNote}
+                              </p>
+                            ) : null}
+                            {previewLineDecision ? (
+                              <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2 text-[0.7rem] sm:text-[0.75rem]">
+                                <p className="font-medium text-foreground/90">
+                                  Decisão laboratório{" "}
+                                  <span className="font-normal text-muted-foreground">
+                                    (somente dev-preview)
+                                  </span>
+                                </p>
+                                {labPlannedAutoCreate ? (
+                                  <p className="text-muted-foreground">
+                                    <span className="font-medium text-foreground/85">
+                                      Reaproveitamento:
+                                    </span>{" "}
+                                    cadastro automático planejado (modo batch) como{" "}
+                                    <span className="font-medium text-foreground">
+                                      {labSuggestedNewName || "—"}
+                                    </span>
+                                    .
+                                  </p>
+                                ) : labBlockedNew ? (
+                                  <p className="text-muted-foreground">
+                                    <span className="font-medium text-foreground/85">
+                                      Reaproveitamento:
+                                    </span>{" "}
+                                    sugestão de produto novo bloqueada quando o match é
+                                    considerado confiável.
+                                  </p>
+                                ) : (
+                                  <p className="text-muted-foreground">
+                                    <span className="font-medium text-foreground/85">
+                                      Reaproveitamento:
+                                    </span>{" "}
+                                    vínculo fraco ou pendente — validar duplicidade.
+                                  </p>
+                                )}
+                                {labCostPrimary != null ? (
+                                  <p className="text-muted-foreground">
+                                    <span className="font-medium text-foreground/85">
+                                      Custo sugerido (un. prim.):
+                                    </span>{" "}
+                                    {formatPreviewBrl(labCostPrimary)}
+                                    {labQtyPrimary != null ? (
+                                      <>
+                                        {" "}
+                                        <span className="text-border">·</span> qtd prim.{" "}
+                                        <span className="font-mono tabular-nums">
+                                          {labQtyPrimary}
+                                        </span>
+                                      </>
+                                    ) : null}
+                                    {!labLineOk ? (
+                                      <span className="ml-1 text-amber-700 dark:text-amber-400">
+                                        (NF-e: q×v ≠ total)
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                ) : null}
+                                {labTrace ? (
+                                  <p
+                                    className="font-mono text-[0.65rem] text-muted-foreground break-words"
+                                    title={labTrace}
+                                  >
+                                    {labTrace}
+                                  </p>
+                                ) : null}
+                                {labReasons.length > 0 ? (
+                                  <p className="text-amber-900/90 dark:text-amber-200/95">
+                                    <span className="font-medium">Motivos:</span>{" "}
+                                    {labReasons.join(", ")}
+                                  </p>
+                                ) : null}
+                                {labActions.length > 0 ? (
+                                  <ul className="list-inside list-disc space-y-0.5 text-muted-foreground">
+                                    {labActions.map((a, j) => (
+                                      <li key={j}>{a}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                           <span
                             className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/40 text-muted-foreground sm:flex sm:h-10 sm:w-10"
@@ -930,7 +1194,7 @@ function NfePreviewSimulationTable({
       </div>
 
       <h3 className="text-sm font-semibold">
-        Simulação por linha (raw vs ajustado vs match)
+        Simulação por linha (visão de validação IA)
       </h3>
       {hasAi && aiMeta?.enabled === true ? (
         <div className="rounded-md border border-dashed bg-muted/15 px-3 py-2 text-xs space-y-1">
@@ -953,6 +1217,11 @@ function NfePreviewSimulationTable({
           ) : null}
         </div>
       ) : null}
+      <div className="rounded-md border bg-emerald-500/5 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-100">
+        <strong>Resultado final (contexto aplicado):</strong> esta tabela é a
+        decisão efetiva do laboratório (`unitSuggestion` + `previewLineDecision`),
+        incluindo conversões sugeridas para criar.
+      </div>
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full caption-bottom border-collapse text-xs">
           <thead>
@@ -965,25 +1234,33 @@ function NfePreviewSimulationTable({
               <th className="p-2 text-right font-medium">Qtd ajust.</th>
               <th className="p-2 font-medium">Sugerido</th>
               <th className="p-2 font-medium">Un. cadastro</th>
+              <th className="p-2 font-medium">Un. sugerida</th>
+              <th className="p-2 font-medium">Conversões faltantes</th>
+              <th className="p-2 font-medium">Derivadas padrão</th>
+              <th className="max-w-[140px] p-2 font-medium">Revisão (lab)</th>
+              <th className="p-2 text-right font-medium">Custo / UN prim.</th>
+              <th className="p-2 font-medium">Reuso</th>
               <th className="p-2 text-right font-medium">Conversão</th>
               <th className="p-2 text-right font-medium">Stock qty</th>
               <th className="p-2 text-right font-medium">V. unit. ajust.</th>
-              {hasAi ? (
-                <>
-                  <th className="p-2 font-medium bg-primary/5">IA stock</th>
-                  <th className="p-2 font-medium bg-primary/5">IA fator</th>
-                  <th className="p-2 font-medium bg-primary/5">IA un.</th>
-                  <th className="p-2 text-right font-medium bg-primary/5">IA conf.</th>
-                  <th className="p-2 font-medium bg-primary/5">IA auto?</th>
-                  <th className="max-w-[120px] p-2 font-medium bg-primary/5">
-                    IA nome
-                  </th>
-                </>
-              ) : null}
             </tr>
           </thead>
           <tbody>
             {items.map((it, i) => {
+              const rawIt = rawItems[i] ?? null;
+              const rawKey = consolidationKey({
+                productName: String(it.productName ?? ""),
+                quantity: Number(it.quantity ?? 0) || 0,
+                unitValue: Number(it.unitValue ?? 0) || 0,
+                lineTotal: Number(it.lineTotal ?? 0) || 0,
+                unitCommercial:
+                  it.unitCommercial != null ? String(it.unitCommercial) : null,
+                unitTax: it.unitTax != null ? String(it.unitTax) : null,
+                invoiceUnitRaw: null,
+                ncm: it.ncm != null ? String(it.ncm) : null,
+                ean: it.ean != null ? String(it.ean) : null,
+              });
+              const rawNameByKey = rawNameByConsolidationKey.get(rawKey) ?? null;
               const sim = it._preview_line_simulation as
                 | Record<string, unknown>
                 | undefined;
@@ -1028,54 +1305,77 @@ function NfePreviewSimulationTable({
                 sim?.catalogNameForRegistration != null
                   ? String(sim.catalogNameForRegistration)
                   : String(it.productName ?? "—");
-              const ai = it._preview_line_ai_units as
+              const unitSuggestion = sim?.unitSuggestion as
                 | Record<string, unknown>
                 | undefined;
-              const aiKind = ai?.kind != null ? String(ai.kind) : "";
-              const aiStock =
-                aiKind === "OK" && ai?.stock_quantity_suggested != null
-                  ? String(ai.stock_quantity_suggested)
-                  : aiKind === "SKIP" || aiKind === "ERROR"
-                    ? "—"
-                    : ai?.skipped === true
-                      ? "—"
-                      : "—";
-              const aiFactor =
-                aiKind === "OK" && ai?.conversion_factor_per_invoice_unit != null
-                  ? String(ai.conversion_factor_per_invoice_unit)
+              const suggestedPrimaryUnit =
+                unitSuggestion?.primary_unit_code != null
+                  ? String(unitSuggestion.primary_unit_code)
                   : "—";
-              const aiUnit =
-                aiKind === "OK" && ai?.catalog_unit_target != null
-                  ? String(ai.catalog_unit_target)
+              const suggestedConversions = Array.isArray(
+                unitSuggestion?.suggested_conversions,
+              )
+                ? (unitSuggestion.suggested_conversions as Array<Record<string, unknown>>)
+                : [];
+              const suggestedConversionSummary = suggestedConversions.length > 0
+                ? suggestedConversions.map((c) => String(c.relation ?? "—")).join(" | ")
+                : "—";
+              const derivedSummary = suggestedConversions.flatMap((c) => {
+                if (!Array.isArray(c.derived_standard)) return [];
+                return (c.derived_standard as Array<Record<string, unknown>>).map((d) =>
+                  `1 UN = ${String(d.qty_for_1_un ?? "—")} ${
+                    String(d.unit_code ?? "").toUpperCase()
+                  }`
+                );
+              }).join(" | ") || "—";
+              const rowPld = sim?.previewLineDecision as
+                | Record<string, unknown>
+                | undefined;
+              const rowManual = rowPld?.manual_review as
+                | Record<string, unknown>
+                | undefined;
+              const rowCost = rowPld?.cost_suggestion as
+                | Record<string, unknown>
+                | undefined;
+              const rowReuse = rowPld?.match_reuse as
+                | Record<string, unknown>
+                | undefined;
+              const rowLabStatusRaw =
+                rowManual?.status != null ? String(rowManual.status) : "—";
+              const rowLabStatus =
+                rowLabStatusRaw !== "—"
+                  ? labManualStatusLabelPt(rowLabStatusRaw)
                   : "—";
-              const aiConf =
-                aiKind === "OK" && ai?.confidence != null
-                  ? String(ai.confidence)
+              const rowLabReasonsRaw = Array.isArray(rowManual?.reason_codes)
+                ? (rowManual.reason_codes as unknown[]).map((x) => String(x))
+                : [];
+              const rowLabReasons =
+                rowLabReasonsRaw.length > 0
+                  ? rowLabReasonsRaw.map(labReasonLabelPt).join(" · ")
                   : "—";
-              const aiAuto =
-                aiKind === "OK" && ai?.would_substitute_stock === true
+              const rowLabReviewSummary =
+                rowLabStatus !== "—"
+                  ? `${rowLabStatus}${rowLabReasons !== "—" && rowLabReasons !== "" ? ` · ${rowLabReasons}` : ""}`
+                  : "—";
+              const rowCostPrimary =
+                rowCost?.unit_cost_in_primary != null &&
+                Number.isFinite(Number(rowCost.unit_cost_in_primary))
+                  ? formatPreviewBrl(Number(rowCost.unit_cost_in_primary))
+                  : "—";
+              const rowReuseLabel =
+                rowReuse?.reused_existing_product === true
                   ? "sim"
-                  : aiKind === "OK"
+                  : rowReuse?.reused_existing_product === false
                     ? "não"
                     : "—";
-              const aiName =
-                aiKind === "OK" && ai?.cleaned_product_name != null
-                  ? String(ai.cleaned_product_name)
-                  : "—";
-              const aiInterpret =
-                aiKind === "OK" && ai?.interpretation != null
-                  ? String(ai.interpretation)
-                  : null;
-              const aiNote =
-                aiKind === "ERROR" && ai?.message != null
-                  ? String(ai.message)
-                  : aiKind === "SKIP" && ai?.rationale != null
-                    ? String(ai.rationale)
-                    : null;
               return (
                 <tr key={i} className="border-b border-border/60 align-top">
                   <td className="max-w-[160px] p-2 font-mono">
-                    {String(it.productName ?? "—")}
+                    {rawNameByKey != null
+                      ? rawNameByKey
+                      : rawIt?.productName != null
+                      ? String(rawIt.productName)
+                      : "—"}
                   </td>
                   <td className="max-w-[140px] p-2 font-mono text-muted-foreground">
                     {catalogName}
@@ -1086,53 +1386,143 @@ function NfePreviewSimulationTable({
                   <td className="p-2 text-right font-mono">{qtyAdj}</td>
                   <td className="max-w-[140px] p-2">{suggested}</td>
                   <td className="p-2 font-mono">{catUnit}</td>
+                  <td className="p-2 font-mono">{suggestedPrimaryUnit}</td>
+                  <td className="max-w-[220px] p-2">{suggestedConversionSummary}</td>
+                  <td className="max-w-[220px] p-2">{derivedSummary}</td>
+                  <td className="max-w-[140px] p-2 text-[11px] leading-snug">
+                    {rowLabReviewSummary}
+                  </td>
+                  <td className="p-2 text-right font-mono">{rowCostPrimary}</td>
+                  <td className="p-2 font-mono">{rowReuseLabel}</td>
                   <td className="p-2 text-right font-mono">{conv}</td>
                   <td className="p-2 text-right font-mono">{stock}</td>
                   <td className="p-2 text-right font-mono">{vu}</td>
-                  {hasAi ? (
-                    <>
-                      <td className="p-2 text-right font-mono bg-primary/5">
-                        {aiStock}
-                        {aiInterpret ? (
-                          <span className="block text-[10px] text-muted-foreground font-normal">
-                            {aiInterpret.slice(0, 100)}
-                            {aiInterpret.length > 100 ? "…" : ""}
-                          </span>
-                        ) : null}
-                        {aiNote ? (
-                          <span className="block text-[10px] text-destructive/80 font-normal">
-                            {aiNote.slice(0, 80)}
-                            {aiNote.length > 80 ? "…" : ""}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="p-2 text-right font-mono bg-primary/5">
-                        {aiFactor}
-                      </td>
-                      <td className="p-2 font-mono bg-primary/5">
-                        {aiUnit}
-                        {aiKind === "OK" &&
-                        ai?.catalog_unit_needs_review === true ? (
-                          <span className="mt-0.5 block text-[10px] font-normal text-amber-800 dark:text-amber-300">
-                            Rever código (nota não mapeada)
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="p-2 text-right font-mono bg-primary/5">
-                        {aiConf}
-                      </td>
-                      <td className="p-2 font-mono bg-primary/5">{aiAuto}</td>
-                      <td className="max-w-[120px] p-2 font-mono bg-primary/5">
-                        {aiName}
-                      </td>
-                    </>
-                  ) : null}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {hasAi ? (
+        <>
+          <div className="rounded-md border bg-primary/5 px-3 py-2 text-xs text-primary/95">
+            <strong>Diagnóstico IA bruto (LLM):</strong> comparação do retorno cru
+            do modelo; não substitui a decisão final do contexto.
+          </div>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full caption-bottom border-collapse text-xs">
+              <thead>
+                <tr className="border-b bg-primary/5 text-left">
+                  <th className="p-2 font-medium">Produto (nota)</th>
+                  <th className="p-2 font-medium">IA nome</th>
+                  <th className="p-2 font-medium">IA un. bruta</th>
+                  <th className="p-2 text-right font-medium">IA stock bruto</th>
+                  <th className="p-2 text-right font-medium">IA fator bruto</th>
+                  <th className="p-2 text-right font-medium">IA conf.</th>
+                  <th className="p-2 font-medium">IA auto?</th>
+                  <th className="max-w-[260px] p-2 font-medium">Sugestão conversão (bruta)</th>
+                  <th className="max-w-[260px] p-2 font-medium">Interpretação / nota</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => {
+                  const rawIt = rawItems[i] ?? null;
+                  const rawKey = consolidationKey({
+                    productName: String(it.productName ?? ""),
+                    quantity: Number(it.quantity ?? 0) || 0,
+                    unitValue: Number(it.unitValue ?? 0) || 0,
+                    lineTotal: Number(it.lineTotal ?? 0) || 0,
+                    unitCommercial:
+                      it.unitCommercial != null ? String(it.unitCommercial) : null,
+                    unitTax: it.unitTax != null ? String(it.unitTax) : null,
+                    invoiceUnitRaw: null,
+                    ncm: it.ncm != null ? String(it.ncm) : null,
+                    ean: it.ean != null ? String(it.ean) : null,
+                  });
+                  const rawNameByKey = rawNameByConsolidationKey.get(rawKey) ?? null;
+                  const sim = it._preview_line_simulation as
+                    | Record<string, unknown>
+                    | undefined;
+                  const ai = it._preview_line_ai_units as
+                    | Record<string, unknown>
+                    | undefined;
+                  const aiKind = ai?.kind != null ? String(ai.kind) : "";
+                  const aiName =
+                    aiKind === "OK" && ai?.cleaned_product_name != null
+                      ? String(ai.cleaned_product_name)
+                      : "—";
+                  const aiUnitRaw =
+                    aiKind === "OK" && ai?.catalog_unit_target != null
+                      ? String(ai.catalog_unit_target)
+                      : "—";
+                  const aiStockRaw =
+                    aiKind === "OK" && ai?.stock_quantity_suggested != null
+                      ? String(ai.stock_quantity_suggested)
+                      : "—";
+                  const aiFactorRaw =
+                    aiKind === "OK" && ai?.conversion_factor_per_invoice_unit != null
+                      ? String(ai.conversion_factor_per_invoice_unit)
+                      : "—";
+                  const aiConf =
+                    aiKind === "OK" && ai?.confidence != null
+                      ? String(ai.confidence)
+                      : "—";
+                  const aiAuto =
+                    aiKind === "OK" && ai?.would_substitute_stock === true
+                      ? "sim"
+                      : aiKind === "OK"
+                        ? "não"
+                        : "—";
+                  const aiInterpret =
+                    aiKind === "OK" && ai?.interpretation != null
+                      ? String(ai.interpretation)
+                      : null;
+                  const aiNote =
+                    aiKind === "ERROR" && ai?.message != null
+                      ? String(ai.message)
+                      : aiKind === "SKIP" && ai?.rationale != null
+                        ? String(ai.rationale)
+                        : null;
+                  const unitNote =
+                    sim?.invoiceUnitRaw != null
+                      ? String(sim.invoiceUnitRaw)
+                      : String(it.unitCommercial ?? it.unitTax ?? "—");
+                  const factorNum = Number(aiFactorRaw);
+                  const aiRawConversionHint =
+                    aiKind === "OK" &&
+                    aiUnitRaw !== "—" &&
+                    unitNote !== "—" &&
+                    Number.isFinite(factorNum) &&
+                    factorNum > 0
+                      ? `1 ${unitNote.toUpperCase()} = ${factorNum} ${aiUnitRaw.toUpperCase()}`
+                      : "—";
+                  return (
+                    <tr key={i} className="border-b border-border/60 align-top">
+                      <td className="max-w-[180px] p-2 font-mono">
+                        {rawNameByKey != null
+                          ? rawNameByKey
+                          : rawIt?.productName != null
+                          ? String(rawIt.productName)
+                          : "—"}
+                      </td>
+                      <td className="max-w-[180px] p-2 font-mono">{aiName}</td>
+                      <td className="p-2 font-mono">{aiUnitRaw}</td>
+                      <td className="p-2 text-right font-mono">{aiStockRaw}</td>
+                      <td className="p-2 text-right font-mono">{aiFactorRaw}</td>
+                      <td className="p-2 text-right font-mono">{aiConf}</td>
+                      <td className="p-2 font-mono">{aiAuto}</td>
+                      <td className="max-w-[260px] p-2">{aiRawConversionHint}</td>
+                      <td className="max-w-[260px] p-2 text-[11px] leading-snug text-muted-foreground">
+                        {aiInterpret != null ? aiInterpret : aiNote ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
       {items.some(
         (it) =>
           (it._preview_line_simulation as Record<string, unknown> | undefined)
@@ -1143,9 +1533,9 @@ function NfePreviewSimulationTable({
           <strong className="font-medium text-foreground">Nome p/ cadastro</strong>{" "}
           é o que a importação em lote gravaria ao criar produto novo (trecho
           “N un / cx / …” removido).{" "}
-          <code className="rounded bg-muted px-1">stock qty</code> vem do match
-          (regras + heurísticas). Colunas <strong>IA</strong> são só laboratório;
-          <strong>IA auto?</strong> = sim só com confiança alta e totais coerentes.
+          <code className="rounded bg-muted px-1">stock qty</code> e conversões
+          para criar vêm do contexto final (`unitSuggestion` / `previewLineDecision`).
+          A tabela de diagnóstico mostra apenas a saída bruta do modelo para auditoria.
         </p>
       ) : null}
     </div>

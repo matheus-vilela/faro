@@ -28,6 +28,10 @@ import {
 } from "@/lib/companyUnits/productUnitOptions";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { OPERATIONAL_ITEM_TYPES } from "@/lib/itemClassification/operationalItemTypes";
+import {
+  importPendingReasonBadgeLabel,
+  readPendingPayloadReasonCode,
+} from "@/lib/importPending/pendingReasonUi";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -52,6 +56,8 @@ type PendingRow = {
   detail: string | null;
   payload: Record<string, unknown> | null;
   created_at: string;
+  expense_id: string | null;
+  expense_item_id: string | null;
 };
 
 type PendingProductRow = {
@@ -91,7 +97,9 @@ function normalizeCustomUnitCode(raw: string) {
 
 function readPayloadProductId(payload: Record<string, unknown> | null): string | null {
   if (!payload) return null;
-  const ownTarget = String(payload.target_product_id ?? payload.product_id ?? payload.productId ?? "").trim();
+  const ownTarget = String(
+    payload.target_product_id ?? payload.product_id ?? payload.productId ?? "",
+  ).trim();
   if (ownTarget) return ownTarget;
   const match = payload.productMatch as Record<string, unknown> | undefined;
   const nested = String(match?.resolvedProductId ?? match?.suggestedProductId ?? "").trim();
@@ -157,7 +165,7 @@ export function DashboardAlertsCard({
     setLoadingPending(true);
     let q = supabase
       .from("import_review_pending")
-      .select("id, kind, status, title, detail, payload, created_at")
+      .select("id, kind, status, title, detail, payload, created_at, expense_id, expense_item_id")
       .eq("company_id", currentCompany.id)
       .order("created_at", { ascending: false })
       .limit(300);
@@ -516,11 +524,8 @@ export function DashboardAlertsCard({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">Todos tipos</SelectItem>
-                            <SelectItem value="missing_conversion">Sem conversão</SelectItem>
-                            <SelectItem value="missing_category">Sem categoria</SelectItem>
-                            <SelectItem value="unit_conflict">Conflito de unidade</SelectItem>
-                            <SelectItem value="possible_duplicate">Possível duplicidade</SelectItem>
-                            <SelectItem value="missing_product_match">Sem vínculo de produto</SelectItem>
+                            <SelectItem value="missing_conversion">Revisão de linha / conversão</SelectItem>
+                            <SelectItem value="missing_product_match">Legado — vínculo (sem despesa)</SelectItem>
                             <SelectItem value="catalog_reconciliation">Catálogo (agrupamentos)</SelectItem>
                           </SelectContent>
                         </Select>
@@ -598,6 +603,10 @@ export function DashboardAlertsCard({
                             selectedUnit || importedUnitRaw || "un",
                             customUnitAliasOptions,
                           );
+                          const reasonCode = readPendingPayloadReasonCode(r.payload);
+                          const payloadProductName = String(
+                            (r.payload as Record<string, unknown> | null)?.product_name ?? "",
+                          ).trim();
                           return (
                             <div
                               key={r.id}
@@ -607,7 +616,24 @@ export function DashboardAlertsCard({
                               )}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className={cn("text-sm font-medium", isResolved && "text-emerald-700 dark:text-emerald-300")}>{r.title}</p>
+                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                                  {r.kind === "missing_conversion" && reasonCode ? (
+                                    <Badge
+                                      variant="secondary"
+                                      className="shrink-0 text-[11px] font-semibold uppercase tracking-wide"
+                                    >
+                                      {importPendingReasonBadgeLabel(reasonCode)}
+                                    </Badge>
+                                  ) : null}
+                                  <p
+                                    className={cn(
+                                      "min-w-0 text-sm font-medium",
+                                      isResolved && "text-emerald-700 dark:text-emerald-300",
+                                    )}
+                                  >
+                                    {r.title}
+                                  </p>
+                                </div>
                                 <div className="flex items-center gap-2">
                                   {isResolved ? (
                                     <Badge variant="outline" className="border-emerald-500 text-emerald-700 dark:text-emerald-300">
@@ -618,8 +644,18 @@ export function DashboardAlertsCard({
                                   <span className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("pt-BR")}</span>
                                 </div>
                               </div>
+                              {r.detail ? (
+                                <p className="mt-2 text-sm leading-snug text-muted-foreground">{r.detail}</p>
+                              ) : null}
                               {!isResolved ? (
                                 <>
+                                  {isOpen && !productId && r.kind === "missing_conversion" ? (
+                                    <p className="mt-2 text-sm text-muted-foreground">
+                                      {payloadProductName
+                                        ? `Linha na NF: ${payloadProductName}. Abra a despesa para vincular o produto e conferir valores.`
+                                        : "Abra a despesa para vincular o produto e conferir valores."}
+                                    </p>
+                                  ) : null}
                                   {isOpen && productId && product ? (
                                     <div className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3">
                                       <div className="grid gap-1.5">
@@ -693,7 +729,16 @@ export function DashboardAlertsCard({
                                 </>
                               ) : null}
                               {isOpen ? (
-                                <div className="mt-2 flex gap-2">
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {r.expense_id ? (
+                                    <Button size="sm" variant="secondary" asChild>
+                                      <Link
+                                        to={`/app/despesas?expense=${encodeURIComponent(r.expense_id)}`}
+                                      >
+                                        Abrir despesa
+                                      </Link>
+                                    </Button>
+                                  ) : null}
                                   <Button size="sm" onClick={() => void closePending(r.id, "RESOLVED")} disabled={busy === r.id}>
                                     Resolver
                                   </Button>

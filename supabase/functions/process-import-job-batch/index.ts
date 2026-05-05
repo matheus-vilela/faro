@@ -9,6 +9,11 @@ import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.t
 import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
 import { embedSingleProductIfMissing } from "../_shared/productEmbedding.ts";
 import { mapInvoiceUnitToCatalogUnit } from "../_shared/productImport/invoiceUnitToCatalogUnit.ts";
+import {
+  batchImportReviewPendingTitleDetail,
+  compactProductMatchForPendingPayload,
+  importJobItemPendingReason,
+} from "../_shared/productImport/batchImportPendingMessaging.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -654,7 +659,7 @@ Deno.serve(async (req) => {
               product_name: String(item.productName ?? ""),
               status: needsConfirmation ? "PENDING_REVIEW" : "COMPLETED",
               classification_type: needsConfirmation ? "REVISAO_PENDENTE" : "PRODUTO_ESTOCAVEL",
-              pending_reason: needsConfirmation ? "Conflito de unidade/baixa confiança" : null,
+              pending_reason: needsConfirmation ? importJobItemPendingReason(pm) : null,
               payload: item,
             })
               .select("id")
@@ -689,22 +694,12 @@ Deno.serve(async (req) => {
             if (rawInsErr) throw new Error(rawInsErr.message);
             rawRowIdsOrdered.push(String(rawIns?.id ?? ""));
             itemIndex += 1;
-            if (needsConfirmation) {
-              pendingForFile += 1;
-              await markPending(supabase, {
-                company_id: companyId,
-                batch_id: batchId,
-                file_id: fileId,
-                kind: "missing_product_match",
-                title: `Item requer revisão: ${String(item.productName ?? "item")}`,
-                detail: "Baixa confiança no vínculo de produto para importação XML.",
-                payload: item as Record<string, unknown>,
-              });
-            }
             finalItems.push({
               ...item,
               productId,
               import_pending_resolution: needsConfirmation || !productId,
+              import_job_item_id: ijInserted?.id ?? null,
+              onboarding_import_item_raw_id: rawIns?.id ?? null,
             });
           }
 
@@ -837,6 +832,14 @@ Deno.serve(async (req) => {
             }
             if (!productId || it.import_pending_resolution === true) {
               pendingForFile += 1;
+              const linePm = it.productMatch as Record<string, unknown> | undefined;
+              const lineProductId = String(it.productId ?? "").trim() || null;
+              const { title: pendingTitle, detail: pendingDetail, reason_code } =
+                batchImportReviewPendingTitleDetail({
+                  productName: String(it.productName ?? ""),
+                  pm: linePm,
+                  missingProduct: !lineProductId,
+                });
               await markPending(supabase, {
                 company_id: companyId,
                 batch_id: batchId,
@@ -844,8 +847,21 @@ Deno.serve(async (req) => {
                 expense_id: expenseId,
                 expense_item_id: String(insItem.id),
                 kind: "missing_conversion",
-                title: `Conversão/revisão pendente para ${String(it.productName ?? "item")}`,
-                detail: "Item importado sem resolução segura para estoque.",
+                title: pendingTitle,
+                detail: pendingDetail,
+                payload: {
+                  reason_code,
+                  productId: lineProductId,
+                  target_product_id: lineProductId,
+                  product_name: String(it.productName ?? ""),
+                  unitCommercial: it.unitCommercial,
+                  quantity: it.quantity,
+                  unitValue: it.unitValue,
+                  lineTotal: it.lineTotal,
+                  productMatch: compactProductMatchForPendingPayload(linePm),
+                  import_job_item_id: it.import_job_item_id ?? null,
+                  onboarding_import_item_raw_id: it.onboarding_import_item_raw_id ?? null,
+                },
               });
             }
           }

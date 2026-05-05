@@ -1,6 +1,7 @@
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import {
   applySecondarySignals,
+  isFlavorOnlyCatalogInsideCompositeInvoice,
   scoreNameMatch,
 } from "../_shared/productImport/matchingScore.ts";
 import {
@@ -30,7 +31,10 @@ import {
   unitsAreEqual,
   type NormalizedUnitCode,
 } from "../_shared/productImport/unitNormalize.ts";
-import { assistBorderlineProductMatch } from "../_shared/productImport/productMatchLlmAssist.ts";
+import {
+  assistBorderlineProductMatch,
+  assistImportColdNewProduct,
+} from "../_shared/productImport/productMatchLlmAssist.ts";
 import {
   augmentScoredListWithVectorNeighbors,
   ensureCompanyProductNameEmbeddings,
@@ -194,13 +198,27 @@ function enrichProductMatch(
 ): NonNullable<ItemWithProductMatch["productMatch"]> {
   const catU = normalizeUnitLabel(product.unit);
   const rule = equivRule ?? pickProductUnitRule(rules, invoiceU, catU);
-  const c = computeStockQuantity({
+  /** Novo produto com nome já sugerido: não comparar unidade com o «melhor» candidato do catálogo (evita falso conflito). */
+  const stagingNewWithSuggestedName =
+    (!partial.resolvedProductId ||
+      String(partial.resolvedProductId).trim() === "") &&
+    String(partial.borderlineLlmSuggestedName ?? "").trim() !== "";
+  let c = computeStockQuantity({
     invoiceQuantity: Number(it.quantity),
     invoiceUnit: invoiceU,
     productUnitRaw: product.unit,
     autoApplyGlobalMassVolume: autoGlobal,
     productRule: rule,
   });
+  if (stagingNewWithSuggestedName) {
+    const q = Math.max(0.0001, Number(it.quantity));
+    c = {
+      stockQuantity: q,
+      conversionFactorApplied: 1,
+      resolutionSource: "DIRECT_UNIT_MATCH",
+      needsUserConfirmation: false,
+    };
+  }
   let resolved = partial.resolvedProductId;
   let needs = partial.needsConfirmation;
   let st = partial.resolutionStatus;
@@ -611,6 +629,52 @@ export async function resolveProductMatches(
       }
     }
 
+    const normInvoice = normalizeInvoiceProductLabel(name);
+    const exactNameHits = products.filter(
+      (p) => normalizeInvoiceProductLabel(p.name) === normInvoice,
+    );
+    if (exactNameHits.length > 0) {
+      let pPick: ProductRow;
+      if (exactNameHits.length === 1) {
+        pPick = exactNameHits[0]!;
+      } else {
+        const unitOk = exactNameHits.find((p) =>
+          unitsAreEqual(invoiceU, normalizeUnitLabel(p.unit)),
+        );
+        pPick = unitOk ?? exactNameHits[0]!;
+      }
+      const catUe = normalizeUnitLabel(pPick.unit);
+      const prulesE = rulesByProduct.get(pPick.id) ?? [];
+      const mExact = enrichProductMatch(
+        it,
+        {
+          resolvedProductId: pPick.id,
+          suggestedProductId: pPick.id,
+          suggestedProductName: pPick.name,
+          suggestedScore: 100,
+          needsConfirmation: false,
+          resolutionStatus: "AUTO_MATCH",
+          matchReason: "Nome normalizado idêntico ao cadastro",
+          invoiceUnitNormalized: invoiceU,
+          catalogUnitNormalized: catUe,
+          unitConvertible: false,
+          decisionPath: "exact_normalized_name",
+        },
+        pPick,
+        invoiceU,
+        autoApplyGlobalMassVolume,
+        prulesE,
+        null,
+      );
+      if (mExact.needsConfirmation) requiresProductConfirmation = true;
+      out.push({
+        ...it,
+        productId: mExact.resolvedProductId,
+        productMatch: mExact,
+      });
+      continue;
+    }
+
     type Scored = { product: ProductRow; score: number; detail: string };
     const scoredList: Scored[] = [];
 
@@ -651,7 +715,8 @@ export async function resolveProductMatches(
     }
 
     if (!scoredList.length) {
-      requiresProductConfirmation = true;
+      const autoNewEmpty = opts?.importBatch === true;
+      if (!autoNewEmpty) requiresProductConfirmation = true;
       out.push({
         ...it,
         productId: null,
@@ -660,13 +725,16 @@ export async function resolveProductMatches(
           suggestedProductId: null,
           suggestedProductName: null,
           suggestedScore: 0,
-          needsConfirmation: true,
+          needsConfirmation: !autoNewEmpty,
           resolutionStatus: "NEW_PRODUCT_STAGED",
-          matchReason: "Catálogo vazio ou sem candidato",
+          matchReason: autoNewEmpty
+            ? "Catálogo vazio — cadastro automático com nome da nota."
+            : "Catálogo vazio ou sem candidato",
           invoiceUnitNormalized: invoiceU,
           catalogUnitNormalized: "UNKN",
           unitConvertible: false,
           decisionPath: "catalog_empty_or_no_candidates",
+          borderlineLlmSuggestedName: autoNewEmpty ? name.trim() : undefined,
         },
       });
       continue;
@@ -678,6 +746,18 @@ export async function resolveProductMatches(
 
     const autoTh = thresholds.autoMatchMinScore;
     const confMin = thresholds.confirmMinScore;
+
+    const topK = opts?.importBatch ? 12 : 5;
+    const LLM_LINK_MIN_SCORE = 52;
+    const safeForLink = (s: Scored) =>
+      s.score >= LLM_LINK_MIN_SCORE &&
+      !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name);
+    const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
+
+    const importBatchNoSafeLink =
+      opts?.importBatch === true &&
+      bestScore < autoTh &&
+      linkCandidates.length === 0;
 
     let catU = normalizeUnitLabel(bestProduct.unit);
     let decision = decideWithUnits({
@@ -693,37 +773,58 @@ export async function resolveProductMatches(
     let borderlineLlmSuggestedName: string | undefined;
 
     const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
-    const importXmlColdLlm =
+    const importBatchLlmEligible =
       opts?.importBatch === true &&
       bestScore < autoTh &&
-      openaiKey &&
+      !!openaiKey &&
       borderlineLlmRemaining > 0;
 
     const runBorderlineLlm =
-      inBorderlineScoreBand && llmBorderlineMatchEnabled && openaiKey &&
+      inBorderlineScoreBand &&
+      llmBorderlineMatchEnabled &&
+      !!openaiKey &&
       borderlineLlmRemaining > 0;
-    const runImportColdLlm = importXmlColdLlm;
 
-    if (runBorderlineLlm || runImportColdLlm) {
-      const topK = opts?.importBatch ? 12 : 5;
-      const topN = scoredList.slice(0, topK);
-      const candidates = topN.map((s) => ({
-        product_id: s.product.id,
-        product_name: s.product.name,
-        catalog_unit: s.product.unit ?? null,
-        similarity_score_0_100: Math.round(s.score * 10) / 10,
-      }));
+    const useColdNewOnly =
+      importBatchLlmEligible && linkCandidates.length === 0;
+    const useBorderlineAssist =
+      linkCandidates.length > 0 &&
+      (importBatchLlmEligible || runBorderlineLlm);
 
-      borderlineLlmRemaining -= 1;
-      borderlineLlmCalls += 1;
+    const canInvokeLlm =
+      !!openaiKey &&
+      borderlineLlmRemaining > 0 &&
+      (useColdNewOnly || useBorderlineAssist);
 
-      const assist = await assistBorderlineProductMatch(openaiKey, openaiModel, {
-        invoice_description: name,
-        invoice_unit_raw: rawUnit ?? null,
-        invoice_ean: itemEan ? String(itemEan) : null,
-        candidates,
-        mode: opts?.importBatch ? "import_xml_batch" : "borderline",
-      });
+    if (canInvokeLlm) {
+      let assist: Awaited<ReturnType<typeof assistBorderlineProductMatch>>;
+      if (useColdNewOnly) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+        assist = await assistImportColdNewProduct(openaiKey, openaiModel, {
+          invoice_description: name,
+          invoice_unit_raw: rawUnit ?? null,
+          invoice_ean: itemEan ? String(itemEan) : null,
+        });
+      } else if (useBorderlineAssist) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+        const candidates = linkCandidates.map((s) => ({
+          product_id: s.product.id,
+          product_name: s.product.name,
+          catalog_unit: s.product.unit ?? null,
+          similarity_score_0_100: Math.round(s.score * 10) / 10,
+        }));
+        assist = await assistBorderlineProductMatch(openaiKey, openaiModel, {
+          invoice_description: name,
+          invoice_unit_raw: rawUnit ?? null,
+          invoice_ean: itemEan ? String(itemEan) : null,
+          candidates,
+          mode: opts?.importBatch ? "import_xml_batch" : "borderline",
+        });
+      } else {
+        assist = { kind: "SKIP", rationale: "Sem candidatos seguros para IA." };
+      }
 
       if (assist.kind === "LINK") {
         const picked = productById.get(assist.product_id);
@@ -746,20 +847,57 @@ export async function resolveProductMatches(
           borderlineLlmRationale = assist.rationale;
         }
       } else if (assist.kind === "NEW_PRODUCT") {
-        decisionPath = "borderline_llm_new_hint";
+        decisionPath = useColdNewOnly
+          ? "import_llm_cold_new"
+          : "borderline_llm_new_hint";
         borderlineLlmRationale = assist.rationale;
         borderlineLlmSuggestedName = assist.suggested_catalog_name;
       } else if (assist.kind === "SKIP") {
         decisionPath = "borderline_llm_skip";
         borderlineLlmRationale = assist.rationale;
+        if (useColdNewOnly && opts?.importBatch) {
+          borderlineLlmSuggestedName = name.trim();
+          decisionPath = "import_llm_cold_fallback";
+          borderlineLlmRationale = `${assist.rationale} · fallback: nome da nota.`;
+        } else if (
+          opts?.importBatch &&
+          bestScore < autoTh &&
+          useBorderlineAssist
+        ) {
+          borderlineLlmSuggestedName = name.trim();
+          decisionPath = "import_batch_borderline_llm_skip_auto_new";
+          borderlineLlmRationale = `${assist.rationale} · cadastro automático (batch) com nome da nota.`;
+        }
       } else if (assist.kind === "ERROR") {
         decisionPath = "borderline_llm_error";
         borderlineLlmRationale = assist.message;
+        if (useColdNewOnly && opts?.importBatch) {
+          borderlineLlmSuggestedName = name.trim();
+          decisionPath = "import_llm_cold_fallback_error";
+          borderlineLlmRationale = `${assist.message} · fallback: nome da nota.`;
+        } else if (opts?.importBatch && bestScore < autoTh && useBorderlineAssist) {
+          borderlineLlmSuggestedName = name.trim();
+          decisionPath = "import_batch_borderline_llm_error_auto_new";
+          borderlineLlmRationale = `${assist.message} · cadastro automático (batch) com nome da nota.`;
+        }
       }
-    } else if (inBorderlineScoreBand && !importXmlColdLlm) {
+    } else if (importBatchNoSafeLink) {
+      borderlineLlmSuggestedName = name.trim();
+      decisionPath = "import_batch_deterministic_new";
+      borderlineLlmRationale =
+        "Sem candidatos com similaridade mínima no catálogo; cadastro automático com o nome da nota.";
+    } else if (inBorderlineScoreBand && !canInvokeLlm) {
       decisionPath = "scored_borderline_no_llm";
-    } else if (opts?.importBatch && bestScore < autoTh && !openaiKey) {
+    } else if (
+      opts?.importBatch &&
+      bestScore < autoTh &&
+      linkCandidates.length > 0 &&
+      !openaiKey
+    ) {
       decisionPath = "import_batch_no_openai_key";
+      borderlineLlmSuggestedName = name.trim();
+      borderlineLlmRationale =
+        "Sem OpenAI no servidor; cadastro automático (batch) com nome da nota.";
     }
 
     let resolvedId: string | null = null;
@@ -772,8 +910,17 @@ export async function resolveProductMatches(
 
     let needsConfirmation = decision.needsConfirmation || resolvedId == null;
 
-    if (borderlineLlmSuggestedName && decisionPath === "borderline_llm_new_hint") {
-      needsConfirmation = true;
+    if (
+      opts?.importBatch === true &&
+      String(borderlineLlmSuggestedName ?? "").trim() !== ""
+    ) {
+      const blockOnlyUnitOrAmbiguousMatch =
+        decision.resolutionStatus === "UNIT_CONFLICT_PENDING" ||
+        decision.resolutionStatus === "UNIT_VALIDATION_REQUIRED" ||
+        decision.resolutionStatus === "PENDING_USER_CONFIRM";
+      if (!blockOnlyUnitOrAmbiguousMatch) {
+        needsConfirmation = false;
+      }
     }
 
     if (needsConfirmation) {

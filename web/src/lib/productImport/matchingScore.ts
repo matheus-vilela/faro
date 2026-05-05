@@ -1,5 +1,56 @@
 import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName"
 
+/**
+ * Primeiro token da linha da nota sugere produto processado (bebida, polpa, etc.);
+ * não usar para matching genérico (ex.: "água" sozinho).
+ */
+const COMPOSITE_INVOICE_LEADING_TOKENS = new Set([
+  "refrigerante",
+  "refri",
+  "suco",
+  "nectar",
+  "néctar",
+  "nct",
+  "polpa",
+  "xarope",
+  "cha",
+  "chá",
+  "mate",
+  "cerveja",
+  "vodka",
+  "whisky",
+  "whiskey",
+  "energetico",
+  "energético",
+  "isotonico",
+  "isotônico",
+  "gin",
+  "rum",
+  "cachaca",
+  "cachaça",
+])
+
+/**
+ * Cadastro parece ser só sabor/ingrediente (1 token) e a nota é item composto
+ * (≥2 tokens) cujo último token coincide — ex.: catálogo "Morango" vs nota "Refrigerante Morango".
+ * Nesses casos o score por substring não deve empurrar vínculo automático.
+ */
+export function isFlavorOnlyCatalogInsideCompositeInvoice(
+  invoiceLine: string,
+  catalogName: string,
+): boolean {
+  const cx = canonicalProductName(invoiceLine)
+  const cy = canonicalProductName(catalogName)
+  if (!cx || !cy) return false
+  const invTok = cx.split(" ").filter(Boolean)
+  const catTok = cy.split(" ").filter(Boolean)
+  if (catTok.length !== 1 || invTok.length < 2) return false
+  const flavor = catTok[0]!
+  if (invTok[invTok.length - 1] !== flavor) return false
+  const first = invTok[0]!
+  return COMPOSITE_INVOICE_LEADING_TOKENS.has(first)
+}
+
 function levenshtein(a: string, b: string): number {
   const m = a.length
   const n = b.length
@@ -32,7 +83,11 @@ export function scoreNameMatch(invoiceLine: string, catalogName: string): number
     if (cx.includes(cy) || cy.includes(cx)) {
       const shorter = Math.min(cx.length, cy.length)
       const longer = Math.max(cx.length, cy.length)
-      return Math.round(82 + (shorter / longer) * 12)
+      let s = Math.round(82 + (shorter / longer) * 12)
+      if (isFlavorOnlyCatalogInsideCompositeInvoice(invoiceLine, catalogName)) {
+        s = Math.min(s, 68)
+      }
+      return s
     }
     const d = levenshtein(cx, cy)
     const maxLen = Math.max(cx.length, cy.length)
