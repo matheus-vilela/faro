@@ -22,8 +22,8 @@ export function embeddingModelFromEnv(): string {
 }
 
 /** Serialização para RPC `match_products_by_name_embedding` (cast ::vector no Postgres). */
-export function vectorToPgText(vec: number[]): string {
-  if (!vec.length) return "[]";
+export function vectorToPgText(vec: number[] | null | undefined): string {
+  if (!vec || !Array.isArray(vec) || !vec.length) return "[]";
   return `[${vec.map((x) => (Number.isFinite(x) ? x : 0)).join(",")}]`;
 }
 
@@ -32,7 +32,7 @@ export async function embedTextsOpenAI(
   texts: string[],
   model: string,
 ): Promise<number[][]> {
-  if (!apiKey.trim() || texts.length === 0) return [];
+  if (!apiKey.trim() || !Array.isArray(texts) || texts.length === 0) return [];
   const res = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: {
@@ -41,7 +41,10 @@ export async function embedTextsOpenAI(
     },
     body: JSON.stringify({
       model,
-      input: texts.map((t) => (t.length > 8000 ? t.slice(0, 8000) : t)),
+      input: texts.map((t) => {
+        const s = String(t ?? "");
+        return s.length > 8000 ? s.slice(0, 8000) : s;
+      }),
       dimensions: EMBEDDING_DIM,
     }),
   });
@@ -170,7 +173,9 @@ export async function augmentScoredListWithVectorNeighbors(params: {
   let queryVec: number[];
   try {
     const vecs = await embedTextsOpenAI(openaiKey, [invoiceLineName.trim()], model);
-    queryVec = vecs[0]!;
+    const first = vecs[0];
+    if (!first || !Array.isArray(first) || !first.length) return;
+    queryVec = first;
   } catch (e) {
     console.error("[productEmbedding] query embed:", e);
     return;

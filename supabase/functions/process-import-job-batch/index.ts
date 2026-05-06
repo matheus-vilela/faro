@@ -22,9 +22,19 @@ const corsHeaders: Record<string, string> = {
 };
 
 /** Uma sub-ronda curta por invoke (quota CPU da Edge); o resto encadeia via `stillActive`. */
-const MAX_FILES_PER_RUN = 4;
+function intFromEnv(name: string, defaultVal: number, min: number, max: number): number {
+  const raw = Deno.env.get(name)?.trim();
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return defaultVal;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+const MAX_FILES_PER_RUN = intFromEnv("IMPORT_BATCH_MAX_FILES_PER_RUN", 6, 1, 80);
+const STALE_FILE_MINUTES = intFromEnv("IMPORT_BATCH_STALE_FILE_MINUTES", 8, 2, 120);
 
 const LOG = "[process-import-job-batch]";
+/** Após a resposta HTTP, o runtime pode encerrar a instância (`EarlyDrop`) e cancelar trabalho assíncrono.
+ * O encadeamento interno abaixo é melhor esforço; o cliente (`drainProcessImportJobBatch` no web) deve
+ * reinvocar até `remaining_files === 0` para concluir o lote de forma confiável. */
 
 /** Marcador grepável nos logs (`acao` fixo): sempre inclui `unidade` = company_id. */
 function marcador(unidadeId: string, acao: string, detalhes: Record<string, unknown>): void {
@@ -392,12 +402,63 @@ Deno.serve(async (req) => {
     max_ficheiros_neste_invoke: MAX_FILES_PER_RUN,
   });
 
-  const { data: files } = await supabase
+  const staleBeforeIso = new Date(
+    Date.now() - STALE_FILE_MINUTES * 60_000,
+  ).toISOString();
+  const { data: staleRows, error: staleSelErr } = await supabase
+    .from("import_job_files")
+    .select("id")
+    .eq("batch_id", batchId)
+    .eq("status", "PROCESSING")
+    .lt("updated_at", staleBeforeIso)
+    .limit(200);
+  if (!staleSelErr && (staleRows?.length ?? 0) > 0) {
+    const staleIds = (staleRows ?? []).map((r) => String((r as { id?: string }).id ?? "")).filter(Boolean);
+    if (staleIds.length > 0) {
+      const { error: reclaimErr } = await supabase
+        .from("import_job_files")
+        .update({
+          status: "QUEUED",
+          last_error: `Reenfileirado automaticamente após ${STALE_FILE_MINUTES} min sem progresso.`,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", staleIds);
+      if (reclaimErr) {
+        pibLog(
+          execId,
+          "stale_reclaim_erro",
+          { company_id: companyId, batch_id: batchId },
+          reclaimErr.message,
+          { stale_count: staleIds.length },
+        );
+      } else {
+        pibLog(
+          execId,
+          "stale_reclaim_ok",
+          { company_id: companyId, batch_id: batchId },
+          "ficheiros PROCESSING stale reenfileirados",
+          { stale_count: staleIds.length, stale_minutes: STALE_FILE_MINUTES },
+        );
+      }
+    }
+  }
+
+  const { data: files, error: filesSelErr } = await supabase
     .from("import_job_files")
     .select("id, file_name, xml_hash, xml_content_base64")
     .eq("batch_id", batchId)
     .in("status", ["QUEUED", "PROCESSING"])
     .order("created_at", { ascending: true });
+  if (filesSelErr) {
+    pibLog(
+      execId,
+      "ficheiros_select_erro",
+      { company_id: companyId, batch_id: batchId },
+      filesSelErr.message,
+      {},
+    );
+    return json({ ok: false, error: `Falha ao listar arquivos do lote: ${filesSelErr.message}` }, 500);
+  }
 
   const filesQueued = (files ?? []).length;
   const chunkLen = Math.min(MAX_FILES_PER_RUN, filesQueued);
@@ -465,8 +526,62 @@ Deno.serve(async (req) => {
       });
     }
 
-    const file = fRaw as { id: string; file_name: string; xml_hash: string; xml_content_base64: string };
+    const file = fRaw as {
+      id: string;
+      file_name: string;
+      xml_hash: string;
+      xml_content_base64: string | null;
+    };
     const fileId = file.id;
+    let fileStatus: "COMPLETED" | "FAILED" | "COMPLETED_WITH_PENDING_REVIEW" = "COMPLETED";
+    let fileError: string | null = null;
+    let pendingForFile = 0;
+    let expenseId: string | null = null;
+    if (file.xml_content_base64 == null || String(file.xml_content_base64).trim() === "") {
+      pibLog(
+        execId,
+        "ficheiro_ERRO",
+        { company_id: companyId, batch_id: batchId, file_id: fileId },
+        "import_job_files sem xml_content_base64 — registo inconsistente; marque como falha",
+        { file_name: file.file_name },
+      );
+      fileStatus = "FAILED";
+      fileError = "Arquivo sem conteúdo XML (base64 vazio).";
+      await appendTimeline(
+        supabase,
+        batchId,
+        "ERROR",
+        fileError,
+        { file_name: file.file_name },
+        fileId,
+      );
+      processed += 1;
+      failed += 1;
+      await supabase
+        .from("import_job_files")
+        .update({
+          status: "FAILED",
+          retry_count: 1,
+          last_error: fileError,
+          finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", fileId);
+      await supabase
+        .from("import_job_batches")
+        .update({
+          processed_files: processed,
+          success_files: success,
+          failed_files: failed,
+          pending_review_files: pendingReviewFiles,
+          progress_percent: batch.total_files > 0
+            ? Number(((processed / Number(batch.total_files)) * 100).toFixed(2))
+            : 100,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", batchId);
+      continue;
+    }
     pibLog(
       execId,
       "ficheiro_inicio",
@@ -480,10 +595,6 @@ Deno.serve(async (req) => {
       .eq("id", fileId);
     await appendTimeline(supabase, batchId, "PARSE", `Iniciando arquivo ${file.file_name}`, { file_name: file.file_name }, fileId);
 
-    let fileStatus: "COMPLETED" | "FAILED" | "COMPLETED_WITH_PENDING_REVIEW" = "COMPLETED";
-    let fileError: string | null = null;
-    let pendingForFile = 0;
-    let expenseId: string | null = null;
     try {
       const xmlBytes = decodeBase64ToBytes(file.xml_content_base64);
       const xmlText = strFromU8(xmlBytes);
@@ -534,11 +645,14 @@ Deno.serve(async (req) => {
       } else if (nfeAccessKey) {
         const { data: byKey } = await supabase
           .from("company_nfe_import_logs")
-          .select("id")
+          .select("id, status, expense_id")
           .eq("company_id", companyId)
           .eq("nfe_access_key", nfeAccessKey)
           .maybeSingle();
-        if (byKey) {
+        const byKeyExpenseId = String((byKey as { expense_id?: string | null } | null)?.expense_id ?? "").trim();
+        const byKeyStatus = String((byKey as { status?: string | null } | null)?.status ?? "").toLowerCase();
+        const byKeyReallyImported = byKeyExpenseId !== "" || byKeyStatus === "success" || byKeyStatus === "needs_review";
+        if (byKey && byKeyReallyImported) {
           pibLog(
             execId,
             "skip_duplicado_chave_nfe",
@@ -560,6 +674,14 @@ Deno.serve(async (req) => {
             import_job_batch_id: batchId,
             import_job_file_id: fileId,
           });
+        } else if (byKey && !byKeyReallyImported) {
+          pibLog(
+            execId,
+            "reprocessar_chave_com_log_orfao",
+            { company_id: companyId, batch_id: batchId, file_id: fileId },
+            "log antigo sem evidência de importação (sem expense_id) — segue processamento normal",
+            { chave_nfe_44: nfeAccessKey, status_log: byKeyStatus || null },
+          );
         } else {
           const sr = await ensureSupplierFromExtracted(
             supabase,
@@ -600,8 +722,32 @@ Deno.serve(async (req) => {
               supplier_document: supplierDocument,
             },
           );
-          const match = await resolveProductMatches(supabase, companyId, data.items ?? [], {
+          const safeItems = Array.isArray(data.items)
+            ? data.items.filter((raw) => raw != null).map((raw) => {
+              const it = (raw ?? {}) as Record<string, unknown>;
+              const quantity = Number(it.quantity ?? 0);
+              const unitValue = Number(it.unitValue ?? 0);
+              const lineTotalRaw = Number(it.lineTotal ?? 0);
+              return {
+                ...it,
+                productName: String(it.productName ?? "").trim() || "Item",
+                quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 0.0001,
+                unitValue: Number.isFinite(unitValue) ? unitValue : 0,
+                lineTotal: Number.isFinite(lineTotalRaw)
+                  ? lineTotalRaw
+                  : (Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(unitValue) ? unitValue : 0),
+                unitCommercial: it.unitCommercial == null ? null : String(it.unitCommercial),
+                unitTax: it.unitTax == null ? null : String(it.unitTax),
+                productCode: it.productCode == null ? null : String(it.productCode),
+                ncm: it.ncm == null ? null : String(it.ncm),
+                ean: it.ean == null ? null : String(it.ean),
+              };
+            })
+            : [];
+          const match = await resolveProductMatches(supabase, companyId, safeItems, {
             importBatch: true,
+            skipEmbeddingBackfill: true,
+            skipLlmAssist: true,
           });
           const deferProductCreation = match.deferProductCreationToReconciliation === true;
           pibLog(
@@ -619,7 +765,7 @@ Deno.serve(async (req) => {
           const rawRowIdsOrdered: string[] = [];
           let needsReviewReason: string | null = null;
           let itemIndex = 0;
-          for (const item of match.items ?? []) {
+          for (const item of (match.items ?? []).filter((x) => x != null)) {
             const pm = item.productMatch as Record<string, unknown> | undefined;
             const resolvedProductId = String(pm?.resolvedProductId ?? "").trim() || null;
             const needsConfirmation = pm?.needsConfirmation === true;
@@ -725,6 +871,62 @@ Deno.serve(async (req) => {
             emissionDate && /^\d{4}-\d{2}-\d{2}$/.test(emissionDate)
               ? emissionDate
               : new Date().toISOString().slice(0, 10);
+
+          const { data: duplicateExpenseId, error: dupExpenseErr } = await supabase
+            .rpc("expense_find_duplicate_by_supplier_document", {
+              p_company_id: companyId,
+              p_supplier_id: supplierId,
+              p_supplier_document: supplierDocument,
+              p_invoice_number: invoiceNumber,
+              p_invoice_series: invoiceSeries,
+              p_exclude_expense_id: null,
+            });
+          if (dupExpenseErr) {
+            pibLog(
+              execId,
+              "duplicado_rpc_erro",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              "expense_find_duplicate_by_supplier_document falhou; segue tentativa de insert",
+              { erro: dupExpenseErr.message },
+            );
+          }
+          const duplicateExpense = String(duplicateExpenseId ?? "").trim();
+          if (duplicateExpense) {
+            expenseId = duplicateExpense;
+            pibLog(
+              execId,
+              "skip_despesa_duplicada_fornecedor_documento",
+              { company_id: companyId, batch_id: batchId, file_id: fileId },
+              "despesa já existe para fornecedor + nº/série; arquivo marcado como duplicate",
+              { expense_id: expenseId, invoice_number: invoiceNumber, invoice_series: invoiceSeries },
+            );
+            await insertImportLog(supabase, {
+              company_id: companyId,
+              file_name: file.file_name,
+              xml_hash: file.xml_hash,
+              nfe_access_key: nfeAccessKey,
+              invoice_number: invoiceNumber,
+              invoice_series: invoiceSeries,
+              supplier_document: supplierDocument,
+              emission_date: emissionDate,
+              status: "duplicate",
+              error_message: "Nota já existente por fornecedor + número/série.",
+              expense_id: expenseId,
+              payload: data,
+              import_job_batch_id: batchId,
+              import_job_file_id: fileId,
+            });
+            await appendTimeline(
+              supabase,
+              batchId,
+              "DONE",
+              "Arquivo ignorado por duplicidade de fornecedor + número/série.",
+              { expense_id: expenseId },
+              fileId,
+            );
+            fileStatus = "COMPLETED";
+            continue;
+          }
 
           const { data: expense, error: expErr } = await supabase
             .from("expenses")
@@ -1098,9 +1300,7 @@ Deno.serve(async (req) => {
       remaining_files: stillActive,
     });
 
-    /** Não faz `await` no invoke seguinte para não empilhar ~2× o wall-clock na mesma instância. */
-    const fallbackFetchChain = (): Promise<Response | undefined> =>
-      fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
+    const nextRoundPromise = fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
         method: "POST",
         headers: {
           Authorization: authHeader,
@@ -1108,76 +1308,55 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ batch_id: batchId }),
-      }).catch(() => undefined);
-
-    const chainPromise = supabase.functions
-      .invoke("process-import-job-batch", { body: { batch_id: batchId } })
-      .then(({ data: chainData, error: chainErr }) => {
-        if (chainErr) {
-          const errMsg = chainErr.message ?? String(chainErr);
-          marcador(companyId, "ENCADEAMENTO_INVOKE_ERRO", { batch_id: batchId, erro: errMsg });
-          pibLog(execId, "chain_invoke_erro", { company_id: companyId, batch_id: batchId }, errMsg, {
-            chain_invoke: chainErr,
+      })
+      .then(async (nextRound) => {
+        if (!nextRound.ok) {
+          const bodyTxt = await nextRound.text().catch(() => "");
+          marcador(companyId, "ENCADEAMENTO_INVOKE_ERRO", {
+            batch_id: batchId,
+            status: nextRound.status,
           });
-          const fb = fallbackFetchChain();
-          try {
-            // @ts-ignore Edge runtime helper (quando disponível)
-            if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
-              // @ts-ignore
-              EdgeRuntime.waitUntil(fb);
-              pibLog(
-                execId,
-                "chain_fallback_waitUntil",
-                { company_id: companyId, batch_id: batchId },
-                "invoke falhou — waitUntil(fetch fallback)",
-                {},
-              );
-            } else {
-              void fb.catch(() => undefined);
-            }
-          } catch (_) {
-            void fb.catch(() => undefined);
-          }
+          pibLog(
+            execId,
+            "chain_invoke_erro_http",
+            { company_id: companyId, batch_id: batchId },
+            `HTTP ${nextRound.status}`,
+            { resposta: bodyTxt.slice(0, 500) },
+          );
           return;
         }
         marcador(companyId, "ENCADEAMENTO_INVOKE_OK", { batch_id: batchId });
-        pibLog(execId, "chain_invoke_ok", { company_id: companyId, batch_id: batchId }, "invoke agendado (resolvido)", {
-          resumo: typeof chainData === "object" && chainData !== null ? chainData : { raw: chainData },
-        });
+        pibLog(
+          execId,
+          "chain_invoke_ok",
+          { company_id: companyId, batch_id: batchId },
+          "invoke assíncrono concluído",
+          {},
+        );
       })
       .catch((e) => {
-        marcador(companyId, "ENCADEAMENTO_INVOKE_EXCECAO", { batch_id: batchId, erro: String(e) });
-        pibLog(execId, "chain_invoke_excecao", { company_id: companyId, batch_id: batchId }, String(e), {});
-        void fallbackFetchChain();
+        marcador(companyId, "ENCADEAMENTO_INVOKE_EXCECAO", {
+          batch_id: batchId,
+          erro: String(e),
+        });
+        pibLog(
+          execId,
+          "chain_invoke_excecao",
+          { company_id: companyId, batch_id: batchId },
+          String(e),
+          {},
+        );
       });
-
     try {
       // @ts-ignore Edge runtime helper (quando disponível)
       if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
         // @ts-ignore
-        EdgeRuntime.waitUntil(chainPromise);
-        pibLog(
-          execId,
-          "chain_invoke_waitUntil",
-          { company_id: companyId, batch_id: batchId },
-          "waitUntil(invoke process-import-job-batch)",
-          {},
-        );
+        EdgeRuntime.waitUntil(nextRoundPromise);
       } else {
-        void chainPromise;
-        pibLog(
-          execId,
-          "chain_invoke_fire_and_forget",
-          { company_id: companyId, batch_id: batchId },
-          "sem EdgeRuntime.waitUntil — invoke em void",
-          {},
-        );
+        void nextRoundPromise;
       }
-    } catch (chErr) {
-      console.warn(
-        LOG,
-        JSON.stringify({ exec_id: execId, fase: "chain_agendar_erro", batch_id: batchId, erro: String(chErr) }),
-      );
+    } catch {
+      void nextRoundPromise;
     }
     return json({
       ok: true,

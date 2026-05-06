@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/contexts/CompanyContext";
 import { importJobStatusLabel } from "@/lib/importBatchStatus";
+import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import { Loader2, RefreshCcw, Ban } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -49,6 +50,39 @@ export function Importacoes() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * O processor na Edge pode sofrer `EarlyDrop` após responder HTTP — o encadeamento
+   * servidor não é confiável. Enquanto esta página estiver aberta, o navegador reinvoca
+   * o lote ativo até concluir.
+   */
+  useEffect(() => {
+    const companyId = currentCompany?.id;
+    if (!companyId) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const { data } = await supabase
+        .from("import_job_batches")
+        .select("id")
+        .eq("company_id", companyId)
+        .in("status", ["QUEUED", "PROCESSING"])
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!data?.id || cancelled) return;
+      await drainProcessImportJobBatch(data.id, { maxRounds: 25, pauseMs: 400 });
+      if (!cancelled) void load();
+    };
+    const interval = globalThis.setInterval(() => {
+      void tick();
+    }, 12_000);
+    void tick();
+    return () => {
+      cancelled = true;
+      globalThis.clearInterval(interval);
+    };
+  }, [currentCompany?.id, load]);
 
   const retryBatch = async (batchId: string) => {
     if (!currentCompany?.id) return;

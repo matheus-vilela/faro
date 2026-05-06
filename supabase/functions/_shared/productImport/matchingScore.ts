@@ -69,7 +69,10 @@ function levenshtein(a: string, b: string): number {
 }
 
 /** 0–100 — compara nomes (rótulo + canônico + Levenshtein). */
-export function scoreNameMatch(invoiceLine: string, catalogName: string): number {
+export function scoreNameMatch(
+  invoiceLine: string | null | undefined,
+  catalogName: string | null | undefined,
+): number {
   const x = normalizeInvoiceProductLabel(invoiceLine)
   const y = normalizeInvoiceProductLabel(catalogName)
   if (!x.length && !y.length) return 100

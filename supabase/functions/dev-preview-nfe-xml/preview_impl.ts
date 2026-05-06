@@ -1216,7 +1216,13 @@ async function enrichPreviewOnly(
       matchMeta: null,
     };
   }
-  const matchOpts = simulateImportBatch ? { importBatch: true } : undefined;
+  const matchOpts = simulateImportBatch
+    ? {
+      importBatch: true,
+      skipEmbeddingBackfill: true,
+      skipLlmAssist: true,
+    }
+    : undefined;
   const matchResult = await resolveProductMatches(
     supabase,
     companyId,
@@ -1434,6 +1440,6 @@ export async function handleDevPreview(input: {
     raw,
     enriched: enrichedPayload,
     hint:
-      "Extração XML é determinística (parseNfeXml). «enriched» inclui matching de produtos sem criar fornecedor. Com simulate_import_batch, o matching segue o mesmo modo da importação em lote. Com ai_line_units_preview, cada linha pode incluir _preview_line_ai_units (OpenAI). Campo _preview_line_simulation.previewLineDecision é exclusivo deste laboratório (dev_preview_only): reaproveitamento, conversões, custo sugerido e revisão manual — não usado na importação real ainda.",
+      "Extração XML é determinística (parseNfeXmlToExtracted, igual a process-import-job-batch). «enriched» inclui matching sem criar fornecedor. Com simulate_import_batch=true (padrão), o matching usa as mesmas opções da importação em lote (importBatch + skipEmbeddingBackfill + skipLlmAssist). Com ai_line_units_preview, cada linha pode incluir _preview_line_ai_units (OpenAI). Campo _preview_line_simulation.previewLineDecision é exclusivo deste laboratório (dev_preview_only): não usado na importação real.",
   });
 }

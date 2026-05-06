@@ -92,8 +92,9 @@ export async function ensureSupplierFromExtracted(
     return { supplierId: null, createdNew: false };
   }
 
+  const list = Array.isArray(rows) ? rows : [];
   const norm = (d: string | null | undefined) => normalizeDocumentDigits(d);
-  const found = rows?.find((r: { document: string | null }) =>
+  const found = list.find((r: { document: string | null }) =>
     norm(r.document) === digits
   );
   if (found) return { supplierId: found.id as string, createdNew: false };

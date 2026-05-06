@@ -338,6 +338,15 @@ export type ResolveProductMatchesOptions = {
    * usa IA também fora da faixa borderline (scores baixos) com mais candidatos.
    */
   importBatch?: boolean;
+  /**
+   * Evita backfill de embeddings durante processamento de lote.
+   * Útil para reduzir latência em workers de importação.
+   */
+  skipEmbeddingBackfill?: boolean;
+  /**
+   * Desliga assistências com OpenAI (vector + borderline LLM) para priorizar robustez.
+   */
+  skipLlmAssist?: boolean;
 };
 
 export async function resolveProductMatches(
@@ -373,8 +382,12 @@ export async function resolveProductMatches(
 
   const embeddingModel = embeddingModelFromEnv();
 
+  const itemsSanitized = (items ?? []).filter(
+    (x): x is ExtractedExpenseItem =>
+      x != null && typeof x === "object",
+  );
   const merged = consolidateInvoiceItems(
-    items as ExtractedItemWithInvoiceMeta[],
+    itemsSanitized as ExtractedItemWithInvoiceMeta[],
   ) as ExtractedExpenseItem[];
 
   const { data: aliasRows, error: aliasErr } = await supabase
@@ -452,7 +465,12 @@ export async function resolveProductMatches(
   const products = (prodRows ?? []) as ProductRow[];
   const productById = new Map(products.map((p) => [p.id, p]));
 
-  if (opts?.importBatch && openaiKey && products.length > 0) {
+  if (
+    opts?.importBatch &&
+    !opts?.skipEmbeddingBackfill &&
+    openaiKey &&
+    products.length > 0
+  ) {
     try {
       const { updated, errors } = await ensureCompanyProductNameEmbeddings(
         supabase,
@@ -688,7 +706,8 @@ export async function resolveProductMatches(
         productBarcode: p.barcode,
       });
       sc = sec.score;
-      const extra = sec.reasons.length ? `; ${sec.reasons.join("; ")}` : "";
+      const reasons = Array.isArray(sec.reasons) ? sec.reasons : [];
+      const extra = reasons.length ? `; ${reasons.join("; ")}` : "";
       scoredList.push({
         product: p,
         score: sc,
@@ -698,7 +717,13 @@ export async function resolveProductMatches(
 
     scoredList.sort((a, b) => b.score - a.score);
 
-    if (opts?.importBatch && openaiKey && products.length > 0 && name.trim()) {
+    if (
+      opts?.importBatch &&
+      !opts?.skipLlmAssist &&
+      openaiKey &&
+      products.length > 0 &&
+      name.trim()
+    ) {
       try {
         await augmentScoredListWithVectorNeighbors({
           supabase,
@@ -792,6 +817,7 @@ export async function resolveProductMatches(
       (importBatchLlmEligible || runBorderlineLlm);
 
     const canInvokeLlm =
+      !opts?.skipLlmAssist &&
       !!openaiKey &&
       borderlineLlmRemaining > 0 &&
       (useColdNewOnly || useBorderlineAssist);

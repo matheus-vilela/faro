@@ -44,11 +44,14 @@ export function consolidationKey(it: ExtractedItemWithInvoiceMeta): string {
 export function consolidateInvoiceItems<T extends ExtractedItemWithInvoiceMeta>(
   items: T[],
 ): T[] {
-  if (items.length <= 1) return items
+  const clean = (items ?? []).filter(
+    (it): it is T => it != null && typeof it === "object",
+  )
+  if (clean.length <= 1) return clean
 
   const map = new Map<string, T & { _consolidatedFrom?: number }>()
 
-  for (const it of items) {
+  for (const it of clean) {
     const k = consolidationKey(it)
     const existing = map.get(k)
     if (!existing) {

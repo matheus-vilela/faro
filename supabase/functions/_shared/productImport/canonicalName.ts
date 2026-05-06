@@ -28,8 +28,8 @@ const PLURAL_TO_SING: Record<string, string> = {
 }
 
 /** Remove acentos e colapsa espaços. */
-export function stripDiacriticsLower(s: string): string {
-  return s
+export function stripDiacriticsLower(s: string | null | undefined): string {
+  return String(s ?? "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
@@ -38,7 +38,7 @@ export function stripDiacriticsLower(s: string): string {
 }
 
 /** Normalização “rótulo de nota” — alinhada à ideia de normalize_invoice_product_label (SQL). */
-export function normalizeInvoiceProductLabel(raw: string): string {
+export function normalizeInvoiceProductLabel(raw: string | null | undefined): string {
   const t = stripDiacriticsLower(raw)
   return t.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()
 }
@@ -51,7 +51,7 @@ function singularizeToken(t: string): string {
 /**
  * Nome canônico para matching: tokens limpos, sem ruído comum, plural simples.
  */
-export function canonicalProductName(raw: string): string {
+export function canonicalProductName(raw: string | null | undefined): string {
   const base = normalizeInvoiceProductLabel(raw)
   if (!base) return ""
   const parts = base.split(" ").filter(Boolean)

@@ -9,6 +9,7 @@ import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhats
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
+import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -167,7 +168,7 @@ export function Dashboard() {
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
 
-  const loadImportProgress = useCallback(async () => {
+  const loadImportProgress = useCallback(async (opts?: { silent?: boolean }) => {
     if (!companyId) {
       setLoadingImportProgress(false);
       setActiveImportFiles(0);
@@ -175,7 +176,9 @@ export function Dashboard() {
       return;
     }
 
-    setLoadingImportProgress(true);
+    if (!opts?.silent) {
+      setLoadingImportProgress(true);
+    }
     const { data, error } = await supabase
       .from("import_job_batches")
       .select("status, total_files, processed_files")
@@ -229,6 +232,42 @@ export function Dashboard() {
   useEffect(() => {
     queueMicrotask(() => void loadImportProgress());
   }, [loadImportProgress]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    const interval = globalThis.setInterval(() => {
+      void loadImportProgress({ silent: true });
+    }, 5000);
+    return () => globalThis.clearInterval(interval);
+  }, [companyId, loadImportProgress]);
+
+  /** Destrava lotes XML quando o encadeamento na Edge sofre EarlyDrop (reinvocação no browser). */
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const { data } = await supabase
+        .from("import_job_batches")
+        .select("id")
+        .eq("company_id", companyId)
+        .in("status", ["QUEUED", "PROCESSING"])
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!data?.id || cancelled) return;
+      await drainProcessImportJobBatch(data.id, { maxRounds: 20, pauseMs: 400 });
+      if (!cancelled) void loadImportProgress({ silent: true });
+    };
+    const interval = globalThis.setInterval(() => {
+      void tick();
+    }, 15_000);
+    void tick();
+    return () => {
+      cancelled = true;
+      globalThis.clearInterval(interval);
+    };
+  }, [companyId, loadImportProgress]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {

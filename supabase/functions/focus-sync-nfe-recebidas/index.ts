@@ -237,14 +237,23 @@ type NfeCab = {
 
 function nfeCompletaTrue(cab: NfeCab): boolean {
   const raw = (cab as Record<string, unknown>).nfe_completa;
+  // Alguns payloads da Focus omitem este campo no endpoint de listagem.
+  // Nestes casos, seguimos com a tentativa de download do XML por chave.
+  if (raw === undefined || raw === null || String(raw).trim() === "") return true;
   if (raw === true) return true;
   if (typeof raw === "string" && raw.trim().toLowerCase() === "true") return true;
+  if (raw === 1) return true;
+  if (typeof raw === "string") {
+    const s = raw.trim().toLowerCase();
+    if (s === "1" || s === "sim" || s === "yes") return true;
+  }
   return false;
 }
 
 function nfeRecebidaImportavel(cab: NfeCab): boolean {
-  return String(cab.situacao ?? "").toLowerCase() === "autorizada" &&
-    nfeCompletaTrue(cab);
+  const situacao = String(cab.situacao ?? "").trim().toLowerCase();
+  const autorizada = situacao === "autorizada" || situacao === "autorizado";
+  return autorizada && nfeCompletaTrue(cab);
 }
 
 function focusIdEmpresa(raw: Record<string, unknown> | undefined): unknown {
@@ -441,6 +450,12 @@ Deno.serve(async (req) => {
   let maxXmlDownloads = intFromEnv("FOCUS_SYNC_MAX_XML_DOWNLOADS_PER_RUN", 20, 1, 500);
   const softBudgetMs = intFromEnv("FOCUS_SYNC_SOFT_BUDGET_MS", 0, 0, 600_000);
   const leaseMinutes = intFromEnv("FOCUS_SYNC_LEASE_MINUTES", 30, 1, 180);
+  const activeBatchStaleMinutes = intFromEnv(
+    "FOCUS_SYNC_ACTIVE_BATCH_STALE_MINUTES",
+    25,
+    5,
+    24 * 60,
+  );
   let maxChainDepth = intFromEnv("FOCUS_SYNC_MAX_CHAIN_DEPTH", 2, 0, 5);
 
   const phase = parsePhase(body.phase);
@@ -462,6 +477,7 @@ Deno.serve(async (req) => {
   let companiesToProcess: CoRow[] = [];
   let isManualSingle = false;
   let manualVersaoInicial: number | undefined = undefined;
+  let manualForceReimport = false;
 
   if (isCron) {
     const { data: companies, error: listErr } = await admin
@@ -530,6 +546,7 @@ Deno.serve(async (req) => {
       const n = Number(rawv);
       if (Number.isFinite(n) && n >= 0) manualVersaoInicial = Math.floor(n);
     }
+    manualForceReimport = body.force_reimport === true;
   }
 
   if (isManualSingle) {
@@ -679,6 +696,10 @@ Deno.serve(async (req) => {
     let paginasEste = 0;
     let cabecalhosEste = 0;
     let enfileiradosEste = 0;
+    let reativadosFilaEste = 0;
+    let bloqueadosBatchAtivoEste = 0;
+    let cabecalhosImportaveisEste = 0;
+    let descartadosJaImportadosEste = 0;
     let listaIncompleta = false;
     let listError: string | null = null;
     const tList0 = performance.now();
@@ -791,6 +812,7 @@ Deno.serve(async (req) => {
           const chave = String(cab.chave_nfe ?? "").replace(/\D/g, "");
           if (chave.length !== 44) continue;
           if (!nfeRecebidaImportavel(cab)) continue;
+          cabecalhosImportaveisEste += 1;
           if (seenChaveListCycle.has(chave)) continue;
           seenChaveListCycle.add(chave);
           const v = Number(cab.versao);
@@ -803,17 +825,34 @@ Deno.serve(async (req) => {
         if (toEnqueue.length > 0) {
           const chaves = toEnqueue.map((x) => x.chave);
           const keysKnown = new Set<string>();
-          const chunkSz = 120;
-          for (let i = 0; i < chaves.length; i += chunkSz) {
-            const part = chaves.slice(i, i + chunkSz);
-            const { data: existingKeys } = await admin
-              .from("company_nfe_import_logs")
-              .select("nfe_access_key")
-              .eq("company_id", companyId)
-              .in("nfe_access_key", part);
-            for (const r of existingKeys ?? []) {
-              const k = (r as { nfe_access_key?: string }).nfe_access_key;
-              if (k) keysKnown.add(k);
+          if (!(isManualSingle && manualForceReimport)) {
+            const chunkSz = 120;
+            for (let i = 0; i < chaves.length; i += chunkSz) {
+              const part = chaves.slice(i, i + chunkSz);
+              const { data: existingKeys } = await admin
+                .from("company_nfe_import_logs")
+                .select("nfe_access_key, status, expense_id")
+                .eq("company_id", companyId)
+                .in("nfe_access_key", part);
+              for (const r of existingKeys ?? []) {
+                const row = r as {
+                  nfe_access_key?: string;
+                  status?: string | null;
+                  expense_id?: string | null;
+                };
+                const k = row.nfe_access_key;
+                if (!k) continue;
+                // Só considera "já importado" quando há evidência de importação real.
+                // Logs órfãos/erro sem expense_id não devem bloquear nova tentativa.
+                if (row.expense_id && String(row.expense_id).trim() !== "") {
+                  keysKnown.add(k);
+                  continue;
+                }
+                const st = String(row.status ?? "").toLowerCase();
+                if (st === "success" || st === "needs_review") {
+                  keysKnown.add(k);
+                }
+              }
             }
           }
 
@@ -825,10 +864,124 @@ Deno.serve(async (req) => {
               versao: x.versao,
               status: "pending",
             }));
+          descartadosJaImportadosEste += (toEnqueue.length - rows.length);
 
-          if (rows.length > 0) {
+          // Alguns itens podem já existir na fila com estados terminais (ex.: failed/skipped_duplicate)
+          // e nunca mais voltar para claim. Reativamos para pending quando apropriado.
+          const rowsByKey = new Map(rows.map((r) => [r.nfe_access_key, r]));
+          const rowsKeys = [...rowsByKey.keys()];
+          if (rowsKeys.length > 0) {
+            const batchActivityCache = new Map<string, boolean>();
+            const { data: queueExisting } = await admin
+              .from("focus_nfe_recebidas_sync_queue")
+              .select("id, nfe_access_key, status, batch_id")
+              .eq("company_id", companyId)
+              .in("nfe_access_key", rowsKeys);
+
+            for (const ex of queueExisting ?? []) {
+              const q = ex as {
+                id: string;
+                nfe_access_key?: string;
+                status?: string;
+                batch_id?: string | null;
+              };
+              const key = String(q.nfe_access_key ?? "").trim();
+              if (!key) continue;
+              const st = String(q.status ?? "").toLowerCase();
+              // Não mexe em itens realmente ativos.
+              if (st === "pending" || st === "processing") {
+                rowsByKey.delete(key);
+                continue;
+              }
+              if (st === "in_batch") {
+                const bid = String(q.batch_id ?? "").trim();
+                if (bid) {
+                  const { data: batchRow } = await admin
+                    .from("import_job_batches")
+                    .select("status, updated_at, created_at")
+                    .eq("id", bid)
+                    .maybeSingle();
+                  const bst = String(batchRow?.status ?? "").toUpperCase();
+                  const batchAtivo = bst === "QUEUED" || bst === "PROCESSING";
+                  const tUpdated = Date.parse(String(batchRow?.updated_at ?? ""));
+                  const tCreated = Date.parse(String(batchRow?.created_at ?? ""));
+                  const tBase = Number.isFinite(tUpdated)
+                    ? tUpdated
+                    : Number.isFinite(tCreated)
+                      ? tCreated
+                      : NaN;
+                  const activeAgeMs = Number.isFinite(tBase) ? Date.now() - tBase : 0;
+                  const ativoMasStale = batchAtivo &&
+                    activeAgeMs > activeBatchStaleMinutes * 60_000;
+                  let batchTemArquivosAtivos = false;
+                  if (batchAtivo) {
+                    if (batchActivityCache.has(bid)) {
+                      batchTemArquivosAtivos = batchActivityCache.get(bid) === true;
+                    } else {
+                      const { count: cActiveFiles } = await admin
+                        .from("import_job_files")
+                        .select("id", { count: "exact", head: true })
+                        .eq("batch_id", bid)
+                        .in("status", ["QUEUED", "PROCESSING"]);
+                      batchTemArquivosAtivos = (cActiveFiles ?? 0) > 0;
+                      batchActivityCache.set(bid, batchTemArquivosAtivos);
+                    }
+                  }
+                  const ativoSemArquivos = batchAtivo && !batchTemArquivosAtivos;
+                  if (batchAtivo) {
+                    if (ativoMasStale || ativoSemArquivos) {
+                      slog(
+                        "queue_reactivate_stale_in_batch",
+                        companyId,
+                        "in_batch preso em batch ativo stale/inconsistente — reativar pending",
+                        {
+                          exec_id: execId,
+                          batch_id: bid,
+                          batch_status: bst,
+                          active_age_ms: activeAgeMs,
+                          stale_threshold_min: activeBatchStaleMinutes,
+                          active_files: batchTemArquivosAtivos ? 1 : 0,
+                          nfe_access_key: key,
+                        },
+                      );
+                    } else {
+                      bloqueadosBatchAtivoEste += 1;
+                      rowsByKey.delete(key);
+                      continue;
+                    }
+                  }
+                  if (batchAtivo && !ativoMasStale && !ativoSemArquivos) {
+                    bloqueadosBatchAtivoEste += 1;
+                    rowsByKey.delete(key);
+                    continue;
+                  }
+                }
+              }
+              const rowData = rowsByKey.get(key);
+              const { error: reactErr } = await admin
+                .from("focus_nfe_recebidas_sync_queue")
+                .update({
+                  status: "pending",
+                  versao: rowData?.versao ?? null,
+                  batch_id: null,
+                  last_error: null,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", q.id);
+              if (!reactErr) {
+                reativadosFilaEste += 1;
+                rowsByKey.delete(key);
+              } else {
+                console.warn(LOG, "queue_reactivate", reactErr.message);
+              }
+            }
+          }
+
+          const rowsToInsert = [...rowsByKey.values()];
+
+          if (rowsToInsert.length > 0) {
             let inserted = 0;
-            for (const row of rows) {
+            for (const row of rowsToInsert) {
               const { error: insErr } = await admin
                 .from("focus_nfe_recebidas_sync_queue")
                 .insert(row);
@@ -1115,7 +1268,11 @@ Deno.serve(async (req) => {
       phase,
       paginas_listadas: paginasEste,
       cabecalhos_vistos: cabecalhosEste,
+      cabecalhos_importaveis: cabecalhosImportaveisEste,
+      descartados_ja_importados: descartadosJaImportadosEste,
       filas_inseridas_este_ciclo: enfileiradosEste,
+      filas_reativadas_este_ciclo: reativadosFilaEste,
+      filas_bloqueadas_em_batch_ativo_este_ciclo: bloqueadosBatchAtivoEste,
       novos_xml_batch: filesInserted,
       batch_id: batchIdOut,
       cursor_versao: cursor,

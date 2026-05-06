@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import { hasFocusNfeEmpresaId } from "@/services/focusAtualizarCertificadoService";
 import { patchCompanyMaps } from "@/services/unitSetupService";
@@ -80,6 +81,18 @@ export function FiscalNfeRecebidasManualSyncCard({
 
   const handleSync = useCallback(async () => {
     if (!companyId || !hasFocus) return;
+    let fiscalLockCleared = false;
+    let companyRefetched = false;
+    const clearFiscalLock = async () => {
+      if (!lockFiscalOnboarding || fiscalLockCleared) return;
+      await patchCompanyMaps(companyId, { syncing_fiscal: false });
+      fiscalLockCleared = true;
+    };
+    const refreshCompany = async () => {
+      if (companyRefetched) return;
+      await onSynced();
+      companyRefetched = true;
+    };
     let versaoInicial: number | undefined;
     const trimmed = versaoInput.trim();
     if (trimmed !== "") {
@@ -100,7 +113,7 @@ export function FiscalNfeRecebidasManualSyncCard({
           toast.error(lockErr.slice(0, 220));
           return;
         }
-        await onSynced();
+        await refreshCompany();
       }
       const body: Record<string, unknown> = {
         manual: true,
@@ -108,25 +121,24 @@ export function FiscalNfeRecebidasManualSyncCard({
       };
       if (versaoInicial !== undefined) {
         body.versao_inicial = versaoInicial;
+        // Forçando cursor para uma versão explícita (ex.: 0), pedimos reimportação
+        // sem bloquear por logs antigos.
+        body.force_reimport = true;
       }
       const { data, error } = await supabase.functions.invoke(
         "focus-sync-nfe-recebidas",
         { body },
       );
       if (error) {
-        if (lockFiscalOnboarding) {
-          await patchCompanyMaps(companyId, { syncing_fiscal: false });
-          await onSynced();
-        }
+        await clearFiscalLock();
+        if (lockFiscalOnboarding) await refreshCompany();
         toast.error(error.message ?? "Falha ao chamar sincronização.");
         return;
       }
       const res = data as FocusSyncResponse | null;
       if (!res || res.ok !== true) {
-        if (lockFiscalOnboarding) {
-          await patchCompanyMaps(companyId, { syncing_fiscal: false });
-          await onSynced();
-        }
+        await clearFiscalLock();
+        if (lockFiscalOnboarding) await refreshCompany();
         const msg =
           typeof res?.error === "string" && res.error.trim()
             ? res.error
@@ -136,19 +148,15 @@ export function FiscalNfeRecebidasManualSyncCard({
       }
       const detail = res.detail?.[0];
       if (detail?.error) {
-        if (lockFiscalOnboarding) {
-          await patchCompanyMaps(companyId, { syncing_fiscal: false });
-        }
+        await clearFiscalLock();
         toast.error(String(detail.error));
-        await onSynced();
+        await refreshCompany();
         return;
       }
       if (detail?.skipped) {
-        if (lockFiscalOnboarding) {
-          await patchCompanyMaps(companyId, { syncing_fiscal: false });
-        }
+        await clearFiscalLock();
         toast.message(String(detail.skipped));
-        await onSynced();
+        await refreshCompany();
         return;
       }
       const novos = detail
@@ -161,6 +169,21 @@ export function FiscalNfeRecebidasManualSyncCard({
         batchId ? `Lote: ${batchId.slice(0, 8)}…` : null,
       ].filter(Boolean);
       toast.success(parts.join(" "));
+      if (batchId) {
+        void (async () => {
+          const d = await drainProcessImportJobBatch(batchId, {
+            maxRounds: 120,
+            pauseMs: 400,
+          });
+          await onSynced();
+          if (!d.ok) {
+            toast.message(
+              d.error ??
+                "O lote de importação pode estar incompleto. Abra a central de importações.",
+            );
+          }
+        })();
+      }
       const cont = res.continuacao;
       if (
         cont?.chain_scheduled ||
@@ -172,15 +195,15 @@ export function FiscalNfeRecebidasManualSyncCard({
             "Há listagem ou fila pendente: a sincronização pode continuar automaticamente ou na próxima chamada.",
         );
       }
-      await onSynced();
+      await refreshCompany();
     } catch (e: unknown) {
-      if (lockFiscalOnboarding) {
-        await patchCompanyMaps(companyId, { syncing_fiscal: false });
-        await onSynced();
-      }
+      await clearFiscalLock();
+      if (lockFiscalOnboarding) await refreshCompany();
       const msg = e instanceof Error ? e.message : "Erro ao sincronizar.";
       toast.error(msg);
     } finally {
+      await clearFiscalLock();
+      if (lockFiscalOnboarding) await refreshCompany();
       setSyncing(false);
     }
   }, [companyId, hasFocus, versaoInput, onSynced, lockFiscalOnboarding]);
