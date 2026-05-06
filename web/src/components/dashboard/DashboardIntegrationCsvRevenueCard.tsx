@@ -492,10 +492,11 @@ export function DashboardIntegrationCsvRevenueCard({
     edgePendingEffective ||
     retryBusy;
 
+  /** Não usar `jobsLoading` aqui — ao voltar ao dashboard os jobs começam em loading e o cartão piscava para utilizadores já em idle. */
   const postPdvShow =
     onboardingPdvDone &&
     (epocEnabledEffective || lsSyncPending || pdvSyncLocked) &&
-    (keepVisibleAfterPdvOnboarding || jobsLoading);
+    keepVisibleAfterPdvOnboarding;
 
   const shouldRenderCard =
     inPdvIntegrationOnboarding || postPdvShow;
