@@ -83,6 +83,12 @@ verify_jwt = false
 [functions.dev-preview-nfe-xml]
 verify_jwt = false
 
+[functions.focus-create-expenses-from-received-nfe]
+verify_jwt = false
+
+[functions.process-expense-xml-products]
+verify_jwt = false
+
 [functions.process-integration-csv-revenue-job]
 verify_jwt = false
 [functions.run-onboarding-product-reconciliation]

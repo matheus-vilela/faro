@@ -9,15 +9,17 @@
  * **Orçamentos (env, opcionais):**
  * - `FOCUS_SYNC_MAX_COMPANIES_PER_RUN` (default 1) — cron processa no máximo N unidades elegíveis por POST.
  * - `FOCUS_SYNC_MAX_LIST_PAGES` (default 8) — páginas Focus GET por unidade por fase list.
+ * - `FOCUS_SYNC_LIST_PAGE_SIZE` (default 25) — `limite` no GET lista; paginação trata também respostas com até 100 itens (teto histórico da API).
  * - `FOCUS_SYNC_MAX_XML_DOWNLOADS_PER_RUN` (default 20) — XMLs por unidade por fase download.
  * - `FOCUS_SYNC_SOFT_BUDGET_MS` (0 = desligado) — corta loops quando o tempo desde o início excede.
  * - `FOCUS_SYNC_LEASE_MINUTES` (default 30) — `focusnfe.nfes_recebidas_sync_lease_until` evita sobreposição cron (manual ignora).
  * - `FOCUS_SYNC_MAX_CHAIN_DEPTH` (default 2) — profundidade de auto re-invoke via `waitUntil(fetch)`.
  *
  * Outros: `FOCUS_NFE_XML_THROTTLE_MS`, `FOCUS_NFE_API_BASE`, secrets Supabase + `FOCUS_NFE_TOKEN` + `FOCUS_NFE_RECEBIDAS_CRON_SECRET`.
+ * Logs: `FOCUS_SYNC_VERBOSE_LOGS=true` habilita eventos por página/checkpoint (padrão: só início/fim, erros e resumo enxuto).
  *
  * **Cron:** POST `Authorization: Bearer <secret>`. Opcional body `{ "company_id": "<uuid>" }` para uma unidade (recomendado com pg_net).
- * **Manual:** body pode incluir `max_list_pages`, `max_xml_downloads`, `max_chain_depth` (substituem env só nesse POST) além de `versao_inicial`, `phase`, `chain_depth`.
+ * **Manual:** body pode incluir `max_list_pages`, `max_xml_downloads`, `max_chain_depth`, `list_page_size` (substituem env só nesse POST) além de `versao_inicial`, `phase`, `chain_depth`.
  *
  * **Processor:** após `import_job_files`, dispara `process-import-job-batch` com `invoke` não bloqueante + `EdgeRuntime.waitUntil` quando existir.
  */
@@ -31,6 +33,12 @@ const corsHeaders: Record<string, string> = {
 };
 
 const LOG = "[focus-sync-nfe-recebidas]";
+
+const VERBOSE_LOGS =
+  String(Deno.env.get("FOCUS_SYNC_VERBOSE_LOGS") ?? "").trim() === "true";
+
+/** Teto histórico de itens por resposta na lista NF-e recebidas (Focus). */
+const FOCUS_NFES_RECEBIDAS_LIST_MAX_LEGACY = 100;
 
 const QUEUE_MAX_ATTEMPTS_FAIL = 8;
 
@@ -62,7 +70,21 @@ function slog(
   console.log(LOG, line);
 }
 
+/** Detalhe por página/checkpoint — só com `FOCUS_SYNC_VERBOSE_LOGS=true`. */
+function slogV(
+  fase: string,
+  empresa: string | null,
+  mensagem: string,
+  extras?: Record<string, unknown>,
+): void {
+  if (!VERBOSE_LOGS) return;
+  slog(fase, empresa, mensagem, extras);
+}
+
 function marcador(unidadeId: string, acao: string, detalhes: Record<string, unknown>): void {
+  const isErr =
+    acao.includes("ERRO") || acao.includes("EXCECAO") || acao.includes("FALH");
+  if (!VERBOSE_LOGS && !isErr) return;
   console.log(LOG, JSON.stringify({ unidade: unidadeId, acao, ...detalhes }));
 }
 
@@ -115,6 +137,12 @@ function throttleMsBetweenXmlDownloads(): number {
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   return 450;
+}
+
+/** Modo teste: sem espera entre downloads (só 1 XML por vez na prática). */
+function throttleMsForSyncRun(manualTestMode: boolean): number {
+  if (manualTestMode) return 0;
+  return throttleMsBetweenXmlDownloads();
 }
 
 function retryAfterDelayMs(res: Response): number | null {
@@ -233,6 +261,9 @@ type NfeCab = {
   situacao?: string;
   nfe_completa?: boolean;
   nome_emitente?: string;
+  valor_total?: number | string;
+  valor?: number | string;
+  total?: number | string;
 };
 
 function nfeCompletaTrue(cab: NfeCab): boolean {
@@ -256,6 +287,34 @@ function nfeRecebidaImportavel(cab: NfeCab): boolean {
   return autorizada && nfeCompletaTrue(cab);
 }
 
+/**
+ * Modo teste manual (sem `test_single_key`): a API Focus pode devolver até ~100 itens por página
+ * (ou o tamanho pedido em `limite`); limitamos a N cabeçalhos importáveis para não disparar dedup/fila em lote cheio.
+ */
+function limitCabListForManualTest(
+  cabList: NfeCab[],
+  opts: {
+    isManualSingle: boolean;
+    manualTestMode: boolean;
+    manualTestSingleKey: string | null;
+    maxImportable: number;
+  },
+): NfeCab[] {
+  const { isManualSingle, manualTestMode, manualTestSingleKey, maxImportable } = opts;
+  if (!isManualSingle || !manualTestMode || manualTestSingleKey || maxImportable <= 0) {
+    return cabList;
+  }
+  const out: NfeCab[] = [];
+  for (const cab of cabList) {
+    const chave = String(cab.chave_nfe ?? "").replace(/\D/g, "");
+    if (chave.length !== 44) continue;
+    if (!nfeRecebidaImportavel(cab)) continue;
+    out.push(cab);
+    if (out.length >= maxImportable) break;
+  }
+  return out;
+}
+
 function focusIdEmpresa(raw: Record<string, unknown> | undefined): unknown {
   const v = raw?.id_empresa;
   if (v !== undefined && v !== null && String(v).trim() !== "") return v;
@@ -271,6 +330,19 @@ function parsePhase(raw: unknown): Phase {
 function budgetExceeded(t0: number, softBudgetMs: number): boolean {
   if (softBudgetMs <= 0) return false;
   return performance.now() - t0 > softBudgetMs;
+}
+
+/** Página “cheia” — pode existir continuação na próxima versão. */
+function listFocusPageIsFull(len: number, requestedPageSize: number): boolean {
+  if (len >= FOCUS_NFES_RECEBIDAS_LIST_MAX_LEGACY) return true;
+  return len === requestedPageSize;
+}
+
+function parseCabTotal(cab: NfeCab): number | null {
+  const raw = cab.valor_total ?? cab.valor ?? cab.total ?? null;
+  if (raw === null || raw === undefined) return null;
+  const n = Number(String(raw).replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
 }
 
 function scheduleWaitUntil(p: Promise<unknown>): void {
@@ -293,18 +365,26 @@ function kickProcessImportJobBatch(
   batchId: string,
   companyId: string,
   execId: string,
+  opts?: { test_single_file?: boolean },
 ): void {
   marcador(companyId, "FOCUS_SYNC_PROCESS_INVOKE_AGENDADO", {
     batch_id: batchId,
     exec_id: execId,
+    test_single_file: opts?.test_single_file === true,
   });
-  slog("process_import_job_batch_invoke_nao_bloqueante", companyId, "waitUntil(invoke)", {
+  slogV("process_import_job_batch_invoke_nao_bloqueante", companyId, "waitUntil(invoke)", {
     exec_id: execId,
     batch_id: batchId,
+    test_single_file: opts?.test_single_file === true,
   });
 
+  const invokeBody = {
+    batch_id: batchId,
+    ...(opts?.test_single_file === true ? { test_single_file: true } : {}),
+  };
+
   const procPromise = admin.functions
-    .invoke("process-import-job-batch", { body: { batch_id: batchId } })
+    .invoke("process-import-job-batch", { body: invokeBody })
     .then(({ data: procData, error: procErr }) => {
       if (procErr) {
         const errMsg = procErr.message ?? String(procErr);
@@ -325,7 +405,7 @@ function kickProcessImportJobBatch(
         batch_id: batchId,
         exec_id: execId,
       });
-      slog(
+      slogV(
         "process_import_job_batch_invoke_OK",
         companyId,
         "processor aceite (1.ª ronda); encadeamento interno segue no processor",
@@ -396,7 +476,7 @@ async function persistFocusnfe(
   if (upErr) {
     slog("cursor_persist_erro", companyId, upErr.message, { exec_id: execId, fase: faseLog });
   } else {
-    slog("cursor_persist_ok", companyId, faseLog, { exec_id: execId, ...patch });
+    slogV("cursor_persist_ok", companyId, faseLog, { exec_id: execId, ...patch });
   }
 }
 
@@ -457,8 +537,10 @@ Deno.serve(async (req) => {
     24 * 60,
   );
   let maxChainDepth = intFromEnv("FOCUS_SYNC_MAX_CHAIN_DEPTH", 2, 0, 5);
+  let listPageSize = intFromEnv("FOCUS_SYNC_LIST_PAGE_SIZE", 25, 1, 100);
 
   const phase = parsePhase(body.phase);
+  const skipProcessImportJobBatch = body.skip_process_import_job_batch === true;
   const chainDepthReal = Number.isFinite(Number(body.chain_depth))
     ? Math.max(0, Math.floor(Number(body.chain_depth)))
     : 0;
@@ -478,6 +560,8 @@ Deno.serve(async (req) => {
   let isManualSingle = false;
   let manualVersaoInicial: number | undefined = undefined;
   let manualForceReimport = false;
+  let manualTestMode = false;
+  let manualTestSingleKey: string | null = null;
 
   if (isCron) {
     const { data: companies, error: listErr } = await admin
@@ -547,6 +631,9 @@ Deno.serve(async (req) => {
       if (Number.isFinite(n) && n >= 0) manualVersaoInicial = Math.floor(n);
     }
     manualForceReimport = body.force_reimport === true;
+    manualTestMode = body.test_mode === true;
+    const maybeTestKey = String(body.test_single_key ?? "").replace(/\D/g, "");
+    manualTestSingleKey = maybeTestKey.length === 44 ? maybeTestKey : null;
   }
 
   if (isManualSingle) {
@@ -556,6 +643,13 @@ Deno.serve(async (req) => {
     if (oXd !== null) maxXmlDownloads = oXd;
     const oCh = optionalBodyInt(body.max_chain_depth, 0, 5);
     if (oCh !== null) maxChainDepth = oCh;
+    const oLps = optionalBodyInt(body.list_page_size, 1, 100);
+    if (oLps !== null) listPageSize = oLps;
+    if (manualTestMode) {
+      maxListPages = 1;
+      maxXmlDownloads = 1;
+      maxChainDepth = 0;
+    }
   }
 
   const summary: Array<Record<string, unknown>> = [];
@@ -600,6 +694,7 @@ Deno.serve(async (req) => {
       maxCompanies,
       maxListPages,
       maxXmlDownloads,
+      listPageSize,
       softBudgetMs,
       leaseMinutes,
       maxChainDepth,
@@ -646,7 +741,7 @@ Deno.serve(async (req) => {
         ? manualVersaoInicial
         : cursorPersistido;
 
-    slog("empresa_inicio", companyId, "início", {
+    slogV("empresa_inicio", companyId, "início", {
       exec_id: execId,
       cnpj: cnpjDigits,
       versao_cursor_inicial: cursor,
@@ -700,13 +795,50 @@ Deno.serve(async (req) => {
     let bloqueadosBatchAtivoEste = 0;
     let cabecalhosImportaveisEste = 0;
     let descartadosJaImportadosEste = 0;
+    const xmlsIdentificadosEste: Array<Record<string, unknown>> = [];
     let listaIncompleta = false;
     let listError: string | null = null;
     const tList0 = performance.now();
 
     const seenChaveListCycle = new Set<string>();
 
-    if (runList) {
+    if (runList && manualTestMode && manualTestSingleKey) {
+      const testKey = manualTestSingleKey;
+      const seenChaveListCycle = new Set<string>();
+      const toEnqueue: Array<{ chave: string; versao: number | null }> = [];
+      if (!seenChaveListCycle.has(testKey)) {
+        seenChaveListCycle.add(testKey);
+        toEnqueue.push({ chave: testKey, versao: null });
+      }
+      cabecalhosImportaveisEste += toEnqueue.length;
+      cabecalhosEste += toEnqueue.length;
+      totalCabecalhos += toEnqueue.length;
+      if (toEnqueue.length > 0) {
+        const rows = toEnqueue.map((x) => ({
+          company_id: companyId,
+          nfe_access_key: x.chave,
+          versao: x.versao,
+          status: "pending",
+        }));
+        let inserted = 0;
+        for (const rowToInsert of rows) {
+          const { error: insErr } = await admin
+            .from("focus_nfe_recebidas_sync_queue")
+            .insert(rowToInsert);
+          if (!insErr) inserted += 1;
+          else if (!String(insErr.message).toLowerCase().includes("duplicate") && insErr.code !== "23505") {
+            console.warn(LOG, "queue_insert_test_mode", insErr.message);
+          }
+        }
+        enfileiradosEste += inserted;
+        totalEnfileirados += inserted;
+      }
+      slogV("test_mode_single_key_queue", companyId, "chave única enfileirada para teste", {
+        exec_id: execId,
+        chave_nfe_44: testKey,
+        enfileirados: enfileiradosEste,
+      });
+    } else if (runList) {
       let runs = 0;
       while (runs < maxListPages) {
         if (budgetExceeded(t0, softBudgetMs)) {
@@ -720,7 +852,7 @@ Deno.serve(async (req) => {
         runs += 1;
         const cursorAntesLista = cursor;
         const listUrl =
-          `${apiBase}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpjDigits)}&versao=${cursor}`;
+          `${apiBase}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpjDigits)}&versao=${cursor}&limite=${listPageSize}`;
 
         let listRes: Response;
         try {
@@ -769,7 +901,7 @@ Deno.serve(async (req) => {
             execId,
             "checkpoint_lista_vazia",
           );
-          slog("lista_focus_pagina", companyId, "página vazia — fim", {
+          slogV("lista_focus_pagina", companyId, "página vazia — fim", {
             exec_id: execId,
             run: runs,
             versao_cursor_saida: cursor,
@@ -778,6 +910,12 @@ Deno.serve(async (req) => {
         }
 
         const cabList = lista as NfeCab[];
+        const cabListForQueue = limitCabListForManualTest(cabList, {
+          isManualSingle,
+          manualTestMode,
+          manualTestSingleKey,
+          maxImportable: maxXmlDownloads,
+        });
         paginasEste += 1;
         totalPaginas += 1;
         cabecalhosEste += cabList.length;
@@ -801,18 +939,36 @@ Deno.serve(async (req) => {
           "checkpoint_lista_pagina",
         );
 
-        slog("lista_focus_pagina", companyId, `${cabList.length} cabeçalhos`, {
-          exec_id: execId,
-          run: runs,
-          proxima_consulta_versao: cursor,
-        });
+        slogV(
+          "lista_focus_pagina",
+          companyId,
+          manualTestMode && isManualSingle && !manualTestSingleKey
+            ? `página Focus ${cabList.length} itens → fila ${cabListForQueue.length} importável(is) (cap teste=${maxXmlDownloads})`
+            : `${cabList.length} cabeçalhos`,
+          {
+            exec_id: execId,
+            run: runs,
+            proxima_consulta_versao: cursor,
+            itens_pagina_focus: cabList.length,
+            cabecalhos_para_enfileiramento: cabListForQueue.length,
+          },
+        );
 
         const toEnqueue: Array<{ chave: string; versao: number | null }> = [];
-        for (const cab of cabList) {
+        for (const cab of cabListForQueue) {
           const chave = String(cab.chave_nfe ?? "").replace(/\D/g, "");
           if (chave.length !== 44) continue;
           if (!nfeRecebidaImportavel(cab)) continue;
           cabecalhosImportaveisEste += 1;
+          if (xmlsIdentificadosEste.length < 80) {
+            xmlsIdentificadosEste.push({
+              chave_nfe: chave,
+              versao: Number.isFinite(Number(cab.versao)) ? Number(cab.versao) : null,
+              situacao: String(cab.situacao ?? "").trim() || null,
+              fornecedor_nome: String(cab.nome_emitente ?? "").trim() || null,
+              valor_total: parseCabTotal(cab),
+            });
+          }
           if (seenChaveListCycle.has(chave)) continue;
           seenChaveListCycle.add(chave);
           const v = Number(cab.versao);
@@ -831,25 +987,34 @@ Deno.serve(async (req) => {
               const part = chaves.slice(i, i + chunkSz);
               const { data: existingKeys } = await admin
                 .from("company_nfe_import_logs")
-                .select("nfe_access_key, status, expense_id")
+                .select("nfe_access_key, expense_id")
                 .eq("company_id", companyId)
                 .in("nfe_access_key", part);
+              const expenseIds = (existingKeys ?? [])
+                .map((r) => String((r as { expense_id?: string | null }).expense_id ?? "").trim())
+                .filter((x) => x.length > 0);
+              const existingExpenseIds = new Set<string>();
+              if (expenseIds.length > 0) {
+                const { data: expRows } = await admin
+                  .from("expenses")
+                  .select("id")
+                  .eq("company_id", companyId)
+                  .in("id", expenseIds);
+                for (const er of expRows ?? []) {
+                  const id = String((er as { id?: string }).id ?? "").trim();
+                  if (id) existingExpenseIds.add(id);
+                }
+              }
               for (const r of existingKeys ?? []) {
                 const row = r as {
                   nfe_access_key?: string;
-                  status?: string | null;
                   expense_id?: string | null;
                 };
                 const k = row.nfe_access_key;
                 if (!k) continue;
-                // Só considera "já importado" quando há evidência de importação real.
-                // Logs órfãos/erro sem expense_id não devem bloquear nova tentativa.
-                if (row.expense_id && String(row.expense_id).trim() !== "") {
-                  keysKnown.add(k);
-                  continue;
-                }
-                const st = String(row.status ?? "").toLowerCase();
-                if (st === "success" || st === "needs_review") {
+                // Só bloqueia quando a despesa ainda existe de fato.
+                const expId = String(row.expense_id ?? "").trim();
+                if (expId && existingExpenseIds.has(expId)) {
                   keysKnown.add(k);
                 }
               }
@@ -930,7 +1095,7 @@ Deno.serve(async (req) => {
                   const ativoSemArquivos = batchAtivo && !batchTemArquivosAtivos;
                   if (batchAtivo) {
                     if (ativoMasStale || ativoSemArquivos) {
-                      slog(
+                      slogV(
                         "queue_reactivate_stale_in_batch",
                         companyId,
                         "in_batch preso em batch ativo stale/inconsistente — reativar pending",
@@ -995,12 +1160,18 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (lista.length < 100) break;
+        const listaLen = lista.length;
+        if (
+          listaLen < FOCUS_NFES_RECEBIDAS_LIST_MAX_LEGACY &&
+          listaLen !== listPageSize
+        ) {
+          break;
+        }
 
         if (runs >= maxListPages) {
-          listaIncompleta = lista.length === 100;
+          listaIncompleta = listFocusPageIsFull(listaLen, listPageSize);
           if (listaIncompleta) {
-            slog("lista_focus_cap", companyId, `MAX_LIST_PAGES=${maxListPages}`, {
+            slogV("lista_focus_cap", companyId, `MAX_LIST_PAGES=${maxListPages}`, {
               exec_id: execId,
             });
           }
@@ -1052,7 +1223,7 @@ Deno.serve(async (req) => {
           const claimedRows = (claimed ?? []) as QueueRow[];
           const claimedIds = claimedRows.map((r) => r.id);
           const settledQueueIds = new Set<string>();
-          const xmlGapMs = throttleMsBetweenXmlDownloads();
+          const xmlGapMs = throttleMsForSyncRun(manualTestMode);
           const toFetch: Array<{
             queueId: string;
             cab: NfeCab;
@@ -1124,7 +1295,7 @@ Deno.serve(async (req) => {
             seenXmlHashThisBatch.add(h);
             totalXmlOk += 1;
             toFetch.push({ queueId: qrow.id, cab, xml: xmlBuf, hash: h });
-            slog("xml_transferido_focus_ok", companyId, "XML para batch", {
+            slogV("xml_transferido_focus_ok", companyId, "XML para batch", {
               exec_id: execId,
               chave_nfe_44: chave,
               bytes: xmlBuf.length,
@@ -1237,7 +1408,18 @@ Deno.serve(async (req) => {
                   arquivos: filesInserted,
                   exec_id: execId,
                 });
-                kickProcessImportJobBatch(admin, batchIdOut!, companyId, execId);
+                if (skipProcessImportJobBatch) {
+                  slogV(
+                    "process_import_job_batch_invoke_skip",
+                    companyId,
+                    "skip_process_import_job_batch=true — invoke do batch processor desativado",
+                    { exec_id: execId, batch_id: batchIdOut },
+                  );
+                } else {
+                  kickProcessImportJobBatch(admin, batchIdOut!, companyId, execId, {
+                    test_single_file: isManualSingle && manualTestMode,
+                  });
+                }
               }
             }
           }
@@ -1280,10 +1462,11 @@ Deno.serve(async (req) => {
       pending_queue_remaining: pendingRem,
       elapsed_ms_list: elapsedListMs,
       elapsed_ms_download: elapsedDownloadMs,
+      xmls_identificados_preview: xmlsIdentificadosEste,
     };
     summary.push(linhaSumario);
 
-    slog("empresa_fim_resumo_linha", companyId, "fim", {
+    slogV("empresa_fim_resumo_linha", companyId, "fim", {
       exec_id: execId,
       ...linhaSumario,
     });
@@ -1325,7 +1508,7 @@ Deno.serve(async (req) => {
     }).catch((e) => console.warn(LOG, "chain_fetch", String(e)));
 
     scheduleWaitUntil(chainPromise);
-    slog("continuacao_agendada", null, "waitUntil(chain POST)", {
+    slogV("continuacao_agendada", null, "waitUntil(chain POST)", {
       exec_id: execId,
       company_id: singleCompanyId,
       chain_depth_next: chainDepthReal + 1,
@@ -1349,6 +1532,7 @@ Deno.serve(async (req) => {
       maxCompanies,
       maxListPages,
       maxXmlDownloads,
+      listPageSize,
       softBudgetMs,
     },
     continuacao: {
@@ -1359,7 +1543,12 @@ Deno.serve(async (req) => {
     },
   });
 
-  console.log(LOG, `${JSON.stringify({ exec_id: execId, resultado_resumo_json: summary })}`);
+  if (VERBOSE_LOGS) {
+    console.log(
+      LOG,
+      `${JSON.stringify({ exec_id: execId, resultado_resumo_json: summary })}`,
+    );
+  }
 
   return json({
     ok: true,
@@ -1377,6 +1566,7 @@ Deno.serve(async (req) => {
       maxCompanies,
       maxListPages,
       maxXmlDownloads,
+      listPageSize,
       softBudgetMs,
     },
     continuacao: {

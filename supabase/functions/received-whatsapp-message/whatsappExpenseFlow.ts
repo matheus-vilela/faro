@@ -21,6 +21,7 @@ import {
   resolveProductMatches,
   upsertProductInvoiceAlias,
 } from "./productMatch.ts";
+import { getDefaultCatalogMatchingOpts } from "../_shared/nfeExpenseProducts/catalogMatchingPolicy.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 type Supabase = ReturnType<typeof createClient>;
@@ -1190,10 +1191,16 @@ export async function tryHandleIncomingExpenseDocument(
       return true;
     }
 
+    const matchOpts = await getDefaultCatalogMatchingOpts(
+      supabase,
+      auth.companyId,
+      "WHATSAPP_INTERACTIVE",
+    );
     const matchResult = await resolveProductMatches(
       supabase,
       auth.companyId,
       items,
+      matchOpts,
     );
     await processMatchedExpenseFlow(
       supabase,

@@ -18,8 +18,8 @@ import {
 } from "../_shared/productImport/packSizeFromLabel.ts";
 import { pickInvoiceUnitRaw } from "../_shared/productImport/consolidateItems.ts";
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
+import { matchNfeExpenseCatalogLines } from "../_shared/nfeExpenseProducts/matchPipeline.ts";
 import {
-  resolveProductMatches,
   type ItemWithProductMatch,
 } from "../received-whatsapp-message/productMatch.ts";
 import {
@@ -1216,18 +1216,14 @@ async function enrichPreviewOnly(
       matchMeta: null,
     };
   }
-  const matchOpts = simulateImportBatch
-    ? {
-      importBatch: true,
-      skipEmbeddingBackfill: true,
-      skipLlmAssist: true,
-    }
-    : undefined;
-  const matchResult = await resolveProductMatches(
+  const catalogContext = simulateImportBatch
+    ? "PREVIEW_ECONOMY"
+    : "PREVIEW_FULL";
+  const matchResult = await matchNfeExpenseCatalogLines(
     supabase,
     companyId,
     ex0.items ?? [],
-    matchOpts,
+    catalogContext,
   );
   const matchedProductIds = [
     ...new Set(

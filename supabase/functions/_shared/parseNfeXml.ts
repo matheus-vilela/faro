@@ -26,9 +26,74 @@ function normalizeDateOnly(v: unknown): string | null {
   return null;
 }
 
+function stripBom(s: string): string {
+  const t = s.trim();
+  if (t.charCodeAt(0) === 0xfeff) return t.slice(1).trim();
+  return t;
+}
+
+function pickNFeRoot(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const arr = Array.isArray(raw) ? raw : [raw];
+  for (const el of arr) {
+    if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+    const o = el as Record<string, unknown>;
+    if (o.infNFe != null) return o;
+  }
+  return undefined;
+}
+
+/** Vários `infNFe` no mesmo ficheiro: preferir bloco com `det` (itens). */
+function pickInfNFe(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const arr = Array.isArray(raw) ? raw : [raw];
+  for (const el of arr) {
+    if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+    const o = el as Record<string, unknown>;
+    if (o.det != null) return o;
+  }
+  for (const el of arr) {
+    if (!el || typeof el !== "object" || Array.isArray(el)) continue;
+    return el as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+/** `det` único, vários `det`, ou mapa indexado pelo parser. */
+function normalizeDetList(detRaw: unknown): Record<string, unknown>[] {
+  if (detRaw == null) return [];
+  if (Array.isArray(detRaw)) {
+    return detRaw.filter((d) => d && typeof d === "object" && !Array.isArray(d)) as Record<
+      string,
+      unknown
+    >[];
+  }
+  if (typeof detRaw !== "object") return [];
+  const o = detRaw as Record<string, unknown>;
+  if ("prod" in o || "imposto" in o) return [o];
+  const vals = Object.values(o).filter(
+    (v) => v && typeof v === "object" && !Array.isArray(v),
+  ) as Record<string, unknown>[];
+  if (vals.length > 0 && vals.every((v) => "prod" in v || "imposto" in v)) return vals;
+  return [];
+}
+
+function normalizeProd(raw: unknown): Record<string, unknown> | undefined {
+  if (raw == null) return undefined;
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    if (first && typeof first === "object" && !Array.isArray(first)) {
+      return first as Record<string, unknown>;
+    }
+    return undefined;
+  }
+  if (typeof raw === "object") return raw as Record<string, unknown>;
+  return undefined;
+}
+
 /** Aceita nfeProc, NFe sem wrapper, ou XML com namespace */
 export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult | null {
-  const trimmed = xmlText.trim();
+  const trimmed = stripBom(xmlText);
   if (!trimmed.startsWith("<")) return null;
 
   const parser = new XMLParser({
@@ -45,8 +110,8 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   }
 
   const nfeProc = root.nfeProc as Record<string, unknown> | undefined;
-  const nfeRoot = (nfeProc?.NFe ?? root.NFe) as Record<string, unknown> | undefined;
-  const infNFe = nfeRoot?.infNFe as Record<string, unknown> | undefined;
+  const nfeRoot = pickNFeRoot(nfeProc?.NFe ?? root.NFe);
+  const infNFe = pickInfNFe(nfeRoot?.infNFe);
   if (!infNFe || typeof infNFe !== "object") {
     return null;
   }
@@ -73,14 +138,11 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     totalAmount = num((total as Record<string, unknown> | undefined)?.vNF);
   }
 
-  let detRaw = infNFe.det;
-  if (!detRaw) return null;
-  const detList = Array.isArray(detRaw) ? detRaw : [detRaw];
+  const detList = normalizeDetList(infNFe.det);
 
   const items: ExtractedExpenseItem[] = [];
-  for (const det of detList) {
-    const d = det as Record<string, unknown>;
-    const prod = d.prod as Record<string, unknown> | undefined;
+  for (const d of detList) {
+    const prod = normalizeProd(d.prod);
     if (!prod) continue;
     const productName = str(prod.xProd) ?? "Item";
     const quantity = Math.max(0.0001, num(prod.qCom ?? prod.qTrib));
@@ -107,7 +169,21 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   }
 
   if (items.length === 0) {
-    return null;
+    if (totalAmount > 0) {
+      items.push({
+        productName: "Itens da NF-e (detalhes não extraídos do XML)",
+        quantity: 1,
+        unitValue: totalAmount,
+        lineTotal: totalAmount,
+        productCode: null,
+        unitCommercial: null,
+        unitTax: null,
+        ncm: null,
+        ean: null,
+      });
+    } else {
+      return null;
+    }
   }
 
   const itemsSum = items.reduce((acc, it) => {

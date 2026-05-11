@@ -8,6 +8,7 @@
 -- Variáveis de ambiente na Edge (orçamentos, ver comentário no index da função):
 --   FOCUS_SYNC_MAX_COMPANIES_PER_RUN (default 1)
 --   FOCUS_SYNC_MAX_LIST_PAGES (default 8)
+--   FOCUS_SYNC_LIST_PAGE_SIZE (default 25; query `limite` na listagem)
 --   FOCUS_SYNC_MAX_XML_DOWNLOADS_PER_RUN (default 20)
 --   FOCUS_SYNC_SOFT_BUDGET_MS (0 = desligado)
 --   FOCUS_SYNC_LEASE_MINUTES (default 30)

@@ -14,7 +14,7 @@ import {
   optimizeExpenseImage,
 } from "../_shared/optimizeExpenseImage.ts";
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
-import { productMatchOptionsForNfeXmlUpload } from "./parseExpenseMatchBatch.ts";
+import { getDefaultCatalogMatchingOpts } from "../_shared/nfeExpenseProducts/catalogMatchingPolicy.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -29,12 +29,12 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Igual ao fluxo WhatsApp: aliases + similaridade; NF-e XML estruturada usa matcher de lote (`importBatch`). */
+/** Igual ao fluxo WhatsApp por defeito; NF-e XML estruturada usa política única (`XML_BATCH_OR_LAB`). */
 async function enrichForCompany(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   extracted: ExtractedDocumentResult,
-  matchOpts?: { importBatch?: boolean },
+  catalogContext?: "XML_BATCH_OR_LAB" | "WHATSAPP_INTERACTIVE",
 ): Promise<{
   data: ExtractedDocumentResult & { _requiresProductConfirmation?: boolean };
   resolvedSupplierId: string | null;
@@ -57,11 +57,13 @@ async function enrichForCompany(
     );
     return { data, resolvedSupplierId: sr.supplierId };
   }
+  const ctx = catalogContext ?? "WHATSAPP_INTERACTIVE";
+  const matchOpts = await getDefaultCatalogMatchingOpts(supabase, companyId, ctx);
   const matchResult = await resolveProductMatches(
     supabase,
     companyId,
     ex0.items,
-    matchOpts?.importBatch ? { importBatch: true } : undefined,
+    matchOpts,
   );
   const data: ExtractedDocumentResult & {
     _requiresProductConfirmation?: boolean;
@@ -175,7 +177,7 @@ Deno.serve(async (req) => {
       supabase,
       companyId,
       extracted,
-      productMatchOptionsForNfeXmlUpload(),
+      "XML_BATCH_OR_LAB",
     );
     return json({
       ok: true,

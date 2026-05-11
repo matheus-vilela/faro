@@ -60,6 +60,63 @@ type PreviewOkResponse = {
   enriched: Record<string, unknown>;
 };
 
+type FocusSyncTestResponse = {
+  ok?: boolean;
+  error?: string;
+  exec_id?: string;
+  companies?: number;
+  detail?: Array<{
+    batch_id?: string | null;
+    phase?: string;
+    xmls_identificados_preview?: Array<{
+      chave_nfe?: string | null;
+      versao?: number | null;
+      situacao?: string | null;
+      fornecedor_nome?: string | null;
+      valor_total?: number | null;
+    }>;
+    [key: string]: unknown;
+  }>;
+  metrics?: Record<string, unknown>;
+  caps_aplicados?: Record<string, unknown>;
+  continuacao?: Record<string, unknown>;
+};
+
+function buildFocusSyncTestLog(data: FocusSyncTestResponse): Record<string, unknown> {
+  const detail0 = Array.isArray(data.detail) && data.detail.length > 0
+    ? (data.detail[0] ?? {})
+    : {};
+  const metrics = data.metrics ?? {};
+  return {
+    evento: "focus_sync_nfe_recebidas_teste",
+    ok: data.ok === true,
+    exec_id: data.exec_id ?? null,
+    companies: data.companies ?? null,
+    quantidade_xmls: Number(
+      metrics.xml_descarregados_ok ??
+      detail0.novos_xml_batch ??
+      detail0.novos_xml_na_fila ??
+      0,
+    ),
+    filas_inseridas: Number(metrics.filas_inseridas ?? detail0.filas_inseridas_este_ciclo ?? 0),
+    cabecalhos_vistos: Number(metrics.cabecalhos_vistos ?? detail0.cabecalhos_vistos ?? 0),
+    batch_id: detail0.batch_id ?? null,
+    cursor_versao: detail0.cursor_versao ?? null,
+    lista_incompleta: Boolean(detail0.lista_incompleta ?? data.continuacao?.lista_incompleta ?? false),
+    pending_queue_remaining: Number(
+      detail0.pending_queue_remaining ?? data.continuacao?.pending_queue_remaining ?? 0,
+    ),
+    caps_aplicados: data.caps_aplicados ?? null,
+  };
+}
+
+function formatMaybeBrl(v: unknown): string {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return BRL_PREVIEW.format(n);
+}
+
 const BRL_PREVIEW = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
@@ -137,6 +194,8 @@ export function Desenvolvimento() {
   const [versaoInicial, setVersaoInicial] = useState("");
   const [loadingFocus, setLoadingFocus] = useState(false);
   const [lastJson, setLastJson] = useState<string | null>(null);
+  const [lastFocusResponse, setLastFocusResponse] =
+    useState<FocusSyncTestResponse | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,7 +204,7 @@ export function Desenvolvimento() {
   const [previewResult, setPreviewResult] = useState<PreviewOkResponse | null>(
     null,
   );
-  const [simulateImportBatch, setSimulateImportBatch] = useState(true);
+  const [simulateImportBatch, setSimulateImportBatch] = useState(false);
   const [aiLineUnitsPreview, setAiLineUnitsPreview] = useState(false);
 
   const runFocus = useCallback(async () => {
@@ -182,6 +241,7 @@ export function Desenvolvimento() {
     setLoadingFocus(true);
     setLastError(null);
     setLastJson(null);
+    setLastFocusResponse(null);
     try {
       const body: Record<string, unknown> = {
         manual: true,
@@ -203,14 +263,26 @@ export function Desenvolvimento() {
         toast.error(msg);
         return;
       }
-      const text = JSON.stringify(data, null, 2);
+      const typedData = (data ?? {}) as FocusSyncTestResponse;
+      setLastFocusResponse(typedData);
+      const testLog = buildFocusSyncTestLog(typedData);
+      const text = JSON.stringify(
+        {
+          log_teste: testLog,
+          resposta_completa: typedData,
+        },
+        null,
+        2,
+      );
       setLastJson(text);
       const ok =
         data &&
         typeof data === "object" &&
         (data as { ok?: boolean }).ok === true;
       if (ok) {
-        toast.success("Função concluída. Ver resposta abaixo.");
+        toast.success(
+          `Função concluída. XMLs recebidos: ${String(testLog.quantidade_xmls ?? 0)}.`,
+        );
       } else {
         const err =
           data && typeof data === "object" && "error" in data
@@ -505,6 +577,37 @@ export function Desenvolvimento() {
                 </pre>
               </div>
             ) : null}
+
+            {lastFocusResponse?.detail?.[0]?.xmls_identificados_preview &&
+            lastFocusResponse.detail[0].xmls_identificados_preview.length > 0 ? (
+              <div className="space-y-2">
+                <Label>XMLs identificados (preview)</Label>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full caption-bottom border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-left">
+                        <th className="p-2 font-medium">Chave NF-e</th>
+                        <th className="p-2 font-medium">Fornecedor</th>
+                        <th className="p-2 text-right font-medium">Valor total</th>
+                        <th className="p-2 font-medium">Situação</th>
+                        <th className="p-2 text-right font-medium">Versão</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lastFocusResponse.detail[0].xmls_identificados_preview.map((x, i) => (
+                        <tr key={`${String(x.chave_nfe ?? "sem-chave")}-${i}`} className="border-b border-border/60">
+                          <td className="p-2 font-mono">{String(x.chave_nfe ?? "—")}</td>
+                          <td className="max-w-[220px] truncate p-2">{String(x.fornecedor_nome ?? "—")}</td>
+                          <td className="p-2 text-right font-mono">{formatMaybeBrl(x.valor_total)}</td>
+                          <td className="p-2">{String(x.situacao ?? "—")}</td>
+                          <td className="p-2 text-right font-mono">{String(x.versao ?? "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : (
@@ -545,15 +648,14 @@ export function Desenvolvimento() {
                 disabled={loadingPreview || !companyId}
               />
               <Label htmlFor="dev-simulate-batch" className="font-normal">
-                Simular resolução como importação XML (batch)
+                Modo económico (desliga IA/embeddings de catálogo)
               </Label>
             </div>
             <p className="text-xs text-muted-foreground max-w-xl">
-              Usa o mesmo modo que{" "}
-              <code className="rounded bg-muted px-1">process-import-job-batch</code>{" "}
-              (limiares, IA extra,{" "}
-              <code className="rounded bg-muted px-1">deferProductCreationToReconciliation</code>{" "}
-              desligado).
+              Por defeito o laboratório usa a mesma política que o motor XML em produção
+              (matching com IA quando as regras permitem). Activar esta opção reproduce o
+              comportamento antigo com <code className="rounded bg-muted px-1">importBatch</code>{" "}
+              sem assistência LLM/embeddings.
             </p>
 
             <div className="flex items-center gap-2">

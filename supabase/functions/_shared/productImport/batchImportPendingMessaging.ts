@@ -78,6 +78,33 @@ export function batchImportReviewPendingTitleDetail(params: {
 }
 
 /** Subconjunto seguro do productMatch para JSON em `import_review_pending.payload`. */
+/**
+ * Linha ainda precisa de intervenção humana no catálogo / vínculo de produto
+ * (paridade com o que o dashboard conta em `import_review_pending`).
+ */
+export function lineNeedsCatalogProductReview(params: {
+  resolution: string;
+  productId: string | null | undefined;
+  pm: Record<string, unknown> | undefined;
+}): boolean {
+  const r = String(params.resolution ?? "").trim();
+  if (r === "SKIPPED") return false;
+  const pid = String(params.productId ?? "").trim();
+  const st = String(params.pm?.resolutionStatus ?? "").trim();
+  if (
+    st === "UNIT_CONFLICT_PENDING" ||
+    st === "UNIT_VALIDATION_REQUIRED" ||
+    st === "PENDING_USER_CONFIRM" ||
+    st === "NEW_PRODUCT_STAGED"
+  ) {
+    return true;
+  }
+  if (params.pm?.needsConfirmation === true) return true;
+  if (r === "PENDING_REVIEW") return true;
+  if (!pid) return true;
+  return false;
+}
+
 export function compactProductMatchForPendingPayload(
   pm: Record<string, unknown> | undefined,
 ): Record<string, unknown> {

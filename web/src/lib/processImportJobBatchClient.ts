@@ -21,6 +21,7 @@ export type ProcessImportJobBatchResponse = {
 
 export async function invokeProcessImportJobBatch(
   batchId: string,
+  invokeOptions?: { test_single_file?: boolean },
 ): Promise<{ res: Response; data: ProcessImportJobBatchResponse }> {
   const { data: sess } = await supabase.auth.getSession();
   const token = sess.session?.access_token;
@@ -37,7 +38,10 @@ export async function invokeProcessImportJobBatch(
       apikey: anon,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ batch_id: batchId }),
+    body: JSON.stringify({
+      batch_id: batchId,
+      ...(invokeOptions?.test_single_file === true ? { test_single_file: true } : {}),
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as ProcessImportJobBatchResponse;
   return { res, data };
@@ -49,14 +53,16 @@ export async function invokeProcessImportJobBatch(
  */
 export async function drainProcessImportJobBatch(
   batchId: string,
-  options?: { maxRounds?: number; pauseMs?: number },
+  options?: { maxRounds?: number; pauseMs?: number; test_single_file?: boolean },
 ): Promise<{ ok: boolean; error?: string; last?: ProcessImportJobBatchResponse }> {
   const maxRounds = options?.maxRounds ?? 200;
   const pauseMs = options?.pauseMs ?? 400;
   let last: ProcessImportJobBatchResponse | undefined;
 
   for (let i = 0; i < maxRounds; i += 1) {
-    const { res, data } = await invokeProcessImportJobBatch(batchId);
+    const { res, data } = await invokeProcessImportJobBatch(batchId, {
+      test_single_file: options?.test_single_file === true ? true : undefined,
+    });
     last = data;
     if (!res.ok || data.ok === false) {
       return {

@@ -33,6 +33,7 @@ import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
+import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import {
@@ -156,6 +157,7 @@ export function ExpenseDetailSheet({
   const [linkSaving, setLinkSaving] = useState(false);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
+  const supportDataLoadedCompanyRef = useRef<string | null>(null);
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -183,6 +185,19 @@ export function ExpenseDetailSheet({
     );
   }, [detailExpense?.expense_items]);
 
+  const detailNoteTotal = useMemo(() => {
+    const n = Number(detailExpense?.document_total ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }, [detailExpense?.document_total]);
+
+  const detailTotalDiff = useMemo(() => {
+    return Math.round((detailNoteTotal - detailLineSum) * 100) / 100;
+  }, [detailNoteTotal, detailLineSum]);
+
+  const detailTotalMatches = useMemo(() => {
+    return Math.abs(detailTotalDiff) <= 0.05;
+  }, [detailTotalDiff]);
+
   const detailUnlinkedProductRows = useMemo(() => {
     if (!detailExpense?.expense_items?.length) return 0;
     return detailExpense.expense_items.filter((it) => !it.product_id).length;
@@ -201,31 +216,44 @@ export function ExpenseDetailSheet({
       return;
     }
     setDetailExpense(exp as Expense);
-    const { data: bo } = await supabase
-      .from("boletos")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("flow_type", "payable");
-    setBoletos((bo as Boleto[]) ?? []);
-    const { data: catRows } = await supabase
-      .from("company_categories")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    const { data: sup } = await supabase
-      .from("suppliers")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("name");
-    const { data: prod } = await supabase
-      .from("products")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("name");
-    setSuppliers((sup as Supplier[]) ?? []);
-    setProducts((prod as Product[]) ?? []);
+    const shouldLoadSupportData = supportDataLoadedCompanyRef.current !== companyId;
+    if (shouldLoadSupportData) {
+      const [{ data: bo }, { data: catRows }, { data: sup }, { data: prod }] = await Promise.all([
+        supabase
+          .from("boletos")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("flow_type", "payable"),
+        supabase
+          .from("company_categories")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+      ]);
+      setBoletos((bo as Boleto[]) ?? []);
+      setCompanyCategories((catRows as CompanyCategory[]) ?? []);
+      setSuppliers((sup as Supplier[]) ?? []);
+      setProducts((prod as Product[]) ?? []);
+      supportDataLoadedCompanyRef.current = companyId;
+    } else {
+      const { data: bo } = await supabase
+        .from("boletos")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("flow_type", "payable");
+      setBoletos((bo as Boleto[]) ?? []);
+    }
   }, [expenseId, companyId]);
 
   useEffect(() => {
@@ -986,6 +1014,26 @@ export function ExpenseDetailSheet({
                     divergenceReason={detailExpense.divergence_reason}
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
+                  <div className="rounded-lg border p-4 space-y-2">
+                    <p className="text-sm font-medium">Validação dos valores da nota</p>
+                    <div className="grid gap-2 text-sm sm:grid-cols-3">
+                      <p>
+                        <span className="text-muted-foreground">Total da nota (XML):</span>{" "}
+                        <span className="font-medium">{formatCurrency(detailNoteTotal)}</span>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Soma dos produtos:</span>{" "}
+                        <span className="font-medium">{formatCurrency(detailLineSum)}</span>
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Diferença:</span>{" "}
+                        <span className="font-medium">{formatCurrency(detailTotalDiff)}</span>
+                      </p>
+                    </div>
+                    <Badge variant={detailTotalMatches ? "default" : "secondary"}>
+                      {detailTotalMatches ? "Conferido com a nota" : "Divergente da nota"}
+                    </Badge>
+                  </div>
                   <div className="grid gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Tipo:</span>{" "}
@@ -1199,13 +1247,26 @@ export function ExpenseDetailSheet({
                             </tr>
                           </thead>
                           <tbody>
-                            {detailExpense.expense_items!.map((it, i) => (
+                            {detailExpense.expense_items!.map((it, i) => {
+                              const rawLineName = it.product_name || "";
+                              const strippedLine =
+                                stripPackSizeFromLabel(rawLineName).trim() ||
+                                rawLineName;
+                              const catalogName = it.products?.name?.trim();
+                              const primary =
+                                catalogName ||
+                                strippedLine ||
+                                rawLineName ||
+                                "—";
+                              return (
                               <tr key={i} className="border-t">
                                 <td className="p-2">
-                                  <span>{it.product_name || "—"}</span>
-                                  {it.product_id && it.products && (
+                                  <span>{primary}</span>
+                                  {catalogName &&
+                                    (strippedLine !== catalogName ||
+                                      rawLineName !== catalogName) && (
                                     <p className="text-xs text-muted-foreground mt-0.5">
-                                      → {it.products.name}
+                                      Nota: {strippedLine || rawLineName}
                                     </p>
                                   )}
                                 </td>
@@ -1243,7 +1304,8 @@ export function ExpenseDetailSheet({
                                   )}
                                 </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

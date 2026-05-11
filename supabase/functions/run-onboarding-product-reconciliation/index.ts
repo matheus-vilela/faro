@@ -10,6 +10,7 @@ import {
   resolvePairDeterministic,
   type PairDecision,
 } from "../_shared/onboardingProductReconciliation/clusterPipeline.ts";
+import { upsertImportPendingReviewCompanyAlert } from "../_shared/upsertImportPendingReviewCompanyAlert.ts";
 import { toRawLineInput } from "../_shared/onboardingProductReconciliation/deterministicRules.ts";
 import { normalizeProductDescription } from "../_shared/onboardingProductReconciliation/normalize.ts";
 import type {
@@ -183,21 +184,49 @@ Deno.serve(async (req) => {
     const { data: rawRows, error: rawErr } = await supabase
       .from("onboarding_import_item_raw")
       .select(
-        "id, description_original, description_normalized, unit_raw, ean, created_product_id",
+        "id, expense_item_id, description_original, description_normalized, unit_raw, ean, created_product_id",
       )
       .eq("company_id", companyId)
       .order("created_at", { ascending: true });
 
     if (rawErr) throw new Error(rawErr.message);
 
-    const rows = (rawRows ?? []) as Array<{
+    const rowsAll = (rawRows ?? []) as Array<{
       id: string;
       description_original: string;
       description_normalized: string;
       unit_raw: string | null;
       ean: string | null;
       created_product_id: string | null;
+      expense_item_id: string | null;
     }>;
+
+    const eiIds = rowsAll
+      .map((r) => String(r.expense_item_id ?? "").trim())
+      .filter(Boolean);
+    const productIdByExpenseItem = new Map<string, string | null>();
+    if (eiIds.length > 0) {
+      const { data: eiRows, error: eiErr } = await supabase
+        .from("expense_items")
+        .select("id, product_id")
+        .in("id", eiIds);
+      if (eiErr) throw new Error(eiErr.message);
+      for (const row of (eiRows ?? []) as Array<{
+        id: string;
+        product_id: string | null;
+      }>) {
+        productIdByExpenseItem.set(String(row.id), row.product_id);
+      }
+    }
+
+    const rows = rowsAll.filter((r) => {
+      if (String(r.created_product_id ?? "").trim() !== "") return false;
+      const ei = String(r.expense_item_id ?? "").trim();
+      if (!ei) return true;
+      const pid = productIdByExpenseItem.get(ei);
+      if (pid != null && String(pid).trim() !== "") return false;
+      return true;
+    });
 
     if (rows.length === 0) {
       await supabase
@@ -451,6 +480,8 @@ Deno.serve(async (req) => {
         });
       }
     }
+
+    await upsertImportPendingReviewCompanyAlert(supabase, companyId);
 
     return json({
       ok: true,

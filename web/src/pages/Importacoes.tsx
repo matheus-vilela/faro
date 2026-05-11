@@ -8,6 +8,7 @@ import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import { Loader2, RefreshCcw, Ban } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 type BatchRow = {
@@ -23,12 +24,44 @@ type BatchRow = {
   created_at: string;
 };
 
+type XmlLinkPendingRow = {
+  id: string;
+  title: string;
+  detail: string | null;
+  expense_id: string | null;
+  created_at: string;
+};
+
+type CreationHistoryRow = {
+  id: string;
+  batch_id: string;
+  stage: string;
+  message: string | null;
+  meta: {
+    source?: string;
+    exec_id?: string;
+    summary?: {
+      processed?: number;
+      created?: number;
+      skipped_existing_active?: number;
+      suppliers_created?: number;
+      failed?: number;
+    };
+    remaining_xml?: number;
+    chain_scheduled?: boolean;
+    error?: string;
+  } | null;
+  created_at: string;
+};
+
 export function Importacoes() {
   const { currentCompany } = useCompany();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [creationHistory, setCreationHistory] = useState<CreationHistoryRow[]>([]);
+  const [xmlLinkPendings, setXmlLinkPendings] = useState<XmlLinkPendingRow[]>([]);
 
   const load = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -45,6 +78,33 @@ export function Importacoes() {
       return;
     }
     setRows((data ?? []) as BatchRow[]);
+
+    const { data: pendingXml, error: pendingXmlErr } = await supabase
+      .from("import_review_pending")
+      .select("id, title, detail, expense_id, created_at")
+      .eq("company_id", currentCompany.id)
+      .eq("status", "OPEN")
+      .eq("kind", "missing_product_match")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (pendingXmlErr) {
+      toast.error(pendingXmlErr.message);
+    } else {
+      setXmlLinkPendings((pendingXml ?? []) as XmlLinkPendingRow[]);
+    }
+
+    const { data: historyData, error: historyErr } = await supabase
+      .from("import_job_timeline")
+      .select("id, batch_id, stage, message, meta, created_at")
+      .contains("meta", { source: "focus-create-expenses-from-received-nfe" })
+      .in("stage", ["DONE", "ERROR"])
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (historyErr) {
+      toast.error(historyErr.message);
+      return;
+    }
+    setCreationHistory((historyData ?? []) as CreationHistoryRow[]);
   }, [currentCompany?.id]);
 
   useEffect(() => {
@@ -201,6 +261,48 @@ export function Importacoes() {
       />
       <Card>
         <CardHeader>
+          <CardTitle>Pendências de vínculo (NF-e / catálogo)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Linhas importadas que ainda precisam de confirmação ou vínculo manual com o estoque.
+            Use a despesa para ajustar itens; o painel principal continua com a lista completa e
+            ações em lote.
+          </p>
+          <p className="text-sm">
+            <Link to="/app" className="text-primary underline-offset-4 hover:underline">
+              Abrir alertas no painel
+            </Link>
+          </p>
+          {xmlLinkPendings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhuma pendência aberta deste tipo.</p>
+          ) : (
+            <ul className="space-y-2">
+              {xmlLinkPendings.map((p) => (
+                <li key={p.id} className="rounded-lg border p-3 text-sm">
+                  <p className="font-medium leading-snug">{p.title}</p>
+                  {p.detail ? (
+                    <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{p.detail}</p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>{new Date(p.created_at).toLocaleString("pt-BR")}</span>
+                    {p.expense_id ? (
+                      <Link
+                        to={`/app/despesas?expense=${encodeURIComponent(p.expense_id)}`}
+                        className="text-primary underline-offset-4 hover:underline"
+                      >
+                        Abrir despesa
+                      </Link>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
           <CardTitle>Histórico de lotes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -246,6 +348,44 @@ export function Importacoes() {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Histórico de criação de despesas (NF-e Focus)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {creationHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sem histórico da nova função ainda.</p>
+          ) : creationHistory.map((h) => {
+            const s = h.meta?.summary ?? {};
+            return (
+              <div key={h.id} className="rounded-lg border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">
+                    {h.stage === "ERROR" ? "Execução com falha" : "Execução concluída"}
+                  </p>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(h.created_at).toLocaleString("pt-BR")}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Batch: <strong>{h.batch_id}</strong>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Notas: processadas {Number(s.processed ?? 0)} · criadas {Number(s.created ?? 0)} ·
+                  ignoradas {Number(s.skipped_existing_active ?? 0)} · fornecedores criados {Number(s.suppliers_created ?? 0)} ·
+                  erros {Number(s.failed ?? 0)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Pendentes: {Number(h.meta?.remaining_xml ?? 0)} · encadeada: {h.meta?.chain_scheduled ? "sim" : "não"}
+                </p>
+                {h.stage === "ERROR" && h.meta?.error ? (
+                  <p className="mt-1 text-xs text-destructive">{String(h.meta.error)}</p>
+                ) : null}
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
     </PageShell>

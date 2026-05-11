@@ -99,6 +99,24 @@ function formatDocForDisplay(doc: string | null): string {
   return maskCpfCnpj(doc);
 }
 
+function compactLauncherFallback(exp: Expense): string {
+  const src = String(exp.expense_source ?? "").trim().toLowerCase();
+  if (src === "whatsapp") {
+    const phone = String(exp.whatsapp_sender_phone_normalized ?? "").trim();
+    return phone ? `WhatsApp · ${phone}` : "WhatsApp";
+  }
+  return "Plataforma Faro";
+}
+
+function expenseListDisplayTotal(exp: Expense): number {
+  const docTotal = Number(exp.document_total ?? 0);
+  if (Number.isFinite(docTotal) && docTotal > 0) return docTotal;
+  return exp.expense_items?.reduce(
+    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+    0,
+  ) ?? 0;
+}
+
 const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
   romaneio: "Romaneio",
   recibo: "Recibo",
@@ -160,6 +178,7 @@ const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 export function Despesas() {
   const { currentCompany, currentRole } = useCompany();
+  const companyId = currentCompany?.id ?? "";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightExpenseId = searchParams.get("expense");
@@ -237,8 +256,16 @@ export function Despesas() {
   const [linking, setLinking] = useState(false);
   const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
 
-  const getBoletoForExpense = (expenseId: string) =>
-    boletos.find((b) => b.expense_id === expenseId);
+  const boletosByExpenseId = useMemo(() => {
+    const map = new Map<string, Boleto>();
+    for (const b of boletos) {
+      if (!b.expense_id) continue;
+      if (!map.has(b.expense_id)) map.set(b.expense_id, b);
+    }
+    return map;
+  }, [boletos]);
+
+  const getBoletoForExpense = (expenseId: string) => boletosByExpenseId.get(expenseId);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -302,8 +329,38 @@ export function Despesas() {
     [conversionsByProduct, productById],
   );
 
+  const fetchSupportData = useCallback(async () => {
+    if (!companyId) return;
+    const [{ data: catRows }, { data: sup }, { data: prod }, { data: conv }] = await Promise.all([
+      supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("suppliers")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("product_unit_conversions")
+        .select("*")
+        .eq("company_id", companyId),
+    ]);
+    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
+    setSuppliers((sup as Supplier[]) ?? []);
+    setProducts((prod as Product[]) ?? []);
+    setProductConversions((conv as ProductUnitConversionDraft[]) ?? []);
+  }, [companyId]);
+
   const fetchData = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!companyId) return;
     setLoading(true);
     const { start, end } = getMonthRange(period.month, period.year);
     const startDate = start.slice(0, 10);
@@ -316,9 +373,9 @@ export function Despesas() {
         expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
       `,
-        { count: "exact" },
+        { count: "estimated" },
       )
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .gte("reference_date", startDate)
       .lte("reference_date", endDate)
       .order("reference_date", { ascending: false })
@@ -341,40 +398,14 @@ export function Despesas() {
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("flow_type", "payable");
-    const { data: catRows } = await supabase
-      .from("company_categories")
-      .select("*")
-      .eq("company_id", currentCompany.id)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    const [{ data: sup }, { data: prod }, { data: conv }] = await Promise.all([
-      supabase
-        .from("suppliers")
-        .select("*")
-        .eq("company_id", currentCompany.id)
-        .order("name"),
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", currentCompany.id)
-        .order("name"),
-      supabase
-        .from("product_unit_conversions")
-        .select("*")
-        .eq("company_id", currentCompany.id),
-    ]);
     setExpenses((ex as Expense[]) ?? []);
     setExpensesCount(count ?? 0);
     setBoletos((bo as Boleto[]) ?? []);
-    setSuppliers((sup as Supplier[]) ?? []);
-    setProducts((prod as Product[]) ?? []);
-    setProductConversions((conv as ProductUnitConversionDraft[]) ?? []);
     setLoading(false);
   }, [
-    currentCompany,
+    companyId,
     period.month,
     period.year,
     debouncedSearch,
@@ -389,6 +420,10 @@ export function Despesas() {
   useEffect(() => {
     queueMicrotask(() => fetchData());
   }, [fetchData]);
+
+  useEffect(() => {
+    queueMicrotask(() => fetchSupportData());
+  }, [fetchSupportData]);
 
   useEffect(() => {
     if (highlightExpenseId) {
@@ -1579,6 +1614,7 @@ export function Despesas() {
                         <ExpenseLauncherInfo
                           expenseId={exp.id}
                           compact
+                          fallbackLine={compactLauncherFallback(exp)}
                           className="inline"
                         />
                       </p>
@@ -1598,13 +1634,7 @@ export function Despesas() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium">
-                        {formatCurrency(
-                          exp.expense_items?.reduce(
-                            (s, it) =>
-                              s + Number(it.quantity) * Number(it.unit_value),
-                            0,
-                          ) ?? 0,
-                        )}
+                        {formatCurrency(expenseListDisplayTotal(exp))}
                       </span>
                       <Badge
                         variant={
