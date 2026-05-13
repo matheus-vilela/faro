@@ -76,6 +76,12 @@ export function getDocumentTitle(pathname: string): string {
   if (path === "/register") {
     return tab("Criar conta");
   }
+  if (path === "/privacidade") {
+    return tab("Política de privacidade");
+  }
+  if (path === "/termos") {
+    return tab("Termos de uso");
+  }
   if (path === "/redefinir-senha") {
     return tab("Redefinir senha");
   }

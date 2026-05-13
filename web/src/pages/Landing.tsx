@@ -4,6 +4,10 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
 import { cn } from "@/lib/utils";
 import {
+  getWhatsappAgentDisplayLabel,
+  getWhatsappAgentWaMeHref,
+} from "@/lib/whatsappAgentDisplay";
+import {
   ArrowRight,
   BarChart3,
   Bell,
@@ -337,8 +341,69 @@ export function Landing() {
         </section>
       </main>
 
-      <footer className="border-t border-border/50 bg-muted/20 py-10 text-center text-sm text-muted-foreground backdrop-blur-sm dark:bg-muted/10">
-        <p>© {new Date().getFullYear()} Faro. Todos os direitos reservados.</p>
+      <footer className="border-t border-border/50 bg-muted/20 backdrop-blur-sm dark:bg-muted/10">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+          <div className="grid gap-10 text-sm text-muted-foreground md:grid-cols-[1fr_auto] md:gap-12">
+            <div className="space-y-3 text-left">
+              <p className="font-display text-base font-semibold text-foreground">
+                FARO IA LTDA
+              </p>
+              <p>
+                <a
+                  className="text-primary underline-offset-4 hover:underline"
+                  href="mailto:contato@faroia.com.br"
+                >
+                  contato@faroia.com.br
+                </a>
+              </p>
+              <p>CNPJ: 66.385.510/0001-32 (Matriz)</p>
+              <p className="max-w-md leading-relaxed">
+                R. Cavazzola, 72, Sala Superior — Vila Olímpia, São Paulo/SP —
+                CEP 04546-060
+              </p>
+              <p>
+                Telefone:{" "}
+                <a
+                  className="text-primary underline-offset-4 hover:underline"
+                  href="tel:+5511917589292"
+                >
+                  (11) 91758-9292
+                </a>
+              </p>
+              <p>
+                <a
+                  className="inline-flex items-center gap-2 font-medium text-[#128C7E] underline-offset-4 hover:underline dark:text-[#25F4EE]"
+                  href={getWhatsappAgentWaMeHref()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <MessageCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  WhatsApp: {getWhatsappAgentDisplayLabel()}
+                </a>
+              </p>
+            </div>
+            <nav
+              className="flex flex-col gap-3 text-left md:border-l md:border-border/60 md:pl-12"
+              aria-label="Documentos legais"
+            >
+              <Link
+                to="/privacidade"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                Política de privacidade
+              </Link>
+              <Link
+                to="/termos"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                Termos de uso
+              </Link>
+            </nav>
+          </div>
+          <p className="mt-10 border-t border-border/50 pt-8 text-center text-sm text-muted-foreground">
+            © {new Date().getFullYear()} Faro. Todos os direitos reservados.
+          </p>
+        </div>
       </footer>
     </div>
   );

@@ -29,6 +29,7 @@ import { Integracoes } from "@/pages/Integracoes";
 import { Importacoes } from "@/pages/Importacoes";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
+import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
@@ -37,6 +38,7 @@ import { RedirectInventorySlug } from "@/pages/RedirectInventorySlug";
 import { RedirectRecebimentoSlug } from "@/pages/RedirectRecebimentoSlug";
 import { RedefinirSenha } from "@/pages/RedefinirSenha";
 import { Register } from "@/pages/Register";
+import { TermosDeUso } from "@/pages/TermosDeUso";
 import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
 import { ValidarDespesaWhatsapp } from "@/pages/ValidarDespesaWhatsapp";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
@@ -120,6 +122,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/privacidade" element={<PoliticaPrivacidade />} />
+      <Route path="/termos" element={<TermosDeUso />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/redefinir-senha" element={<RedefinirSenha />} />
