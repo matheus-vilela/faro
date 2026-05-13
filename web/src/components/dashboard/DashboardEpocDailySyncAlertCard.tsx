@@ -5,13 +5,31 @@ import { supabase } from "@/lib/supabase";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
 import { patchCompanyMaps } from "@/services/unitSetupService";
 import { parseEpocSettings } from "@/types/companyIntegration";
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 /** Sem registo recente de tentativa diária (~40 h). */
 const STALE_MS = 40 * 60 * 60 * 1000;
+
+const DISMISS_LS_PREFIX = "faro:epocDailySyncAlertDismissed:";
+
+function readDismissedAttemptAt(companyId: string): string | null {
+  try {
+    return window.localStorage.getItem(`${DISMISS_LS_PREFIX}${companyId}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeDismissedAttemptAt(companyId: string, attemptAtIso: string) {
+  try {
+    window.localStorage.setItem(`${DISMISS_LS_PREFIX}${companyId}`, attemptAtIso);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 export function DashboardEpocDailySyncAlertCard({
   companyId,
@@ -31,6 +49,8 @@ export function DashboardEpocDailySyncAlertCard({
   const [retrying, setRetrying] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [settingsRaw, setSettingsRaw] = useState<Record<string, unknown>>({});
+  /** Alinhado ao localStorage após dismiss ou quando muda `epoc_daily_sync_last_attempt_at`. */
+  const [dismissedLocal, setDismissedLocal] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -65,6 +85,16 @@ export function DashboardEpocDailySyncAlertCard({
   }, [companyId, load]);
 
   const s = useMemo(() => parseEpocSettings(settingsRaw), [settingsRaw]);
+
+  const attemptAtIso = s.epoc_daily_sync_last_attempt_at?.trim() ?? "";
+
+  useEffect(() => {
+    if (!companyId || !attemptAtIso) {
+      setDismissedLocal(false);
+      return;
+    }
+    setDismissedLocal(readDismissedAttemptAt(companyId) === attemptAtIso);
+  }, [companyId, attemptAtIso]);
 
   const { show, variant, title, description } = useMemo(() => {
     if (!enabled || loading) {
@@ -102,6 +132,15 @@ export function DashboardEpocDailySyncAlertCard({
     return { show: false, variant: "stale" as const, title: "", description: "" };
   }, [enabled, loading, s]);
 
+  const dismissedForThisAttempt =
+    !!companyId && attemptAtIso.length > 0 && dismissedLocal;
+
+  const handleDismissAlert = () => {
+    if (!companyId || !attemptAtIso) return;
+    writeDismissedAttemptAt(companyId, attemptAtIso);
+    setDismissedLocal(true);
+  };
+
   const handleRetryDaily = async () => {
     if (!companyId) return;
     const { error: lockErr } = await patchCompanyMaps(companyId, {
@@ -135,7 +174,7 @@ export function DashboardEpocDailySyncAlertCard({
     await refetchCompanies();
   };
 
-  if (!show) return null;
+  if (!show || dismissedForThisAttempt) return null;
 
   return (
     <Card
@@ -164,6 +203,16 @@ export function DashboardEpocDailySyncAlertCard({
               {title}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            {variant === "failed" ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                O que pode ter acontecido: a rotina contactou o EPOC, mas não havia
+                linhas de receita para importar — por exemplo dia sem vendas,
+                exportação ainda não disponível à hora da execução, ou o portal
+                devolveu uma mensagem de “sem dados” / sem eventos no filtro. Isto
+                não implica por si só erro de palavra-passe ou de rede; confira o
+                histórico em Integrações se precisar de detalhe técnico.
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
@@ -186,6 +235,16 @@ export function DashboardEpocDailySyncAlertCard({
           </Button>
           <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
             <Link to="/app/integracoes">Abrir integrações</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-muted-foreground sm:w-auto"
+            onClick={handleDismissAlert}
+          >
+            <X className="mr-2 h-4 w-4" aria-hidden />
+            Ocultar este aviso
           </Button>
         </div>
       </CardContent>
