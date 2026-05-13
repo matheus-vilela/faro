@@ -723,28 +723,28 @@ export async function runNfeExpenseProductMotor(
           stockPayload.error ?? stockRpc,
         );
       }
+    }
 
-      const { data: recRpc, error: recRpcErr } = await supabase.rpc(
-        "finalize_onboarding_xml_recebimento_for_expense",
-        { p_expense_id: expenseId },
+    const { data: recRpc, error: recRpcErr } = await supabase.rpc(
+      "finalize_onboarding_xml_recebimento_for_expense",
+      { p_expense_id: expenseId },
+    );
+    if (recRpcErr) {
+      console.error(
+        "[nfeExpenseMotor] finalize_onboarding_xml_recebimento_for_expense:",
+        recRpcErr.message,
       );
-      if (recRpcErr) {
+    } else {
+      const recPayload = recRpc as {
+        ok?: boolean;
+        skipped?: boolean;
+        error?: string;
+      };
+      if (recPayload?.ok === false) {
         console.error(
-          "[nfeExpenseMotor] finalize_onboarding_xml_recebimento_for_expense:",
-          recRpcErr.message,
+          "[nfeExpenseMotor] recebimento_finalize:",
+          recPayload.error ?? recRpc,
         );
-      } else {
-        const recPayload = recRpc as {
-          ok?: boolean;
-          skipped?: boolean;
-          error?: string;
-        };
-        if (recPayload?.ok === false) {
-          console.error(
-            "[nfeExpenseMotor] recebimento_finalize:",
-            recPayload.error ?? recRpc,
-          );
-        }
       }
     }
   }

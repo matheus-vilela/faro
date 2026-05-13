@@ -61,6 +61,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const [loading, setLoading] = useState(true);
   const [nfeLogCount, setNfeLogCount] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [fiscalAutoMarkFailed, setFiscalAutoMarkFailed] = useState(false);
   const autoFiscalSyncedRef = useRef(false);
 
   const loadCount = useCallback(async (opts?: { silent?: boolean }) => {
@@ -81,6 +82,11 @@ export function DashboardFocusNfeRecebidasSyncCard({
       setNfeLogCount(count ?? 0);
     }
     if (!opts?.silent) setLoading(false);
+  }, [companyId]);
+
+  useEffect(() => {
+    setFiscalAutoMarkFailed(false);
+    autoFiscalSyncedRef.current = false;
   }, [companyId]);
 
   useEffect(() => {
@@ -129,9 +135,19 @@ export function DashboardFocusNfeRecebidasSyncCard({
     isSetupCompleted(setup) &&
     daysSinceOnboarding <= MAX_DAYS_SINCE_ONBOARDING;
 
+  const fiscalOnboardingDone = company?.onboarding_fiscal_completed === true;
+  /** Já há NF-e na base mas a flag ainda não foi persistida — evita skeleton → vazio → sumir (flicker). */
+  const needsAutoCompleteFiscal =
+    !loading &&
+    nfeLogCount !== null &&
+    nfeLogCount > 0 &&
+    !fiscalOnboardingDone &&
+    !fiscalAutoMarkFailed;
+
   const showFullContent =
     eligibleBase && !loading && nfeLogCount !== null && nfeLogCount === 0;
-  const showLoadingShell = eligibleBase && loading;
+  const showLoadingShell =
+    eligibleBase && (loading || needsAutoCompleteFiscal);
 
   useEffect(() => {
     if (!showFullContent) return;
@@ -156,6 +172,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
       const res = await completeCompanyOnboardingFiscalStep(companyId);
       if (res.error) {
         autoFiscalSyncedRef.current = false;
+        setFiscalAutoMarkFailed(true);
         console.error("DashboardFocusNfeRecebidasSyncCard fiscal sync", res.error);
         return;
       }
@@ -171,7 +188,13 @@ export function DashboardFocusNfeRecebidasSyncCard({
     return null;
   }
 
-  if (!loading && nfeLogCount !== null && nfeLogCount > 0) {
+  if (
+    !loading &&
+    nfeLogCount !== null &&
+    nfeLogCount > 0 &&
+    !fiscalOnboardingDone &&
+    fiscalAutoMarkFailed
+  ) {
     return null;
   }
 
@@ -198,7 +221,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
             <Skeleton className="h-full w-1/3 rounded-full" />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            A verificar NF-e na base…
+            {loading
+              ? "A verificar NF-e na base…"
+              : "A concluir a etapa fiscal no painel…"}
           </p>
         </CardContent>
       </Card>

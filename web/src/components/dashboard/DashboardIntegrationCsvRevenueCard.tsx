@@ -314,6 +314,18 @@ export function DashboardIntegrationCsvRevenueCard({
     company.onboarding_integration_pdv_completed !== true;
 
   /**
+   * Com `primary === null`, `primary?.status !== "COMPLETED"` era verdadeiro e, junto a
+   * `syncEndedWithIssue`, mantinha o cartão até os jobs carregarem — flash ao voltar ao dash.
+   */
+  const importOutcomeStillLoading =
+    (bootLoading || jobsLoading) && jobs.length === 0 && primary == null;
+
+  const syncRunIssueBlocksIdle =
+    syncEndedWithIssue &&
+    !importOutcomeStillLoading &&
+    (primary == null || primary.status !== "COMPLETED");
+
+  /**
    * Após onboarding PDV concluído, não ocupar o dash em estado idle.
    * `syncEndedWithIssue` sozinho não deve manter o cartão se já há import COMPLETED —
    * o EPOC pode registar dias sem eventos; o alerta diário trata rotinas posteriores.
@@ -324,7 +336,7 @@ export function DashboardIntegrationCsvRevenueCard({
       edgePendingEffective ||
       hasActive ||
       primary?.status === "FAILED" ||
-      (syncEndedWithIssue && primary?.status !== "COMPLETED") ||
+      syncRunIssueBlocksIdle ||
       retryBusy ||
       completeIntegrationBusy,
     [
@@ -332,7 +344,7 @@ export function DashboardIntegrationCsvRevenueCard({
       edgePendingEffective,
       hasActive,
       primary?.status,
-      syncEndedWithIssue,
+      syncRunIssueBlocksIdle,
       retryBusy,
       completeIntegrationBusy,
     ],

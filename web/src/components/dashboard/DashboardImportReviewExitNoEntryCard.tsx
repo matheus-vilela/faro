@@ -17,6 +17,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   dashboardImportReviewConfirmOutboundAsRecipe,
   dashboardImportReviewSetResolution,
   fetchDashboardImportReviewExitNoEntry,
@@ -24,7 +29,7 @@ import {
 } from "@/lib/dashboardImportReview";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { ChefHat, Inbox, Loader2, X } from "lucide-react";
+import { ChefHat, CircleHelp, Inbox, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -154,9 +159,30 @@ export function DashboardImportReviewExitNoEntryCard({
                 <ChefHat className="h-5 w-5" />
               </div>
               <div className="min-w-0 space-y-1">
-                <CardTitle className="text-lg leading-snug">
-                  Itens importados com saída e sem entrada
-                </CardTitle>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <CardTitle className="text-lg leading-snug">
+                    Itens importados com saída e sem entrada
+                  </CardTitle>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex shrink-0 rounded-full text-muted-foreground outline-none ring-offset-background transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        aria-label="Ordem sugerida na revisão pós-importação"
+                      >
+                        <CircleHelp className="h-4 w-4" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      className="max-w-[min(18rem,calc(100vw-2rem))] text-balance px-3 py-2 text-left text-xs leading-snug"
+                    >
+                      Fluxo sugerido: primeiro estes itens (venda sem compra → ficha técnica), depois
+                      «entrada e sem saída» (insumos), depois receitas quando o cartão indicar. Só
+                      vínculo errado na NF: use «Vínculos NF ↔ produto» na Central de pendências.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <CardDescription className="text-pretty">
                   Produtos com <strong>baixa por venda</strong> (receita / EPOC importada) e sem compra
                   correspondente no histórico. São os principais <strong>candidatos a ficha técnica</strong>{" "}

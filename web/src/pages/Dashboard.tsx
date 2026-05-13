@@ -253,6 +253,9 @@ export function Dashboard() {
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       const { data } = await supabase
         .from("import_job_batches")
         .select("id")
@@ -262,12 +265,15 @@ export function Dashboard() {
         .limit(1)
         .maybeSingle();
       if (!data?.id || cancelled) return;
-      await drainProcessImportJobBatch(data.id, { maxRounds: 20, pauseMs: 400 });
+      await drainProcessImportJobBatch(data.id, {
+        maxRounds: 4,
+        pauseMs: 1_200,
+      });
       if (!cancelled) void loadImportProgress({ silent: true });
     };
     const interval = globalThis.setInterval(() => {
       void tick();
-    }, 15_000);
+    }, 60_000);
     void tick();
     return () => {
       cancelled = true;

@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCompany } from "@/contexts/CompanyContext";
+import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import {
   fetchSupabaseEdgeFunction,
   formatSupabaseFunctionError,
@@ -29,8 +30,10 @@ import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { consolidationKey } from "@/lib/productImport/consolidateItems";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { hasFocusNfeEmpresaId } from "@/services/focusAtualizarCertificadoService";
 import {
   ChevronRight,
+  CloudDownload,
   FileCode2,
   FlaskConical,
   Loader2,
@@ -180,10 +183,16 @@ function catalogCardTitleClean(
   return out || raw.trim();
 }
 
+const ONBOARDING_SIM_MAX_SYNC_ROUNDS = 30;
+const ONBOARDING_SIM_LIST_PAGES = 40;
+const ONBOARDING_SIM_XML_DOWNLOADS = 120;
+
 export function Desenvolvimento() {
-  const { currentCompany } = useCompany();
+  const { currentCompany, refetchCompanies } = useCompany();
   const companyId = currentCompany?.id ?? "";
   const companyLabel = currentCompany?.name?.trim() || "—";
+  const cnpjDigits = String(currentCompany?.document ?? "").replace(/\D/g, "").slice(0, 14);
+  const hasFocus = hasFocusNfeEmpresaId(currentCompany?.focusnfe ?? null);
 
   const [mainTab, setMainTab] = useState<"focus" | "preview">("focus");
 
@@ -197,6 +206,7 @@ export function Desenvolvimento() {
   const [lastFocusResponse, setLastFocusResponse] =
     useState<FocusSyncTestResponse | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [simOnboardingLoading, setSimOnboardingLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -210,6 +220,10 @@ export function Desenvolvimento() {
   const runFocus = useCallback(async () => {
     if (!companyId) {
       toast.error("Selecione uma unidade (empresa) no app.");
+      return;
+    }
+    if (simOnboardingLoading) {
+      toast.message("Aguarde a simulação de onboarding fiscal terminar.");
       return;
     }
     const nPages = Number(maxListPages);
@@ -305,7 +319,148 @@ export function Desenvolvimento() {
     maxXmlDownloads,
     phase,
     versaoInicial,
+    simOnboardingLoading,
   ]);
+
+  const runFullFiscalOnboardingSimulation = useCallback(async () => {
+    if (!companyId) {
+      toast.error("Selecione uma unidade (empresa) no app.");
+      return;
+    }
+    if (!hasFocus) {
+      toast.error("A unidade precisa de id_empresa Focus em focusnfe.");
+      return;
+    }
+    if (cnpjDigits.length !== 14) {
+      toast.error("CNPJ da unidade deve ter 14 dígitos (documento da empresa).");
+      return;
+    }
+    if (loadingFocus) {
+      toast.message("Aguarde o teste Focus terminar.");
+      return;
+    }
+
+    setSimOnboardingLoading(true);
+    try {
+      const syncBodyBase: Record<string, unknown> = {
+        manual: true,
+        company_id: companyId,
+        phase: "auto",
+        max_list_pages: ONBOARDING_SIM_LIST_PAGES,
+        max_xml_downloads: ONBOARDING_SIM_XML_DOWNLOADS,
+        max_chain_depth: 0,
+      };
+
+      let syncRound = 0;
+      let lastRes: FocusSyncTestResponse | null = null;
+      let batchesDrained = 0;
+
+      while (syncRound < ONBOARDING_SIM_MAX_SYNC_ROUNDS) {
+        syncRound += 1;
+        toast.message(`Focus sync: rodada ${syncRound}/${ONBOARDING_SIM_MAX_SYNC_ROUNDS}…`);
+
+        /** Só na 1.ª rodada: cursor 0 + reimport; depois usa o cursor gravado em `focusnfe` para avançar. */
+        const syncBody: Record<string, unknown> =
+          syncRound === 1
+            ? { ...syncBodyBase, versao_inicial: 0, force_reimport: true }
+            : { ...syncBodyBase };
+
+        const { data, error } = await supabase.functions.invoke(
+          "focus-sync-nfe-recebidas",
+          { body: syncBody },
+        );
+        if (error) {
+          toast.error(formatSupabaseFunctionError(error));
+          return;
+        }
+        const typed = (data ?? {}) as FocusSyncTestResponse;
+        lastRes = typed;
+        if (typed.ok !== true) {
+          const msg =
+            typeof typed.error === "string" && typed.error.trim()
+              ? typed.error
+              : "Resposta inválida da sincronização.";
+          toast.error(msg);
+          return;
+        }
+
+        const detail0 = typed.detail?.[0];
+        if (detail0?.error) {
+          toast.error(String(detail0.error));
+          return;
+        }
+        if (detail0?.skipped) {
+          toast.message(String(detail0.skipped));
+          break;
+        }
+
+        const batchId =
+          detail0 && typeof detail0.batch_id === "string" && detail0.batch_id.trim()
+            ? detail0.batch_id.trim()
+            : null;
+        if (batchId) {
+          toast.message(`A processar lote ${batchId.slice(0, 8)}…`);
+          const drain = await drainProcessImportJobBatch(batchId, {
+            maxRounds: 500,
+            pauseMs: 400,
+          });
+          if (!drain.ok) {
+            toast.error(drain.error ?? "Falha no process-import-job-batch.");
+            return;
+          }
+          batchesDrained += 1;
+          const L = drain.last;
+          if (L) {
+            toast.success(
+              `Lote: processados ${Number(L.processed_files ?? 0)} · sucesso ${Number(L.success_files ?? 0)} · falhas ${Number(L.failed_files ?? 0)}`,
+            );
+          }
+        }
+
+        const cont = typed.continuacao;
+        const shouldContinue =
+          cont?.chain_scheduled === true ||
+          cont?.lista_incompleta === true ||
+          (typeof cont?.pending_queue_remaining === "number" && cont.pending_queue_remaining > 0);
+        if (!shouldContinue) break;
+        await new Promise((r) => globalThis.setTimeout(r, 400));
+      }
+
+      if (syncRound >= ONBOARDING_SIM_MAX_SYNC_ROUNDS) {
+        toast.message(
+          "Limite de rodadas de sync atingido — pode haver listagem ou fila pendente. Execute de novo se necessário.",
+        );
+      }
+
+      const log = lastRes ? buildFocusSyncTestLog(lastRes) : null;
+      setLastFocusResponse(lastRes);
+      setLastJson(
+        JSON.stringify(
+          {
+            simulacao_onboarding_fiscal: {
+              rodadas_sync: syncRound,
+              lotes_processados_no_browser: batchesDrained,
+              ultimo_log: log,
+            },
+            resposta_ultima_sync: lastRes,
+          },
+          null,
+          2,
+        ),
+      );
+      setLastError(null);
+
+      toast.success(
+        `Simulação concluída (${syncRound} rodada(s) de sync${batchesDrained > 0 ? `, ${batchesDrained} lote(s) acompanhados` : ""}).`,
+      );
+      await refetchCompanies();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro na simulação.";
+      toast.error(msg);
+    } finally {
+      setSimOnboardingLoading(false);
+    }
+  }, [companyId, hasFocus, cnpjDigits, refetchCompanies, loadingFocus]);
 
   const runPreview = useCallback(async () => {
     if (!companyId) {
@@ -446,6 +601,7 @@ export function Desenvolvimento() {
       </div>
 
       {mainTab === "focus" ? (
+        <div className="space-y-6">
         <Card className="w-full min-w-0">
           <CardHeader>
             <CardTitle>Teste: focus-sync-nfe-recebidas</CardTitle>
@@ -467,7 +623,7 @@ export function Desenvolvimento() {
                 <Select
                   value={phase}
                   onValueChange={(v) => setPhase(v as PhaseOpt)}
-                  disabled={loadingFocus || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || !companyId}
                 >
                   <SelectTrigger id="dev-phase" className="w-full max-w-xs">
                     <SelectValue />
@@ -494,7 +650,7 @@ export function Desenvolvimento() {
                   placeholder="Vazio = usar cursor gravado na unidade"
                   value={versaoInicial}
                   onChange={(e) => setVersaoInicial(e.target.value)}
-                  disabled={loadingFocus || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || !companyId}
                   className="max-w-xs font-mono text-sm"
                 />
               </div>
@@ -510,7 +666,7 @@ export function Desenvolvimento() {
                   max={80}
                   value={maxListPages}
                   onChange={(e) => setMaxListPages(e.target.value)}
-                  disabled={loadingFocus || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || !companyId}
                   className="font-mono text-sm"
                 />
               </div>
@@ -523,7 +679,7 @@ export function Desenvolvimento() {
                   max={500}
                   value={maxXmlDownloads}
                   onChange={(e) => setMaxXmlDownloads(e.target.value)}
-                  disabled={loadingFocus || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || !companyId}
                   className="font-mono text-sm"
                 />
               </div>
@@ -536,7 +692,7 @@ export function Desenvolvimento() {
                   max={5}
                   value={maxChainDepth}
                   onChange={(e) => setMaxChainDepth(e.target.value)}
-                  disabled={loadingFocus || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || !companyId}
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -547,7 +703,7 @@ export function Desenvolvimento() {
 
             <Button
               type="button"
-              disabled={loadingFocus || !companyId}
+              disabled={loadingFocus || simOnboardingLoading || !companyId}
               onClick={() => void runFocus()}
             >
               {loadingFocus ? (
@@ -610,6 +766,84 @@ export function Desenvolvimento() {
             ) : null}
           </CardContent>
         </Card>
+
+        <Card className="w-full min-w-0 border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CloudDownload className="h-5 w-5" />
+              Simular onboarding fiscal completo
+            </CardTitle>
+            <CardDescription>
+              Fluxo de teste para{" "}
+              <span className="font-medium text-foreground">{companyLabel}</span>: na{" "}
+              <strong className="text-foreground">primeira</strong> chamada apenas,{" "}
+              <span className="font-mono text-xs">versao_inicial=0</span> e{" "}
+              <span className="font-mono text-xs">force_reimport</span>; nas seguintes usa o cursor
+              já gravado em <span className="font-mono text-xs">focusnfe</span>. Caps amplos, sem{" "}
+              <span className="font-mono text-xs">test_mode</span>. Reencadeia{" "}
+              <span className="font-mono text-xs">focus-sync-nfe-recebidas</span> até não haver
+              continuação e acompanha cada lote com{" "}
+              <span className="font-mono text-xs">process-import-job-batch</span> no browser. Pode
+              reimportar XMLs já registados — use só em desenvolvimento.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ul className="max-w-3xl list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              <li>
+                Requisitos: CNPJ com 14 dígitos no documento da unidade e{" "}
+                <code className="rounded bg-muted px-1">focusnfe.id_empresa</code> definido.
+              </li>
+              <li>
+                Cada rodada: até {ONBOARDING_SIM_LIST_PAGES} páginas de listagem Focus e até{" "}
+                {ONBOARDING_SIM_XML_DOWNLOADS} downloads de XML (por chamada à função).
+              </li>
+              <li>
+                O card de NF-e no <strong className="text-foreground">Início</strong> só é
+                mostrado se <span className="font-mono text-xs">onboarding_fiscal_completed</span>{" "}
+                for <span className="font-mono text-xs">false</span> e a unidade for elegível
+                (assistência concluída, Focus, até 30 dias após conclusão/criação). Se a unidade já
+                concluiu o passo fiscal ou já tem NF-e na base, o card não aparece — use outra
+                unidade de teste ou repor a flag na base (só dev).
+              </li>
+            </ul>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={
+                loadingFocus ||
+                simOnboardingLoading ||
+                !companyId ||
+                !hasFocus ||
+                cnpjDigits.length !== 14
+              }
+              onClick={() => void runFullFiscalOnboardingSimulation()}
+            >
+              {simOnboardingLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Simulação em curso…
+                </>
+              ) : (
+                <>
+                  <CloudDownload className="mr-2 h-4 w-4" />
+                  Correr simulação de onboarding fiscal
+                </>
+              )}
+            </Button>
+            {!companyId ? (
+              <p className="text-sm text-muted-foreground">Selecione uma unidade.</p>
+            ) : !hasFocus ? (
+              <p className="text-sm text-muted-foreground">
+                Associe a unidade à Focus (id_empresa) para habilitar.
+              </p>
+            ) : cnpjDigits.length !== 14 ? (
+              <p className="text-sm text-muted-foreground">
+                O documento da unidade precisa de um CNPJ com 14 dígitos.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+        </div>
       ) : (
         <Card className="w-full min-w-0">
           <CardHeader>

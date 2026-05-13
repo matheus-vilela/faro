@@ -1,10 +1,4 @@
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { DASHBOARD_OPEN_IMPORT_PENDING_SHEET_EVENT } from "@/lib/dashboardImportReviewUi";
 import { Link2 } from "lucide-react";
 import { DashboardImportReviewEntryNoExitCard } from "./DashboardImportReviewEntryNoExitCard";
@@ -33,21 +27,6 @@ export function DashboardImportReviewHub({
 
   return (
     <div className="space-y-4">
-      <Card className="border-muted bg-muted/15">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold tracking-tight">
-            Revisão pós-importação
-          </CardTitle>
-          <CardDescription className="text-pretty leading-relaxed">
-            Use primeiro os itens com <strong>saída e sem entrada</strong> — costumam ser produtos de
-            venda que precisam de <strong>ficha técnica</strong>. Depois, <strong>entrada e sem saída</strong>{" "}
-            — em geral <strong>insumos</strong> ou matérias que alimentam fichas. Por fim, associe
-            receitas importadas quando o cartão pedir. Se o problema for só vínculo errado na nota,
-            use <strong>Vínculos NF ↔ produto</strong> (mesmo painel da Central de pendências).
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
       <DashboardImportReviewExitNoEntryCard
         companyId={companyId}
         refreshSignal={refreshSignal}
