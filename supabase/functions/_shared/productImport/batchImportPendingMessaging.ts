@@ -56,22 +56,36 @@ export function batchImportReviewPendingTitleDetail(params: {
   pm: Record<string, unknown> | undefined;
   /** Quando não há productId após findOrCreate */
   missingProduct: boolean;
+  /** Nome sugerido para cadastro (ex.: sem marca), para título na Central. */
+  suggestedCatalogName?: string | null;
 }): BatchImportReviewPendingCopy {
   const name = String(params.productName ?? "").trim() || "Item";
   const pm = params.pm;
   const st = String(pm?.resolutionStatus ?? "").trim() || "UNKNOWN";
   const label = batchImportPendingStatusLabel(st);
-  const title = params.missingProduct
+  const sug = String(params.suggestedCatalogName ?? "").trim();
+  let title = params.missingProduct
     ? `Sem produto resolvido — ${name}`
     : `${label} — ${name}`;
+  if (sug && sug.toLowerCase() !== name.toLowerCase()) {
+    title = params.missingProduct
+      ? `Sem produto — ${name} · sugestão: ${sug}`
+      : `${label} — ${name} · sugestão: ${sug}`;
+  }
 
   const mr = String(pm?.matchReason ?? "").trim();
   const fallback = STATUS_DETAIL_FALLBACK[st] ??
     "Revise o vínculo com o catálogo e a unidade antes de dar entrada no estoque.";
-  const detail = mr || fallback;
+  const detailBase = mr || fallback;
+  const detail =
+    sug && !params.missingProduct
+      ? `${detailBase.length > 480 ? `${detailBase.slice(0, 477)}…` : detailBase} · Nome sugerido (cadastro): ${sug}.`
+      : detailBase.length > 600
+        ? `${detailBase.slice(0, 597)}…`
+        : detailBase;
 
   return {
-    title,
+    title: title.length > 180 ? `${title.slice(0, 177)}…` : title,
     detail: detail.length > 600 ? `${detail.slice(0, 597)}…` : detail,
     reason_code: params.missingProduct ? "MISSING_PRODUCT" : st,
   };
@@ -89,19 +103,48 @@ export function lineNeedsCatalogProductReview(params: {
 }): boolean {
   const r = String(params.resolution ?? "").trim();
   if (r === "SKIPPED") return false;
-  const pid = String(params.productId ?? "").trim();
+  /** Motor concluiu vínculo ou cadastro — não forçar revisão por `needsConfirmation` / `NEW_PRODUCT_STAGED` residuais no payload. */
+  if (r === "AUTO_MATCH" || r === "NEW_PRODUCT_CREATED") return false;
+
   const st = String(params.pm?.resolutionStatus ?? "").trim();
   if (
     st === "UNIT_CONFLICT_PENDING" ||
     st === "UNIT_VALIDATION_REQUIRED" ||
-    st === "PENDING_USER_CONFIRM" ||
-    st === "NEW_PRODUCT_STAGED"
+    st === "PENDING_USER_CONFIRM"
   ) {
     return true;
   }
-  if (params.pm?.needsConfirmation === true) return true;
-  if (r === "PENDING_REVIEW") return true;
+
+  const pid = String(params.productId ?? "").trim();
   if (!pid) return true;
+  /** Já há produto na linha: não manter revisão só pelo rótulo PENDING_REVIEW. */
+  if (r === "PENDING_REVIEW") return false;
+  return false;
+}
+
+/**
+ * Só abre `import_review_pending` quando a revisão envolve **produto já cadastrado**
+ * (confirmação de vínculo, conflito/validação de unidade, ou novo produto em análise com candidato).
+ * Não abre só por score alto com candidato — esses casos devem fechar em AUTO_MATCH no motor ou cadastro auto sem fila.
+ */
+export function shouldQueueImportReviewPending(params: {
+  needsCatalogReview: boolean;
+  productId: string | null | undefined;
+  pm: Record<string, unknown> | undefined;
+}): boolean {
+  if (!params.needsCatalogReview) return false;
+  const pm = params.pm;
+  const st = String(pm?.resolutionStatus ?? "").trim();
+  const sid = String(pm?.suggestedProductId ?? "").trim();
+
+  if (
+    st === "UNIT_CONFLICT_PENDING" ||
+    st === "UNIT_VALIDATION_REQUIRED" ||
+    st === "PENDING_USER_CONFIRM"
+  ) {
+    return true;
+  }
+  if (st === "NEW_PRODUCT_STAGED" && sid) return true;
   return false;
 }
 
@@ -127,6 +170,21 @@ export function compactProductMatchForPendingPayload(
   const out: Record<string, unknown> = {};
   for (const k of pick) {
     if (pm[k] !== undefined) out[k] = pm[k];
+  }
+  const ilu = pm.invoice_line_units_llm as Record<string, unknown> | undefined;
+  if (ilu && typeof ilu === "object") {
+    out.invoice_line_units_llm = {
+      kind: ilu.kind,
+      confidence: ilu.confidence,
+      cleaned_product_name: ilu.cleaned_product_name,
+      catalog_unit_target: ilu.catalog_unit_target,
+      interpretation:
+        typeof ilu.interpretation === "string"
+          ? ilu.interpretation.length > 400
+            ? `${ilu.interpretation.slice(0, 397)}…`
+            : ilu.interpretation
+          : ilu.interpretation,
+    };
   }
   return out;
 }

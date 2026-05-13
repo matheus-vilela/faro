@@ -1,7 +1,7 @@
 /**
- * Laboratório / pré-visualização: interpretação de unidades e quantidade de estoque
- * por linha de NF-e via LLM, com confiança e validação numérica.
- * Unidade de cadastro e quantidade 1:1 vêm sempre da NF-e (mapeamento sistema + aliases da empresa).
+ * Interpretação de unidades e nome comercial por linha de NF-e via LLM (OpenAI),
+ * com confiança e validação numérica. Usado no laboratório `dev-preview-nfe-xml` e,
+ * após `resolveProductMatches`, na importação XML em produção (`matchNfeExpenseCatalogLines`).
  */
 
 import { INVOICE_LINE_UNITS_SYSTEM } from "../aiPrompts/invoiceLineUnitsNfe.ts";

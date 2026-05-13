@@ -6,6 +6,7 @@ import {
   batchImportReviewPendingTitleDetail,
   compactProductMatchForPendingPayload,
   lineNeedsCatalogProductReview,
+  shouldQueueImportReviewPending,
 } from "../productImport/batchImportPendingMessaging.ts";
 import { upsertImportPendingReviewCompanyAlert } from "../upsertImportPendingReviewCompanyAlert.ts";
 import { canonicalProductName } from "../productImport/canonicalName.ts";
@@ -18,6 +19,10 @@ import {
 } from "../productImport/consolidateItems.ts";
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
 import { loadNfeMotorExtractContext } from "./extractFromStoredContext.ts";
+import {
+  autoCatalogStockUnitWithOptionalUnPack,
+  catalogRegistrationNameFromNfeLine,
+} from "./newProductCatalogFromNfe.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import { reconcileNfeFinancials } from "./financialReconciliation.ts";
 import type {
@@ -49,17 +54,6 @@ function mapResolution(
   return "PENDING_REVIEW";
 }
 
-function defaultProductUnit(
-  item: ExtractedExpenseItem,
-  pm?: ItemWithProductMatch["productMatch"],
-): string {
-  const raw = pickInvoiceUnitRaw(item as ExtractedItemWithInvoiceMeta);
-  if (raw && raw.trim()) return raw.trim().slice(0, 32);
-  const inv = pm?.invoiceUnitNormalized;
-  if (inv && String(inv).trim()) return String(inv).trim().slice(0, 32);
-  return "UN";
-}
-
 async function ensureProductForLine(
   supabase: SupabaseClient,
   companyId: string,
@@ -69,8 +63,16 @@ async function ensureProductForLine(
   const existing = String(pm.resolvedProductId ?? "").trim();
   if (existing) return { productId: existing, created: false };
 
-  if (pm.needsConfirmation) return { productId: null, created: false };
+  /**
+   * Há candidato sugerido no catálogo, mas a decisão ainda é "novo produto" (zona cinzenta entre limiares).
+   * Não criar automaticamente — evita duplicar quando existe item parecido.
+   */
+  const suggestedId = String(pm.suggestedProductId ?? "").trim();
+  if (suggestedId && pm.resolutionStatus === "NEW_PRODUCT_STAGED") {
+    return { productId: null, created: false };
+  }
 
+  /** Só bloqueia cadastro automático quando há rival plausível ou conflito de unidade (revisão humana). */
   const blockStatuses: ImportItemResolutionStatus[] = [
     "UNIT_CONFLICT_PENDING",
     "UNIT_VALIDATION_REQUIRED",
@@ -80,33 +82,123 @@ async function ensureProductForLine(
     return { productId: null, created: false };
   }
 
-  const name =
-    String(pm.borderlineLlmSuggestedName ?? "").trim() ||
-    String(item.productName ?? "").trim();
+  const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
-  const unit = defaultProductUnit(item, pm);
+  const { stockUnit, pack } = autoCatalogStockUnitWithOptionalUnPack(item, pm);
   const cn = canonicalProductName(name);
+  const insertRow: Record<string, unknown> = {
+    company_id: companyId,
+    name,
+    unit: stockUnit,
+    ncm: item.ncm ? String(item.ncm).trim() || null : null,
+    canonical_name: cn || null,
+    min_quantity: 0,
+    current_quantity: 0,
+    is_active: true,
+    stock_control_type: "DIRECT",
+  };
+  if (pack) {
+    insertRow.import_unit_needs_review = false;
+    insertRow.import_unit_raw = null;
+  }
   const { data: ins, error } = await supabase
     .from("products")
-    .insert({
-      company_id: companyId,
-      name,
-      unit,
-      ncm: item.ncm ? String(item.ncm).trim() || null : null,
-      canonical_name: cn || null,
-      min_quantity: 0,
-      current_quantity: 0,
-      is_active: true,
-      stock_control_type: "DIRECT",
-    })
+    .insert(insertRow)
     .select("id")
     .single();
   if (error || !ins?.id) {
     console.error("[nfeExpenseMotor] create product:", error?.message ?? "unknown");
     return { productId: null, created: false };
   }
-  return { productId: String(ins.id), created: true };
+  const pid = String(ins.id);
+  if (pack) {
+    const { error: cErr } = await supabase.from("product_unit_conversions").insert({
+      company_id: companyId,
+      product_id: pid,
+      primary_qty: 1,
+      primary_unit_code: "un",
+      secondary_qty: pack.secondary_qty,
+      secondary_unit_code: pack.secondary_unit_code,
+    });
+    if (cErr) {
+      console.error("[nfeExpenseMotor] product_unit_conversions:", cErr.message);
+    }
+  }
+  return { productId: pid, created: true };
+}
+
+/**
+ * Cadastro automático quando não há «garfo» no catálogo (sem fila na Central).
+ * Reutiliza nome/unidade do assist; evita duplicar por `canonical_name` activo.
+ */
+async function createProductAutoWhenNoReviewQueue(
+  supabase: SupabaseClient,
+  companyId: string,
+  item: ExtractedExpenseItem,
+  pm: NonNullable<ItemWithProductMatch["productMatch"]>,
+): Promise<{ productId: string | null; created: boolean }> {
+  const name = catalogRegistrationNameFromNfeLine(item, pm);
+  if (!name) return { productId: null, created: false };
+
+  const { stockUnit, pack } = autoCatalogStockUnitWithOptionalUnPack(item, pm);
+  const cn = canonicalProductName(name);
+  if (cn) {
+    const { data: dup } = await supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("canonical_name", cn)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (dup?.id) return { productId: String(dup.id), created: false };
+  }
+
+  const insertRow: Record<string, unknown> = {
+    company_id: companyId,
+    name,
+    unit: stockUnit,
+    ncm: item.ncm ? String(item.ncm).trim() || null : null,
+    canonical_name: cn || null,
+    min_quantity: 0,
+    current_quantity: 0,
+    is_active: true,
+    stock_control_type: "DIRECT",
+  };
+  if (pack) {
+    insertRow.import_unit_needs_review = false;
+    insertRow.import_unit_raw = null;
+  }
+  const { data: ins, error } = await supabase
+    .from("products")
+    .insert(insertRow)
+    .select("id")
+    .single();
+  if (error || !ins?.id) {
+    console.error(
+      "[nfeExpenseMotor] createProductAutoWhenNoReviewQueue:",
+      error?.message ?? "unknown",
+    );
+    return { productId: null, created: false };
+  }
+  const pid = String(ins.id);
+  if (pack) {
+    const { error: cErr } = await supabase.from("product_unit_conversions").insert({
+      company_id: companyId,
+      product_id: pid,
+      primary_qty: 1,
+      primary_unit_code: "un",
+      secondary_qty: pack.secondary_qty,
+      secondary_unit_code: pack.secondary_unit_code,
+    });
+    if (cErr) {
+      console.error(
+        "[nfeExpenseMotor] createProductAutoWhenNoReviewQueue conversions:",
+        cErr.message,
+      );
+    }
+  }
+  return { productId: pid, created: true };
 }
 
 export async function runNfeExpenseProductMotor(
@@ -338,14 +430,68 @@ export async function runNfeExpenseProductMotor(
           resolvedProductId: productId,
         };
       }
-      const needsCatalogReview = lineNeedsCatalogProductReview({
+
+      const rawXmlName = String(ctx.items[i]?.productName ?? "").trim() || "Item";
+      const strippedDisplay =
+        stripPackSizeFromLabel(rawXmlName).trim() || rawXmlName;
+
+      let pmForLineNeeds: Record<string, unknown> | undefined = pmForReview;
+      let needsCatalogReview = lineNeedsCatalogProductReview({
         resolution: resolutionLabel,
         productId,
-        pm: pmForReview,
+        pm: pmForLineNeeds,
+      });
+      let shouldQueue = shouldQueueImportReviewPending({
+        needsCatalogReview,
+        productId,
+        pm: pmForLineNeeds,
       });
 
+      if (!productId && needsCatalogReview && !shouldQueue && pm) {
+        const fb = await createProductAutoWhenNoReviewQueue(
+          supabase,
+          companyId,
+          ctx.items[i]!,
+          pm,
+        );
+        if (fb.productId) {
+          productId = fb.productId;
+          if (fb.created) {
+            createdNew = true;
+            resolutionLabel = "NEW_PRODUCT_CREATED";
+          } else {
+            resolutionLabel = "AUTO_MATCH";
+          }
+          if (pmForReview) {
+            pmForLineNeeds = {
+              ...pmForReview,
+              resolvedProductId: productId,
+              resolutionStatus: "AUTO_MATCH",
+              needsConfirmation: false,
+            };
+          }
+          needsCatalogReview = lineNeedsCatalogProductReview({
+            resolution: resolutionLabel,
+            productId,
+            pm: pmForLineNeeds,
+          });
+          shouldQueue = shouldQueueImportReviewPending({
+            needsCatalogReview,
+            productId,
+            pm: pmForLineNeeds,
+          });
+        }
+      }
+
+      /** Onboarding ZIP: com produto resolvido, liberta `import_pending_resolution` para a entrada automática de stock, mantendo `import_review_pending` quando `needsCatalogReview`. */
+      const onboardingXmlLine = Boolean(raw_import_id);
+      const importPendingResolution =
+        onboardingXmlLine && String(productId ?? "").trim()
+          ? false
+          : needsCatalogReview;
+
       const updateRow: Record<string, unknown> = {
-        import_pending_resolution: needsCatalogReview,
+        import_pending_resolution: importPendingResolution,
         import_engine_suggestion: "XML_CATALOG_MOTOR_APPLIED",
         import_resolution_status:
           unitConflictAutoLinked && String(productId ?? "").trim()
@@ -363,6 +509,7 @@ export async function runNfeExpenseProductMotor(
             borderline_llm_rationale: pm?.borderlineLlmRationale ?? null,
             resolution: resolutionLabel,
             unit_conflict_auto_linked: unitConflictAutoLinked || undefined,
+            invoice_line_units_llm: pm?.invoice_line_units_llm ?? undefined,
           },
         },
         import_confidence_0_1: pm?.suggestedScore != null
@@ -380,9 +527,6 @@ export async function runNfeExpenseProductMotor(
         updateRow.normalized_invoice_unit = String(pm.invoiceUnitNormalized);
       }
 
-      const rawXmlName = String(ctx.items[i]?.productName ?? "").trim() || "Item";
-      const strippedDisplay =
-        stripPackSizeFromLabel(rawXmlName).trim() || rawXmlName;
       if (productId) {
         let catName = catalogNameById.get(productId);
         if (!catName) {
@@ -397,7 +541,10 @@ export async function runNfeExpenseProductMotor(
         }
         updateRow.product_name = catName || strippedDisplay;
       } else {
-        updateRow.product_name = strippedDisplay;
+        updateRow.product_name = pm
+          ? catalogRegistrationNameFromNfeLine(ctx.items[i]!, pm) ||
+            strippedDisplay
+          : strippedDisplay;
       }
 
       await supabase
@@ -449,11 +596,18 @@ export async function runNfeExpenseProductMotor(
         },
       );
 
-      if (needsCatalogReview) {
+      if (needsCatalogReview && shouldQueue) {
+        const suggestedCatalogName = pm
+          ? catalogRegistrationNameFromNfeLine(ctx.items[i]!, pm)
+          : "";
+        const candidateProductIds = [
+          String(pm?.suggestedProductId ?? "").trim(),
+        ].filter(Boolean);
         const copy = batchImportReviewPendingTitleDetail({
-          productName: String(ctx.items[i]?.productName ?? "Item"),
+          productName: rawXmlName,
           pm: pmRecord,
           missingProduct: !String(productId ?? "").trim(),
+          suggestedCatalogName: suggestedCatalogName || null,
         });
         motorReviewRows.push({
           company_id: companyId,
@@ -470,6 +624,9 @@ export async function runNfeExpenseProductMotor(
             xml_line_identity,
             motor_version: motorVersion,
             product_match: compactProductMatchForPendingPayload(pmRecord),
+            xml_product_name: rawXmlName,
+            suggested_catalog_name: suggestedCatalogName || null,
+            candidate_product_ids: candidateProductIds,
           },
         });
       }
@@ -544,6 +701,52 @@ export async function runNfeExpenseProductMotor(
       }
     }
     await upsertImportPendingReviewCompanyAlert(supabase, companyId);
+
+    const { data: stockRpc, error: stockRpcErr } = await supabase.rpc(
+      "apply_xml_import_direct_stock_for_expense",
+      { p_expense_id: expenseId },
+    );
+    if (stockRpcErr) {
+      console.error(
+        "[nfeExpenseMotor] apply_xml_import_direct_stock_for_expense:",
+        stockRpcErr.message,
+      );
+    } else {
+      const stockPayload = stockRpc as {
+        ok?: boolean;
+        lines_applied?: number;
+        error?: string;
+      };
+      if (stockPayload?.ok === false) {
+        console.error(
+          "[nfeExpenseMotor] stock_apply:",
+          stockPayload.error ?? stockRpc,
+        );
+      }
+
+      const { data: recRpc, error: recRpcErr } = await supabase.rpc(
+        "finalize_onboarding_xml_recebimento_for_expense",
+        { p_expense_id: expenseId },
+      );
+      if (recRpcErr) {
+        console.error(
+          "[nfeExpenseMotor] finalize_onboarding_xml_recebimento_for_expense:",
+          recRpcErr.message,
+        );
+      } else {
+        const recPayload = recRpc as {
+          ok?: boolean;
+          skipped?: boolean;
+          error?: string;
+        };
+        if (recPayload?.ok === false) {
+          console.error(
+            "[nfeExpenseMotor] recebimento_finalize:",
+            recPayload.error ?? recRpc,
+          );
+        }
+      }
+    }
   }
 
   return {

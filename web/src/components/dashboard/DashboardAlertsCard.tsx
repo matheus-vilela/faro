@@ -20,6 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CatalogReconciliationPanel } from "@/components/catalog/CatalogReconciliationPanel";
+import { ImportPendingProductMatchDetail } from "@/components/dashboard/ImportPendingProductMatchDetail";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   buildProductUnitSelectOptions,
@@ -32,6 +33,7 @@ import {
   importPendingReasonBadgeLabel,
   readPendingPayloadReasonCode,
 } from "@/lib/importPending/pendingReasonUi";
+import { DASHBOARD_OPEN_IMPORT_PENDING_SHEET_EVENT } from "@/lib/dashboardImportReviewUi";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -121,6 +123,23 @@ function readCatalogClusterIds(
   return ids.length ? ids : null;
 }
 
+function readPayloadCandidateProductIds(payload: Record<string, unknown> | null): string[] {
+  if (!payload) return [];
+  const raw = payload.candidate_product_ids;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x)).filter(Boolean);
+}
+
+function readSuggestedCatalogName(payload: Record<string, unknown> | null): string {
+  if (!payload) return "";
+  return String(payload.suggested_catalog_name ?? "").trim();
+}
+
+function readPayloadXmlProductName(payload: Record<string, unknown> | null): string {
+  if (!payload) return "";
+  return String(payload.xml_product_name ?? "").trim();
+}
+
 export function DashboardAlertsCard({
   loading,
   totalAlerts,
@@ -198,23 +217,27 @@ export function DashboardAlertsCard({
           .filter((v): v is string => Boolean(v)),
       ),
     );
-
-    if (productIds.length === 0) {
-      setPendingProducts({});
-      setPendingProductConfigs({});
-      return;
-    }
+    const candIds = Array.from(
+      new Set(openRows.flatMap((r) => readPayloadCandidateProductIds(r.payload))),
+    );
+    const productIdsMerged = Array.from(new Set([...productIds, ...candIds]));
 
     const [productsRes, configsRes, unitsRes] = await Promise.all([
-      supabase
-        .from("products")
-        .select("id, name, unit, import_unit_raw")
-        .in("id", productIds),
-      supabase
-        .from("product_operational_config")
-        .select("product_id, suggested_operational_type, suggested_score, suggestion_reasons, final_operational_type, linked_entry_breakdown_recipe_id, configuration_status")
-        .eq("company_id", currentCompany.id)
-        .in("product_id", productIds),
+      productIdsMerged.length > 0
+        ? supabase
+            .from("products")
+            .select("id, name, unit, import_unit_raw")
+            .in("id", productIdsMerged)
+        : Promise.resolve({ data: [] as PendingProductRow[], error: null }),
+      productIdsMerged.length > 0
+        ? supabase
+            .from("product_operational_config")
+            .select(
+              "product_id, suggested_operational_type, suggested_score, suggestion_reasons, final_operational_type, linked_entry_breakdown_recipe_id, configuration_status",
+            )
+            .eq("company_id", currentCompany.id)
+            .in("product_id", productIdsMerged)
+        : Promise.resolve({ data: [] as PendingProductConfigRow[], error: null }),
       supabase
         .from("company_custom_unit_aliases")
         .select("unit_code, unit_label")
@@ -229,6 +252,8 @@ export function DashboardAlertsCard({
         map[row.id] = row;
       }
       setPendingProducts(map);
+    } else {
+      setPendingProducts({});
     }
     if (!configsRes.error) {
       const map: Record<string, PendingProductConfigRow> = {};
@@ -237,6 +262,8 @@ export function DashboardAlertsCard({
         map[row.product_id] = row;
       }
       setPendingProductConfigs(map);
+    } else {
+      setPendingProductConfigs({});
     }
     if (!unitsRes.error) {
       setCustomUnitAliasOptions((unitsRes.data ?? []) as CompanyUnitAliasRow[]);
@@ -246,6 +273,13 @@ export function DashboardAlertsCard({
   useEffect(() => {
     setPendingCount(importPending);
   }, [importPending]);
+
+  useEffect(() => {
+    const open = () => setSheetOpen(true);
+    window.addEventListener(DASHBOARD_OPEN_IMPORT_PENDING_SHEET_EVENT, open);
+    return () =>
+      window.removeEventListener(DASHBOARD_OPEN_IMPORT_PENDING_SHEET_EVENT, open);
+  }, []);
 
   useEffect(() => {
     if (!sheetOpen) return;
@@ -270,6 +304,164 @@ export function DashboardAlertsCard({
       return;
     }
   };
+
+  const applyLinkCandidateAndResolve = useCallback(
+    async (row: PendingRow, linkProductId: string) => {
+      if (!currentCompany?.id || !row.expense_item_id) return;
+      const xmlLine =
+        readPayloadXmlProductName(row.payload) ||
+        readSuggestedCatalogName(row.payload) ||
+        row.title;
+      setBusy(row.id);
+      try {
+        const prodRow = pendingProducts[linkProductId];
+        const displayName = prodRow?.name?.trim() || "Produto";
+        const { error: upErr } = await supabase
+          .from("expense_items")
+          .update({
+            product_id: linkProductId,
+            product_name: displayName,
+            import_pending_resolution: false,
+            import_engine_suggestion: "XML_CATALOG_DASHBOARD_LINK",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", row.expense_item_id);
+        if (upErr) throw upErr;
+
+        const nl = normalizeInvoiceProductLabel(xmlLine);
+        if (nl) {
+          const { error: alErr } = await supabase.from("product_invoice_line_aliases").upsert(
+            {
+              company_id: currentCompany.id,
+              normalized_label: nl,
+              product_id: linkProductId,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "company_id,normalized_label" },
+          );
+          if (alErr) {
+            console.warn("[DashboardAlertsCard] alias upsert:", alErr.message);
+          }
+        }
+
+        const { error: pendErr } = await supabase
+          .from("import_review_pending")
+          .update({ status: "RESOLVED", updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (pendErr) throw pendErr;
+
+        setRows((cur) => cur.filter((x) => x.id !== row.id));
+        setPendingCount((c) => Math.max(0, c - 1));
+        toast.success("Produto vinculado à linha.");
+        void loadPendingRows();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Não foi possível vincular.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [currentCompany?.id, loadPendingRows, pendingProducts],
+  );
+
+  const createSuggestedProductAndResolve = useCallback(
+    async (row: PendingRow) => {
+      if (!currentCompany?.id || !row.expense_item_id) return;
+      const suggested =
+        readSuggestedCatalogName(row.payload) ||
+        readPayloadXmlProductName(row.payload) ||
+        row.title;
+      const name = suggested.trim().slice(0, 512);
+      if (!name) {
+        toast.error("Sem nome sugerido para cadastro.");
+        return;
+      }
+      const pm = row.payload?.productMatch as Record<string, unknown> | undefined;
+      const invU = String(pm?.invoiceUnitNormalized ?? "").trim().toLowerCase();
+      const unit =
+        invU && invU !== "unkn" && invU.length <= 32 ? invU : "un";
+      const cn = canonicalProductName(name) || null;
+
+      setBusy(row.id);
+      try {
+        if (cn) {
+          const { data: dup } = await supabase
+            .from("products")
+            .select("id")
+            .eq("company_id", currentCompany.id)
+            .eq("canonical_name", cn)
+            .eq("is_active", true)
+            .maybeSingle();
+          if (dup?.id) {
+            await applyLinkCandidateAndResolve(row, String(dup.id));
+            return;
+          }
+        }
+
+        const { data: ins, error: insErr } = await supabase
+          .from("products")
+          .insert({
+            company_id: currentCompany.id,
+            name,
+            unit,
+            canonical_name: cn,
+            min_quantity: 0,
+            current_quantity: 0,
+            is_active: true,
+            stock_control_type: "DIRECT",
+          })
+          .select("id")
+          .single();
+        if (insErr || !ins?.id) throw new Error(insErr?.message ?? "Falha ao criar produto.");
+
+        const newId = String(ins.id);
+        const { error: upErr } = await supabase
+          .from("expense_items")
+          .update({
+            product_id: newId,
+            product_name: name,
+            import_pending_resolution: false,
+            import_engine_suggestion: "XML_CATALOG_DASHBOARD_NEW_PRODUCT",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", row.expense_item_id);
+        if (upErr) throw upErr;
+
+        const xmlLine =
+          readPayloadXmlProductName(row.payload) || readSuggestedCatalogName(row.payload) || row.title;
+        const nl = normalizeInvoiceProductLabel(xmlLine);
+        if (nl) {
+          const { error: alErr } = await supabase.from("product_invoice_line_aliases").upsert(
+            {
+              company_id: currentCompany.id,
+              normalized_label: nl,
+              product_id: newId,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "company_id,normalized_label" },
+          );
+          if (alErr) {
+            console.warn("[DashboardAlertsCard] alias upsert:", alErr.message);
+          }
+        }
+
+        const { error: pendErr } = await supabase
+          .from("import_review_pending")
+          .update({ status: "RESOLVED", updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (pendErr) throw pendErr;
+
+        setRows((cur) => cur.filter((x) => x.id !== row.id));
+        setPendingCount((c) => Math.max(0, c - 1));
+        toast.success("Produto criado e linha vinculada.");
+        void loadPendingRows();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Não foi possível criar o produto.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [applyLinkCandidateAndResolve, currentCompany?.id, loadPendingRows],
+  );
 
   const displayedPendingCount = useMemo(() => Math.max(0, pendingCount), [pendingCount]);
 
@@ -487,7 +679,8 @@ export function DashboardAlertsCard({
                   <SheetHeader className="border-b px-4 py-3">
                     <SheetTitle>Central de pendências</SheetTitle>
                     <SheetDescription>
-                      Resolva conflitos sem sair do dashboard.
+                      Vínculos de nota com o catálogo e outras pendências de importação. O mesmo painel abre a partir de{" "}
+                      <strong>Revisão pós-importação → Abrir vínculos</strong> no bloco acima.
                     </SheetDescription>
                   </SheetHeader>
                   <div className="space-y-4 overflow-y-auto p-4">
@@ -525,7 +718,7 @@ export function DashboardAlertsCard({
                           <SelectContent>
                             <SelectItem value="all">Todos tipos</SelectItem>
                             <SelectItem value="missing_conversion">Revisão de linha / conversão</SelectItem>
-                            <SelectItem value="missing_product_match">Legado — vínculo (sem despesa)</SelectItem>
+                            <SelectItem value="missing_product_match">Vínculo NF → catálogo</SelectItem>
                             <SelectItem value="catalog_reconciliation">Catálogo (agrupamentos)</SelectItem>
                           </SelectContent>
                         </Select>
@@ -647,8 +840,72 @@ export function DashboardAlertsCard({
                               {r.detail ? (
                                 <p className="mt-2 text-sm leading-snug text-muted-foreground">{r.detail}</p>
                               ) : null}
+                              {isOpen &&
+                              !isResolved &&
+                              (r.kind === "missing_conversion" ||
+                                (r.kind === "missing_product_match" &&
+                                  !(
+                                    r.expense_item_id &&
+                                    (readPayloadCandidateProductIds(r.payload).length > 0 ||
+                                      readSuggestedCatalogName(r.payload))
+                                  ))) ? (
+                                <ImportPendingProductMatchDetail
+                                  payload={r.payload as Record<string, unknown> | null}
+                                  className="mt-2"
+                                />
+                              ) : null}
                               {!isResolved ? (
                                 <>
+                                  {isOpen &&
+                                  r.kind === "missing_product_match" &&
+                                  r.expense_item_id &&
+                                  (readPayloadCandidateProductIds(r.payload).length > 0 ||
+                                    readSuggestedCatalogName(r.payload)) ? (
+                                    <div className="mt-3 space-y-2 rounded-md border border-primary/20 bg-primary/[0.04] p-3 dark:bg-primary/10">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                                        Resolver aqui
+                                      </p>
+                                      <ImportPendingProductMatchDetail
+                                        payload={r.payload as Record<string, unknown> | null}
+                                      />
+                                      {readPayloadXmlProductName(r.payload) ? (
+                                        <p className="text-sm">
+                                          <span className="text-muted-foreground">Na NF: </span>
+                                          <span className="font-medium">{readPayloadXmlProductName(r.payload)}</span>
+                                        </p>
+                                      ) : null}
+                                      {readSuggestedCatalogName(r.payload) ? (
+                                        <p className="text-sm">
+                                          <span className="text-muted-foreground">Sugestão de cadastro: </span>
+                                          <span className="font-medium">{readSuggestedCatalogName(r.payload)}</span>
+                                        </p>
+                                      ) : null}
+                                      <div className="flex flex-wrap gap-2">
+                                        {readPayloadCandidateProductIds(r.payload).map((cid) => (
+                                          <Button
+                                            key={`${r.id}-cand-${cid}`}
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            disabled={busy === r.id}
+                                            onClick={() => void applyLinkCandidateAndResolve(r, cid)}
+                                          >
+                                            Usar: {pendingProducts[cid]?.name ?? `Produto ${cid.slice(0, 8)}…`}
+                                          </Button>
+                                        ))}
+                                        {readSuggestedCatalogName(r.payload) ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            disabled={busy === r.id}
+                                            onClick={() => void createSuggestedProductAndResolve(r)}
+                                          >
+                                            Criar produto sugerido
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  ) : null}
                                   {isOpen && !productId && r.kind === "missing_conversion" ? (
                                     <p className="mt-2 text-sm text-muted-foreground">
                                       {payloadProductName

@@ -143,9 +143,21 @@ function ProductPicker({
 export function EstoqueReceitasPanel({
   companyId,
   onStockChanged,
+  prefillNewRecipeOutputProductId,
+  prefillNewRecipeAutoOpen = true,
+  onPrefillConsumed,
 }: {
   companyId: string;
   onStockChanged?: () => void;
+  /** Produto-alvo para vincular à ficha (saída em ficha nova ou saída/ingrediente em ficha existente). */
+  prefillNewRecipeOutputProductId?: string | null;
+  /**
+   * Se true (padrão), abre o sheet de nova receita assim que o produto estiver carregado (ex.: deep link em Produtos).
+   * Se false, só define o contexto de vínculo: o utilizador escolhe ficha na lista ou “Nova ficha técnica”.
+   */
+  prefillNewRecipeAutoOpen?: boolean;
+  /** Chamado após aplicar o preenchimento para limpar query string na URL. */
+  onPrefillConsumed?: () => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
@@ -166,6 +178,47 @@ export function EstoqueReceitasPanel({
   const [consumeRecipe, setConsumeRecipe] = useState<string>("");
   const [portions, setPortions] = useState("1");
   const [consuming, setConsuming] = useState(false);
+  const [linkContextProductId, setLinkContextProductId] = useState<string | null>(null);
+  const prefillHandledRef = useRef(false);
+
+  useEffect(() => {
+    prefillHandledRef.current = false;
+  }, [companyId, prefillNewRecipeOutputProductId]);
+
+  useEffect(() => {
+    const pid = prefillNewRecipeOutputProductId?.trim();
+    if (!pid) {
+      if (!prefillNewRecipeAutoOpen) setLinkContextProductId(null);
+      return;
+    }
+    if (loading) return;
+    const match = products.find((p) => p.id === pid);
+    if (!match) return;
+
+    if (!prefillNewRecipeAutoOpen) {
+      setLinkContextProductId(pid);
+      return;
+    }
+
+    if (prefillHandledRef.current) return;
+    prefillHandledRef.current = true;
+    setEditingRecipeId(null);
+    setSheetMode("edit");
+    const base = match.name.trim();
+    setName(base ? `${base} — ficha` : "Nova ficha técnica");
+    setBatchYield("1");
+    setOutputId(pid);
+    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    setSheetOpen(true);
+    toast.message("Defina os insumos e salve a receita quando estiver pronto.");
+    onPrefillConsumed?.();
+  }, [
+    prefillNewRecipeOutputProductId,
+    prefillNewRecipeAutoOpen,
+    products,
+    loading,
+    onPrefillConsumed,
+  ]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -405,25 +458,48 @@ export function EstoqueReceitasPanel({
     setBatchYield("1");
     setOutputId("");
     setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    onStockChanged?.();
     void load();
   };
 
-  const openEditRecipe = (r: RecipeRow) => {
+  const openEditRecipe = (r: RecipeRow, linkProductId?: string | null) => {
+    const pending = linkProductId?.trim() ?? "";
     setEditingRecipeId(r.id);
     setName(r.name);
     setBatchYield(String(r.batch_yield));
-    setOutputId(r.output_product_id ?? "");
-    setIngs(
-      (r.recipe_ingredients ?? []).map((i) => ({
-        product_id: i.product_id,
-        quantity: String(i.input_quantity ?? i.quantity),
-        unit_code:
-          i.input_unit_code ??
-          products.find((p) => p.id === i.product_id)?.unit ??
-          "",
-      })),
-    );
-    setSheetMode("summary");
+    let nextOutput = (r.output_product_id ?? "").trim();
+    let nextIngs: IngRow[] = (r.recipe_ingredients ?? []).map((i) => ({
+      product_id: i.product_id,
+      quantity: String(i.input_quantity ?? i.quantity),
+      unit_code:
+        i.input_unit_code ??
+        products.find((p) => p.id === i.product_id)?.unit ??
+        "",
+    }));
+
+    if (pending) {
+      if (!nextOutput) {
+        nextOutput = pending;
+      } else if (nextOutput !== pending) {
+        const alreadyIng = nextIngs.some((row) => row.product_id === pending);
+        if (!alreadyIng) {
+          const p = productById.get(pending);
+          nextIngs = [
+            ...nextIngs,
+            { product_id: pending, quantity: "1", unit_code: p?.unit ?? "" },
+          ];
+        }
+      }
+      setSheetMode("edit");
+    } else {
+      setSheetMode("summary");
+    }
+
+    if (nextIngs.length === 0) {
+      nextIngs = [{ product_id: "", quantity: "1", unit_code: "" }];
+    }
+    setOutputId(nextOutput);
+    setIngs(nextIngs);
     setSheetOpen(true);
   };
 
@@ -444,6 +520,7 @@ export function EstoqueReceitasPanel({
     setBatchYield("1");
     setOutputId("");
     setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    onStockChanged?.();
     void load();
   };
 
@@ -495,8 +572,8 @@ export function EstoqueReceitasPanel({
       return;
     }
     toast.success("Estoque dos ingredientes atualizado.");
-    void load();
     onStockChanged?.();
+    void load();
   };
 
   return (
@@ -506,7 +583,7 @@ export function EstoqueReceitasPanel({
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <ChefHat className="h-4 w-4" />
-              Receitas (fichas técnicas)
+              Ficha Técnica
             </CardTitle>
             <CardDescription>
               Cadastre ingredientes por lote (rendimento) e depois use a baixa
@@ -517,20 +594,41 @@ export function EstoqueReceitasPanel({
             type="button"
             size="sm"
             onClick={() => {
+              const pid = linkContextProductId?.trim();
+              const match = pid ? products.find((p) => p.id === pid) : undefined;
               setEditingRecipeId(null);
               setSheetMode("edit");
-              setName("");
-              setBatchYield("1");
-              setOutputId("");
-              setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+              if (match) {
+                const base = match.name.trim();
+                setName(base ? `${base} — ficha` : "Nova ficha técnica");
+                setBatchYield("1");
+                setOutputId(pid!);
+                setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+              } else {
+                setName("");
+                setBatchYield("1");
+                setOutputId("");
+                setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+              }
               setSheetOpen(true);
             }}
           >
             <Plus className="mr-1.5 h-4 w-4" />
-            Nova receita
+            Nova ficha técnica
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {linkContextProductId ? (
+            <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-foreground">
+              <span className="font-medium">Vincular produto: </span>
+              <span>{productById.get(linkContextProductId)?.name ?? "—"}</span>
+              <span className="text-muted-foreground">
+                {" "}
+                — escolha uma ficha na lista ou crie uma nova; o produto entra como saída (se a ficha
+                ainda não tiver saída) ou como novo ingrediente.
+              </span>
+            </div>
+          ) : null}
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -538,7 +636,7 @@ export function EstoqueReceitasPanel({
             </div>
           ) : recipes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nenhuma receita cadastrada.
+              Nenhuma ficha técnica cadastrada.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -547,8 +645,8 @@ export function EstoqueReceitasPanel({
                   key={r.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => openEditRecipe(r)}
-                  onKeyDown={(e) => e.key === "Enter" && openEditRecipe(r)}
+                  onClick={() => openEditRecipe(r, linkContextProductId)}
+                  onKeyDown={(e) => e.key === "Enter" && openEditRecipe(r, linkContextProductId)}
                   className="cursor-pointer rounded-2xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-4 text-sm shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -590,7 +688,7 @@ export function EstoqueReceitasPanel({
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-2">
-            <Label>Receita</Label>
+            <Label>Ficha técnica</Label>
             <Select
               value={consumeRecipe || "__"}
               onValueChange={(v) =>
@@ -647,9 +745,9 @@ export function EstoqueReceitasPanel({
                 <SheetTitle className="text-xl font-semibold sm:text-2xl">
                   {editingRecipeId
                     ? sheetMode === "summary"
-                      ? "Resumo da receita"
-                      : "Editar receita"
-                    : "Nova receita"}
+                      ? "Resumo da ficha técnica"
+                      : "Editar ficha técnica"
+                    : "Nova ficha técnica"}
                 </SheetTitle>
               </div>
               {editingRecipeId ? (
@@ -693,7 +791,7 @@ export function EstoqueReceitasPanel({
               <div className="space-y-4 p-6">
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Receita
+                    Ficha técnica
                   </p>
                   <p className="mt-1 text-lg font-semibold text-foreground">{name}</p>
                   <p className="mt-2 text-sm text-muted-foreground">

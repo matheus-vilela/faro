@@ -365,8 +365,18 @@ export function Produtos() {
   };
 
   const { currentCompany } = useCompany();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const lowStockOnly = searchParams.get("estoque") === "baixo";
+  const recipeOutputProductId =
+    searchParams.get("recipeOutputProduct")?.trim() || undefined;
+  const productHighlightId = searchParams.get("highlight")?.trim() || undefined;
+
+  const clearRecipeOutputProductParam = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    if (!next.has("recipeOutputProduct")) return;
+    next.delete("recipeOutputProduct");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [productsCount, setProductsCount] = useState(0);
@@ -440,6 +450,7 @@ export function Produtos() {
   /** Evita recarregar conversões ao voltar do resumo para edição sem salvar. */
   const productConversionsLoadedIdRef = useRef<string | null>(null);
   const productSheetViewRef = useRef<"summary" | "edit">("summary");
+  const productHighlightHandledRef = useRef<string | null>(null);
   /** Nomes das categorias de catálogo por produto (listagem). */
   const [productCatalogMap, setProductCatalogMap] = useState<
     Record<string, { id: string; name: string }[]>
@@ -989,8 +1000,11 @@ export function Produtos() {
   ]);
 
   useEffect(() => {
-    if (searchParams.get("estoque") === "baixo") {
+    const est = searchParams.get("estoque");
+    if (est === "baixo") {
       setEstoqueTab("catalogo");
+    } else if (est === "receitas") {
+      setEstoqueTab("receitas");
     }
   }, [searchParams]);
 
@@ -1181,6 +1195,40 @@ export function Produtos() {
     setStockMovementRows([]);
     setStockMovementLoading(false);
   };
+
+  useEffect(() => {
+    if (!productHighlightId) {
+      productHighlightHandledRef.current = null;
+    }
+  }, [productHighlightId]);
+
+  /** Abre o detalhe do produto quando a URL traz `?highlight=<uuid>` (ex.: revisão pós-importação). */
+  useEffect(() => {
+    if (!productHighlightId || loading) return;
+    if (productHighlightHandledRef.current === productHighlightId) return;
+    const found = products.find((p) => p.id === productHighlightId);
+    if (!found) {
+      toast.message(
+        "Produto não está na página atual. Use a busca ou mude de página na lista.",
+      );
+      productHighlightHandledRef.current = productHighlightId;
+      const next = new URLSearchParams(searchParams);
+      next.delete("highlight");
+      setSearchParams(next, { replace: true });
+      return;
+    }
+    productHighlightHandledRef.current = productHighlightId;
+    openStockSheet(found);
+    const next = new URLSearchParams(searchParams);
+    next.delete("highlight");
+    setSearchParams(next, { replace: true });
+  }, [
+    productHighlightId,
+    loading,
+    products,
+    searchParams,
+    setSearchParams,
+  ]);
 
   const handleStockSave = async () => {
     if (!stockProduct) return;
@@ -1555,7 +1603,7 @@ export function Produtos() {
     <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Produtos e estoque"
-        description="Catálogo, CMV, movimentações, contagem (incluindo link pelo WhatsApp), compras, etiquetas, perdas e receitas."
+        description="Catálogo, CMV, movimentações, contagem (incluindo link pelo WhatsApp), compras, etiquetas, perdas e fichas técnicas."
         icon={Package}
         action={
           estoqueTab === "catalogo" ? (
@@ -1592,7 +1640,7 @@ export function Produtos() {
             ["compras", "Compras", ShoppingCart],
             ["etiquetas", "Etiquetas", Tag],
             ["perdas", "Perdas", Trash2],
-            ["receitas", "Receitas", ChefHat],
+            ["receitas", "Ficha Técnica", ChefHat],
           ] as const
         ).map(([id, label, Icon]) => (
           <button
@@ -3030,6 +3078,8 @@ export function Produtos() {
       {currentCompany?.id && estoqueTab === "receitas" && (
         <EstoqueReceitasPanel
           companyId={currentCompany.id}
+          prefillNewRecipeOutputProductId={recipeOutputProductId}
+          onPrefillConsumed={clearRecipeOutputProductParam}
           onStockChanged={() => {
             void fetchProducts();
             void fetchLowStockCount();

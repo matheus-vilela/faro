@@ -8,6 +8,11 @@ import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
 import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
 import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.ts";
 import { NFE_CATALOG_MOTOR_VERSION } from "../_shared/nfeExpenseProducts/types.ts";
+import {
+  importXmlProductsAfterBatchEnabled,
+  invokeProcessExpenseXmlProducts,
+  scheduleWaitUntilEdge,
+} from "../_shared/nfeExpenseProducts/invokeProcessExpenseXmlProducts.ts";
 import { upsertImportPendingReviewCompanyAlert } from "../_shared/upsertImportPendingReviewCompanyAlert.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -33,18 +38,6 @@ const TEST_SINGLE_FILE_MODE = String(Deno.env.get("IMPORT_BATCH_TEST_SINGLE_FILE
 const VERBOSE_LOGS = String(Deno.env.get("IMPORT_BATCH_VERBOSE_LOGS") ?? "")
   .trim()
   .toLowerCase() === "true";
-/**
- * Liga invocação assíncrona a `process-expense-xml-products` após despesa/itens criados.
- * Por defeito **ligado**; desligar com `IMPORT_XML_PRODUCTS_AFTER_BATCH=false`.
- */
-function importXmlProductsAfterBatchEnabled(): boolean {
-  const v = String(Deno.env.get("IMPORT_XML_PRODUCTS_AFTER_BATCH") ?? "")
-    .trim()
-    .toLowerCase();
-  if (v === "false" || v === "0" || v === "no") return false;
-  return true;
-}
-const IMPORT_XML_PRODUCTS_AFTER_BATCH = importXmlProductsAfterBatchEnabled();
 
 const LOG = "[process-import-job-batch]";
 /** HTTP 546 no Supabase = limite do worker (CPU/tempo/mem). 503/529 = sobrecarga temporária. */
@@ -159,19 +152,6 @@ function pibLog(
   console.log(LOG, JSON.stringify(line));
 }
 
-function scheduleWaitUntilEdge(p: Promise<unknown>): void {
-  try {
-    const ER = globalThis.EdgeRuntime;
-    if (ER && typeof ER.waitUntil === "function") {
-      ER.waitUntil(p);
-      return;
-    }
-  } catch {
-    /* ignore */
-  }
-  void p.catch(() => undefined);
-}
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -225,11 +205,27 @@ function normalizeCatalogLabel(v: string): string {
     .trim();
 }
 
-async function insertImportLog(
+/**
+ * Evita 23505 em `idx_company_nfe_import_logs_unique_access_key` / `unique_xml_hash`:
+ * o mesmo XML (hash) ou reprocessamento do ficheiro deve atualizar o log, não duplicar.
+ */
+async function upsertCompanyNfeImportLog(
   supabase: ReturnType<typeof createClient>,
   payload: Record<string, unknown>,
 ) {
-  await supabase.from("company_nfe_import_logs").insert(payload);
+  const { error } = await supabase
+    .from("company_nfe_import_logs")
+    .upsert(
+      { ...payload, updated_at: new Date().toISOString() },
+      { onConflict: "company_id,xml_hash" },
+    );
+  if (error) {
+    console.error(
+      "[process-import-job-batch] company_nfe_import_logs upsert:",
+      error.message,
+    );
+    throw new Error(error.message);
+  }
 }
 
 async function appendTimeline(
@@ -730,23 +726,9 @@ Deno.serve(async (req) => {
             execId,
             "skip_duplicado_chave_nfe",
             { company_id: companyId, batch_id: batchId, file_id: fileId },
-            "já existe log com mesma nfe_access_key — regista duplicate, não cria despesa",
+            "já existe log com mesma nfe_access_key — não cria despesa nem segundo registo (único por chave)",
             { chave_nfe_44: nfeAccessKey, expense_id: byKeyExpenseId },
           );
-          await insertImportLog(supabase, {
-            company_id: companyId,
-            file_name: file.file_name,
-            xml_hash: file.xml_hash,
-            nfe_access_key: nfeAccessKey,
-            invoice_number: invoiceNumber,
-            invoice_series: invoiceSeries,
-            supplier_document: supplierDocument,
-            emission_date: emissionDate,
-            status: "duplicate",
-            error_message: "Nota já importada por chave de acesso.",
-            import_job_batch_id: batchId,
-            import_job_file_id: fileId,
-          });
           await appendTimelineMaybeQuiet(
             supabase,
             batchId,
@@ -946,7 +928,7 @@ Deno.serve(async (req) => {
               "despesa já existe para fornecedor + nº/série; arquivo marcado como duplicate",
               { expense_id: expenseId, invoice_number: invoiceNumber, invoice_series: invoiceSeries },
             );
-            await insertImportLog(supabase, {
+            await upsertCompanyNfeImportLog(supabase, {
               company_id: companyId,
               file_name: file.file_name,
               xml_hash: file.xml_hash,
@@ -1058,16 +1040,16 @@ Deno.serve(async (req) => {
                 xml_catalog_motor: {
                   pending: true,
                   motor_version: NFE_CATALOG_MOTOR_VERSION,
-                  note: IMPORT_XML_PRODUCTS_AFTER_BATCH
+                  note: importXmlProductsAfterBatchEnabled()
                     ? "Motor de catálogo agendado após este lote."
-                    : "Defina IMPORT_XML_PRODUCTS_AFTER_BATCH=true para aplicar vínculos de produto.",
+                    : "Motor de catálogo desativado (IMPORT_XML_PRODUCTS_AFTER_BATCH=false).",
                 },
               },
               import_stock_resolution: null,
               resolved_entry_breakdown_recipe_id: null,
               import_pending_resolution: true,
               import_resolution_status:
-                IMPORT_XML_PRODUCTS_AFTER_BATCH
+                importXmlProductsAfterBatchEnabled()
                   ? null
                   : "AWAITING_XML_CATALOG_MOTOR",
               import_applied_rule_id: null,
@@ -1182,7 +1164,7 @@ Deno.serve(async (req) => {
             );
           }
 
-          await insertImportLog(supabase, {
+          await upsertCompanyNfeImportLog(supabase, {
             company_id: companyId,
             file_name: file.file_name,
             xml_hash: file.xml_hash,
@@ -1202,7 +1184,7 @@ Deno.serve(async (req) => {
             execId,
             "import_log_gravado",
             { company_id: companyId, batch_id: batchId, file_id: fileId },
-            "company_nfe_import_logs insert OK",
+            "company_nfe_import_logs upsert OK",
             {
               expense_id: expenseId,
               log_status: "success",
@@ -1213,57 +1195,18 @@ Deno.serve(async (req) => {
             file_id: fileId,
             expense_id: expenseId,
           });
-          if (
-            IMPORT_XML_PRODUCTS_AFTER_BATCH &&
-            expenseId &&
-            serviceRole &&
-            supabaseUrl
-          ) {
-            const motorUrl =
-              `${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-expense-xml-products`;
-            const motorPromise = fetch(motorUrl, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${serviceRole}`,
-                apikey: anonKey ?? "",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                company_id: companyId,
-                expense_id: expenseId,
-                import_job_file_id: fileId,
-                motor_version: NFE_CATALOG_MOTOR_VERSION,
-                mode: "apply",
-              }),
-            })
-              .then(async (motorRes) => {
-                if (!motorRes.ok) {
-                  const txt = await motorRes.text().catch(() => "");
-                  console.warn(
-                    LOG,
-                    JSON.stringify({
-                      exec_id: execId,
-                      fase: "xml_catalog_motor_http",
-                      expense_id: expenseId,
-                      status: motorRes.status,
-                      corpo: txt.slice(0, 500),
-                    }),
-                  );
-                }
-              })
-              .catch((e) => {
-                console.error(
-                  LOG,
-                  JSON.stringify({
-                    exec_id: execId,
-                    fase: "xml_catalog_motor_invoke_erro",
-                    expense_id: expenseId,
-                    erro: String(e),
-                  }),
-                );
-              });
-            scheduleWaitUntilEdge(motorPromise);
-          }
+          scheduleWaitUntilEdge(
+            invokeProcessExpenseXmlProducts({
+              supabaseUrl,
+              serviceRole,
+              anonKey,
+              companyId,
+              expenseId,
+              importJobFileId: fileId,
+              execId,
+              logPrefix: LOG,
+            }),
+          );
         }
       } else {
         pibLog(

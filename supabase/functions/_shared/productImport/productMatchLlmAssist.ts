@@ -3,6 +3,7 @@
  * Deno Edge + Vitest compatível via fetch JSON.
  */
 
+import { stripTrailingPackagingQtyAndUnitsForCatalogName } from "./canonicalName.ts";
 import {
   PRODUCT_MATCH_SYSTEM_BORDERLINE,
   PRODUCT_MATCH_SYSTEM_IMPORT_BATCH,
@@ -98,7 +99,8 @@ export async function assistImportColdNewProduct(
     const decision = String(parsed.decision ?? "").toUpperCase();
     const rationale = String(parsed.rationale ?? "").trim() || "—";
     if (decision === "NEW_PRODUCT") {
-      const name = String(parsed.suggested_catalog_name ?? "").trim();
+      const nameRaw = String(parsed.suggested_catalog_name ?? "").trim();
+      const name = stripTrailingPackagingQtyAndUnitsForCatalogName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
       }
@@ -186,7 +188,8 @@ export async function assistBorderlineProductMatch(
       return { kind: "LINK", product_id: pid, rationale };
     }
     if (decision === "NEW_PRODUCT") {
-      const name = String(parsed.suggested_catalog_name ?? "").trim();
+      const nameRaw = String(parsed.suggested_catalog_name ?? "").trim();
+      const name = stripTrailingPackagingQtyAndUnitsForCatalogName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
       }

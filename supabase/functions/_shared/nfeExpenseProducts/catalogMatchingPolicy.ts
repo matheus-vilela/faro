@@ -35,6 +35,20 @@ export function envImportProductLlmDisabled(): boolean {
   }
 }
 
+/** Desliga só o assist `assistInvoiceLineUnits` (nome/unidade por linha NF-e). */
+export function envImportLineUnitsLlmDisabled(): boolean {
+  try {
+    const v =
+      typeof Deno !== "undefined"
+        ? Deno.env.get("IMPORT_LINE_UNITS_LLM_DISABLED") ?? ""
+        : "";
+    const s = String(v).trim().toLowerCase();
+    return s === "true" || s === "1";
+  } catch {
+    return false;
+  }
+}
+
 function applyKillSwitch(
   base: ResolveProductMatchesOptions | undefined,
 ): ResolveProductMatchesOptions | undefined {

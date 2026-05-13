@@ -31,6 +31,26 @@ const COMPOSITE_INVOICE_LEADING_TOKENS = new Set([
 ])
 
 /**
+ * Catálogo curto alinhado ao início da linha (ex.: "Arroz" vs "Arroz branco tipo 1").
+ * Evita score alto quando só um token do meio/fim da nota aparece dentro do cadastro.
+ */
+export function shortCatalogAnchorsInvoiceHead(
+  invoiceLine: string,
+  catalogName: string,
+): boolean {
+  const cx = canonicalProductName(invoiceLine)
+  const cy = canonicalProductName(catalogName)
+  if (!cx || !cy) return true
+  const invTok = cx.split(" ").filter(Boolean)
+  const catTok = cy.split(" ").filter(Boolean)
+  if (invTok.length < 4 || catTok.length > 2) return true
+  for (let i = 0; i < catTok.length; i++) {
+    if (invTok[i] !== catTok[i]) return false
+  }
+  return true
+}
+
+/**
  * Cadastro parece ser só sabor/ingrediente (1 token) e a nota é item composto
  * (≥2 tokens) cujo último token coincide — ex.: catálogo "Morango" vs nota "Refrigerante Morango".
  * Nesses casos o score por substring não deve empurrar vínculo automático.
@@ -87,6 +107,11 @@ export function scoreNameMatch(
       const shorter = Math.min(cx.length, cy.length)
       const longer = Math.max(cx.length, cy.length)
       let s = Math.round(82 + (shorter / longer) * 12)
+      const invN = cx.split(" ").filter(Boolean).length
+      const catN = cy.split(" ").filter(Boolean).length
+      if (invN >= 4 && catN <= 2 && !shortCatalogAnchorsInvoiceHead(invoiceLine, catalogName)) {
+        s = Math.min(s, 58)
+      }
       if (isFlavorOnlyCatalogInsideCompositeInvoice(invoiceLine, catalogName)) {
         s = Math.min(s, 68)
       }
@@ -119,16 +144,25 @@ export function applySecondarySignals(params: {
   let score = params.baseScore
   const reasons: string[] = []
 
+  const eanInv = digitsOnly(params.invoiceEan)
+  const bc = digitsOnly(params.productBarcode)
+  const eanMatch = eanInv.length >= 8 && bc.length >= 8 && eanInv === bc
+
   const ncmInv = digitsOnly(params.invoiceNcm).slice(0, 8)
   const ncmProd = digitsOnly(params.productNcm).slice(0, 8)
   if (ncmInv.length >= 4 && ncmProd.length >= 4 && ncmInv === ncmProd) {
-    score = Math.min(100, Math.max(score, 88))
+    const base = params.baseScore
+    if (base >= 58 || eanMatch) {
+      score = Math.min(100, Math.max(score, 88))
+    } else if (base >= 46) {
+      score = Math.min(100, Math.max(score, base + 20))
+    } else {
+      score = Math.min(100, Math.max(score, base + 10))
+    }
     reasons.push("NCM igual ao cadastro")
   }
 
-  const eanInv = digitsOnly(params.invoiceEan)
-  const bc = digitsOnly(params.productBarcode)
-  if (eanInv.length >= 8 && bc.length >= 8 && eanInv === bc) {
+  if (eanMatch) {
     score = Math.min(100, score + 25)
     reasons.push("EAN/código de barras igual ao cadastro")
   }

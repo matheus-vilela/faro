@@ -313,14 +313,18 @@ export function DashboardIntegrationCsvRevenueCard({
   const inPdvIntegrationOnboarding =
     company.onboarding_integration_pdv_completed !== true;
 
-  /** Após onboarding PDV concluído, não ocupar o dash em estado totalmente idle. */
+  /**
+   * Após onboarding PDV concluído, não ocupar o dash em estado idle.
+   * `syncEndedWithIssue` sozinho não deve manter o cartão se já há import COMPLETED —
+   * o EPOC pode registar dias sem eventos; o alerta diário trata rotinas posteriores.
+   */
   const keepVisibleAfterPdvOnboarding = useMemo(
     () =>
       pdvSyncLocked ||
       edgePendingEffective ||
       hasActive ||
       primary?.status === "FAILED" ||
-      syncEndedWithIssue ||
+      (syncEndedWithIssue && primary?.status !== "COMPLETED") ||
       retryBusy ||
       completeIntegrationBusy,
     [
@@ -454,13 +458,13 @@ export function DashboardIntegrationCsvRevenueCard({
         "O processamento do CSV falhou; pode tentar de novo ou rever a integração."
       );
     }
-    if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
-      return (
-        latestSyncRun?.summary?.slice(0, 260) ??
-        "A exportação no portal não produziu tabela utilizável nesta sincronização."
-      );
-    }
     if (!primary) {
+      if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
+        return (
+          latestSyncRun?.summary?.slice(0, 260) ??
+          "A exportação no portal não produziu tabela utilizável nesta sincronização."
+        );
+      }
       return "Quando a sincronização EPOC correr, o progresso aparece aqui até à primeira importação estar concluída.";
     }
     const meta = primary.metadata ?? {};
@@ -469,6 +473,12 @@ export function DashboardIntegrationCsvRevenueCard({
     const totalRows = Number(meta.csv_total_data_rows ?? 0) || null;
     if (primary.status === "COMPLETED") {
       return `${created} receita(s) criadas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}${totalRows ? ` · ${totalRows} linhas no CSV` : ""}.`;
+    }
+    if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
+      return (
+        latestSyncRun?.summary?.slice(0, 260) ??
+        "A exportação no portal não produziu tabela utilizável nesta sincronização."
+      );
     }
     if (primary.status === "PENDING") {
       return "A processar o CSV das receitas na integração. Pode demorar alguns segundos.";

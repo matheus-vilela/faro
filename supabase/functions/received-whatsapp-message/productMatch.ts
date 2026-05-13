@@ -7,6 +7,7 @@ import {
 import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
+  stripTrailingPackagingQtyAndUnitsForCatalogName,
 } from "../_shared/productImport/canonicalName.ts";
 import {
   consolidateInvoiceItems,
@@ -23,6 +24,7 @@ import {
   computeStockQuantity,
   pickProductUnitRule,
   type ProductUnitRuleRow,
+  type ResolutionSource,
 } from "../_shared/productImport/unitConversion.ts";
 import {
   conversionFactorToA,
@@ -74,6 +76,8 @@ export type ItemWithProductMatch = ExtractedExpenseItem & {
     decisionPath?: string;
     borderlineLlmRationale?: string;
     borderlineLlmSuggestedName?: string;
+    /** Pós-match: `assistInvoiceLineUnits` (produção + preview). */
+    invoice_line_units_llm?: Record<string, unknown>;
   };
 };
 
@@ -84,6 +88,8 @@ export type ResolveProductMatchesResult = {
   deferProductCreationToReconciliation: boolean;
   /** Chamadas LLM na faixa borderline nesta execução (métricas). */
   borderlineLlmCalls: number;
+  /** Chamadas a `assistInvoiceLineUnits` (NF-e XML / preview full). */
+  lineUnitsLlmCalls?: number;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -108,6 +114,14 @@ function envProductMatchLlmForce(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Nome para cadastro: sem quantidade de embalagem / unidade comercial no fim (ex.: "100 UN"). */
+function finalizeSuggestedCatalogName(raw: string | null | undefined): string | undefined {
+  const t = String(raw ?? "").trim();
+  if (!t) return undefined;
+  const n = stripTrailingPackagingQtyAndUnitsForCatalogName(t).trim().slice(0, 512);
+  return n.length ? n : undefined;
 }
 
 function envProductMatchLlmMaxCalls(): number {
@@ -167,6 +181,14 @@ async function loadImportSettings(
       !!d.defer_product_creation_to_reconciliation,
   };
 }
+
+const RESOLUTION_SOURCE_PT: Record<ResolutionSource, string> = {
+  DIRECT_UNIT_MATCH: "mesma unidade (sem conversão)",
+  AUTO_CONVERTED_GLOBAL_RULE: "conversão global massa/volume",
+  AUTO_CONVERTED_PRODUCT_RULE: "regra de conversão do produto",
+  UNIT_VALIDATION_REQUIRED: "validação de unidade necessária",
+  UNKNOWN_INVOICE_UNIT: "unidade da nota ausente ou não reconhecida",
+};
 
 function equivToProductRule(
   e: EquivRow,
@@ -241,8 +263,8 @@ function enrichProductMatch(
     invoiceUnitNormalized: invoiceU,
     catalogUnitNormalized: catU,
     matchReason: partial.matchReason
-      ? `${partial.matchReason} · estoque: ${c.stockQuantity} (${c.resolutionSource})`
-      : `estoque: ${c.stockQuantity} (${c.resolutionSource})`,
+      ? `${partial.matchReason} · estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`
+      : `estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`,
   };
 }
 
@@ -280,7 +302,7 @@ function decideWithUnits(params: {
       resolutionStatus: "AUTO_MATCH",
       needsConfirmation: false,
       unitConvertible: false,
-      matchReason: `Score ${bestScore.toFixed(1)} ≥ ${auto} e unidade compatível (${invoiceU})`,
+      matchReason: `Pontuação ${bestScore.toFixed(1)} ≥ ${auto} e unidade compatível (${invoiceU})`,
     };
   }
 
@@ -290,7 +312,7 @@ function decideWithUnits(params: {
       needsConfirmation: false,
       unitConvertible: false,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}; unidade da nota ausente — vínculo por nome forte (cadastro ${catalogU})`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}; unidade da nota ausente — vínculo por nome forte (cadastro ${catalogU})`,
     };
   }
 
@@ -300,7 +322,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: true,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}, mas unidade da nota (${invoiceU}) difere do cadastro (${catalogU}); conversão não automática`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}, mas a unidade da nota (${invoiceU}) difere do cadastro (${catalogU}); conversão não automática`,
     };
   }
 
@@ -310,7 +332,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: false,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}, mas unidades ${invoiceU} vs ${catalogU} exigem confirmação`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}, mas as unidades ${invoiceU} (nota) e ${catalogU} (cadastro) exigem confirmação`,
     };
   }
 
@@ -320,7 +342,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: conv,
       matchReason:
-        `Score ${bestScore.toFixed(1)} entre ${conf} e ${auto - 1}; confirmação recomendada`,
+        `Pontuação ${bestScore.toFixed(1)} entre ${conf} e ${auto - 1}; confirmação recomendada`,
     };
   }
 
@@ -328,7 +350,7 @@ function decideWithUnits(params: {
     resolutionStatus: "NEW_PRODUCT_STAGED",
     needsConfirmation: true,
     unitConvertible: false,
-    matchReason: `Score ${bestScore.toFixed(1)} < ${conf}; tratar como novo produto`,
+    matchReason: `Pontuação ${bestScore.toFixed(1)} < ${conf}; tratar como novo produto`,
   };
 }
 
@@ -711,7 +733,7 @@ export async function resolveProductMatches(
       scoredList.push({
         product: p,
         score: sc,
-        detail: `score ${sc.toFixed(1)}${extra}`,
+        detail: `pontuação ${sc.toFixed(1)}${extra}`,
       });
     }
 
@@ -759,7 +781,9 @@ export async function resolveProductMatches(
           catalogUnitNormalized: "UNKN",
           unitConvertible: false,
           decisionPath: "catalog_empty_or_no_candidates",
-          borderlineLlmSuggestedName: autoNewEmpty ? name.trim() : undefined,
+          borderlineLlmSuggestedName: autoNewEmpty
+            ? finalizeSuggestedCatalogName(name.trim())
+            : undefined,
         },
       });
       continue;
@@ -774,9 +798,15 @@ export async function resolveProductMatches(
 
     const topK = opts?.importBatch ? 12 : 5;
     const LLM_LINK_MIN_SCORE = 52;
-    const safeForLink = (s: Scored) =>
-      s.score >= LLM_LINK_MIN_SCORE &&
-      !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name);
+    const LLM_LINK_MIN_NAME_SCORE = 42;
+    const safeForLink = (s: Scored) => {
+      const nameOnly = scoreNameMatch(name, s.product.name);
+      return (
+        s.score >= LLM_LINK_MIN_SCORE &&
+        nameOnly >= LLM_LINK_MIN_NAME_SCORE &&
+        !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name)
+      );
+    };
     const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
 
     const importBatchNoSafeLink =
@@ -877,12 +907,14 @@ export async function resolveProductMatches(
           ? "import_llm_cold_new"
           : "borderline_llm_new_hint";
         borderlineLlmRationale = assist.rationale;
-        borderlineLlmSuggestedName = assist.suggested_catalog_name;
+        borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
+          assist.suggested_catalog_name,
+        );
       } else if (assist.kind === "SKIP") {
         decisionPath = "borderline_llm_skip";
         borderlineLlmRationale = assist.rationale;
         if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_llm_cold_fallback";
           borderlineLlmRationale = `${assist.rationale} · fallback: nome da nota.`;
         } else if (
@@ -890,7 +922,7 @@ export async function resolveProductMatches(
           bestScore < autoTh &&
           useBorderlineAssist
         ) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_batch_borderline_llm_skip_auto_new";
           borderlineLlmRationale = `${assist.rationale} · cadastro automático (batch) com nome da nota.`;
         }
@@ -898,17 +930,17 @@ export async function resolveProductMatches(
         decisionPath = "borderline_llm_error";
         borderlineLlmRationale = assist.message;
         if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_llm_cold_fallback_error";
           borderlineLlmRationale = `${assist.message} · fallback: nome da nota.`;
         } else if (opts?.importBatch && bestScore < autoTh && useBorderlineAssist) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_batch_borderline_llm_error_auto_new";
           borderlineLlmRationale = `${assist.message} · cadastro automático (batch) com nome da nota.`;
         }
       }
     } else if (importBatchNoSafeLink) {
-      borderlineLlmSuggestedName = name.trim();
+      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
       decisionPath = "import_batch_deterministic_new";
       borderlineLlmRationale =
         "Sem candidatos com similaridade mínima no catálogo; cadastro automático com o nome da nota.";
@@ -921,7 +953,7 @@ export async function resolveProductMatches(
       !openaiKey
     ) {
       decisionPath = "import_batch_no_openai_key";
-      borderlineLlmSuggestedName = name.trim();
+      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
       borderlineLlmRationale =
         "Sem OpenAI no servidor; cadastro automático (batch) com nome da nota.";
     }
@@ -1004,6 +1036,7 @@ export async function resolveProductMatches(
     requiresProductConfirmation,
     deferProductCreationToReconciliation,
     borderlineLlmCalls,
+    lineUnitsLlmCalls: 0,
   };
 }
 

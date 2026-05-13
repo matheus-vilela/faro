@@ -7,6 +7,10 @@ import { stripPackSizeFromLabel } from "../_shared/productImport/packSizeFromLab
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
 import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
 import { insertBoletosFromNfeDupXml } from "../_shared/insertBoletosFromNfeDup.ts";
+import {
+  invokeProcessExpenseXmlProducts,
+  scheduleWaitUntilEdge,
+} from "../_shared/nfeExpenseProducts/invokeProcessExpenseXmlProducts.ts";
 import { parseLooseNumber, resolveDocumentTotal, shouldCreateExpense } from "./core.ts";
 
 const LOG = "[focus-create-expenses-from-received-nfe]";
@@ -510,6 +514,21 @@ Deno.serve(async (req) => {
           import_job_batch_id: selectedBatchId,
           import_job_file_id: file.id,
         }, { onConflict: "company_id,xml_hash" });
+
+        if (expenseId && serviceRole && supabaseUrl) {
+          scheduleWaitUntilEdge(
+            invokeProcessExpenseXmlProducts({
+              supabaseUrl,
+              serviceRole,
+              anonKey,
+              companyId,
+              expenseId,
+              importJobFileId: file.id,
+              execId,
+              logPrefix: LOG,
+            }),
+          );
+        }
 
         await supabase
           .from("import_job_files")

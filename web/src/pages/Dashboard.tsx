@@ -1,6 +1,7 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
+import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
@@ -72,6 +73,11 @@ export function Dashboard() {
   const [loadingImportProgress, setLoadingImportProgress] = useState(true);
   const [activeImportFiles, setActiveImportFiles] = useState(0);
   const [activeImportPercent, setActiveImportPercent] = useState(0);
+  const [importReviewSeq, setImportReviewSeq] = useState(0);
+
+  const bumpImportReviewPipeline = useCallback(() => {
+    setImportReviewSeq((n) => n + 1);
+  }, []);
 
   const loadBoletos = useCallback(async () => {
     if (!companyId) {
@@ -353,6 +359,14 @@ export function Dashboard() {
 
       <div className="grid gap-6">
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
+        {canSeeAlerts && companyId ? (
+          <DashboardImportReviewHub
+            companyId={companyId}
+            importPendingOpenCount={alertSummary.importPending}
+            refreshSignal={importReviewSeq}
+            onPipelineChange={bumpImportReviewPipeline}
+          />
+        ) : null}
         {canSeeAlerts ? (
           <DashboardAlertsCard
             loading={loadingAlerts}

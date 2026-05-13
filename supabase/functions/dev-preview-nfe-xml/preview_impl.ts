@@ -998,6 +998,11 @@ async function attachLineUnitsAiPreview(
     },
   ): Promise<PreviewItem> {
     const pm = it.productMatch as Record<string, unknown> | undefined;
+    const existing = pm?.invoice_line_units_llm as Record<string, unknown> | undefined;
+    if (existing?.kind === "OK") {
+      return it;
+    }
+
     const suggestedName = pm?.suggestedProductName
       ? String(pm.suggestedProductName)
       : null;
@@ -1201,6 +1206,7 @@ async function enrichPreviewOnly(
   matchMeta: {
     deferProductCreationToReconciliation: boolean;
     borderlineLlmCalls: number;
+    lineUnitsLlmCalls: number;
     requiresProductConfirmation: boolean;
   } | null;
 }> {
@@ -1326,6 +1332,7 @@ async function enrichPreviewOnly(
       deferProductCreationToReconciliation:
         matchResult.deferProductCreationToReconciliation,
       borderlineLlmCalls: matchResult.borderlineLlmCalls,
+      lineUnitsLlmCalls: matchResult.lineUnitsLlmCalls ?? 0,
       requiresProductConfirmation: matchResult.requiresProductConfirmation,
     },
   };
@@ -1417,7 +1424,7 @@ export async function handleDevPreview(input: {
         concurrency: r.concurrency,
         auto_confidence_threshold: r.autoThreshold,
         note:
-          "Substituição automática de stock só quando confidence ≥ limiar E validação numérica OK (laboratório; importação real ainda não usa). Chamadas OpenAI em paralelo (LINE_UNITS_AI_CONCURRENCY).",
+          "Substituição automática de stock só quando confidence ≥ limiar E validação numérica OK (laboratório). Chamadas OpenAI em paralelo (LINE_UNITS_AI_CONCURRENCY). Com PREVIEW_FULL, o assist de linha já corre em `matchNfeExpenseCatalogLines`; aqui só acrescenta se ainda não existir `invoice_line_units_llm.kind=OK` na linha.",
       };
     }
   }
@@ -1431,11 +1438,12 @@ export async function handleDevPreview(input: {
     defer_product_creation_to_reconciliation:
       matchMeta?.deferProductCreationToReconciliation ?? null,
     borderline_llm_calls: matchMeta?.borderlineLlmCalls ?? null,
+    line_units_llm_calls: matchMeta?.lineUnitsLlmCalls ?? null,
     catalog_preview,
     file_name: input.fileName || "nota.xml",
     raw,
     enriched: enrichedPayload,
     hint:
-      "Extração XML é determinística (parseNfeXmlToExtracted, igual a process-import-job-batch). «enriched» inclui matching sem criar fornecedor. Com simulate_import_batch=true (padrão), o matching usa as mesmas opções da importação em lote (importBatch + skipEmbeddingBackfill + skipLlmAssist). Com ai_line_units_preview, cada linha pode incluir _preview_line_ai_units (OpenAI). Campo _preview_line_simulation.previewLineDecision é exclusivo deste laboratório (dev_preview_only): não usado na importação real.",
+      "Extração XML é determinística (parseNfeXmlToExtracted, igual a process-import-job-batch). «enriched» inclui matching sem criar fornecedor. Com simulate_import_batch=true (padrão), o matching usa as mesmas opções da importação em lote (importBatch + skipEmbeddingBackfill + skipLlmAssist). Com PREVIEW_FULL, o assist de linha (OpenAI, paridade com importação) corre em matchNfeExpenseCatalogLines e fica em productMatch.invoice_line_units_llm. Com ai_line_units_preview, acrescenta _preview_line_ai_units só nas linhas onde esse assist ainda não produziu kind=OK. Campo _preview_line_simulation.previewLineDecision é exclusivo deste laboratório (dev_preview_only).",
   });
 }

@@ -23,6 +23,31 @@ Deno.test("lineNeedsCatalogProductReview: sem produto => sim", () => {
   );
 });
 
+Deno.test("lineNeedsCatalogProductReview: NEW_PRODUCT_CREATED com pm residual => não", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "NEW_PRODUCT_CREATED",
+      productId: "uuid-new",
+      pm: {
+        resolutionStatus: "NEW_PRODUCT_STAGED",
+        needsConfirmation: true,
+      },
+    }),
+    false,
+  );
+});
+
+Deno.test("lineNeedsCatalogProductReview: AUTO_MATCH com needsConfirmation => não", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "AUTO_MATCH",
+      productId: "uuid-1",
+      pm: { resolutionStatus: "AUTO_MATCH", needsConfirmation: true },
+    }),
+    false,
+  );
+});
+
 Deno.test("lineNeedsCatalogProductReview: NEW_PRODUCT_STAGED => sim", () => {
   assertEquals(
     lineNeedsCatalogProductReview({
