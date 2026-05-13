@@ -99,48 +99,51 @@ export function DashboardIntegrationCsvRevenueCard({
   const [retryBusy, setRetryBusy] = useState(false);
   const [completeIntegrationBusy, setCompleteIntegrationBusy] = useState(false);
 
-  const loadBootstrap = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!companyId) {
-      setEpocEnabled(false);
-      setLatestSyncRun(null);
+  const loadBootstrap = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!companyId) {
+        setEpocEnabled(false);
+        setLatestSyncRun(null);
+        if (!opts?.silent) setBootLoading(false);
+        return;
+      }
+      if (!opts?.silent) {
+        setBootLoading(true);
+      }
+      const [intRes, runRes] = await Promise.all([
+        supabase
+          .from("company_integrations")
+          .select("enabled")
+          .eq("company_id", companyId)
+          .eq("provider", "epoc")
+          .maybeSingle(),
+        supabase
+          .from("epoc_csv_sync_runs")
+          .select("outcome,summary,created_at")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const enabled =
+        intRes.data?.enabled === true && !intRes.error ? true : false;
+      const runErr = !!runRes.error;
+      const run =
+        runErr || !runRes.data
+          ? null
+          : {
+              outcome: String(runRes.data.outcome ?? ""),
+              summary: String(runRes.data.summary ?? ""),
+              created_at: String(runRes.data.created_at ?? ""),
+            };
+
+      setEpocEnabled(enabled);
+      setLatestSyncRun(run);
       if (!opts?.silent) setBootLoading(false);
-      return;
-    }
-    if (!opts?.silent) {
-      setBootLoading(true);
-    }
-    const [intRes, runRes] = await Promise.all([
-      supabase
-        .from("company_integrations")
-        .select("enabled")
-        .eq("company_id", companyId)
-        .eq("provider", "epoc")
-        .maybeSingle(),
-      supabase
-        .from("epoc_csv_sync_runs")
-        .select("outcome,summary,created_at")
-        .eq("company_id", companyId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-    const enabled =
-      intRes.data?.enabled === true && !intRes.error ? true : false;
-    const runErr = !!runRes.error;
-    const run =
-      runErr || !runRes.data
-        ? null
-        : {
-            outcome: String(runRes.data.outcome ?? ""),
-            summary: String(runRes.data.summary ?? ""),
-            created_at: String(runRes.data.created_at ?? ""),
-          };
-
-    setEpocEnabled(enabled);
-    setLatestSyncRun(run);
-    if (!opts?.silent) setBootLoading(false);
-  }, [companyId]);
+    },
+    [companyId],
+  );
 
   const loadJobs = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -352,10 +355,7 @@ export function DashboardIntegrationCsvRevenueCard({
 
   const isTerminalFailure =
     primary?.status === "FAILED" ||
-    (syncEndedWithIssue &&
-      !primary &&
-      !hasActive &&
-      !edgePendingEffective);
+    (syncEndedWithIssue && !primary && !hasActive && !edgePendingEffective);
 
   const onboardingBannerEligible =
     !!companyId && (!onboardingPdvDone || epocEnabledEffective);
@@ -368,7 +368,13 @@ export function DashboardIntegrationCsvRevenueCard({
         epocEnabled ||
         lsSyncPending ||
         pdvSyncLocked),
-    [companyId, inPdvIntegrationOnboarding, epocEnabled, lsSyncPending, pdvSyncLocked],
+    [
+      companyId,
+      inPdvIntegrationOnboarding,
+      epocEnabled,
+      lsSyncPending,
+      pdvSyncLocked,
+    ],
   );
 
   useEffect(() => {
@@ -379,7 +385,14 @@ export function DashboardIntegrationCsvRevenueCard({
       void loadBootstrap({ silent: true });
     }, ms);
     return () => window.clearInterval(id);
-  }, [companyId, pollImportJobs, hasActive, edgePendingEffective, loadJobs, loadBootstrap]);
+  }, [
+    companyId,
+    pollImportJobs,
+    hasActive,
+    edgePendingEffective,
+    loadJobs,
+    loadBootstrap,
+  ]);
 
   /** Reconsulta rápida quando o primeiro import concluir. */
   useEffect(() => {
@@ -399,7 +412,9 @@ export function DashboardIntegrationCsvRevenueCard({
         );
         return;
       }
-      toast.success("Integração PDV marcada como concluída.", { duration: 3500 });
+      toast.success("Integração PDV marcada como concluída.", {
+        duration: 3500,
+      });
       await refetchCompanies();
     } finally {
       setCompleteIntegrationBusy(false);
@@ -514,27 +529,15 @@ export function DashboardIntegrationCsvRevenueCard({
     edgePendingEffective ||
     retryBusy;
 
-  /** Não usar `jobsLoading` aqui — ao voltar ao dashboard os jobs começam em loading e o cartão piscava para utilizadores já em idle. */
-  const postPdvShow =
-    onboardingPdvDone &&
-    (epocEnabledEffective || lsSyncPending || pdvSyncLocked) &&
-    keepVisibleAfterPdvOnboarding;
+  const postPdvShow = onboardingPdvDone && keepVisibleAfterPdvOnboarding;
 
-  const shouldRenderCard =
-    inPdvIntegrationOnboarding || postPdvShow;
+  const shouldRenderCard = inPdvIntegrationOnboarding || postPdvShow;
 
   if (!shouldRenderCard) {
     return null;
   }
 
-  /** Durante onboarding PDV ou com `syncing_pdv` ativo, não esconder por estado transitório da fila. */
-  if (
-    hasActive &&
-    !primary &&
-    !retryBusy &&
-    !pdvSyncLocked &&
-    !inPdvIntegrationOnboarding
-  ) {
+  if (inPdvIntegrationOnboarding) {
     return null;
   }
 
@@ -586,9 +589,7 @@ export function DashboardIntegrationCsvRevenueCard({
 
           <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
             {(primary?.status === "FAILED" ||
-              (syncEndedWithIssue &&
-                !hasActive &&
-                !edgePendingEffective)) && (
+              (syncEndedWithIssue && !hasActive && !edgePendingEffective)) && (
               <Button
                 size="sm"
                 type="button"

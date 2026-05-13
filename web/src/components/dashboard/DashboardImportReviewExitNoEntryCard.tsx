@@ -47,15 +47,14 @@ export function DashboardImportReviewExitNoEntryCard({
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<DashboardImportReviewRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirmProduct, setConfirmProduct] = useState<DashboardImportReviewRow | null>(null);
+  const [confirmProduct, setConfirmProduct] =
+    useState<DashboardImportReviewRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { rows: next, error: err } = await fetchDashboardImportReviewExitNoEntry(
-      supabase,
-      companyId,
-    );
+    const { rows: next, error: err } =
+      await fetchDashboardImportReviewExitNoEntry(supabase, companyId);
     setLoading(false);
     if (err) {
       setError(err);
@@ -90,7 +89,11 @@ export function DashboardImportReviewExitNoEntryCard({
     if (!confirmProduct) return;
     const pid = confirmProduct.product_id;
     setBusyId(pid);
-    const res = await dashboardImportReviewConfirmOutboundAsRecipe(supabase, companyId, pid);
+    const res = await dashboardImportReviewConfirmOutboundAsRecipe(
+      supabase,
+      companyId,
+      pid,
+    );
     setBusyId(null);
     if (!res.ok) {
       toast.error(
@@ -108,24 +111,35 @@ export function DashboardImportReviewExitNoEntryCard({
     onPipelineChange?.();
   };
 
+  if (rows.length === 0) {
+    return null;
+  }
+
   return (
     <>
-      <AlertDialog open={!!confirmProduct} onOpenChange={(o) => !o && setConfirmProduct(null)}>
+      <AlertDialog
+        open={!!confirmProduct}
+        onOpenChange={(o) => !o && setConfirmProduct(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar como ficha técnica?</AlertDialogTitle>
             <AlertDialogDescription className="space-y-2 text-pretty">
               <span>
-                Esta ação só ocorre porque você confirmou. Será criada uma receita (ficha técnica)
-                tipo preparo ligada ao produto{" "}
-                <strong className="text-foreground">{confirmProduct?.name}</strong>, o produto
-                passará a ser tratado como{" "}
-                <strong className="text-foreground">controlado por receita</strong> e o item sairá
-                desta fila.
+                Esta ação só ocorre porque você confirmou. Será criada uma
+                receita (ficha técnica) tipo preparo ligada ao produto{" "}
+                <strong className="text-foreground">
+                  {confirmProduct?.name}
+                </strong>
+                , o produto passará a ser tratado como{" "}
+                <strong className="text-foreground">
+                  controlado por receita
+                </strong>{" "}
+                e o item sairá desta fila.
               </span>
               <span className="block">
-                Nenhum lançamento de estoque existente é apagado. Se algo falhar, o cadastro
-                permanece como está.
+                Nenhum lançamento de estoque existente é apagado. Se algo
+                falhar, o cadastro permanece como está.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -177,16 +191,20 @@ export function DashboardImportReviewExitNoEntryCard({
                       side="top"
                       className="max-w-[min(18rem,calc(100vw-2rem))] text-balance px-3 py-2 text-left text-xs leading-snug"
                     >
-                      Fluxo sugerido: primeiro estes itens (venda sem compra → ficha técnica), depois
-                      «entrada e sem saída» (insumos), depois receitas quando o cartão indicar. Só
-                      vínculo errado na NF: use «Vínculos NF ↔ produto» na Central de pendências.
+                      Fluxo sugerido: primeiro estes itens (venda sem compra →
+                      ficha técnica), depois «entrada e sem saída» (insumos),
+                      depois receitas quando o cartão indicar. Só vínculo errado
+                      na NF: use «Vínculos NF ↔ produto» na Central de
+                      pendências.
                     </TooltipContent>
                   </Tooltip>
                 </div>
                 <CardDescription className="text-pretty">
-                  Produtos com <strong>baixa por venda</strong> (receita / EPOC importada) e sem compra
-                  correspondente no histórico. São os principais <strong>candidatos a ficha técnica</strong>{" "}
-                  (produto de venda preparado internamente) — a conversão só ocorre com a sua confirmação.
+                  Produtos com <strong>baixa por venda</strong> (receita / EPOC
+                  importada) e sem compra correspondente no histórico. São os
+                  principais <strong>candidatos a ficha técnica</strong>{" "}
+                  (produto de venda preparado internamente) — a conversão só
+                  ocorre com a sua confirmação.
                 </CardDescription>
               </div>
             </div>
@@ -224,7 +242,9 @@ export function DashboardImportReviewExitNoEntryCard({
                   className="flex flex-col gap-2 rounded-xl border border-border/80 bg-background/60 p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-foreground">{r.name}</p>
+                    <p className="truncate font-medium text-foreground">
+                      {r.name}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       Saldo atual:{" "}
                       {Number(r.current_quantity).toLocaleString("pt-BR", {
@@ -248,7 +268,9 @@ export function DashboardImportReviewExitNoEntryCard({
                       Confirmar como ficha técnica
                     </Button>
                     <Button type="button" variant="outline" size="sm" asChild>
-                      <Link to="/app/produtos?estoque=receitas">Abrir receitas</Link>
+                      <Link to="/app/produtos?estoque=receitas">
+                        Abrir receitas
+                      </Link>
                     </Button>
                     <Button
                       type="button"
@@ -268,8 +290,8 @@ export function DashboardImportReviewExitNoEntryCard({
           )}
           {!loading && rows.length > 8 ? (
             <p className="text-xs text-muted-foreground">
-              Lista truncada: mostrando 8 de {rows.length}. Os demais permanecem na fila até
-              revisão ou dispensa.
+              Lista truncada: mostrando 8 de {rows.length}. Os demais permanecem
+              na fila até revisão ou dispensa.
             </p>
           ) : null}
         </CardContent>

@@ -45,15 +45,14 @@ export function DashboardImportReviewPendingRevenueLinkCard({
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<DashboardPendingRevenueLinkRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirmRow, setConfirmRow] = useState<DashboardPendingRevenueLinkRow | null>(null);
+  const [confirmRow, setConfirmRow] =
+    useState<DashboardPendingRevenueLinkRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { rows: next, error: err } = await fetchDashboardImportReviewPendingRevenueLink(
-      supabase,
-      companyId,
-    );
+    const { rows: next, error: err } =
+      await fetchDashboardImportReviewPendingRevenueLink(supabase, companyId);
     setLoading(false);
     if (err) {
       setError(err);
@@ -71,7 +70,11 @@ export function DashboardImportReviewPendingRevenueLinkCard({
     if (!confirmRow) return;
     const pid = confirmRow.product_id;
     setBusyId(pid);
-    const res = await dashboardImportReviewFinalizeRecipeProductSales(supabase, companyId, pid);
+    const res = await dashboardImportReviewFinalizeRecipeProductSales(
+      supabase,
+      companyId,
+      pid,
+    );
     setBusyId(null);
     setConfirmRow(null);
     if (!res.ok) {
@@ -90,22 +93,37 @@ export function DashboardImportReviewPendingRevenueLinkCard({
     void load();
   };
 
+  if (rows.length === 0) {
+    return null;
+  }
+
   return (
     <>
-      <AlertDialog open={!!confirmRow} onOpenChange={(o) => !o && setConfirmRow(null)}>
+      <AlertDialog
+        open={!!confirmRow}
+        onOpenChange={(o) => !o && setConfirmRow(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Ligar vendas à ficha técnica?</AlertDialogTitle>
             <AlertDialogDescription className="space-y-2 text-pretty">
               <span>
-                Os lançamentos de receita ainda em modo <strong className="text-foreground">venda
-                de produto</strong> para <strong className="text-foreground">{confirmRow?.name}</strong>{" "}
-                passarão a <strong className="text-foreground">venda por receita</strong>, usando a
-                ficha já cadastrada. As movimentações de estoque já registadas{" "}
-                <strong className="text-foreground">não são apagadas nem recalculadas</strong>.
+                Os lançamentos de receita ainda em modo{" "}
+                <strong className="text-foreground">venda de produto</strong>{" "}
+                para{" "}
+                <strong className="text-foreground">{confirmRow?.name}</strong>{" "}
+                passarão a{" "}
+                <strong className="text-foreground">venda por receita</strong>,
+                usando a ficha já cadastrada. As movimentações de estoque já
+                registadas{" "}
+                <strong className="text-foreground">
+                  não são apagadas nem recalculadas
+                </strong>
+                .
               </span>
               <span className="block text-muted-foreground">
-                Confirme apenas depois de validar os insumos da receita em Produtos → Receitas.
+                Confirme apenas depois de validar os insumos da receita em
+                Produtos → Receitas.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -121,8 +139,7 @@ export function DashboardImportReviewPendingRevenueLinkCard({
             >
               {busyId ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  A migrar…
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />A migrar…
                 </>
               ) : (
                 "Ligar vendas à ficha"
@@ -144,9 +161,11 @@ export function DashboardImportReviewPendingRevenueLinkCard({
                   Etapa 2: vendas ainda como produto (pós-ficha)
                 </CardTitle>
                 <CardDescription className="text-pretty">
-                  Após confirmar o item como ficha técnica e incluir <strong>pelo menos um insumo</strong>{" "}
-                  na receita, pode associar aqui os lançamentos de venda importados que ainda
-                  estavam no modo produto. Ação explícita — nada corre em segundo plano.
+                  Após confirmar o item como ficha técnica e incluir{" "}
+                  <strong>pelo menos um insumo</strong> na receita, pode
+                  associar aqui os lançamentos de venda importados que ainda
+                  estavam no modo produto. Ação explícita — nada corre em
+                  segundo plano.
                 </CardDescription>
               </div>
             </div>
@@ -166,8 +185,7 @@ export function DashboardImportReviewPendingRevenueLinkCard({
         <CardContent className="space-y-4">
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              A verificar filas…
+              <Loader2 className="h-4 w-4 animate-spin" />A verificar filas…
             </div>
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
@@ -184,7 +202,9 @@ export function DashboardImportReviewPendingRevenueLinkCard({
                   className="flex flex-col gap-2 rounded-xl border border-border/80 bg-background/60 p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-foreground">{r.name}</p>
+                    <p className="truncate font-medium text-foreground">
+                      {r.name}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {r.pending_sales_count} venda(s) ainda em modo produto
                     </p>
@@ -199,7 +219,9 @@ export function DashboardImportReviewPendingRevenueLinkCard({
                       Ligar vendas à ficha
                     </Button>
                     <Button type="button" variant="outline" size="sm" asChild>
-                      <Link to="/app/produtos?estoque=receitas">Abrir receitas</Link>
+                      <Link to="/app/produtos?estoque=receitas">
+                        Abrir receitas
+                      </Link>
                     </Button>
                   </div>
                 </li>

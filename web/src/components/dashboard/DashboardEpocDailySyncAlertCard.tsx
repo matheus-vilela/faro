@@ -25,7 +25,10 @@ function readDismissedAttemptAt(companyId: string): string | null {
 
 function writeDismissedAttemptAt(companyId: string, attemptAtIso: string) {
   try {
-    window.localStorage.setItem(`${DISMISS_LS_PREFIX}${companyId}`, attemptAtIso);
+    window.localStorage.setItem(
+      `${DISMISS_LS_PREFIX}${companyId}`,
+      attemptAtIso,
+    );
   } catch {
     /* ignore quota / private mode */
   }
@@ -98,12 +101,16 @@ export function DashboardEpocDailySyncAlertCard({
 
   const { show, variant, title, description } = useMemo(() => {
     if (!enabled || loading) {
-      return { show: false, variant: "stale" as const, title: "", description: "" };
+      return {
+        show: false,
+        variant: "stale" as const,
+        title: "",
+        description: "",
+      };
     }
     const atRaw = s.epoc_daily_sync_last_attempt_at?.trim() ?? "";
     const atMs = atRaw ? Date.parse(atRaw) : NaN;
-    const stale =
-      Number.isFinite(atMs) && Date.now() - atMs > STALE_MS;
+    const stale = Number.isFinite(atMs) && Date.now() - atMs > STALE_MS;
     const failed = s.epoc_daily_sync_last_attempt_ok === false;
 
     if (failed) {
@@ -115,7 +122,7 @@ export function DashboardEpocDailySyncAlertCard({
           (s.epoc_daily_sync_last_attempt_error?.trim() ||
             "A rotina diária não concluiu a exportação. Pode repetir agora ou ver detalhes nas integrações.") +
           (atRaw
-            ? ` Último registo: ${new Date(atRaw).toLocaleString("pt-BR")}.`
+            ? ` Última tentativa: ${new Date(atRaw).toLocaleString("pt-BR")}.`
             : ""),
       };
     }
@@ -129,7 +136,12 @@ export function DashboardEpocDailySyncAlertCard({
           : "Sem registo recente da rotina diária. Confirme o agendamento ou sincronize agora.",
       };
     }
-    return { show: false, variant: "stale" as const, title: "", description: "" };
+    return {
+      show: false,
+      variant: "stale" as const,
+      title: "",
+      description: "",
+    };
   }, [enabled, loading, s]);
 
   const dismissedForThisAttempt =
@@ -203,16 +215,6 @@ export function DashboardEpocDailySyncAlertCard({
               {title}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-            {variant === "failed" ? (
-              <p className="mt-2 text-sm text-muted-foreground">
-                O que pode ter acontecido: a rotina contactou o EPOC, mas não havia
-                linhas de receita para importar — por exemplo dia sem vendas,
-                exportação ainda não disponível à hora da execução, ou o portal
-                devolveu uma mensagem de “sem dados” / sem eventos no filtro. Isto
-                não implica por si só erro de palavra-passe ou de rede; confira o
-                histórico em Integrações se precisar de detalhe técnico.
-              </p>
-            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
@@ -233,7 +235,12 @@ export function DashboardEpocDailySyncAlertCard({
               </>
             )}
           </Button>
-          <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            asChild
+          >
             <Link to="/app/integracoes">Abrir integrações</Link>
           </Button>
           <Button
