@@ -20,6 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CatalogReconciliationPanel } from "@/components/catalog/CatalogReconciliationPanel";
+import { DashboardImportReviewProductCadastroModal } from "@/components/dashboard/DashboardImportReviewProductCadastroModal";
 import { ImportPendingProductMatchDetail } from "@/components/dashboard/ImportPendingProductMatchDetail";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
@@ -178,6 +179,7 @@ export function DashboardAlertsCard({
   const [newUnitCode, setNewUnitCode] = useState("");
   const [newUnitLabel, setNewUnitLabel] = useState("");
   const [savingNewUnit, setSavingNewUnit] = useState(false);
+  const [cadastroProductId, setCadastroProductId] = useState<string | null>(null);
 
   const loadPendingRows = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -612,6 +614,18 @@ export function DashboardAlertsCard({
   ]);
 
   return (
+    <>
+      {currentCompany?.id ? (
+        <DashboardImportReviewProductCadastroModal
+          companyId={currentCompany.id}
+          productId={cadastroProductId}
+          open={cadastroProductId !== null}
+          onOpenChange={(o) => {
+            if (!o) setCadastroProductId(null);
+          }}
+          onSaved={() => void loadPendingRows()}
+        />
+      ) : null}
     <Card className="overflow-hidden border-l-4 border-l-amber-500/80 shadow-sm ring-1 ring-border/60">
       <CardHeader className="border-b border-border/50 bg-linear-to-br from-amber-500/[0.07] to-transparent pb-4 dark:from-amber-500/12">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -679,8 +693,8 @@ export function DashboardAlertsCard({
                   <SheetHeader className="border-b px-4 py-3">
                     <SheetTitle>Central de pendências</SheetTitle>
                     <SheetDescription>
-                      Vínculos de nota com o catálogo e outras pendências de importação. O mesmo painel abre a partir de{" "}
-                      <strong>Revisão pós-importação → Abrir vínculos</strong> no bloco acima.
+                      Confira vínculos entre a NF e o catálogo. Também abre em{" "}
+                      <strong>Revisão pós-importação → Abrir vínculos</strong>.
                     </SheetDescription>
                   </SheetHeader>
                   <div className="space-y-4 overflow-y-auto p-4">
@@ -800,6 +814,13 @@ export function DashboardAlertsCard({
                           const payloadProductName = String(
                             (r.payload as Record<string, unknown> | null)?.product_name ?? "",
                           ).trim();
+                          const candidateIds = readPayloadCandidateProductIds(r.payload);
+                          const suggestedCatalog = readSuggestedCatalogName(r.payload);
+                          const hasAiSuggestionBlock =
+                            isOpen &&
+                            r.kind === "missing_product_match" &&
+                            Boolean(r.expense_item_id) &&
+                            (candidateIds.length > 0 || Boolean(suggestedCatalog));
                           return (
                             <div
                               key={r.id}
@@ -844,11 +865,7 @@ export function DashboardAlertsCard({
                               !isResolved &&
                               (r.kind === "missing_conversion" ||
                                 (r.kind === "missing_product_match" &&
-                                  !(
-                                    r.expense_item_id &&
-                                    (readPayloadCandidateProductIds(r.payload).length > 0 ||
-                                      readSuggestedCatalogName(r.payload))
-                                  ))) ? (
+                                  !(r.expense_item_id && (candidateIds.length > 0 || Boolean(suggestedCatalog))))) ? (
                                 <ImportPendingProductMatchDetail
                                   payload={r.payload as Record<string, unknown> | null}
                                   className="mt-2"
@@ -856,15 +873,17 @@ export function DashboardAlertsCard({
                               ) : null}
                               {!isResolved ? (
                                 <>
-                                  {isOpen &&
-                                  r.kind === "missing_product_match" &&
-                                  r.expense_item_id &&
-                                  (readPayloadCandidateProductIds(r.payload).length > 0 ||
-                                    readSuggestedCatalogName(r.payload)) ? (
+                                  {isOpen && hasAiSuggestionBlock ? (
                                     <div className="mt-3 space-y-2 rounded-md border border-primary/20 bg-primary/[0.04] p-3 dark:bg-primary/10">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-                                        Resolver aqui
-                                      </p>
+                                      <div className="space-y-1">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                                          Aplicar sugestão da importação
+                                        </p>
+                                        <p className="text-sm leading-snug text-muted-foreground">
+                                          Use um dos botões abaixo para gravar na despesa o vínculo ou o nome sugerido
+                                          pelo assistente de importação. Isso atualiza a linha e encerra este alerta.
+                                        </p>
+                                      </div>
                                       <ImportPendingProductMatchDetail
                                         payload={r.payload as Record<string, unknown> | null}
                                       />
@@ -874,14 +893,14 @@ export function DashboardAlertsCard({
                                           <span className="font-medium">{readPayloadXmlProductName(r.payload)}</span>
                                         </p>
                                       ) : null}
-                                      {readSuggestedCatalogName(r.payload) ? (
+                                      {suggestedCatalog ? (
                                         <p className="text-sm">
                                           <span className="text-muted-foreground">Sugestão de cadastro: </span>
-                                          <span className="font-medium">{readSuggestedCatalogName(r.payload)}</span>
+                                          <span className="font-medium">{suggestedCatalog}</span>
                                         </p>
                                       ) : null}
                                       <div className="flex flex-wrap gap-2">
-                                        {readPayloadCandidateProductIds(r.payload).map((cid) => (
+                                        {candidateIds.map((cid) => (
                                           <Button
                                             key={`${r.id}-cand-${cid}`}
                                             type="button"
@@ -890,17 +909,17 @@ export function DashboardAlertsCard({
                                             disabled={busy === r.id}
                                             onClick={() => void applyLinkCandidateAndResolve(r, cid)}
                                           >
-                                            Usar: {pendingProducts[cid]?.name ?? `Produto ${cid.slice(0, 8)}…`}
+                                            Aplicar vínculo: {pendingProducts[cid]?.name ?? `Produto ${cid.slice(0, 8)}…`}
                                           </Button>
                                         ))}
-                                        {readSuggestedCatalogName(r.payload) ? (
+                                        {suggestedCatalog ? (
                                           <Button
                                             type="button"
                                             size="sm"
                                             disabled={busy === r.id}
                                             onClick={() => void createSuggestedProductAndResolve(r)}
                                           >
-                                            Criar produto sugerido
+                                            Aplicar sugestão: criar produto
                                           </Button>
                                         ) : null}
                                       </div>
@@ -996,8 +1015,20 @@ export function DashboardAlertsCard({
                                       </Link>
                                     </Button>
                                   ) : null}
+                                  {productId && product ? (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setCadastroProductId(productId)}
+                                    >
+                                      Ajustar cadastro
+                                    </Button>
+                                  ) : null}
                                   <Button size="sm" onClick={() => void closePending(r.id, "RESOLVED")} disabled={busy === r.id}>
-                                    Resolver
+                                    {hasAiSuggestionBlock
+                                      ? "Encerrar sem aplicar sugestão"
+                                      : "Marcar como conferido"}
                                   </Button>
                                   <Button size="sm" variant="outline" onClick={() => void closePending(r.id, "IGNORED")} disabled={busy === r.id}>
                                     Ignorar
@@ -1153,5 +1184,6 @@ export function DashboardAlertsCard({
         </DialogContent>
       </Dialog>
     </Card>
+    </>
   );
 }
