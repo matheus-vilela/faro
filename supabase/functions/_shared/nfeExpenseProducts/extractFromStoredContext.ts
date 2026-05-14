@@ -1,7 +1,5 @@
 import { enrichExtractedWithTaxId } from "../expenseSupplierEnsure.ts";
 import type { ExtractedDocumentResult, ExtractedExpenseItem } from "../openaiExpense.ts";
-import { parseNfeXmlToExtracted } from "../parseNfeXml.ts";
-import { strFromU8 } from "npm:fflate@0.8.2";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -61,29 +59,22 @@ export function buildXmlLineIdentities(items: ExtractedExpenseItem[]): string[] 
   });
 }
 
-function decodeBase64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    out[i] = binary.charCodeAt(i);
-  }
-  return out;
-}
-
 export type LoadedNfeMotorContext = {
   items: ExtractedExpenseItem[];
   xml_line_identities: string[];
+  /** Sempre `null` — o motor usa só o `payload` do log; reconciliação financeira usa total da despesa + linhas. */
   xml_text: string | null;
   payload_enriched: ExtractedDocumentResult;
   import_job_file_id: string | null;
-  /** `import_job_files.batch_id` quando o XML veio de um lote. */
+  /** Copiado de `company_nfe_import_logs.import_job_batch_id` quando existir. */
   import_job_batch_id: string | null;
   /** Linhas brutas onboarding ligadas aos `expense_items` desta despesa (ordenadas como os itens). */
   raw_rows_ordered: Array<{ id: string; expense_item_id: string | null }>;
 };
 
 /**
- * Carrega XML + payload coerentes com o lote (`company_nfe_import_logs` + ficheiro de job).
+ * Carrega o payload gravado em `company_nfe_import_logs` (mesma fonte da criação da despesa).
+ * Não lê `import_job_files` nem XML em base64 — o match e os metadados vêm do JSON persistido no log.
  */
 export async function loadNfeMotorExtractContext(
   supabase: SupabaseClient,
@@ -94,7 +85,7 @@ export async function loadNfeMotorExtractContext(
   const q = importJobFileIdHint
     ? supabase
       .from("company_nfe_import_logs")
-      .select("payload, import_job_file_id")
+      .select("payload, import_job_file_id, import_job_batch_id")
       .eq("company_id", companyId)
       .eq("expense_id", expenseId)
       .eq("import_job_file_id", importJobFileIdHint)
@@ -102,7 +93,7 @@ export async function loadNfeMotorExtractContext(
       .limit(1)
     : supabase
       .from("company_nfe_import_logs")
-      .select("payload, import_job_file_id")
+      .select("payload, import_job_file_id, import_job_batch_id")
       .eq("company_id", companyId)
       .eq("expense_id", expenseId)
       .eq("status", "success")
@@ -111,60 +102,25 @@ export async function loadNfeMotorExtractContext(
 
   const { data: logRow, error: logErr } = await q.maybeSingle();
 
-  let xml_text: string | null = null;
-  let payload: ExtractedDocumentResult | null = null;
-  let import_job_file_id: string | null = null;
-  let import_job_batch_id: string | null = null;
-
-  if (!logErr && logRow?.payload && typeof logRow.payload === "object") {
-    payload = enrichExtractedWithTaxId(
-      logRow.payload as ExtractedDocumentResult,
-    );
-    import_job_file_id = logRow.import_job_file_id
-      ? String(logRow.import_job_file_id)
-      : null;
-
-    const fileId = importJobFileIdHint ?? import_job_file_id;
-    if (fileId) {
-      const { data: fileRow } = await supabase
-        .from("import_job_files")
-        .select("xml_content_base64, batch_id")
-        .eq("id", fileId)
-        .eq("company_id", companyId)
-        .maybeSingle();
-      const fr = fileRow as { xml_content_base64?: string; batch_id?: string } | null;
-      import_job_batch_id = fr?.batch_id ? String(fr.batch_id) : null;
-      const b64 = fr?.xml_content_base64;
-      if (b64 && b64.trim()) {
-        try {
-          xml_text = strFromU8(decodeBase64ToBytes(b64));
-        } catch {
-          xml_text = null;
-        }
-      }
-    }
+  if (logErr || !logRow?.payload || typeof logRow.payload !== "object") {
+    return null;
   }
 
+  const payload = enrichExtractedWithTaxId(
+    logRow.payload as ExtractedDocumentResult,
+  );
   if (!payload?.items?.length) {
     return null;
   }
 
-  if (!xml_text?.trim()) {
-    return null;
-  }
+  const import_job_file_id = logRow.import_job_file_id
+    ? String(logRow.import_job_file_id)
+    : null;
+  const import_job_batch_id = logRow.import_job_batch_id
+    ? String(logRow.import_job_batch_id)
+    : null;
 
-  let items = normalizeExtractedItemsLikeBatch(payload);
-
-  const reparsed = parseNfeXmlToExtracted(xml_text);
-  if (reparsed?.items?.length) {
-    const repNorm = normalizeExtractedItemsLikeBatch(
-      enrichExtractedWithTaxId(reparsed),
-    );
-    if (repNorm.length === items.length) {
-      items = repNorm;
-    }
-  }
-
+  const items = normalizeExtractedItemsLikeBatch(payload);
   const xml_line_identities = buildXmlLineIdentities(items);
 
   const { data: expenseItemRows } = await supabase
@@ -208,7 +164,7 @@ export async function loadNfeMotorExtractContext(
   return {
     items,
     xml_line_identities,
-    xml_text,
+    xml_text: null,
     payload_enriched: payload,
     import_job_file_id,
     import_job_batch_id,

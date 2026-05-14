@@ -8,6 +8,11 @@ export type NfeExpenseProductsInput = {
   xml_hash?: string;
   motor_version: string;
   mode: "apply" | "preview";
+  /**
+   * Quando true (só `apply`): não volta a correr match nem `update` em `expense_items`;
+   * usa `import_score_reasons_json.xml_catalog_motor.batch_finalize` gravado no insert do batch.
+   */
+  finalize_after_batch_insert?: boolean;
 };
 
 export type NfeCatalogLineResolution =

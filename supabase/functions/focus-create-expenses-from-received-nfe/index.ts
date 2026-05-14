@@ -11,6 +11,10 @@ import {
   invokeProcessExpenseXmlProducts,
   scheduleWaitUntilEdge,
 } from "../_shared/nfeExpenseProducts/invokeProcessExpenseXmlProducts.ts";
+import {
+  deleteImportJobItemsIfPurging,
+  importJobFileXmlClearPatch,
+} from "../_shared/importJobFilePurge.ts";
 import { parseLooseNumber, resolveDocumentTotal, shouldCreateExpense } from "./core.ts";
 
 const LOG = "[focus-create-expenses-from-received-nfe]";
@@ -363,6 +367,10 @@ Deno.serve(async (req) => {
         );
         if (!shouldCreateExpense(!!duplicateExpenseId)) {
           summary.skipped_existing_active += 1;
+          const { error: purgeSkipErr } = await deleteImportJobItemsIfPurging(supabase, file.id);
+          if (purgeSkipErr) {
+            console.warn(LOG, JSON.stringify({ fase: "purge_import_job_items_erro", file_id: file.id, erro: purgeSkipErr }));
+          }
           await supabase
             .from("import_job_files")
             .update({
@@ -370,6 +378,7 @@ Deno.serve(async (req) => {
               last_error: null,
               finished_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
+              ...importJobFileXmlClearPatch(),
             })
             .eq("id", file.id);
           await supabase.from("company_nfe_import_logs").upsert({
@@ -530,6 +539,10 @@ Deno.serve(async (req) => {
           );
         }
 
+        const { error: purgeItemsErr } = await deleteImportJobItemsIfPurging(supabase, file.id);
+        if (purgeItemsErr) {
+          console.warn(LOG, JSON.stringify({ fase: "purge_import_job_items_erro", file_id: file.id, erro: purgeItemsErr }));
+        }
         await supabase
           .from("import_job_files")
           .update({
@@ -537,6 +550,7 @@ Deno.serve(async (req) => {
             last_error: null,
             finished_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
+            ...importJobFileXmlClearPatch(),
           })
           .eq("id", file.id);
         summary.created += 1;

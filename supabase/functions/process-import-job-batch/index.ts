@@ -13,7 +13,15 @@ import {
   invokeProcessExpenseXmlProducts,
   scheduleWaitUntilEdge,
 } from "../_shared/nfeExpenseProducts/invokeProcessExpenseXmlProducts.ts";
+import { buildNfeXmlExpenseItemInserts, type BuiltXmlCatalogExpenseLine } from "../_shared/nfeExpenseProducts/buildNfeXmlExpenseItemInserts.ts";
+import { buildXmlLineIdentities } from "../_shared/nfeExpenseProducts/extractFromStoredContext.ts";
+import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import { upsertImportPendingReviewCompanyAlert } from "../_shared/upsertImportPendingReviewCompanyAlert.ts";
+import {
+  deleteImportJobItemsIfPurging,
+  importJobFileXmlClearPatch,
+  importPurgeOnCompleteEnabled,
+} from "../_shared/importJobFilePurge.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -38,6 +46,7 @@ const TEST_SINGLE_FILE_MODE = String(Deno.env.get("IMPORT_BATCH_TEST_SINGLE_FILE
 const VERBOSE_LOGS = String(Deno.env.get("IMPORT_BATCH_VERBOSE_LOGS") ?? "")
   .trim()
   .toLowerCase() === "true";
+/** Padrão true: após `COMPLETED` / `COMPLETED_WITH_PENDING_REVIEW`, apaga `import_job_items` e zera `xml_content_base64`. `false` desliga. */
 
 const LOG = "[process-import-job-batch]";
 /** HTTP 546 no Supabase = limite do worker (CPU/tempo/mem). 503/529 = sobrecarga temporária. */
@@ -180,6 +189,81 @@ function calcProgressPercent(processed: number, totalFiles: number): number {
   if (!Number.isFinite(totalFiles) || totalFiles <= 0) return 100;
   const safeProcessed = Math.max(0, Math.min(processed, totalFiles));
   return Number(((safeProcessed / totalFiles) * 100).toFixed(2));
+}
+
+/** Atualiza contadores do lote, linha do ficheiro e (opcional) purge pós-sucesso. `IMPORT_BATCH_PURGE_ON_COMPLETE`. */
+async function finalizeImportJobFileRow(args: {
+  supabase: ReturnType<typeof createClient>;
+  execId: string;
+  companyId: string;
+  batchId: string;
+  fileId: string;
+  fileStatus: "COMPLETED" | "FAILED" | "COMPLETED_WITH_PENDING_REVIEW";
+  fileError: string | null;
+  processed: number;
+  success: number;
+  failed: number;
+  pendingReviewFiles: number;
+  totalFilesBase: number;
+}): Promise<{ processed: number; success: number; failed: number; pendingReviewFiles: number }> {
+  const {
+    supabase,
+    execId,
+    companyId,
+    batchId,
+    fileId,
+    fileStatus,
+    fileError,
+    processed,
+    success,
+    failed,
+    pendingReviewFiles,
+    totalFilesBase,
+  } = args;
+  const proc = processed + 1;
+  const succ = fileStatus === "FAILED" ? success : success + 1;
+  const fail = fileStatus === "FAILED" ? failed + 1 : failed;
+  const isSuccessTerminal =
+    fileStatus === "COMPLETED" || fileStatus === "COMPLETED_WITH_PENDING_REVIEW";
+  const shouldPurge = isSuccessTerminal && importPurgeOnCompleteEnabled();
+  if (shouldPurge) {
+    const { error: delErr } = await deleteImportJobItemsIfPurging(supabase, fileId);
+    if (delErr) {
+      pibLog(
+        execId,
+        "purge_import_job_items_erro",
+        { company_id: companyId, batch_id: batchId, file_id: fileId },
+        delErr,
+        {},
+      );
+    }
+  }
+  const nowIso = new Date().toISOString();
+  const xmlPatch = shouldPurge ? importJobFileXmlClearPatch() : {};
+  await supabase
+    .from("import_job_files")
+    .update({
+      status: fileStatus,
+      retry_count: fileStatus === "FAILED" ? 1 : 0,
+      last_error: fileError,
+      finished_at: nowIso,
+      updated_at: nowIso,
+      ...xmlPatch,
+    })
+    .eq("id", fileId);
+  const progressPercent = calcProgressPercent(proc, totalFilesBase);
+  await supabase
+    .from("import_job_batches")
+    .update({
+      processed_files: proc,
+      success_files: succ,
+      failed_files: fail,
+      pending_review_files: pendingReviewFiles,
+      progress_percent: progressPercent,
+      updated_at: nowIso,
+    })
+    .eq("id", batchId);
+  return { processed: proc, success: succ, failed: fail, pendingReviewFiles };
 }
 
 function extractXmlVnfTotal(xmlText: string): number | null {
@@ -738,6 +822,20 @@ Deno.serve(async (req) => {
             fileId,
           );
           fileStatus = "COMPLETED";
+          ({ processed, success, failed, pendingReviewFiles } = await finalizeImportJobFileRow({
+            supabase,
+            execId,
+            companyId,
+            batchId,
+            fileId,
+            fileStatus,
+            fileError,
+            processed,
+            success,
+            failed,
+            pendingReviewFiles,
+            totalFilesBase,
+          }));
           continue;
         } else {
           if (byKey && !byKeyReallyImported) {
@@ -953,6 +1051,20 @@ Deno.serve(async (req) => {
               fileId,
             );
             fileStatus = "COMPLETED";
+            ({ processed, success, failed, pendingReviewFiles } = await finalizeImportJobFileRow({
+              supabase,
+              execId,
+              companyId,
+              batchId,
+              fileId,
+              fileStatus,
+              fileError,
+              processed,
+              success,
+              failed,
+              pendingReviewFiles,
+              totalFilesBase,
+            }));
             continue;
           } else if (duplicateExpense && !duplicateExpenseExists) {
             pibLog(
@@ -962,6 +1074,20 @@ Deno.serve(async (req) => {
               "rpc retornou despesa duplicada, mas ela não existe mais; segue criação da despesa",
               { expense_id_log: duplicateExpense, invoice_number: invoiceNumber, invoice_series: invoiceSeries },
             );
+          }
+
+          let builtCatalogLines: BuiltXmlCatalogExpenseLine[] | null = null;
+          if (importXmlProductsAfterBatchEnabled()) {
+            const { lines: builtLines } = await buildNfeXmlExpenseItemInserts(supabase, {
+              companyId,
+              items: finalItems as ExtractedExpenseItem[],
+              motorVersion: NFE_CATALOG_MOTOR_VERSION,
+              xmlLineIdentities: buildXmlLineIdentities(finalItems as ExtractedExpenseItem[]),
+              rawImportIdsOrdered: rawRowIdsOrdered.map((rid) =>
+                String(rid ?? "").trim() || null,
+              ),
+            });
+            builtCatalogLines = builtLines;
           }
 
           const { data: expense, error: expErr } = await supabase
@@ -1015,48 +1141,51 @@ Deno.serve(async (req) => {
           });
           await appendTimelineMaybeQuiet(supabase, batchId, "UPSERT_EXPENSE", "Despesa criada.", { expense_id: expenseId }, fileId);
 
-          const expenseItemRowsPayload = finalItems.map((it) => {
-            const q = Math.max(0.0001, Number(it.quantity ?? 0));
-            const uv = Number(it.unitValue ?? 0);
-            const invUnit = String(it.unitCommercial ?? "").trim() || null;
-            const productId = String(it.productId ?? "").trim() || null;
-            const stockQty = Number(it.quantity ?? q);
-            const rawPn = String(it.productName ?? "Item");
-            const displayName =
-              stripPackSizeFromLabel(rawPn).trim() || rawPn;
-            return {
+          let expenseItemRowsPayload: Record<string, unknown>[] = [];
+          if (builtCatalogLines) {
+            expenseItemRowsPayload = builtCatalogLines.map((L) => ({
               expense_id: expenseId,
-              product_name: displayName,
-              quantity: q,
-              unit_value: uv,
-              product_id: productId,
-              invoice_unit: invUnit,
-              stock_quantity: Number.isFinite(stockQty) ? stockQty : q,
-              stock_added: false,
-              import_nature: "ESTOQUE_DIRETO",
-              import_engine_suggestion: "XML_CATALOG_MOTOR_PENDING",
-              import_confidence_0_1: null,
-              import_score_reasons_json: {
-                xml_catalog_motor: {
-                  pending: true,
-                  motor_version: NFE_CATALOG_MOTOR_VERSION,
-                  note: importXmlProductsAfterBatchEnabled()
-                    ? "Motor de catálogo agendado após este lote."
-                    : "Motor de catálogo desativado (IMPORT_XML_PRODUCTS_AFTER_BATCH=false).",
+              ...L.insertRow,
+            }));
+          } else {
+            expenseItemRowsPayload = finalItems.map((it) => {
+              const q = Math.max(0.0001, Number(it.quantity ?? 0));
+              const uv = Number(it.unitValue ?? 0);
+              const invUnit = String(it.unitCommercial ?? "").trim() || null;
+              const productId = String(it.productId ?? "").trim() || null;
+              const stockQty = Number(it.quantity ?? q);
+              const rawPn = String(it.productName ?? "Item");
+              const displayName =
+                stripPackSizeFromLabel(rawPn).trim() || rawPn;
+              return {
+                expense_id: expenseId,
+                product_name: displayName,
+                quantity: q,
+                unit_value: uv,
+                product_id: productId,
+                invoice_unit: invUnit,
+                stock_quantity: Number.isFinite(stockQty) ? stockQty : q,
+                stock_added: false,
+                import_nature: "ESTOQUE_DIRETO",
+                import_engine_suggestion: "XML_CATALOG_MOTOR_PENDING",
+                import_confidence_0_1: null,
+                import_score_reasons_json: {
+                  xml_catalog_motor: {
+                    pending: true,
+                    motor_version: NFE_CATALOG_MOTOR_VERSION,
+                    note: "Motor de catálogo desativado (IMPORT_XML_PRODUCTS_AFTER_BATCH=false).",
+                  },
                 },
-              },
-              import_stock_resolution: null,
-              resolved_entry_breakdown_recipe_id: null,
-              import_pending_resolution: true,
-              import_resolution_status:
-                importXmlProductsAfterBatchEnabled()
-                  ? null
-                  : "AWAITING_XML_CATALOG_MOTOR",
-              import_applied_rule_id: null,
-              match_score: null,
-              match_decision_reason: null,
-            };
-          });
+                import_stock_resolution: null,
+                resolved_entry_breakdown_recipe_id: null,
+                import_pending_resolution: true,
+                import_resolution_status: "AWAITING_XML_CATALOG_MOTOR",
+                import_applied_rule_id: null,
+                match_score: null,
+                match_decision_reason: null,
+              };
+            });
+          }
           const { data: insertedExpenseItems, error: bulkItemErr } = await supabase
             .from("expense_items")
             .insert(expenseItemRowsPayload)
@@ -1205,6 +1334,7 @@ Deno.serve(async (req) => {
               importJobFileId: fileId,
               execId,
               logPrefix: LOG,
+              finalizeAfterBatchInsert: importXmlProductsAfterBatchEnabled(),
             }),
           );
         }
@@ -1262,31 +1392,20 @@ Deno.serve(async (req) => {
       await appendTimelineMaybeQuiet(supabase, batchId, "ERROR", fileError, {}, fileId);
     }
 
-    processed += 1;
-    if (fileStatus === "FAILED") failed += 1;
-    else success += 1;
-    const progressPercent = calcProgressPercent(processed, totalFilesBase);
-    await supabase
-      .from("import_job_files")
-      .update({
-        status: fileStatus,
-        retry_count: fileStatus === "FAILED" ? 1 : 0,
-        last_error: fileError,
-        finished_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", fileId);
-    await supabase
-      .from("import_job_batches")
-      .update({
-        processed_files: processed,
-        success_files: success,
-        failed_files: failed,
-        pending_review_files: pendingReviewFiles,
-        progress_percent: progressPercent,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", batchId);
+    ({ processed, success, failed, pendingReviewFiles } = await finalizeImportJobFileRow({
+      supabase,
+      execId,
+      companyId,
+      batchId,
+      fileId,
+      fileStatus,
+      fileError,
+      processed,
+      success,
+      failed,
+      pendingReviewFiles,
+      totalFilesBase,
+    }));
   }
 
   const { count: stillActive } = await supabase

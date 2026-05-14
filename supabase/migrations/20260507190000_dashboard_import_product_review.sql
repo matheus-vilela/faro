@@ -27,6 +27,9 @@ COMMENT ON TABLE public.product_import_dashboard_review IS
 
 ALTER TABLE public.product_import_dashboard_review ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "product_import_dashboard_review_company"
+  ON public.product_import_dashboard_review;
+
 CREATE POLICY "product_import_dashboard_review_company"
   ON public.product_import_dashboard_review FOR ALL
   USING (

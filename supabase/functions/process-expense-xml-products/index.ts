@@ -54,6 +54,9 @@ Deno.serve(async (req) => {
   ).trim();
   const modeRaw = String((body as { mode?: string }).mode ?? "apply").trim().toLowerCase();
   const mode = modeRaw === "preview" ? "preview" : "apply";
+  const rawFin = (body as { finalize_after_batch_insert?: unknown }).finalize_after_batch_insert;
+  const finalize_after_batch_insert =
+    rawFin === true || String(rawFin ?? "").trim().toLowerCase() === "true";
 
   if (!company_id || !expense_id) {
     return json({ ok: false, error: "company_id e expense_id obrigatórios." }, 400);
@@ -65,6 +68,7 @@ Deno.serve(async (req) => {
     import_job_file_id,
     motor_version,
     mode,
+    finalize_after_batch_insert,
   });
 
   return json({ ok: result.ok, ...result });

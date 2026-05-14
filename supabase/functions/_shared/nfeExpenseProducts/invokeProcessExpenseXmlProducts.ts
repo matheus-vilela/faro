@@ -37,6 +37,8 @@ export function invokeProcessExpenseXmlProducts(params: {
   importJobFileId: string | null | undefined;
   execId: string;
   logPrefix?: string;
+  /** Quando true, o motor só finaliza (ledger, reviews, stock) — linhas já resolvidas no batch. */
+  finalizeAfterBatchInsert?: boolean;
 }): Promise<void> {
   if (!importXmlProductsAfterBatchEnabled()) return Promise.resolve();
   const {
@@ -48,6 +50,7 @@ export function invokeProcessExpenseXmlProducts(params: {
     importJobFileId,
     execId,
     logPrefix = LOG,
+    finalizeAfterBatchInsert,
   } = params;
   if (!expenseId || !serviceRole || !supabaseUrl) return Promise.resolve();
 
@@ -61,6 +64,7 @@ export function invokeProcessExpenseXmlProducts(params: {
   };
   const fid = String(importJobFileId ?? "").trim();
   if (fid) body.import_job_file_id = fid;
+  if (finalizeAfterBatchInsert) body.finalize_after_batch_insert = true;
 
   return fetch(motorUrl, {
     method: "POST",
