@@ -1,6 +1,12 @@
 /**
  * Política única de opts para `resolveProductMatches` — paridade com o laboratório (IA + embeddings
  * em fluxos XML/lab) e kill-switch operacional.
+ *
+ * NF-e / lote XML — árbitro RAG+LLM (env, opcional):
+ * - IMPORT_NFE_RAG_ARBITER: `smart` (padrão), `always`, `off`
+ * - IMPORT_NFE_ARBITER_GAP_THRESHOLD: diferença mínima top1−top2 para não chamar LLM em `smart` (padrão 14)
+ * - IMPORT_NFE_ARBITER_MAX_CANDIDATES: candidatos enviados ao árbitro (6–30, padrão 18)
+ * - IMPORT_NFE_RAG_MATCH_COUNT: vizinhos RPC `match_products_by_name_embedding` no lote (8–80, padrão 42)
  */
 
 import type { ResolveProductMatchesOptions } from "../../received-whatsapp-message/productMatch.ts";

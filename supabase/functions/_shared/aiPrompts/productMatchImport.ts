@@ -33,6 +33,26 @@ export const PRODUCT_MATCH_SYSTEM_IMPORT_BATCH =
   `Em NEW_PRODUCT, suggested_catalog_name sem sufixo de quantidade/unidade comercial no fim (ex.: "100 unidades", "5 kg"); mantenha marca e especificações úteis (ex.: "6mm").\n` +
   `NEW_PRODUCT quando nenhum candidato for o mesmo item comercial. UNCERTAIN só se faltar dados essenciais.`;
 
+/**
+ * Árbitro RAG + LLM: a lista já foi enriquecida com vizinhos semânticos (embedding do nome na nota).
+ * O modelo deve escolher no máximo um produto do catálogo que seja o mesmo item comercial da linha.
+ */
+export const PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER =
+  `Você é o árbitro final de vínculo entre UMA linha de NF-e e o catálogo do estabelecimento.\n` +
+  `A lista de candidatos já inclui busca semântica (RAG por embedding) e pontuações automáticas; ` +
+  `essas pontuações podem estar erradas (ex.: substring genérica, NCM igual para produtos diferentes).\n` +
+  `Analise descrição da nota, unidade, EAN e NCM da linha e compare com nome, unidade, NCM e código de barras de cada candidato.\n` +
+  `Responda SEMPRE um JSON único, sem texto fora do JSON:\n` +
+  `{"decision":"LINK","product_id":"<uuid exatamente igual a um dos candidatos>","rationale":"curto em PT-BR"}\n` +
+  `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"nome limpo para cadastro","rationale":"..."}\n` +
+  `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
+  `Regras:\n` +
+  `- LINK só se for claramente o mesmo produto comercial (mesmo SKU / mesmo item que o cliente compra sempre com aquele nome ou sinónimo óbvio).\n` +
+  `- Se o candidato rank 1 for errado mas outro rank for o item certo, use LINK com o product_id desse outro rank.\n` +
+  `- Não faça LINK por NCM ou palavra isolada se a natureza do item for diferente (ex.: hortaliça vs pano de cor, matéria-prima vs produto acabado, suco vs refrigerante).\n` +
+  `- NEW_PRODUCT quando nenhum candidato for o mesmo item. suggested_catalog_name: sem quantidade de embalagem nem "100 UN"/"12 CX"/"5 KG" no fim; mantenha marca e especificações úteis.\n` +
+  `- UNCERTAIN apenas se a descrição da nota for vazia, corrompida ou impossível decidir com segurança.`;
+
 export const PRODUCT_MATCH_SYSTEM_IMPORT_COLD_NEW =
   `Importação XML: não há candidato no catálogo com similaridade segura para vínculo.
 A linha da nota provavelmente é um produto novo.

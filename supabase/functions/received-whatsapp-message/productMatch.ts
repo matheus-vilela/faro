@@ -1,6 +1,7 @@
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import {
   applySecondarySignals,
+  digitsOnly,
   isFlavorOnlyCatalogInsideCompositeInvoice,
   scoreNameMatch,
 } from "../_shared/productImport/matchingScore.ts";
@@ -36,6 +37,7 @@ import {
 import {
   assistBorderlineProductMatch,
   assistImportColdNewProduct,
+  assistNfeRagArbiterMatch,
 } from "../_shared/productImport/productMatchLlmAssist.ts";
 import {
   augmentScoredListWithVectorNeighbors,
@@ -135,6 +137,84 @@ function envProductMatchLlmMaxCalls(): number {
   } catch {
     return 30;
   }
+}
+
+/** Modo do árbitro RAG+LLM na importação NF-e em lote (`IMPORT_NFE_RAG_ARBITER`). */
+function importNfeRagArbiterMode(): "off" | "smart" | "always" {
+  try {
+    const v = String(
+      typeof Deno !== "undefined" ? Deno.env.get("IMPORT_NFE_RAG_ARBITER") ?? "" : "",
+    )
+      .trim()
+      .toLowerCase();
+    if (v === "off" || v === "false" || v === "0") return "off";
+    if (v === "always" || v === "true" || v === "1") return "always";
+    return "smart";
+  } catch {
+    return "smart";
+  }
+}
+
+function importNfeRagArbiterGapThreshold(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_ARBITER_GAP_THRESHOLD") ?? "14"
+          : "14",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 4 && n <= 40 ? n : 14;
+  } catch {
+    return 14;
+  }
+}
+
+function importNfeRagMatchCount(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_RAG_MATCH_COUNT") ?? "42"
+          : "42",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 8 && n <= 80 ? Math.floor(n) : 42;
+  } catch {
+    return 42;
+  }
+}
+
+function importNfeArbiterMaxCandidates(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_ARBITER_MAX_CANDIDATES") ?? "18"
+          : "18",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 6 && n <= 30 ? Math.floor(n) : 18;
+  } catch {
+    return 18;
+  }
+}
+
+function promoteScoredCandidateToTop(
+  list: Array<{ product: ProductRow; score: number; detail: string }>,
+  productId: string,
+): boolean {
+  const i = list.findIndex((s) => s.product.id === productId);
+  if (i < 0) return false;
+  const [row] = list.splice(i, 1);
+  const prevTop = list[0]?.score ?? 0;
+  row.score = Math.max(row.score, prevTop + 0.5, 86);
+  row.detail = `${row.detail} · árbitro RAG+LLM`;
+  list.unshift(row);
+  return true;
 }
 
 async function loadImportSettings(
@@ -755,6 +835,7 @@ export async function resolveProductMatches(
           productById,
           openaiKey,
           model: embeddingModel,
+          matchCount: opts?.importBatch ? importNfeRagMatchCount() : 24,
         });
       } catch (e) {
         console.error("[productMatch] vector RAG:", e);
@@ -789,8 +870,88 @@ export async function resolveProductMatches(
       continue;
     }
 
-    let bestScore = scoredList[0].score;
+    let borderlineLlmSuggestedName: string | undefined;
+    let nfeArbiterRationale: string | undefined;
+    let nfeArbiterDecisionPath: string | undefined;
+    let nfeArbiterForcedNewSuggestedName: string | undefined;
+
+    const arbMode = importNfeRagArbiterMode();
+    const gapTh = importNfeRagArbiterGapThreshold();
+    const maxCand = importNfeArbiterMaxCandidates();
+    if (
+      opts?.importBatch &&
+      arbMode !== "off" &&
+      !opts?.skipLlmAssist &&
+      openaiKey &&
+      borderlineLlmRemaining > 0 &&
+      name.trim()
+    ) {
+      const top = scoredList[0]!;
+      const second = scoredList[1];
+      const gap = second ? top.score - second.score : 100;
+      const ambiguous = second != null && gap < gapTh;
+      const belowAuto = top.score < thresholds.autoMatchMinScore;
+      const softTop = top.score < 86;
+      const runArb =
+        arbMode === "always" ||
+        (arbMode === "smart" && (ambiguous || belowAuto || softTop));
+      if (runArb) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+        const sliceN = Math.min(maxCand, scoredList.length);
+        const arbInputCands = scoredList.slice(0, sliceN).map((s, idx) => ({
+          rank: idx + 1,
+          product_id: s.product.id,
+          name: s.product.name,
+          catalog_unit: s.product.unit,
+          ncm: s.product.ncm ?? null,
+          barcode_digits: (() => {
+            const d = digitsOnly(s.product.barcode);
+            return d.length >= 4 ? d : null;
+          })(),
+          similarity_0_100: Math.round(s.score * 10) / 10,
+          match_detail: s.detail,
+        }));
+        const arb = await assistNfeRagArbiterMatch(openaiKey, openaiModel, {
+          invoice_description: name,
+          invoice_unit_raw: rawUnit ?? null,
+          invoice_ean: itemEan ? String(itemEan) : null,
+          invoice_ncm: itemNcm ? String(itemNcm) : null,
+          candidates: arbInputCands,
+        });
+        if (arb.kind === "LINK") {
+          promoteScoredCandidateToTop(scoredList, arb.product_id);
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_link";
+        } else if (arb.kind === "NEW_PRODUCT") {
+          nfeArbiterForcedNewSuggestedName = arb.suggested_catalog_name;
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
+            arb.suggested_catalog_name,
+          );
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_new_product";
+        } else if (arb.kind === "ERROR") {
+          nfeArbiterRationale = arb.message;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_error";
+        } else {
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_skip";
+        }
+      }
+    }
+
+    const nfeArbiterForcedNew = nfeArbiterForcedNewSuggestedName != null;
+    let bestScore = nfeArbiterForcedNew
+      ? Math.min(45, Math.max(0, thresholds.confirmMinScore - 1))
+      : scoredList[0].score;
     let bestProduct = scoredList[0].product;
+    if (nfeArbiterForcedNew && borderlineLlmSuggestedName) {
+      bestProduct = {
+        ...bestProduct,
+        name: borderlineLlmSuggestedName,
+        unit: rawUnit ?? bestProduct.unit,
+      };
+    }
     let matchReason = `Melhor candidato: ${scoredList[0].detail}`;
 
     const autoTh = thresholds.autoMatchMinScore;
@@ -823,9 +984,8 @@ export async function resolveProductMatches(
       hasCandidate: true,
     });
 
-    let decisionPath = "scored_catalog";
-    let borderlineLlmRationale: string | undefined;
-    let borderlineLlmSuggestedName: string | undefined;
+    let decisionPath = nfeArbiterDecisionPath ?? "scored_catalog";
+    let borderlineLlmRationale: string | undefined = nfeArbiterRationale;
 
     const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
     const importBatchLlmEligible =
@@ -841,10 +1001,14 @@ export async function resolveProductMatches(
       borderlineLlmRemaining > 0;
 
     const useColdNewOnly =
-      importBatchLlmEligible && linkCandidates.length === 0;
+      importBatchLlmEligible &&
+      linkCandidates.length === 0 &&
+      String(borderlineLlmSuggestedName ?? "").trim() === "";
+
     const useBorderlineAssist =
       linkCandidates.length > 0 &&
-      (importBatchLlmEligible || runBorderlineLlm);
+      (importBatchLlmEligible || runBorderlineLlm) &&
+      String(borderlineLlmSuggestedName ?? "").trim() === "";
 
     const canInvokeLlm =
       !opts?.skipLlmAssist &&

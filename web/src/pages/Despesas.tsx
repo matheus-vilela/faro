@@ -46,19 +46,19 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
   convertQuantityForProduct,
   getLockedSystemSecondaryQty,
 } from "@/lib/companyUnits/convert";
-import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import {
   countLinesNeedingProductReview,
   divergenceReasonLabel,
   valuesDivergeCents,
 } from "@/lib/expenseDivergenceUi";
-import { findExpenseDuplicateId } from "@/lib/expenseDedup";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj } from "@/lib/masks";
+import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,9 @@ function formatDocForDisplay(doc: string | null): string {
 }
 
 function compactLauncherFallback(exp: Expense): string {
-  const src = String(exp.expense_source ?? "").trim().toLowerCase();
+  const src = String(exp.expense_source ?? "")
+    .trim()
+    .toLowerCase();
   if (src === "whatsapp") {
     const phone = String(exp.whatsapp_sender_phone_normalized ?? "").trim();
     return phone ? `WhatsApp · ${phone}` : "WhatsApp";
@@ -111,10 +113,12 @@ function compactLauncherFallback(exp: Expense): string {
 function expenseListDisplayTotal(exp: Expense): number {
   const docTotal = Number(exp.document_total ?? 0);
   if (Number.isFinite(docTotal) && docTotal > 0) return docTotal;
-  return exp.expense_items?.reduce(
-    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
-    0,
-  ) ?? 0;
+  return (
+    exp.expense_items?.reduce(
+      (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+      0,
+    ) ?? 0
+  );
 }
 
 const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
@@ -238,8 +242,10 @@ export function Despesas() {
   const [importDocumentTotal, setImportDocumentTotal] = useState<number | null>(
     null,
   );
-  const [importRequiresProductConfirmation, setImportRequiresProductConfirmation] =
-    useState(false);
+  const [
+    importRequiresProductConfirmation,
+    setImportRequiresProductConfirmation,
+  ] = useState(false);
   const [importProductReviewLineCount, setImportProductReviewLineCount] =
     useState(0);
   const [divergenceReasonValue, setDivergenceReasonValue] = useState("");
@@ -265,7 +271,8 @@ export function Despesas() {
     return map;
   }, [boletos]);
 
-  const getBoletoForExpense = (expenseId: string) => boletosByExpenseId.get(expenseId);
+  const getBoletoForExpense = (expenseId: string) =>
+    boletosByExpenseId.get(expenseId);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -293,7 +300,10 @@ export function Despesas() {
       const allowed = new Set<string>([base]);
       const convs = conversionsByProduct.get(productId) ?? [];
       for (const c of convs) {
-        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+        if (
+          c.primary_unit_code?.trim().toLowerCase() ===
+          base.trim().toLowerCase()
+        ) {
           allowed.add(c.secondary_unit_code);
         }
       }
@@ -331,28 +341,29 @@ export function Despesas() {
 
   const fetchSupportData = useCallback(async () => {
     if (!companyId) return;
-    const [{ data: catRows }, { data: sup }, { data: prod }, { data: conv }] = await Promise.all([
-      supabase
-        .from("company_categories")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase
-        .from("suppliers")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("name"),
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("name"),
-      supabase
-        .from("product_unit_conversions")
-        .select("*")
-        .eq("company_id", companyId),
-    ]);
+    const [{ data: catRows }, { data: sup }, { data: prod }, { data: conv }] =
+      await Promise.all([
+        supabase
+          .from("company_categories")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("product_unit_conversions")
+          .select("*")
+          .eq("company_id", companyId),
+      ]);
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
     setProducts((prod as Product[]) ?? []);
@@ -859,7 +870,7 @@ export function Despesas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pelo mês de competência da despesa (data do documento / emissão da NF)"
+        description="Lista filtrada pelo mês de competência da despesa"
       />
 
       <Sheet
@@ -1347,16 +1358,20 @@ export function Despesas() {
                           <Select
                             value={it.product_id ?? "__none__"}
                             onValueChange={(v) =>
-                              updateItem(i, (() => {
-                                const productId = v === "__none__" ? undefined : v;
-                                const product = productId
-                                  ? products.find((p) => p.id === productId)
-                                  : undefined;
-                                return {
-                                  product_id: productId,
-                                  invoice_unit: product?.unit ?? undefined,
-                                };
-                              })())
+                              updateItem(
+                                i,
+                                (() => {
+                                  const productId =
+                                    v === "__none__" ? undefined : v;
+                                  const product = productId
+                                    ? products.find((p) => p.id === productId)
+                                    : undefined;
+                                  return {
+                                    product_id: productId,
+                                    invoice_unit: product?.unit ?? undefined,
+                                  };
+                                })(),
+                              )
                             }
                           >
                             <SelectTrigger>
@@ -1395,7 +1410,8 @@ export function Despesas() {
                               value={it.invoice_unit ?? "__none__"}
                               onValueChange={(v) =>
                                 updateItem(i, {
-                                  invoice_unit: v === "__none__" ? undefined : v,
+                                  invoice_unit:
+                                    v === "__none__" ? undefined : v,
                                 })
                               }
                             >
@@ -1403,12 +1419,19 @@ export function Despesas() {
                                 <SelectValue placeholder="Selecione a unidade" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">Selecione</SelectItem>
-                                {allowedUnitsForProduct(it.product_id).map((u) => (
-                                  <SelectItem key={`${it.product_id}-${u}`} value={u}>
-                                    {u}
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="__none__">
+                                  Selecione
+                                </SelectItem>
+                                {allowedUnitsForProduct(it.product_id).map(
+                                  (u) => (
+                                    <SelectItem
+                                      key={`${it.product_id}-${u}`}
+                                      value={u}
+                                    >
+                                      {u}
+                                    </SelectItem>
+                                  ),
+                                )}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1527,8 +1550,7 @@ export function Despesas() {
                   exp.expense_source === "whatsapp" && exp.status === "pending";
                 const sumItemsRow =
                   exp.expense_items?.reduce(
-                    (s, it) =>
-                      s + Number(it.quantity) * Number(it.unit_value),
+                    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
                     0,
                   ) ?? 0;
                 const documentTotalImport =
