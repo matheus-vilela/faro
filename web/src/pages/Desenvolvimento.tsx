@@ -38,6 +38,7 @@ import {
   FlaskConical,
   Loader2,
   Package,
+  RefreshCw,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -83,6 +84,26 @@ type FocusSyncTestResponse = {
   metrics?: Record<string, unknown>;
   caps_aplicados?: Record<string, unknown>;
   continuacao?: Record<string, unknown>;
+};
+
+type FocusGetSyncNfeDetailRow = {
+  company_id?: string;
+  cnpj?: string;
+  ok?: boolean;
+  skipped?: string;
+  error?: string;
+  exec_id?: string;
+  notasEncontradas?: number;
+  quantasBuscasForamExecutadas?: number;
+  temposDeProcessamento?: Record<string, unknown>;
+};
+
+type FocusGetSyncNfeResponse = {
+  ok?: boolean;
+  error?: string;
+  exec_id?: string;
+  detail?: FocusGetSyncNfeDetailRow[];
+  metrics?: Record<string, unknown>;
 };
 
 function buildFocusSyncTestLog(data: FocusSyncTestResponse): Record<string, unknown> {
@@ -187,6 +208,15 @@ const ONBOARDING_SIM_MAX_SYNC_ROUNDS = 30;
 const ONBOARDING_SIM_LIST_PAGES = 40;
 const ONBOARDING_SIM_XML_DOWNLOADS = 120;
 
+/** Alinhado ao default jsonb em `companies.onboarding_fiscal` (migrations). */
+const DEFAULT_ONBOARDING_FISCAL = {
+  sync: true,
+  max_nfes_sync: 0,
+  nfes_sync: 0,
+  nfes_ignored: 0,
+  completed: false,
+} as const;
+
 export function Desenvolvimento() {
   const { currentCompany, refetchCompanies } = useCompany();
   const companyId = currentCompany?.id ?? "";
@@ -194,7 +224,7 @@ export function Desenvolvimento() {
   const cnpjDigits = String(currentCompany?.document ?? "").replace(/\D/g, "").slice(0, 14);
   const hasFocus = hasFocusNfeEmpresaId(currentCompany?.focusnfe ?? null);
 
-  const [mainTab, setMainTab] = useState<"focus" | "preview">("focus");
+  const [mainTab, setMainTab] = useState<"focus" | "syncNfs" | "preview">("focus");
 
   const [phase, setPhase] = useState<PhaseOpt>("auto");
   const [maxListPages, setMaxListPages] = useState("2");
@@ -207,6 +237,15 @@ export function Desenvolvimento() {
     useState<FocusSyncTestResponse | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [simOnboardingLoading, setSimOnboardingLoading] = useState(false);
+
+  const [getSyncVersao, setGetSyncVersao] = useState("");
+  const [getSyncOnboarding, setGetSyncOnboarding] = useState(true);
+  const [loadingGetSyncNfe, setLoadingGetSyncNfe] = useState(false);
+  const [getSyncError, setGetSyncError] = useState<string | null>(null);
+  const [getSyncLastJson, setGetSyncLastJson] = useState<string | null>(null);
+  const [getSyncResponse, setGetSyncResponse] = useState<FocusGetSyncNfeResponse | null>(
+    null,
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -224,6 +263,10 @@ export function Desenvolvimento() {
     }
     if (simOnboardingLoading) {
       toast.message("Aguarde a simulação de onboarding fiscal terminar.");
+      return;
+    }
+    if (loadingGetSyncNfe) {
+      toast.message("Aguarde a listagem resumida Sync NFs terminar.");
       return;
     }
     const nPages = Number(maxListPages);
@@ -320,6 +363,109 @@ export function Desenvolvimento() {
     phase,
     versaoInicial,
     simOnboardingLoading,
+    loadingGetSyncNfe,
+  ]);
+
+  const runGetSyncNfe = useCallback(async () => {
+    if (!companyId) {
+      toast.error("Selecione uma unidade (empresa) no app.");
+      return;
+    }
+    if (!hasFocus) {
+      toast.error("A unidade precisa de id_empresa Focus em focusnfe.");
+      return;
+    }
+    if (cnpjDigits.length !== 14) {
+      toast.error("CNPJ da unidade deve ter 14 dígitos (documento da empresa).");
+      return;
+    }
+    if (loadingFocus || simOnboardingLoading) {
+      toast.message("Aguarde outra operação Focus nesta página terminar.");
+      return;
+    }
+    let versao: number | undefined;
+    const vTrim = getSyncVersao.trim();
+    if (vTrim !== "") {
+      const v = Number(vTrim);
+      if (!Number.isFinite(v) || v < 0) {
+        toast.error("Versão inicial: número ≥ 0 ou vazio.");
+        return;
+      }
+      versao = Math.floor(v);
+    }
+
+    setLoadingGetSyncNfe(true);
+    setGetSyncError(null);
+    setGetSyncLastJson(null);
+    setGetSyncResponse(null);
+    try {
+      const { error: fiscalResetErr } = await supabase
+        .from("companies")
+        .update({ onboarding_fiscal: { ...DEFAULT_ONBOARDING_FISCAL } })
+        .eq("id", companyId);
+      if (fiscalResetErr) {
+        const msg =
+          fiscalResetErr.message ?? "Não foi possível repor onboarding_fiscal aos valores iniciais.";
+        setGetSyncError(msg);
+        toast.error(msg);
+        return;
+      }
+      await refetchCompanies();
+
+      const body: Record<string, unknown> = {
+        manual: true,
+        company_id: companyId,
+      };
+      if (versao !== undefined) body.versao = versao;
+      if (getSyncOnboarding) body.onboarding = true;
+
+      const { data, error } = await supabase.functions.invoke("focus-get-sync-nfe", {
+        body,
+      });
+      if (error) {
+        const msg = formatSupabaseFunctionError(error);
+        setGetSyncError(msg);
+        toast.error(msg);
+        return;
+      }
+      const typed = (data ?? {}) as FocusGetSyncNfeResponse;
+      setGetSyncResponse(typed);
+      setGetSyncLastJson(JSON.stringify(typed, null, 2));
+      const ok = typed.ok === true;
+      const d0 = Array.isArray(typed.detail) ? typed.detail[0] : undefined;
+      if (ok && d0?.ok === true) {
+        toast.success(
+          `Listagem resumida concluída. Notas gravadas (nfe_completa): ${String(d0.notasEncontradas ?? 0)}.`,
+        );
+        if (getSyncOnboarding) await refetchCompanies();
+      } else if (ok && d0?.skipped) {
+        toast.message(String(d0.skipped));
+      } else {
+        const err =
+          typeof typed.error === "string"
+            ? typed.error
+            : typeof d0?.error === "string"
+              ? d0.error
+              : "Resposta inesperada";
+        setGetSyncError(err);
+        toast.error(err);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      setGetSyncError(msg);
+      toast.error(msg);
+    } finally {
+      setLoadingGetSyncNfe(false);
+    }
+  }, [
+    companyId,
+    cnpjDigits.length,
+    getSyncVersao,
+    getSyncOnboarding,
+    hasFocus,
+    loadingFocus,
+    simOnboardingLoading,
+    refetchCompanies,
   ]);
 
   const runFullFiscalOnboardingSimulation = useCallback(async () => {
@@ -337,6 +483,10 @@ export function Desenvolvimento() {
     }
     if (loadingFocus) {
       toast.message("Aguarde o teste Focus terminar.");
+      return;
+    }
+    if (loadingGetSyncNfe) {
+      toast.message("Aguarde a listagem resumida Sync NFs terminar.");
       return;
     }
 
@@ -460,7 +610,7 @@ export function Desenvolvimento() {
     } finally {
       setSimOnboardingLoading(false);
     }
-  }, [companyId, hasFocus, cnpjDigits, refetchCompanies, loadingFocus]);
+  }, [companyId, hasFocus, cnpjDigits, refetchCompanies, loadingFocus, loadingGetSyncNfe]);
 
   const runPreview = useCallback(async () => {
     if (!companyId) {
@@ -588,6 +738,18 @@ export function Desenvolvimento() {
         </button>
         <button
           type="button"
+          onClick={() => setMainTab("syncNfs")}
+          className={cn(
+            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            mainTab === "syncNfs"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Sync NFs
+        </button>
+        <button
+          type="button"
           onClick={() => setMainTab("preview")}
           className={cn(
             "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
@@ -623,7 +785,7 @@ export function Desenvolvimento() {
                 <Select
                   value={phase}
                   onValueChange={(v) => setPhase(v as PhaseOpt)}
-                  disabled={loadingFocus || simOnboardingLoading || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
                 >
                   <SelectTrigger id="dev-phase" className="w-full max-w-xs">
                     <SelectValue />
@@ -650,7 +812,7 @@ export function Desenvolvimento() {
                   placeholder="Vazio = usar cursor gravado na unidade"
                   value={versaoInicial}
                   onChange={(e) => setVersaoInicial(e.target.value)}
-                  disabled={loadingFocus || simOnboardingLoading || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
                   className="max-w-xs font-mono text-sm"
                 />
               </div>
@@ -666,7 +828,7 @@ export function Desenvolvimento() {
                   max={80}
                   value={maxListPages}
                   onChange={(e) => setMaxListPages(e.target.value)}
-                  disabled={loadingFocus || simOnboardingLoading || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
                   className="font-mono text-sm"
                 />
               </div>
@@ -679,7 +841,7 @@ export function Desenvolvimento() {
                   max={500}
                   value={maxXmlDownloads}
                   onChange={(e) => setMaxXmlDownloads(e.target.value)}
-                  disabled={loadingFocus || simOnboardingLoading || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
                   className="font-mono text-sm"
                 />
               </div>
@@ -692,7 +854,7 @@ export function Desenvolvimento() {
                   max={5}
                   value={maxChainDepth}
                   onChange={(e) => setMaxChainDepth(e.target.value)}
-                  disabled={loadingFocus || simOnboardingLoading || !companyId}
+                  disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -703,7 +865,7 @@ export function Desenvolvimento() {
 
             <Button
               type="button"
-              disabled={loadingFocus || simOnboardingLoading || !companyId}
+              disabled={loadingFocus || simOnboardingLoading || loadingGetSyncNfe || !companyId}
               onClick={() => void runFocus()}
             >
               {loadingFocus ? (
@@ -811,6 +973,7 @@ export function Desenvolvimento() {
               variant="secondary"
               disabled={
                 loadingFocus ||
+                loadingGetSyncNfe ||
                 simOnboardingLoading ||
                 !companyId ||
                 !hasFocus ||
@@ -843,6 +1006,159 @@ export function Desenvolvimento() {
             ) : null}
           </CardContent>
         </Card>
+        </div>
+      ) : mainTab === "syncNfs" ? (
+        <div className="space-y-6">
+          <Card className="w-full min-w-0">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5" />
+                Listagem resumida: focus-get-sync-nfe
+              </CardTitle>
+              <CardDescription>
+                Chama a Edge Function só para{" "}
+                <span className="font-medium text-foreground">{companyLabel}</span>
+                {companyId ? (
+                  <span className="mt-1 block font-mono text-xs text-muted-foreground">
+                    {companyId}
+                  </span>
+                ) : null}
+                . Lista NF-e recebidas na Focus (sem parâmetro <code className="rounded bg-muted px-1 text-xs">limite</code>
+                ; tamanho da página é o da API) com paginação por{" "}
+                <code className="rounded bg-muted px-1 text-xs">x-total-count</code> /{" "}
+                <code className="rounded bg-muted px-1 text-xs">x-max-version</code> e grava em{" "}
+                <code className="rounded bg-muted px-1 text-xs">
+                  focus_get_sync_nfe_staging
+                </code>{" "}
+                apenas notas com <code className="rounded bg-muted px-1 text-xs">nfe_completa</code>{" "}
+                explicitamente verdadeiro (sem download de XML nem fila de import). Com{" "}
+                <code className="rounded bg-muted px-1 text-xs">onboarding: true</code>, a primeira
+                lista Focus bem-sucedida atualiza{" "}
+                <code className="rounded bg-muted px-1 text-xs">companies.onboarding_fiscal.max_nfes_sync</code>{" "}
+                para o dashboard.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="min-w-0 space-y-6">
+              <div className="space-y-2 max-w-md">
+                <Label htmlFor="dev-getsync-versao">Versão inicial (opcional)</Label>
+                <Input
+                  id="dev-getsync-versao"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder="Vazio = usar cursor em focusnfe.nfes_recebidas_ultima_versao"
+                  value={getSyncVersao}
+                  onChange={(e) => setGetSyncVersao(e.target.value)}
+                  disabled={loadingGetSyncNfe || loadingFocus || simOnboardingLoading || !companyId}
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="dev-getsync-onboarding"
+                  checked={getSyncOnboarding}
+                  onCheckedChange={(v) => setGetSyncOnboarding(v === true)}
+                  disabled={
+                    loadingGetSyncNfe || loadingFocus || simOnboardingLoading || !companyId
+                  }
+                />
+                <Label htmlFor="dev-getsync-onboarding" className="font-normal text-sm">
+                  Fluxo onboarding (<code className="rounded bg-muted px-1 text-xs">onboarding: true</code>
+                  {" — "}atualiza{" "}
+                  <code className="rounded bg-muted px-1 text-xs">onboarding_fiscal</code>{" "}
+                  na empresa após a primeira lista Focus)
+                </Label>
+              </div>
+
+              <Button
+                type="button"
+                disabled={
+                  loadingGetSyncNfe ||
+                  loadingFocus ||
+                  simOnboardingLoading ||
+                  !companyId ||
+                  !hasFocus ||
+                  cnpjDigits.length !== 14
+                }
+                onClick={() => void runGetSyncNfe()}
+              >
+                {loadingGetSyncNfe ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    A listar na Focus…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Executar sync resumido
+                  </>
+                )}
+              </Button>
+
+              {!companyId ? (
+                <p className="text-sm text-muted-foreground">Selecione uma unidade.</p>
+              ) : !hasFocus ? (
+                <p className="text-sm text-muted-foreground">
+                  Associe a unidade à Focus (id_empresa) para habilitar.
+                </p>
+              ) : cnpjDigits.length !== 14 ? (
+                <p className="text-sm text-muted-foreground">
+                  O documento da unidade precisa de um CNPJ com 14 dígitos.
+                </p>
+              ) : null}
+
+              {getSyncResponse?.exec_id ? (
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">exec_id</span>{" "}
+                  <code className="rounded bg-muted px-1 font-mono">{getSyncResponse.exec_id}</code>
+                  {" — "}exemplo no SQL Editor:{" "}
+                  <code className="break-all rounded bg-muted px-1 font-mono text-[11px]">
+                    {`select * from public.focus_get_sync_nfe_staging where exec_id = '${getSyncResponse.exec_id}';`}
+                  </code>
+                </p>
+              ) : null}
+
+              {getSyncError ? (
+                <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  {getSyncError}
+                </div>
+              ) : null}
+
+              {getSyncResponse?.detail?.[0] &&
+              getSyncResponse.detail[0].ok === true &&
+              getSyncResponse.detail[0].temposDeProcessamento ? (
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
+                  <p>
+                    <span className="text-muted-foreground">CNPJ:</span>{" "}
+                    <span className="font-mono">{String(getSyncResponse.detail[0].cnpj ?? "—")}</span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Notas encontradas (gravadas):</span>{" "}
+                    {String(getSyncResponse.detail[0].notasEncontradas ?? 0)}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Buscas Focus executadas:</span>{" "}
+                    {String(getSyncResponse.detail[0].quantasBuscasForamExecutadas ?? 0)}
+                  </p>
+                  <p className="text-muted-foreground">Tempos (ms / objeto):</p>
+                  <pre className="max-h-40 overflow-auto rounded border bg-background/80 p-2 font-mono text-[11px]">
+                    {JSON.stringify(getSyncResponse.detail[0].temposDeProcessamento, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+
+              {getSyncLastJson ? (
+                <div className="space-y-2">
+                  <Label>Resposta JSON</Label>
+                  <pre className="max-h-[min(70vh,560px)] overflow-auto rounded-md border bg-muted/40 p-3 text-xs font-mono">
+                    {getSyncLastJson}
+                  </pre>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
       ) : (
         <Card className="w-full min-w-0">

@@ -73,6 +73,10 @@ verify_jwt = false
 [functions.focus-sync-nfe-recebidas]
 verify_jwt = false
 
+# Mesmo modelo de auth que `focus-sync-nfe-recebidas` (cron secret ou manual + JWT).
+[functions.focus-get-sync-nfe]
+verify_jwt = false
+
 # JWT validado no handler (sessão + user_companies).
 # Secrets (produção): `supabase secrets set OPENAI_API_KEY=...` — usado com ai_line_units_preview.
 # Local: `supabase/functions/.env` ou painel; a resposta JSON inclui `openai_api_key_configured` (boolean).

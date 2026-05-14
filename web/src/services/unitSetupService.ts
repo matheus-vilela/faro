@@ -308,6 +308,7 @@ export async function patchCompanyMaps(
     onboarding_integration_pdv_completed?: boolean;
     syncing_fiscal?: boolean;
     syncing_pdv?: boolean;
+    onboarding_fiscal?: Record<string, unknown>;
   },
 ): Promise<{ error?: string }> {
   const row: Record<string, unknown> = {};
@@ -339,6 +340,9 @@ export async function patchCompanyMaps(
   if (patch.phone !== undefined) row.phone = patch.phone;
   if (patch.onboarding_fiscal_completed !== undefined) {
     row.onboarding_fiscal_completed = patch.onboarding_fiscal_completed;
+  }
+  if (patch.onboarding_fiscal !== undefined) {
+    row.onboarding_fiscal = patch.onboarding_fiscal;
   }
   if (patch.onboarding_integration_pdv_completed !== undefined) {
     row.onboarding_integration_pdv_completed =

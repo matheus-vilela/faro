@@ -1,8 +1,8 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
+import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
-import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
@@ -10,6 +10,7 @@ import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhats
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
+import { isOnboardingFiscalNfeRecebidasDashboardEnabled } from "@/lib/onboardingFiscalDashboard";
 import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
@@ -174,58 +175,66 @@ export function Dashboard() {
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
 
-  const loadImportProgress = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!companyId) {
+  const loadImportProgress = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!companyId) {
+        setLoadingImportProgress(false);
+        setActiveImportFiles(0);
+        setActiveImportPercent(0);
+        return;
+      }
+
+      if (!opts?.silent) {
+        setLoadingImportProgress(true);
+      }
+      const { data, error } = await supabase
+        .from("import_job_batches")
+        .select("status, total_files, processed_files")
+        .eq("company_id", companyId)
+        .in("status", ["QUEUED", "PROCESSING"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (error) {
+        setActiveImportFiles(0);
+        setActiveImportPercent(0);
+        setLoadingImportProgress(false);
+        return;
+      }
+
+      const rows = (data ?? []) as ImportBatchProgressRow[];
+      const totals = rows.reduce(
+        (acc, row) => {
+          const total = Math.max(Number(row.total_files ?? 0), 0);
+          const processed = Math.min(
+            Math.max(Number(row.processed_files ?? 0), 0),
+            total,
+          );
+          return {
+            totalFiles: acc.totalFiles + total,
+            processedFiles: acc.processedFiles + processed,
+          };
+        },
+        { totalFiles: 0, processedFiles: 0 },
+      );
+
+      const pendingFiles = Math.max(
+        totals.totalFiles - totals.processedFiles,
+        0,
+      );
+      const progress =
+        totals.totalFiles > 0
+          ? Number(
+              ((totals.processedFiles / totals.totalFiles) * 100).toFixed(0),
+            )
+          : 0;
+
+      setActiveImportFiles(pendingFiles);
+      setActiveImportPercent(progress);
       setLoadingImportProgress(false);
-      setActiveImportFiles(0);
-      setActiveImportPercent(0);
-      return;
-    }
-
-    if (!opts?.silent) {
-      setLoadingImportProgress(true);
-    }
-    const { data, error } = await supabase
-      .from("import_job_batches")
-      .select("status, total_files, processed_files")
-      .eq("company_id", companyId)
-      .in("status", ["QUEUED", "PROCESSING"])
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (error) {
-      setActiveImportFiles(0);
-      setActiveImportPercent(0);
-      setLoadingImportProgress(false);
-      return;
-    }
-
-    const rows = (data ?? []) as ImportBatchProgressRow[];
-    const totals = rows.reduce(
-      (acc, row) => {
-        const total = Math.max(Number(row.total_files ?? 0), 0);
-        const processed = Math.min(
-          Math.max(Number(row.processed_files ?? 0), 0),
-          total,
-        );
-        return {
-          totalFiles: acc.totalFiles + total,
-          processedFiles: acc.processedFiles + processed,
-        };
-      },
-      { totalFiles: 0, processedFiles: 0 },
-    );
-
-    const pendingFiles = Math.max(totals.totalFiles - totals.processedFiles, 0);
-    const progress =
-      totals.totalFiles > 0
-        ? Number(((totals.processedFiles / totals.totalFiles) * 100).toFixed(0))
-        : 0;
-
-    setActiveImportFiles(pendingFiles);
-    setActiveImportPercent(progress);
-    setLoadingImportProgress(false);
-  }, [companyId]);
+    },
+    [companyId],
+  );
 
   useEffect(() => {
     queueMicrotask(() => void loadBoletos());
@@ -253,7 +262,10 @@ export function Dashboard() {
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
         return;
       }
       const { data } = await supabase
@@ -333,7 +345,11 @@ export function Dashboard() {
           activeImportPercent={activeImportPercent}
         />
       ) : null}
-      {currentCompany && !currentCompany.onboarding_fiscal_completed ? (
+      {currentCompany &&
+      currentCompany.onboarding_fiscal?.sync &&
+      isOnboardingFiscalNfeRecebidasDashboardEnabled(
+        currentCompany.onboarding_fiscal,
+      ) ? (
         <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
       {currentCompany ? (
