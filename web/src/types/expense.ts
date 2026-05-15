@@ -47,6 +47,11 @@ export interface Expense {
   document_total?: number | null
   /** Motivo indicado quando havia divergência ou revisão na importação. */
   divergence_reason?: string | null
+  /**
+   * Snapshot da NF-e (ICMSTot) e/ou conferência soma linhas vs total — importação XML / staging.
+   * Ver `icms_tot` (vNF, vDesc, vPIS, vCOFINS, …) e opcionalmente `adjusted_sum_components`, `delta`.
+   */
+  financial_reconciliation_json?: Record<string, unknown> | null
   created_at: string
   updated_at: string
   items?: ExpenseItem[]

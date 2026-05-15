@@ -4,7 +4,7 @@
  */
 import { PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER } from "./aiPrompts/productMatchImport.ts";
 import type { NfeRagArbiterCandidate } from "./productImport/productMatchLlmAssist.ts";
-import { stripTrailingPackagingQtyAndUnitsForCatalogName } from "./productImport/canonicalName.ts";
+import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";
 
 const STAGING_NFE_LINE_STOCK_SYSTEM =
@@ -20,10 +20,11 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `Exemplo: descrição "heineken longneck 24UN", quantidade XML = 1, valor total linha = 24 → stock_quantity = 24, stock_unit_value = 1 (não use quantidade XML 1 como 1 garrafa).\n` +
   `Outro: se for realmente 1 caixa com 12 unidades e o nome indica 12, use 12 e valor_total/12.\n` +
   `\n**normalized_product_name** (obrigatório em NEW_PRODUCT; opcional em LINK se quiser refletir limpeza):\n` +
-  `- Nome comercial do **produto** sem contagem de embalagem no texto: **não** incluir sufixos como "24UN", "10X1KG", "12X350ML", "CX6", "FD12", "PCT 10", quantidades coladas ao final.\n` +
+  `- Nome comercial do **produto** sem contagem de embalagem no texto: **não** incluir sufixos como "24UN", "10X1KG", "12X350ML", "6X950ML", "1,002 KG PCT", "CX6", "FD12", "PCT 10", "PC 1KG", quantidades coladas ao final.\n` +
+  `- **Nunca** começar o nome com asterisco (*), sustenido (#) ou outros prefixos de impressão de NF; remova-os por completo.\n` +
   `- Remova siglas que são só **embalagem/medida de lote** (UN, CX, FD, PCT, PÇ, KG no contexto de fardo, etc.) quando não fazem parte do nome da marca/produto.\n` +
   `- Mantenha **marca** e **tipo** do item (ex.: "Heineken Long Neck", "Linguiça Toscana Sadia").\n` +
-  `\n**suggested_catalog_name** (NEW_PRODUCT): pode igualar a normalized_product_name ou versão ligeiramente mais curta para cadastro; sem lixo de NF no fim.\n` +
+  `\n**suggested_catalog_name** (NEW_PRODUCT): deve ser **o mesmo nome limpo** que normalized_product_name (ou abreviação mínima sem perder a identidade do item); **não** repita o texto bruto da nota com pesos, packs ou medidas.\n` +
   `\n**stock_quantity** e **stock_unit_value** (números > 0, use ponto decimal):\n` +
   `- Em NEW_PRODUCT: **obrigatórios** — quantidade física de unidades do produto normalizado e preço unitário coerente com valor total da linha (stock_quantity × stock_unit_value ≈ valor total da linha; tolerância centavos).\n` +
   `- Em LINK: **opcionais** — preencha se a linha XML esconder pack no nome e precisar corrigir quantidade/valor para estoque; se não precisar correção, use quantidade e valor unitário da linha XML (repita nos campos ou omita e o sistema usa XML).\n` +
@@ -180,9 +181,7 @@ export async function assistStagingNfeLineStockNormalizeAndMatch(
     const usesPack = parsed.uses_packaging_from_description === true;
 
     const rawNorm = strOrNull(parsed.normalized_product_name);
-    const normalizedProductName = rawNorm
-      ? stripTrailingPackagingQtyAndUnitsForCatalogName(rawNorm).trim()
-      : null;
+    const normalizedProductName = rawNorm ? sanitizeCatalogProductName(rawNorm) : null;
 
     const sq = parsePositiveNum(parsed.stock_quantity);
     const su = parsePositiveNum(parsed.stock_unit_value);
@@ -216,15 +215,12 @@ export async function assistStagingNfeLineStockNormalizeAndMatch(
 
     if (decision === "NEW_PRODUCT") {
       const suggRaw = strOrNull(parsed.suggested_catalog_name);
-      const suggestedStripped = suggRaw
-        ? stripTrailingPackagingQtyAndUnitsForCatalogName(suggRaw).trim()
-        : "";
+      const suggestedStripped = suggRaw ? sanitizeCatalogProductName(suggRaw) : "";
 
       const normFinal =
         (normalizedProductName && normalizedProductName.length > 0
           ? normalizedProductName
-          : suggestedStripped) ||
-        (suggRaw ? stripTrailingPackagingQtyAndUnitsForCatalogName(suggRaw).trim() : "");
+          : suggestedStripped) || "";
 
       const suggested =
         (suggestedStripped.length > 0 ? suggestedStripped : normFinal) || normFinal;

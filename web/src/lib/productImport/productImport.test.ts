@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canonicalProductName, normalizeInvoiceProductLabel, stripTrailingPackagingQtyAndUnitsForCatalogName } from "./canonicalName";
+import {
+  canonicalProductName,
+  normalizeInvoiceProductLabel,
+  sanitizeCatalogProductName,
+  stripTrailingPackagingQtyAndUnitsForCatalogName,
+} from "./canonicalName";
 import { consolidateInvoiceItems, pickInvoiceUnitRaw } from "./consolidateItems";
 import {
   applySecondarySignals,
@@ -128,6 +133,33 @@ describe("canonicalName — strip sufixo embalagem/unidade", () => {
   it("remove kg no fim", () => {
     expect(stripTrailingPackagingQtyAndUnitsForCatalogName("Açúcar Cristal 5 kg")).toBe(
       "Açúcar Cristal",
+    );
+  });
+
+  it("remove peso + PCT e formato NxML compacto", () => {
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName(
+        "AMORA CONGELADA SWEET BERRY 1,002 KG PCT",
+      ),
+    ).toBe("AMORA CONGELADA SWEET BERRY");
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName(
+        "APERITIVO VERMOUTH CARPANO ROSSO 6X950ML",
+      ),
+    ).toBe("APERITIVO VERMOUTH CARPANO ROSSO");
+  });
+
+  it("remove PC + peso no fim", () => {
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName("* CHIMICHURRI SEM PIMENTA PC 1KG"),
+    ).toBe("* CHIMICHURRI SEM PIMENTA");
+  });
+});
+
+describe("canonicalName — sanitizeCatalogProductName", () => {
+  it("remove asteriscos à esquerda e sufixos de embalagem", () => {
+    expect(sanitizeCatalogProductName("* CHIMICHURRI SEM PIMENTA PC 1KG")).toBe(
+      "CHIMICHURRI SEM PIMENTA",
     );
   });
 });

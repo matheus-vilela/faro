@@ -3,7 +3,7 @@
  * Deno Edge + Vitest compatível via fetch JSON.
  */
 
-import { stripTrailingPackagingQtyAndUnitsForCatalogName } from "./canonicalName.ts";
+import { sanitizeCatalogProductName } from "./canonicalName.ts";
 import {
   PRODUCT_MATCH_SYSTEM_BORDERLINE,
   PRODUCT_MATCH_SYSTEM_IMPORT_BATCH,
@@ -101,7 +101,7 @@ export async function assistImportColdNewProduct(
     const rationale = String(parsed.rationale ?? "").trim() || "—";
     if (decision === "NEW_PRODUCT") {
       const nameRaw = String(parsed.suggested_catalog_name ?? "").trim();
-      const name = stripTrailingPackagingQtyAndUnitsForCatalogName(nameRaw).trim();
+      const name = sanitizeCatalogProductName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
       }
@@ -224,7 +224,7 @@ export async function assistNfeRagArbiterMatch(
     }
     if (decision === "NEW_PRODUCT") {
       const nameRaw = String(parsed.suggested_catalog_name ?? "").trim();
-      const name = stripTrailingPackagingQtyAndUnitsForCatalogName(nameRaw).trim();
+      const name = sanitizeCatalogProductName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
       }
@@ -313,7 +313,7 @@ export async function assistBorderlineProductMatch(
     }
     if (decision === "NEW_PRODUCT") {
       const nameRaw = String(parsed.suggested_catalog_name ?? "").trim();
-      const name = stripTrailingPackagingQtyAndUnitsForCatalogName(nameRaw).trim();
+      const name = sanitizeCatalogProductName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
       }

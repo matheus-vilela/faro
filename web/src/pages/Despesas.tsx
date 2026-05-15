@@ -55,7 +55,7 @@ import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import {
   countLinesNeedingProductReview,
   divergenceReasonLabel,
-  valuesDivergeCents,
+  getNfeExpenseValueBreakdown,
 } from "@/lib/expenseDivergenceUi";
 import { maskCpfCnpj } from "@/lib/masks";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
@@ -1557,9 +1557,12 @@ export function Despesas() {
                   exp.document_total != null
                     ? Number(exp.document_total)
                     : null;
-                const valueRisk =
-                  documentTotalImport != null &&
-                  valuesDivergeCents(documentTotalImport, sumItemsRow);
+                const nfeVal = getNfeExpenseValueBreakdown({
+                  documentTotal: documentTotalImport,
+                  sumItems: sumItemsRow,
+                  financialReconciliationJson: exp.financial_reconciliation_json ?? null,
+                });
+                const valueRisk = nfeVal.needsAttention;
                 const unlinkedProducts =
                   exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
                 return (
@@ -1599,7 +1602,11 @@ export function Despesas() {
                           {valueRisk && (
                             <span
                               className="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
-                              title="Total do documento na importação difere da soma das linhas"
+                              title={
+                                nfeVal.hasIcmsBreakdown
+                                  ? "Há ICMSTot no registro — totais do XML são a referência."
+                                  : "Total do documento difere da soma das linhas (sem ICMSTot para conferir)"
+                              }
                             >
                               Ajuste: valores
                             </span>

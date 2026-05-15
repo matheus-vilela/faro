@@ -8,7 +8,7 @@ import {
 import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
-  stripTrailingPackagingQtyAndUnitsForCatalogName,
+  sanitizeCatalogProductName,
 } from "../_shared/productImport/canonicalName.ts";
 import {
   consolidateInvoiceItems,
@@ -118,11 +118,11 @@ function envProductMatchLlmForce(): boolean {
   }
 }
 
-/** Nome para cadastro: sem quantidade de embalagem / unidade comercial no fim (ex.: "100 UN"). */
+/** Nome para cadastro: sem lixo de NF (asteriscos, packs, peso no fim). */
 function finalizeSuggestedCatalogName(raw: string | null | undefined): string | undefined {
   const t = String(raw ?? "").trim();
   if (!t) return undefined;
-  const n = stripTrailingPackagingQtyAndUnitsForCatalogName(t).trim().slice(0, 512);
+  const n = sanitizeCatalogProductName(t).slice(0, 512);
   return n.length ? n : undefined;
 }
 

@@ -1,7 +1,13 @@
+import { ExpenseFinancialReconciliationPanel } from "@/components/expenses/ExpenseFinancialReconciliationPanel";
 import { ExpenseRecordedDivergenceBanner } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -29,12 +35,14 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
-import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
+import { getNfeExpenseValueBreakdown } from "@/lib/expenseDivergenceUi";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
-import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
+import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import {
   type Boleto,
@@ -45,7 +53,14 @@ import {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { Copy, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Pencil,
+  Plus,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -147,6 +162,7 @@ export function ExpenseDetailSheet({
   const [deleting, setDeleting] = useState(false);
   const [approvingWhatsapp, setApprovingWhatsapp] = useState(false);
   const [linkItemSheetOpen, setLinkItemSheetOpen] = useState(false);
+  const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
   const [linkItem, setLinkItem] = useState<{
     id: string;
     product_name: string;
@@ -163,6 +179,10 @@ export function ExpenseDetailSheet({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    setValidationDetailsOpen(false);
+  }, [detailExpense?.id]);
 
   const getBoletoForExpense = (id: string) =>
     boletos.find((b) => b.expense_id === id);
@@ -185,18 +205,25 @@ export function ExpenseDetailSheet({
     );
   }, [detailExpense?.expense_items]);
 
+  const nfeValBreakdown = useMemo(() => {
+    if (!detailExpense) return null;
+    return getNfeExpenseValueBreakdown({
+      documentTotal: detailExpense.document_total,
+      sumItems: detailLineSum,
+      financialReconciliationJson:
+        detailExpense.financial_reconciliation_json ?? null,
+    });
+  }, [detailExpense, detailLineSum]);
+
   const detailNoteTotal = useMemo(() => {
     const n = Number(detailExpense?.document_total ?? 0);
     return Number.isFinite(n) ? n : 0;
   }, [detailExpense?.document_total]);
 
-  const detailTotalDiff = useMemo(() => {
-    return Math.round((detailNoteTotal - detailLineSum) * 100) / 100;
-  }, [detailNoteTotal, detailLineSum]);
-
   const detailTotalMatches = useMemo(() => {
-    return Math.abs(detailTotalDiff) <= 0.05;
-  }, [detailTotalDiff]);
+    if (!nfeValBreakdown || nfeValBreakdown.documentTotal == null) return false;
+    return !nfeValBreakdown.needsAttention;
+  }, [nfeValBreakdown]);
 
   const detailUnlinkedProductRows = useMemo(() => {
     if (!detailExpense?.expense_items?.length) return 0;
@@ -216,31 +243,33 @@ export function ExpenseDetailSheet({
       return;
     }
     setDetailExpense(exp as Expense);
-    const shouldLoadSupportData = supportDataLoadedCompanyRef.current !== companyId;
+    const shouldLoadSupportData =
+      supportDataLoadedCompanyRef.current !== companyId;
     if (shouldLoadSupportData) {
-      const [{ data: bo }, { data: catRows }, { data: sup }, { data: prod }] = await Promise.all([
-        supabase
-          .from("boletos")
-          .select("*")
-          .eq("company_id", companyId)
-          .eq("flow_type", "payable"),
-        supabase
-          .from("company_categories")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase
-          .from("suppliers")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("name"),
-        supabase
-          .from("products")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("name"),
-      ]);
+      const [{ data: bo }, { data: catRows }, { data: sup }, { data: prod }] =
+        await Promise.all([
+          supabase
+            .from("boletos")
+            .select("*")
+            .eq("company_id", companyId)
+            .eq("flow_type", "payable"),
+          supabase
+            .from("company_categories")
+            .select("*")
+            .eq("company_id", companyId)
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("suppliers")
+            .select("*")
+            .eq("company_id", companyId)
+            .order("name"),
+          supabase
+            .from("products")
+            .select("*")
+            .eq("company_id", companyId)
+            .order("name"),
+        ]);
       setBoletos((bo as Boleto[]) ?? []);
       setCompanyCategories((catRows as CompanyCategory[]) ?? []);
       setSuppliers((sup as Supplier[]) ?? []);
@@ -489,7 +518,7 @@ export function ExpenseDetailSheet({
     (!!detailExpense &&
       detailExpense.type === "nota_fiscal" &&
       editType === "nota_fiscal" &&
-      !(detailExpense.invoice_number?.trim()));
+      !detailExpense.invoice_number?.trim());
 
   const canEditSubmit =
     editItems.every(
@@ -1011,29 +1040,13 @@ export function ExpenseDetailSheet({
                   <ExpenseRecordedDivergenceBanner
                     documentTotal={detailExpense.document_total}
                     sumLines={detailLineSum}
+                    financialReconciliationJson={
+                      detailExpense.financial_reconciliation_json ?? null
+                    }
                     divergenceReason={detailExpense.divergence_reason}
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
-                  <div className="rounded-lg border p-4 space-y-2">
-                    <p className="text-sm font-medium">Validação dos valores da nota</p>
-                    <div className="grid gap-2 text-sm sm:grid-cols-3">
-                      <p>
-                        <span className="text-muted-foreground">Total da nota (XML):</span>{" "}
-                        <span className="font-medium">{formatCurrency(detailNoteTotal)}</span>
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Soma dos produtos:</span>{" "}
-                        <span className="font-medium">{formatCurrency(detailLineSum)}</span>
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Diferença:</span>{" "}
-                        <span className="font-medium">{formatCurrency(detailTotalDiff)}</span>
-                      </p>
-                    </div>
-                    <Badge variant={detailTotalMatches ? "default" : "secondary"}>
-                      {detailTotalMatches ? "Conferido com a nota" : "Divergente da nota"}
-                    </Badge>
-                  </div>
+
                   <div className="grid gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Tipo:</span>{" "}
@@ -1148,7 +1161,9 @@ export function ExpenseDetailSheet({
                         Fluxo de caixa e alertas
                       </p>
                       <div>
-                        <span className="text-muted-foreground">Categoria:</span>{" "}
+                        <span className="text-muted-foreground">
+                          Categoria:
+                        </span>{" "}
                         <span className="text-foreground">
                           {linkedBoletoForDetail
                             ? formatBoletoCategoryLabel(
@@ -1221,7 +1236,90 @@ export function ExpenseDetailSheet({
                       </div>
                     )}
                   </div>
-
+                  <div
+                    className={
+                      detailTotalMatches
+                        ? "rounded-xl border border-border bg-muted/25 p-4"
+                        : "rounded-xl border-2 border-destructive/35 bg-destructive/5 p-4"
+                    }
+                  >
+                    <div className="flex gap-3">
+                      <div className="min-w-0 flex-1 space-y-2 text-sm">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Validação dos valores da nota
+                        </p>
+                        <p className="font-semibold leading-snug">
+                          {detailTotalMatches
+                            ? "Conferido com a nota"
+                            : nfeValBreakdown?.documentTotal == null
+                              ? "Total da nota não informado"
+                              : "Total do documento e soma dos itens diferem"}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          Total da nota:{" "}
+                          <span className="font-medium text-foreground">
+                            {formatCurrency(detailNoteTotal)}
+                          </span>
+                          {detailTotalMatches && (
+                            <span className="ml-1 text-emerald-700 dark:text-emerald-400">
+                              ✓
+                            </span>
+                          )}
+                        </p>
+                        {!detailTotalMatches &&
+                          nfeValBreakdown?.documentTotal != null &&
+                          !nfeValBreakdown.hasIcmsBreakdown && (
+                            <p className="text-xs text-muted-foreground">
+                              Sem totais ICMSTot no registro: ajuste linhas ou o
+                              total. Se a NF foi importada com XML completo, o
+                              bloco ICMSTot costuma evitar este alerta.
+                            </p>
+                          )}
+                        {!detailTotalMatches &&
+                          nfeValBreakdown?.documentTotal == null && (
+                            <p className="text-xs text-muted-foreground">
+                              Informe o total do documento ou reabra a
+                              importação para preencher automaticamente.
+                            </p>
+                          )}
+                        <Collapsible
+                          open={validationDetailsOpen}
+                          onOpenChange={setValidationDetailsOpen}
+                        >
+                          <CollapsibleTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-auto w-full justify-start gap-1.5 px-0 py-1 text-muted-foreground hover:text-foreground sm:w-auto"
+                            >
+                              <ChevronDown
+                                aria-hidden
+                                className={cn(
+                                  "size-4 shrink-0 transition-transform duration-200",
+                                  validationDetailsOpen && "rotate-180",
+                                )}
+                              />
+                              {validationDetailsOpen
+                                ? "Ocultar detalhes da conferência e impostos"
+                                : "Ver detalhes da conferência e impostos"}
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="space-y-4 pt-2">
+                            <ExpenseFinancialReconciliationPanel
+                              data={
+                                detailExpense.financial_reconciliation_json as
+                                  | Record<string, unknown>
+                                  | null
+                                  | undefined
+                              }
+                              formatCurrency={formatCurrency}
+                            />
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </div>
+                    </div>
+                  </div>
                   {(detailExpense.expense_items?.length ?? 0) > 0 && (
                     <div>
                       <p className="font-medium mb-2">Itens</p>
@@ -1259,51 +1357,54 @@ export function ExpenseDetailSheet({
                                 rawLineName ||
                                 "—";
                               return (
-                              <tr key={i} className="border-t">
-                                <td className="p-2">
-                                  <span>{primary}</span>
-                                  {catalogName &&
-                                    (strippedLine !== catalogName ||
-                                      rawLineName !== catalogName) && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      Nota: {strippedLine || rawLineName}
-                                    </p>
-                                  )}
-                                </td>
-                                <td className="p-2">
-                                  {it.product_id ? (
-                                    <Badge variant="secondary">Vinculado</Badge>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openLinkItemSheet({
-                                          id: it.id!,
-                                          product_name: it.product_name,
-                                          quantity: Number(it.quantity),
-                                          unit_value: Number(it.unit_value),
-                                        });
-                                      }}
-                                    >
-                                      Vincular
-                                    </Button>
-                                  )}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {it.quantity}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(Number(it.unit_value))}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(
-                                    Number(it.quantity) * Number(it.unit_value),
-                                  )}
-                                </td>
-                              </tr>
+                                <tr key={i} className="border-t">
+                                  <td className="p-2">
+                                    <span>{primary}</span>
+                                    {catalogName &&
+                                      (strippedLine !== catalogName ||
+                                        rawLineName !== catalogName) && (
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                          Nota: {strippedLine || rawLineName}
+                                        </p>
+                                      )}
+                                  </td>
+                                  <td className="p-2">
+                                    {it.product_id ? (
+                                      <Badge variant="secondary">
+                                        Vinculado
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openLinkItemSheet({
+                                            id: it.id!,
+                                            product_name: it.product_name,
+                                            quantity: Number(it.quantity),
+                                            unit_value: Number(it.unit_value),
+                                          });
+                                        }}
+                                      >
+                                        Vincular
+                                      </Button>
+                                    )}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {it.quantity}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {formatCurrency(Number(it.unit_value))}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {formatCurrency(
+                                      Number(it.quantity) *
+                                        Number(it.unit_value),
+                                    )}
+                                  </td>
+                                </tr>
                               );
                             })}
                           </tbody>
@@ -1326,9 +1427,7 @@ export function ExpenseDetailSheet({
                     <BoletoLinkedBlock
                       boleto={linkedBoletoForDetail}
                       formatCurrency={formatCurrency}
-                      onVerBoleto={() =>
-                        setBoletoResumo(linkedBoletoForDetail)
-                      }
+                      onVerBoleto={() => setBoletoResumo(linkedBoletoForDetail)}
                     />
                   ) : null}
 

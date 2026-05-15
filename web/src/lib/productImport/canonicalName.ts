@@ -43,9 +43,22 @@ export function normalizeInvoiceProductLabel(raw: string): string {
   return t.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()
 }
 
+/** Remove `*`, `#` e espaços no início (comum em descrições de NF-e). */
+export function stripLeadingInvoiceDecorativeMarks(raw: string | null | undefined): string {
+  let s = String(raw ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+  for (let i = 0; i < 8; i++) {
+    const t = s.replace(/^\s*[*#]+\s*/u, "").trim()
+    if (t === s) break
+    s = t
+  }
+  return s
+}
+
 /**
  * Remove do **final** do nome sugerido quantidade de embalagem e unidade comercial/medida
- * (ex.: "… 100 UNIDADES", "… 12 x 500 ml", "… 5 kg") para o cadastro de produto.
+ * (ex.: "… 100 UNIDADES", "… 12 x 500 ml", "… 5 kg", "… 6X950ML", "… 1,002 KG PCT") para o cadastro de produto.
  * Preserva sufixos tipo "6mm" (dimensão no meio do nome, não `N + unidade` no fim).
  */
 export function stripTrailingPackagingQtyAndUnitsForCatalogName(
@@ -61,9 +74,14 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(
     /\s+\d+[\.,]?\d*\s+(?:unidades?|unids?|unds?|duzias?|pecas?|pças?|cx|caixas?|fardos?|pcts?|packs?)\s*$/iu,
     /\s+\d+[\.,]?\d*\s+(?:un|und)\b\s*$/iu,
     /\s+\d+[\.,]?\d*\s+(?:kg|g|mg|l|lt|ml|m2|m3|m²|m³)\s*$/iu,
+    /\s+\d+\s*[xX]\s*\d+[\.,]?\d*\s*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
+    /\s+\d+[xX]\d+[\.,]?\d*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
+    /\s+\d+[\.,]?\d*\s+(?:kg|g|mg|l|lt|ml)\s+(?:pct|pcts?|pçs?|pc\b|cx|caixas?|fardos?|fds?|packs?|emb\.?)\s*$/iu,
+    /\s+(?:pc|pct|pçs?)\s+\d+[\.,]?\d*\s*(?:kg|g|mg|l|lt|ml)\s*$/iu,
+    /\s+(?:pct|pcts?|pçs?|cx|fds?|fardos?)\s*$/iu,
   ]
   let s = orig
-  for (let pass = 0; pass < 12; pass++) {
+  for (let pass = 0; pass < 16; pass++) {
     let changed = false
     for (const re of packOrMeasureTail) {
       const t = s.replace(re, "").trim()
@@ -75,6 +93,12 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(
     if (!changed) break
   }
   return s.length ? s : orig
+}
+
+/** Nome de cadastro a partir de rótulo de NF-e ou resposta LLM: limpa prefixos e sufixos de lote/embalagem. */
+export function sanitizeCatalogProductName(raw: string | null | undefined): string {
+  const led = stripLeadingInvoiceDecorativeMarks(raw)
+  return stripTrailingPackagingQtyAndUnitsForCatalogName(led).trim()
 }
 
 function singularizeToken(t: string): string {
