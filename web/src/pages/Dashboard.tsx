@@ -14,7 +14,6 @@ import {
   isOnboardingFiscalInterpretConfirmPhase,
   isOnboardingFiscalNfeRecebidasDashboardEnabled,
 } from "@/lib/onboardingFiscalDashboard";
-import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -257,43 +256,6 @@ export function Dashboard() {
       void loadImportProgress({ silent: true });
     }, 5000);
     return () => globalThis.clearInterval(interval);
-  }, [companyId, loadImportProgress]);
-
-  /** Destrava lotes XML quando o encadeamento na Edge sofre EarlyDrop (reinvocação no browser). */
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      if (
-        typeof document !== "undefined" &&
-        document.visibilityState === "hidden"
-      ) {
-        return;
-      }
-      const { data } = await supabase
-        .from("import_job_batches")
-        .select("id")
-        .eq("company_id", companyId)
-        .in("status", ["QUEUED", "PROCESSING"])
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (!data?.id || cancelled) return;
-      await drainProcessImportJobBatch(data.id, {
-        maxRounds: 4,
-        pauseMs: 1_200,
-      });
-      if (!cancelled) void loadImportProgress({ silent: true });
-    };
-    const interval = globalThis.setInterval(() => {
-      void tick();
-    }, 60_000);
-    void tick();
-    return () => {
-      cancelled = true;
-      globalThis.clearInterval(interval);
-    };
   }, [companyId, loadImportProgress]);
 
   const formatCurrency = (v: number) =>

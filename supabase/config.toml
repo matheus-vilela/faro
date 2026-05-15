@@ -44,14 +44,6 @@ verify_jwt = false
 [functions.focus-atualizar-certificado]
 verify_jwt = false
 
-[functions.enqueue-nfe-import]
-verify_jwt = true
-
-# Chamadas internas (`focus-sync-nfe-recebidas`, chaining no próprio processor) usam o service role;
-# a função valida Authorization no código — evita o gateway rejeitar antes do handler.
-[functions.process-import-job-batch]
-verify_jwt = false
-
 [functions.focus-cria-empresa]
 verify_jwt = false
 
@@ -69,11 +61,7 @@ verify_jwt = false
 [functions.epoc-validate-login]
 verify_jwt = false
 
-# Secret no header Authorization (cron) — igual epoc-daily-sync.
-[functions.focus-sync-nfe-recebidas]
-verify_jwt = false
-
-# Mesmo modelo de auth que `focus-sync-nfe-recebidas` (cron secret ou manual + JWT).
+# Secret no header Authorization (cron) ou JWT no handler — igual epoc-daily-sync.
 [functions.focus-get-sync-nfe]
 verify_jwt = false
 

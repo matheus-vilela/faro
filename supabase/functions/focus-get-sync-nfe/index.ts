@@ -281,7 +281,7 @@ Deno.serve(async (req) => {
       {
         ok: false,
         error:
-          "Defina FOCUS_NFE_RECEBIDAS_CRON_SECRET (mesmo secret usado em focus-sync-nfe-recebidas).",
+          "Defina FOCUS_NFE_RECEBIDAS_CRON_SECRET (secret no Authorization Bearer para chamadas agendadas ou internas).",
       },
       503,
     );

@@ -4,7 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/contexts/CompanyContext";
 import { importJobStatusLabel } from "@/lib/importBatchStatus";
-import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import { Loader2, RefreshCcw, Ban } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -58,7 +57,6 @@ export function Importacoes() {
   const { currentCompany } = useCompany();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<BatchRow[]>([]);
-  const [retrying, setRetrying] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [creationHistory, setCreationHistory] = useState<CreationHistoryRow[]>([]);
   const [xmlLinkPendings, setXmlLinkPendings] = useState<XmlLinkPendingRow[]>([]);
@@ -111,101 +109,6 @@ export function Importacoes() {
     void load();
   }, [load]);
 
-  /**
-   * O processor na Edge pode sofrer `EarlyDrop` após responder HTTP — o encadeamento
-   * servidor não é confiável. Enquanto esta página estiver aberta, o navegador reinvoca
-   * o lote ativo até concluir.
-   */
-  useEffect(() => {
-    const companyId = currentCompany?.id;
-    if (!companyId) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      const { data } = await supabase
-        .from("import_job_batches")
-        .select("id")
-        .eq("company_id", companyId)
-        .in("status", ["QUEUED", "PROCESSING"])
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (!data?.id || cancelled) return;
-      await drainProcessImportJobBatch(data.id, { maxRounds: 25, pauseMs: 400 });
-      if (!cancelled) void load();
-    };
-    const interval = globalThis.setInterval(() => {
-      void tick();
-    }, 12_000);
-    void tick();
-    return () => {
-      cancelled = true;
-      globalThis.clearInterval(interval);
-    };
-  }, [currentCompany?.id, load]);
-
-  const retryBatch = async (batchId: string) => {
-    if (!currentCompany?.id) return;
-    setRetrying(batchId);
-    const { error: updErr } = await supabase
-      .from("import_job_batches")
-      .update({
-        status: "QUEUED",
-        processed_files: 0,
-        success_files: 0,
-        failed_files: 0,
-        pending_review_files: 0,
-        progress_percent: 0,
-        retry_count: 1,
-        last_error: null,
-        started_at: null,
-        finished_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", batchId);
-    if (updErr) {
-      setRetrying(null);
-      toast.error(updErr.message);
-      return;
-    }
-    const { error: fileUpdErr } = await supabase
-      .from("import_job_files")
-      .update({
-        status: "QUEUED",
-        last_error: null,
-        started_at: null,
-        finished_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("batch_id", batchId);
-    if (fileUpdErr) {
-      setRetrying(null);
-      toast.error(fileUpdErr.message);
-      return;
-    }
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
-    if (!token) {
-      setRetrying(null);
-      toast.error("Sessão inválida.");
-      return;
-    }
-    const baseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-    await fetch(`${baseUrl.replace(/\/$/, "")}/functions/v1/process-import-job-batch`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: anon,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ batch_id: batchId }),
-    }).catch(() => undefined);
-    setRetrying(null);
-    toast.success("Retry iniciado em segundo plano.");
-    void load();
-  };
-
   const cancelBatch = async (batchId: string) => {
     if (!currentCompany?.id) return;
     setCancelling(batchId);
@@ -251,7 +154,7 @@ export function Importacoes() {
     <PageShell className="space-y-6" narrow>
       <PageHeader
         title="Central de importações"
-        description="Acompanhe lotes XML em segundo plano, progresso e falhas parciais."
+        description="Histórico de lotes XML e pendências. O processamento em lote antigo foi removido; lotes antigos podem permanecer em fila até novo fluxo."
         action={(
           <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
@@ -332,17 +235,6 @@ export function Importacoes() {
                   >
                     {cancelling === r.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
                     Cancelar importação
-                  </Button>
-                ) : null}
-                {(r.status === "FAILED" || r.status === "PARTIAL_SUCCESS") ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => void retryBatch(r.id)}
-                    disabled={retrying === r.id}
-                  >
-                    {retrying === r.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Retry lote
                   </Button>
                 ) : null}
               </div>
