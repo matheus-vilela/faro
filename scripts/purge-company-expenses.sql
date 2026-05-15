@@ -4,8 +4,8 @@
 -- DESTRUTIVO. Não há undo. Use só em dev/staging ou com backup.
 --
 -- Apaga linhas em public.expenses; o PostgreSQL propaga CASCADE para, entre
--- outras: expense_items, recebimentos, expense_xml_item_motor_pass,
--- import_job_files (expense_id), logs de resolução ligados à despesa, etc.
+-- outras: expense_items, recebimentos, expense_resolution_logs,
+-- expense_xml_item_motor_pass, import_review_pending (expense_id), etc.
 -- Boletos e company_nfe_import_logs ficam com expense_id = NULL (SET NULL).
 --
 -- Como executar (Supabase Dashboard → SQL Editor):
@@ -21,7 +21,7 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_company uuid := '00000000-0000-0000-0000-000000000000'::uuid; -- <-- ALTERE AQUI
+  v_company uuid := '9399b80c-2cd5-4651-b58c-6ee6a044b71a'::uuid; -- <-- ALTERE AQUI
   n int;
 BEGIN
   IF v_company = '00000000-0000-0000-0000-000000000000'::uuid THEN

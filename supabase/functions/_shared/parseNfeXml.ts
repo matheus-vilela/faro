@@ -216,3 +216,87 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     likelyNotPurchaseReason: null,
   };
 }
+
+/** Totais e bases na tag `ICMSTot` (NF-e / nfeProc). */
+export type NfeXmlTaxTotals = {
+  vBC: number | null;
+  vICMS: number | null;
+  vICMSDeson: number | null;
+  vFCP: number | null;
+  vBCST: number | null;
+  vST: number | null;
+  vFCPST: number | null;
+  vProd: number | null;
+  vFrete: number | null;
+  vSeg: number | null;
+  vDesc: number | null;
+  vII: number | null;
+  vIPI: number | null;
+  vIPIDevol: number | null;
+  vPIS: number | null;
+  vCOFINS: number | null;
+  vOutro: number | null;
+  vNF: number | null;
+  vTotTrib: number | null;
+};
+
+function taxField(icmsTot: Record<string, unknown> | undefined, key: string): number | null {
+  if (!icmsTot) return null;
+  const raw = icmsTot[key];
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const n = num(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Extrai totais de impostos do bloco `total/ICMSTot` (um parse). */
+export function extractNfeTaxTotalsFromXml(xmlText: string): NfeXmlTaxTotals | null {
+  const trimmed = stripBom(xmlText);
+  if (!trimmed.startsWith("<")) return null;
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    removeNSPrefix: true,
+    trimValues: true,
+  });
+
+  let root: Record<string, unknown>;
+  try {
+    root = parser.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const nfeProc = root.nfeProc as Record<string, unknown> | undefined;
+  const nfeRoot = pickNFeRoot(nfeProc?.NFe ?? root.NFe);
+  const infNFe = pickInfNFe(nfeRoot?.infNFe);
+  if (!infNFe || typeof infNFe !== "object") return null;
+
+  const total = infNFe.total as Record<string, unknown> | undefined;
+  const icmsRaw = total?.ICMSTot;
+  const icmsTot = (
+    Array.isArray(icmsRaw) ? icmsRaw[0] : icmsRaw
+  ) as Record<string, unknown> | undefined;
+  if (!icmsTot || typeof icmsTot !== "object") return null;
+
+  return {
+    vBC: taxField(icmsTot, "vBC"),
+    vICMS: taxField(icmsTot, "vICMS"),
+    vICMSDeson: taxField(icmsTot, "vICMSDeson"),
+    vFCP: taxField(icmsTot, "vFCP"),
+    vBCST: taxField(icmsTot, "vBCST"),
+    vST: taxField(icmsTot, "vST"),
+    vFCPST: taxField(icmsTot, "vFCPST"),
+    vProd: taxField(icmsTot, "vProd"),
+    vFrete: taxField(icmsTot, "vFrete"),
+    vSeg: taxField(icmsTot, "vSeg"),
+    vDesc: taxField(icmsTot, "vDesc"),
+    vII: taxField(icmsTot, "vII"),
+    vIPI: taxField(icmsTot, "vIPI"),
+    vIPIDevol: taxField(icmsTot, "vIPIDevol"),
+    vPIS: taxField(icmsTot, "vPIS"),
+    vCOFINS: taxField(icmsTot, "vCOFINS"),
+    vOutro: taxField(icmsTot, "vOutro"),
+    vNF: taxField(icmsTot, "vNF"),
+    vTotTrib: taxField(icmsTot, "vTotTrib"),
+  };
+}

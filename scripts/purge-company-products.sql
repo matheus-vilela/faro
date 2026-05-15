@@ -23,7 +23,7 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_company uuid := 'ff48f174-45c8-43ab-b992-a9fa19fd4297'::uuid; -- <-- ALTERE AQUI
+  v_company uuid := '9399b80c-2cd5-4651-b58c-6ee6a044b71a'::uuid;  -- <-- ALTERE AQUI
   n int;
   n_revenue int;
 BEGIN

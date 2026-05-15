@@ -17,8 +17,8 @@ interface OnboardingFiscalMetrics {
   max_nfes_sync: number;
   nfes_sync: number;
   nfes_ignored: number;
-  /** Dentro do JSON; alinhado com `onboarding_fiscal_completed` ao concluir. */
-  completed?: boolean;
+  /** Após interpretação XML (onboarding): utilizador confirma no dashboard para fechar o card. */
+  interpret_confirmed?: boolean;
 }
 
 export interface Company {

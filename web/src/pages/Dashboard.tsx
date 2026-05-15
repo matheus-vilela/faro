@@ -10,7 +10,10 @@ import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhats
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
-import { isOnboardingFiscalNfeRecebidasDashboardEnabled } from "@/lib/onboardingFiscalDashboard";
+import {
+  isOnboardingFiscalInterpretConfirmPhase,
+  isOnboardingFiscalNfeRecebidasDashboardEnabled,
+} from "@/lib/onboardingFiscalDashboard";
 import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
@@ -346,10 +349,13 @@ export function Dashboard() {
         />
       ) : null}
       {currentCompany &&
-      currentCompany.onboarding_fiscal?.sync &&
-      isOnboardingFiscalNfeRecebidasDashboardEnabled(
+      !currentCompany.onboarding_fiscal_completed &&
+      (isOnboardingFiscalNfeRecebidasDashboardEnabled(
         currentCompany.onboarding_fiscal,
-      ) ? (
+      ) ||
+        isOnboardingFiscalInterpretConfirmPhase(
+          currentCompany.onboarding_fiscal,
+        )) ? (
         <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
       {currentCompany ? (

@@ -150,6 +150,8 @@ export async function assistNfeRagArbiterMatch(
   apiKey: string,
   model: string,
   input: NfeRagArbiterInput,
+  /** Se definido, substitui o prompt de sistema padrão (ex.: interpretação staging só NCM). */
+  systemPrompt?: string,
 ): Promise<NfeRagArbiterResult> {
   if (!apiKey.trim()) {
     return { kind: "ERROR", message: "OPENAI_API_KEY ausente." };
@@ -188,7 +190,10 @@ export async function assistNfeRagArbiterMatch(
       temperature: 0.05,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER },
+        {
+          role: "system",
+          content: systemPrompt ?? PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER,
+        },
         { role: "user", content: JSON.stringify(userPayload) },
       ],
     }),

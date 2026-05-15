@@ -95,5 +95,9 @@ verify_jwt = false
 
 [functions.process-integration-csv-revenue-job]
 verify_jwt = false
+
+[functions.focus-get-sync-nfe-interpret-staging]
+verify_jwt = false
+
 [functions.run-onboarding-product-reconciliation]
 verify_jwt = true

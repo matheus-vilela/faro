@@ -2,10 +2,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Company } from "@/contexts/CompanyContext";
 import { useCompany } from "@/contexts/CompanyContext";
-import { isOnboardingFiscalNfeRecebidasDashboardEnabled } from "@/lib/onboardingFiscalDashboard";
+import {
+  isOnboardingFiscalInterpretConfirmPhase,
+  isOnboardingFiscalNfeRecebidasDashboardEnabled,
+} from "@/lib/onboardingFiscalDashboard";
 import { supabase } from "@/lib/supabase";
-import { completeCompanyOnboardingFiscalStep } from "@/services/companyOnboardingFlagsService";
-import { ArrowRight, FileBadge, Loader2 } from "lucide-react";
+import {
+  completeCompanyOnboardingFiscalStep,
+  confirmOnboardingFiscalInterpretPhase,
+} from "@/services/companyOnboardingFlagsService";
+import { ArrowRight, CheckCircle2, FileBadge, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -67,11 +73,24 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const [nfeLogCount, setNfeLogCount] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [fiscalAutoMarkFailed, setFiscalAutoMarkFailed] = useState(false);
+  const [interpretClosing, setInterpretClosing] = useState(false);
   const autoFiscalSyncedRef = useRef(false);
 
   const obFiscal = parseOnboardingFiscalMetrics(company?.onboarding_fiscal);
   const fiscalOnboardingDone = company?.onboarding_fiscal_completed === true;
   const focusnfe = company?.focusnfe;
+  const interpretConfirmPhase = isOnboardingFiscalInterpretConfirmPhase(
+    company?.onboarding_fiscal,
+  );
+  const progressPhase = isOnboardingFiscalNfeRecebidasDashboardEnabled(
+    company?.onboarding_fiscal,
+  );
+
+  useEffect(() => {
+    if (interpretConfirmPhase && companyId) {
+      setLoading(false);
+    }
+  }, [interpretConfirmPhase, companyId]);
 
   const loadCount = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -102,15 +121,11 @@ export function DashboardFocusNfeRecebidasSyncCard({
   }, [companyId]);
 
   useEffect(() => {
-    if (
-      !isOnboardingFiscalNfeRecebidasDashboardEnabled(
-        company?.onboarding_fiscal,
-      )
-    ) {
+    if (!progressPhase) {
       return;
     }
     queueMicrotask(() => void loadCount());
-  }, [loadCount, company?.onboarding_fiscal]);
+  }, [loadCount, progressPhase]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
@@ -118,27 +133,18 @@ export function DashboardFocusNfeRecebidasSyncCard({
   }, []);
 
   useEffect(() => {
-    if (
-      !isOnboardingFiscalNfeRecebidasDashboardEnabled(
-        company?.onboarding_fiscal,
-      ) ||
-      fiscalOnboardingDone
-    ) {
+    if (!progressPhase || fiscalOnboardingDone) {
       return;
     }
     const id = window.setInterval(() => {
       void loadCount({ silent: true });
     }, 45_000);
     return () => window.clearInterval(id);
-  }, [company?.onboarding_fiscal, fiscalOnboardingDone, loadCount]);
+  }, [progressPhase, fiscalOnboardingDone, loadCount]);
 
   /** Primeira NF-e na base: persistir conclusão fiscal sem obrigar clique extra. */
   useEffect(() => {
-    if (
-      !isOnboardingFiscalNfeRecebidasDashboardEnabled(
-        company?.onboarding_fiscal,
-      )
-    ) {
+    if (!progressPhase) {
       return;
     }
     if (
@@ -163,16 +169,76 @@ export function DashboardFocusNfeRecebidasSyncCard({
       }
       await refetchCompanies();
     })();
-  }, [companyId, company?.onboarding_fiscal, nfeLogCount, refetchCompanies]);
+  }, [companyId, progressPhase, nfeLogCount, refetchCompanies]);
 
-  if (
-    !company ||
-    !isOnboardingFiscalNfeRecebidasDashboardEnabled(company.onboarding_fiscal)
-  ) {
+  if (!company || (!progressPhase && !interpretConfirmPhase)) {
     return null;
   }
 
-  if (!obFiscal.sync) {
+  if (interpretConfirmPhase) {
+    return (
+      <Card className="border-2 border-emerald-500/40 bg-linear-to-r from-emerald-500/12 via-teal-500/10 to-sky-500/10 shadow-md">
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/30 text-emerald-950 ring-1 ring-emerald-700/20 dark:text-emerald-100">
+                <CheckCircle2 className="h-5 w-5 opacity-95" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-950/85 dark:text-emerald-100/85">
+                  Onboarding fiscal · NF-e recebidas
+                </p>
+                <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
+                  Interpretação concluída
+                </h3>
+                <p className="mt-2 text-sm font-medium leading-relaxed text-emerald-950/92 dark:text-emerald-100/90">
+                  As notas deste lote foram processadas (fornecedores, produtos,
+                  despesas e stock). Confirme para fechar este aviso no painel.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                disabled={interpretClosing}
+                onClick={() => {
+                  if (!companyId) return;
+                  setInterpretClosing(true);
+                  void (async () => {
+                    const res = await confirmOnboardingFiscalInterpretPhase(
+                      companyId,
+                    );
+                    if (res.error) {
+                      setInterpretClosing(false);
+                      console.error(
+                        "confirmOnboardingFiscalInterpretPhase",
+                        res.error,
+                      );
+                      return;
+                    }
+                    await refetchCompanies();
+                  })();
+                }}
+              >
+                {interpretClosing ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    A guardar…
+                  </>
+                ) : (
+                  "Confirmar e fechar"
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!progressPhase) {
     return null;
   }
 

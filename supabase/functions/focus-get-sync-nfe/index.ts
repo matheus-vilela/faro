@@ -1,4 +1,6 @@
+// @ts-nocheck
 /**
+ * 
  * Listagem **resumida** de NF-e recebidas na Focus (`GET /v2/nfes_recebidas`), usando
  * `x-total-count` e `x-max-version` nos headers para paginação. Apenas notas com
  * `nfe_completa` explicitamente verdadeiro são gravadas em `focus_get_sync_nfe_staging`.
@@ -15,6 +17,9 @@
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
  * Para cada nota gravada, faz download do XML em **blocos paralelos de 10** (`GET .../{chave}.xml`);
  * entre blocos aplica `FOCUS_NFE_XML_THROTTLE_MS` (default 450 ms).
+ * Com pelo menos uma linha em `focus_get_sync_nfe_staging`, enfileira `focus_get_sync_nfe_interpret_jobs`
+ * (com `onboarding` quando o body pediu `onboarding: true`).
+ * (processamento assíncrono via pg_cron → `focus-get-sync-nfe-interpret-staging`).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -26,8 +31,10 @@ const XML_DOWNLOAD_PARALLEL = 10;
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Max-Age": "86400",
 };
 
 function json(body: unknown, status = 200): Response {
@@ -252,14 +259,15 @@ async function mergeOnboardingFiscalMaxNfes(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
   if (req.method !== "POST") return json({ ok: false, error: "Use POST" }, 405);
 
-  const tWall0 = performance.now();
+  try {
+    const tWall0 = performance.now();
 
-  // --- Passo 1: body, segredo cron / manual + JWT, env Supabase + Focus ---
-  const bodyRaw = await req.json().catch(() => ({}));
+    // --- Passo 1: body, segredo cron / manual + JWT, env Supabase + Focus ---
+    const bodyRaw = await req.json().catch(() => ({}));
   const body =
     bodyRaw && typeof bodyRaw === "object" && !Array.isArray(bodyRaw)
       ? (bodyRaw as Record<string, unknown>)
@@ -675,6 +683,38 @@ Deno.serve(async (req) => {
       wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
     };
 
+    if (notasEncontradas > 0) {
+      const { data: existingJob, error: selJobErr } = await admin
+        .from("focus_get_sync_nfe_interpret_jobs")
+        .select("id,status")
+        .eq("exec_id", execId)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (selJobErr) {
+        console.warn(LOG, "interpret_job_select", companyId, selJobErr.message);
+      } else if (!existingJob?.id) {
+        const { error: insJobErr } = await admin
+          .from("focus_get_sync_nfe_interpret_jobs")
+          .insert({
+            exec_id: execId,
+            company_id: companyId,
+            status: "pending",
+            onboarding: onboardingFlow,
+          });
+        if (insJobErr) {
+          console.warn(LOG, "interpret_job_insert", companyId, insJobErr.message);
+        }
+      } else {
+        const { error: updOnbErr } = await admin
+          .from("focus_get_sync_nfe_interpret_jobs")
+          .update({ onboarding: onboardingFlow })
+          .eq("id", existingJob.id);
+        if (updOnbErr) {
+          console.warn(LOG, "interpret_job_onboarding", companyId, updOnbErr.message);
+        }
+      }
+    }
+
     const linhaLog = {
       cnpj: cnpjDigits,
       notasEncontradas,
@@ -705,4 +745,14 @@ Deno.serve(async (req) => {
       wall_total_ms: Math.round(performance.now() - tWall0),
     },
   });
+  } catch (e) {
+    console.error(LOG, "unhandled_error", e);
+    return json(
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      },
+      500,
+    );
+  }
 });

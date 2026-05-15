@@ -33,6 +33,33 @@ export async function completeCompanyOnboardingFiscalStep(
   return { error: error?.message };
 }
 
+export async function confirmOnboardingFiscalInterpretPhase(
+  companyId: string,
+): Promise<{ error?: string }> {
+  const { data: row, error: fErr } = await supabase
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (fErr) return { error: fErr.message };
+  if (!row) return { error: "Empresa não encontrada." };
+
+  const prev =
+    row.onboarding_fiscal &&
+    typeof row.onboarding_fiscal === "object" &&
+    !Array.isArray(row.onboarding_fiscal)
+      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
+      : {};
+
+  const { error } = await supabase
+    .from("companies")
+    .update({
+      onboarding_fiscal: { ...prev, interpret_confirmed: true },
+    })
+    .eq("id", companyId);
+  return { error: error?.message };
+}
+
 export async function completeCompanyOnboardingIntegrationPdvStep(
   companyId: string,
 ): Promise<{ error?: string }> {

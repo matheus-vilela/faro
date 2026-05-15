@@ -215,6 +215,7 @@ const DEFAULT_ONBOARDING_FISCAL = {
   nfes_sync: 0,
   nfes_ignored: 0,
   completed: false,
+  interpret_confirmed: false,
 } as const;
 
 export function Desenvolvimento() {
