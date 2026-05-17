@@ -64,3 +64,18 @@ export function isFiscalOnboardingSyncInProgress(raw: unknown): boolean {
 export function isOnboardingFiscalDashboardCardVisible(raw: unknown): boolean {
   return !isOnboardingFiscalJsonCompleted(raw);
 }
+
+/** SEFAZ/Focus indisponível no onboarding (`sefaz_unavailable === true`). */
+export function isOnboardingFiscalSefazUnavailable(raw: unknown): boolean {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return false;
+  return o.sefaz_unavailable === true;
+}
+
+/** ISO do próximo retry automático (`sefaz_retry_at`), se existir. */
+export function onboardingFiscalSefazRetryAt(raw: unknown): string | null {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return null;
+  const v = o.sefaz_retry_at;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}

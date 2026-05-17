@@ -6,9 +6,17 @@ import {
   isOnboardingFiscalFlowCompleted,
   isOnboardingFiscalInterpretConfirmPhase,
   isOnboardingFiscalNfeRecebidasDashboardEnabled,
+  isOnboardingFiscalSefazUnavailable,
+  onboardingFiscalSefazRetryAt,
 } from "@/lib/onboardingFiscalDashboard";
 import { confirmOnboardingFiscalInterpretPhase } from "@/services/companyOnboardingFlagsService";
-import { ArrowRight, CheckCircle2, FileBadge, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  FileBadge,
+  Loader2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -55,6 +63,18 @@ function progressPercent(max: number, synced: number, ignored: number): number {
   return Math.min(100, Math.max(0, Math.round((done / max) * 100)));
 }
 
+function formatSefazRetryLabel(retryAtIso: string | null, nowMs: number): string {
+  if (!retryAtIso) return "em breve";
+  const t = new Date(retryAtIso).getTime();
+  if (!Number.isFinite(t)) return "em breve";
+  const diffMs = t - nowMs;
+  if (diffMs <= 60_000) return "em breve";
+  const m = Math.ceil(diffMs / 60_000);
+  if (m < 60) return `em cerca de ${m} min`;
+  const h = Math.ceil(m / 60);
+  return `em cerca de ${h} h`;
+}
+
 /**
  * Onboarding fiscal · NF-e recebidas (Focus / SEFAZ).
  * O Dashboard só monta este card com `onboarding_fiscal.completed` ≠ true.
@@ -82,6 +102,11 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const progressPhase = isOnboardingFiscalNfeRecebidasDashboardEnabled(
     company?.onboarding_fiscal,
   );
+  const sefazUnavailable = isOnboardingFiscalSefazUnavailable(
+    company?.onboarding_fiscal,
+  );
+  const sefazRetryAt = onboardingFiscalSefazRetryAt(company?.onboarding_fiscal);
+  const sefazRetryLabel = formatSefazRetryLabel(sefazRetryAt, nowMs);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
@@ -175,7 +200,48 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const max = obFiscal.max;
   const done = obFiscal.synced + obFiscal.ignored;
   const barPct = progressPercent(max, obFiscal.synced, obFiscal.ignored);
-  const awaitingSefazEstimate = max === 0;
+  const awaitingSefazEstimate = max === 0 && !sefazUnavailable;
+
+  if (sefazUnavailable) {
+    return (
+      <Card className="border-2 border-amber-500/45 bg-linear-to-r from-amber-500/14 via-orange-500/10 to-amber-500/8 shadow-md">
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/35 text-amber-950 ring-1 ring-amber-700/25 dark:text-amber-100">
+                <AlertTriangle className="h-5 w-5 opacity-95" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-950/85 dark:text-amber-100/85">
+                  Onboarding fiscal · NF-e recebidas
+                </p>
+                <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
+                  SEFAZ indisponível no momento
+                </h3>
+                <p className="mt-2 text-sm font-medium leading-relaxed text-amber-950/92 dark:text-amber-100/90">
+                  Não foi possível obter resposta da SEFAZ para listar as NF-e
+                  recebidas desta unidade. Vamos tentar novamente{" "}
+                  <strong>{sefazRetryLabel}</strong> de forma automática.
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Não é necessário fazer nada agora — o painel atualiza assim que
+                  a sincronização retomar.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              <Button size="sm" className="shrink-0" variant="outline" asChild>
+                <Link to="/app/configuracoes/fiscal">
+                  Configurações fiscais
+                  <ArrowRight className="ml-1.5 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md">
@@ -201,16 +267,16 @@ export function DashboardFocusNfeRecebidasSyncCard({
 
               {awaitingSefazEstimate ? (
                 <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
-                  Estamos a consultar a SEFAZ pelos dados das{" "}
-                  <strong>NF-e recebidas</strong> desta unidade. Assim que a
-                  primeira listagem terminar, o total estimado aparece aqui e
-                  acompanha o progresso de sincronização.
+                  Estamos a consultar a SEFAZ e a preparar as{" "}
+                  <strong>NF-e recebidas</strong> desta unidade. O total de
+                  notas a processar aparece aqui assim que a sincronização
+                  terminar.
                 </p>
               ) : (
                 <>
                   <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
                     <strong>{done}</strong> de <strong>{max}</strong> notas
-                    contabilizadas na estimativa da SEFAZ.
+                    processadas neste onboarding.
                   </p>
                   <div
                     className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18"

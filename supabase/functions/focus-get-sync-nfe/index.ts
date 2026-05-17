@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * 
+ *
  * Listagem **resumida** de NF-e recebidas na Focus (`GET /v2/nfes_recebidas`), usando
  * `x-total-count` e `x-max-version` nos headers para paginação. Apenas notas com
  * `nfe_completa` explicitamente verdadeiro são gravadas em `focus_get_sync_nfe_staging`.
@@ -10,8 +10,10 @@
  *
  * **Manual:** `{ "manual": true, "company_id": "<uuid>" }` + `Authorization: Bearer <JWT>`.
  * Opcional: `versao` (número inicial do cursor; senão usa `focusnfe.nfes_recebidas_ultima_versao` ou 0).
- * Opcional: `onboarding: true` — fluxo de onboarding fiscal: na **primeira** resposta de listagem Focus grava
- * `companies.onboarding_fiscal.max_nfes_sync` como `len(lista) + x-total-count` (total estimado a sincronizar), preservando `sync`, `nfes_*` e `completed`.
+ * Opcional: `onboarding: true` — fluxo de onboarding fiscal: ao **terminar** o sync (staging completo), grava
+ * `companies.onboarding_fiscal.max_nfes_sync` = notas efetivamente gravadas em staging (total exato a interpretar).
+ * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
+ * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
@@ -212,7 +214,10 @@ type OnboardingFiscalState = {
   nfes_sync: number;
   nfes_ignored: number;
   completed: boolean;
+  sefaz_unavailable?: boolean;
 };
+
+const SEFAZ_RETRY_MINUTES_DEFAULT = 30;
 
 function normalizeOnboardingFiscal(raw: unknown): OnboardingFiscalState {
   const o =
@@ -240,7 +245,112 @@ function defaultOnboardingFiscalState(): OnboardingFiscalState {
     nfes_sync: 0,
     nfes_ignored: 0,
     completed: false,
+    sefaz_unavailable: false,
   };
+}
+
+function sefazRetryMinutes(): number {
+  const raw = Deno.env.get("FOCUS_ONBOARDING_SEFAZ_RETRY_MINUTES")?.trim();
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 5 && n <= 24 * 60) return Math.floor(n);
+  return SEFAZ_RETRY_MINUTES_DEFAULT;
+}
+
+/** Erros transitórios na listagem Focus/SEFAZ (não confundir com 401/403 de configuração). */
+function isSefazUnavailableListError(
+  status: number | null,
+  isNetwork: boolean,
+): boolean {
+  if (isNetwork) return true;
+  if (status == null) return true;
+  if (status >= 500) return true;
+  if (status === 429 || status === 408) return true;
+  return false;
+}
+
+function clearSefazErrorFields(
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const o = { ...state, sefaz_unavailable: false };
+  delete o.sefaz_unavailable_at;
+  delete o.sefaz_retry_at;
+  delete o.sefaz_error_detail;
+  return o;
+}
+
+async function applyOnboardingFiscalSefazUnavailable(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  detail?: string,
+): Promise<{ error?: string }> {
+  const retryAt = new Date(
+    Date.now() + sefazRetryMinutes() * 60_000,
+  ).toISOString();
+  const { data: row, error: rErr } = await admin
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (rErr) return { error: rErr.message };
+  const base =
+    row?.onboarding_fiscal &&
+    typeof row.onboarding_fiscal === "object" &&
+    !Array.isArray(row.onboarding_fiscal)
+      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
+      : {};
+  const prev = normalizeOnboardingFiscal(row?.onboarding_fiscal);
+  const next: Record<string, unknown> = {
+    ...base,
+    ...prev,
+    sync: true,
+    sefaz_unavailable: true,
+    sefaz_unavailable_at: new Date().toISOString(),
+    sefaz_retry_at: retryAt,
+  };
+  if (detail) next.sefaz_error_detail = detail.slice(0, 300);
+  const { error: uErr } = await admin
+    .from("companies")
+    .update({
+      onboarding_fiscal: next,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", companyId);
+  if (uErr) return { error: uErr.message };
+  console.log(
+    LOG,
+    "onboarding_fiscal_sefaz_unavailable",
+    JSON.stringify({ company_id: companyId, sefaz_retry_at: retryAt }),
+  );
+  return {};
+}
+
+async function clearOnboardingFiscalSefazForRetry(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<{ error?: string }> {
+  const { data: row, error: rErr } = await admin
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (rErr) return { error: rErr.message };
+  const base =
+    row?.onboarding_fiscal &&
+    typeof row.onboarding_fiscal === "object" &&
+    !Array.isArray(row.onboarding_fiscal)
+      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
+      : {};
+  const prev = normalizeOnboardingFiscal(row?.onboarding_fiscal);
+  const next = clearSefazErrorFields({ ...base, ...prev });
+  const { error: uErr } = await admin
+    .from("companies")
+    .update({
+      onboarding_fiscal: next,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", companyId);
+  if (uErr) return { error: uErr.message };
+  return {};
 }
 
 async function applyOnboardingFiscalDefaults(
@@ -270,12 +380,22 @@ async function mergeOnboardingFiscalMaxNfes(
     .eq("id", companyId)
     .maybeSingle();
   if (rErr) return { error: rErr.message };
+  const base =
+    row?.onboarding_fiscal &&
+    typeof row.onboarding_fiscal === "object" &&
+    !Array.isArray(row.onboarding_fiscal)
+      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
+      : {};
   const prev = normalizeOnboardingFiscal(row?.onboarding_fiscal);
-  const next: OnboardingFiscalState = { ...prev, max_nfes_sync: maxNfesSync };
+  const next = clearSefazErrorFields({
+    ...base,
+    ...prev,
+    max_nfes_sync: maxNfesSync,
+  });
   const { error: uErr } = await admin
     .from("companies")
     .update({
-      onboarding_fiscal: next as unknown as Record<string, unknown>,
+      onboarding_fiscal: next,
       updated_at: new Date().toISOString(),
     })
     .eq("id", companyId);
@@ -294,496 +414,585 @@ Deno.serve(async (req) => {
 
     // --- Passo 1: body, segredo cron / manual + JWT, env Supabase + Focus ---
     const bodyRaw = await req.json().catch(() => ({}));
-  const body =
-    bodyRaw && typeof bodyRaw === "object" && !Array.isArray(bodyRaw)
-      ? (bodyRaw as Record<string, unknown>)
-      : {};
+    const body =
+      bodyRaw && typeof bodyRaw === "object" && !Array.isArray(bodyRaw)
+        ? (bodyRaw as Record<string, unknown>)
+        : {};
 
-  const onboardingFlow = body.onboarding === true;
+    const onboardingFlow = body.onboarding === true;
+    const onboardingRetry = body.onboarding_retry === true;
 
-  const expected = Deno.env.get("FOCUS_NFE_RECEBIDAS_CRON_SECRET")?.trim();
-  if (!expected) {
-    return json(
-      {
-        ok: false,
-        error:
-          "Defina FOCUS_NFE_RECEBIDAS_CRON_SECRET (secret no Authorization Bearer para chamadas agendadas ou internas).",
-      },
-      503,
-    );
-  }
-
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
-  const isCron = bearer === expected;
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const focusToken = Deno.env.get("FOCUS_NFE_TOKEN")?.trim();
-  const apiBase = (
-    Deno.env.get("FOCUS_NFE_API_BASE")?.trim() || "https://api.focusnfe.com.br"
-  ).replace(/\/$/, "");
-
-  if (!supabaseUrl || !anonKey || !serviceKey || !focusToken) {
-    return json(
-      { ok: false, error: "Variáveis Supabase ou FOCUS_NFE_TOKEN em falta." },
-      500,
-    );
-  }
-
-  const maxCompanies = intFromEnv(
-    "FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN",
-    1,
-    1,
-    500,
-  );
-  const maxPages = intFromEnv("FOCUS_GET_SYNC_MAX_PAGES", 80, 1, 500);
-
-  const cronFilterCompanyId = isCron
-    ? String(body.company_id ?? "").trim()
-    : "";
-
-  const admin = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  let companiesToProcess: CoRow[] = [];
-  let isManualSingle = false;
-  let bodyVersaoInicial: number | null = null;
-
-  if (isCron) {
-    const { data: companies, error: listErr } = await admin
-      .from("companies")
-      .select("id, document, focusnfe");
-
-    if (listErr) {
-      console.error(LOG, "list_companies", listErr.message);
-      return json({ ok: false, error: listErr.message }, 500);
-    }
-    let list = (companies ?? []) as CoRow[];
-    if (cronFilterCompanyId) {
-      list = list.filter((c) => String(c.id) === cronFilterCompanyId);
-    }
-    companiesToProcess = list;
-  } else {
-    if (body.manual !== true) {
+    const expected = Deno.env.get("FOCUS_NFE_RECEBIDAS_CRON_SECRET")?.trim();
+    if (!expected) {
       return json(
         {
           ok: false,
           error:
-            "Não autorizado. Use Bearer com o secret do cron ou body { manual: true, company_id } com sessão válida.",
+            "Defina FOCUS_NFE_RECEBIDAS_CRON_SECRET (secret no Authorization Bearer para chamadas agendadas ou internas).",
         },
-        401,
+        503,
       );
     }
-    const companyIdManual = String(body.company_id ?? "").trim();
-    if (!companyIdManual) {
+
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isCron = bearer === expected;
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const focusToken = Deno.env.get("FOCUS_NFE_TOKEN")?.trim();
+    const apiBase = (
+      Deno.env.get("FOCUS_NFE_API_BASE")?.trim() ||
+      "https://api.focusnfe.com.br"
+    ).replace(/\/$/, "");
+
+    if (!supabaseUrl || !anonKey || !serviceKey || !focusToken) {
       return json(
-        {
-          ok: false,
-          error: "manual: true requer company_id (UUID da unidade).",
-        },
-        400,
+        { ok: false, error: "Variáveis Supabase ou FOCUS_NFE_TOKEN em falta." },
+        500,
       );
     }
-    if (!authHeader.startsWith("Bearer ") || !bearer) {
-      return json(
-        { ok: false, error: "Envie Authorization: Bearer <JWT da sessão>." },
-        401,
-      );
-    }
-    const userClient = createClient(supabaseUrl, anonKey, {
+
+    const maxCompanies = intFromEnv(
+      "FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN",
+      1,
+      1,
+      500,
+    );
+    const maxPages = intFromEnv("FOCUS_GET_SYNC_MAX_PAGES", 80, 1, 500);
+
+    const cronFilterCompanyId = isCron
+      ? String(body.company_id ?? "").trim()
+      : "";
+
+    const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: authHeader } },
     });
-    const {
-      data: { user },
-      error: userErr,
-    } = await userClient.auth.getUser();
-    if (userErr || !user) {
-      return json(
-        { ok: false, error: "Sessão inválida. Entre novamente." },
-        401,
-      );
-    }
-    const { data: mem, error: memErr } = await userClient
-      .from("user_companies")
-      .select("company_id")
-      .eq("user_id", user.id)
-      .eq("company_id", companyIdManual)
-      .maybeSingle();
-    if (memErr || !mem) {
-      return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
-    }
-    const { data: oneRow, error: coErr } = await admin
-      .from("companies")
-      .select("id, document, focusnfe")
-      .eq("id", companyIdManual)
-      .maybeSingle();
-    if (coErr || !oneRow) {
-      return json({ ok: false, error: "Unidade não encontrada." }, 404);
-    }
-    companiesToProcess = [oneRow as CoRow];
-    isManualSingle = true;
-    const rawv = body.versao;
-    if (rawv !== undefined && rawv !== null && String(rawv).trim() !== "") {
-      const n = Number(rawv);
-      if (Number.isFinite(n) && n >= 0) bodyVersaoInicial = Math.floor(n);
-    }
-  }
 
-  const execId = crypto.randomUUID();
+    let companiesToProcess: CoRow[] = [];
+    let isManualSingle = false;
+    let bodyVersaoInicial: number | null = null;
 
-  // Elegíveis: id_empresa Focus + CNPJ 14 dígitos + cap empresas
-  const detail: Array<Record<string, unknown>> = [];
-  let eligibleSlots = 0;
-  const eligible: CoRow[] = [];
+    if (isCron) {
+      const { data: companies, error: listErr } = await admin
+        .from("companies")
+        .select("id, document, focusnfe");
 
-  for (const row of companiesToProcess) {
-    const companyId = String(row.id);
-    const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
-    const cnpjDigits = String(row.document ?? "")
-      .replace(/\D/g, "")
-      .slice(0, 14);
-    if (!focusIdEmpresa(focusnfe)) {
-      detail.push({ company_id: companyId, skipped: "sem id_empresa Focus" });
-      continue;
-    }
-    if (cnpjDigits.length !== 14) {
-      detail.push({
-        company_id: companyId,
-        skipped: "document sem CNPJ 14 dígitos",
+      if (listErr) {
+        console.error(LOG, "list_companies", listErr.message);
+        return json({ ok: false, error: listErr.message }, 500);
+      }
+      let list = (companies ?? []) as CoRow[];
+      if (cronFilterCompanyId) {
+        list = list.filter((c) => String(c.id) === cronFilterCompanyId);
+      }
+      companiesToProcess = list;
+    } else {
+      if (body.manual !== true) {
+        return json(
+          {
+            ok: false,
+            error:
+              "Não autorizado. Use Bearer com o secret do cron ou body { manual: true, company_id } com sessão válida.",
+          },
+          401,
+        );
+      }
+      const companyIdManual = String(body.company_id ?? "").trim();
+      if (!companyIdManual) {
+        return json(
+          {
+            ok: false,
+            error: "manual: true requer company_id (UUID da unidade).",
+          },
+          400,
+        );
+      }
+      if (!authHeader.startsWith("Bearer ") || !bearer) {
+        return json(
+          { ok: false, error: "Envie Authorization: Bearer <JWT da sessão>." },
+          401,
+        );
+      }
+      const userClient = createClient(supabaseUrl, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: authHeader } },
       });
-      continue;
+      const {
+        data: { user },
+        error: userErr,
+      } = await userClient.auth.getUser();
+      if (userErr || !user) {
+        return json(
+          { ok: false, error: "Sessão inválida. Entre novamente." },
+          401,
+        );
+      }
+      const { data: mem, error: memErr } = await userClient
+        .from("user_companies")
+        .select("company_id")
+        .eq("user_id", user.id)
+        .eq("company_id", companyIdManual)
+        .maybeSingle();
+      if (memErr || !mem) {
+        return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
+      }
+      const { data: oneRow, error: coErr } = await admin
+        .from("companies")
+        .select("id, document, focusnfe")
+        .eq("id", companyIdManual)
+        .maybeSingle();
+      if (coErr || !oneRow) {
+        return json({ ok: false, error: "Unidade não encontrada." }, 404);
+      }
+      companiesToProcess = [oneRow as CoRow];
+      isManualSingle = true;
+      const rawv = body.versao;
+      if (rawv !== undefined && rawv !== null && String(rawv).trim() !== "") {
+        const n = Number(rawv);
+        if (Number.isFinite(n) && n >= 0) bodyVersaoInicial = Math.floor(n);
+      }
     }
-    if (eligibleSlots >= maxCompanies) continue;
-    eligibleSlots += 1;
-    eligible.push(row);
-  }
 
-  // --- Passo 2: para cada unidade, GET na Focus (headers + versão) e staging só nfe_completa true ---
-  for (const row of eligible) {
-    const companyId = String(row.id);
-    const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
-    const cnpjDigits = String(row.document ?? "")
-      .replace(/\D/g, "")
-      .slice(0, 14);
+    const execId = crypto.randomUUID();
 
-    const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
-    const cursorPersistido =
-      Number.isFinite(storedRaw) && storedRaw >= 0 ? Math.floor(storedRaw) : 0;
-    let versao =
-      isManualSingle && bodyVersaoInicial !== null
-        ? bodyVersaoInicial
-        : cursorPersistido;
+    // Elegíveis: id_empresa Focus + CNPJ 14 dígitos + cap empresas
+    const detail: Array<Record<string, unknown>> = [];
+    let eligibleSlots = 0;
+    const eligible: CoRow[] = [];
 
-    let quantasBuscas = 0;
-    let notasEncontradas = 0;
-    const focusHttpMs: number[] = [];
-    const tCompany0 = performance.now();
-    const xmlGapMs = throttleMsBetweenXmlDownloads();
-    let onboardingFirstListMaxWritten = false;
-
-    if (onboardingFlow) {
-      const { error: obResetErr } = await applyOnboardingFiscalDefaults(
-        admin,
-        companyId,
-      );
-      if (obResetErr) {
-        console.warn(LOG, "onboarding_fiscal_reset", companyId, obResetErr);
+    for (const row of companiesToProcess) {
+      const companyId = String(row.id);
+      const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
+      const cnpjDigits = String(row.document ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 14);
+      if (!focusIdEmpresa(focusnfe)) {
+        detail.push({ company_id: companyId, skipped: "sem id_empresa Focus" });
+        continue;
+      }
+      if (cnpjDigits.length !== 14) {
         detail.push({
           company_id: companyId,
-          ok: false,
-          error: `onboarding_fiscal reset: ${obResetErr}`,
+          skipped: "document sem CNPJ 14 dígitos",
         });
         continue;
       }
-      console.log(
-        LOG,
-        JSON.stringify({
-          fase: "onboarding_processamento",
-          company_id: companyId,
-          exec_id: execId,
-        }),
-      );
+      if (eligibleSlots >= maxCompanies) continue;
+      eligibleSlots += 1;
+      eligible.push(row);
     }
 
-    for (let page = 0; page < maxPages; page++) {
-      const listUrl = `${apiBase}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpjDigits)}&versao=${versao}`;
+    // --- Passo 2: para cada unidade, GET na Focus (headers + versão) e staging só nfe_completa true ---
+    for (const row of eligible) {
+      const companyId = String(row.id);
+      const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
+      const cnpjDigits = String(row.document ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 14);
 
-      const tHttp0 = performance.now();
-      let listRes: Response;
-      try {
-        listRes = await fetch(listUrl, {
-          method: "GET",
-          headers: {
-            Authorization: focusBasicAuthHeader(focusToken),
-            Accept: "application/json",
-          },
-        });
-      } catch (e) {
-        console.error(LOG, "fetch lista", companyId, e);
-        detail.push({
-          company_id: companyId,
-          cnpj: cnpjDigits,
-          ok: false,
-          error: "falha de rede na lista Focus",
-          quantasBuscasForamExecutadas: quantasBuscas,
-          notasEncontradas: 0,
-        });
-        break;
-      }
-      focusHttpMs.push(Math.round(performance.now() - tHttp0));
-      quantasBuscas += 1;
+      const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
+      const cursorPersistido =
+        Number.isFinite(storedRaw) && storedRaw >= 0
+          ? Math.floor(storedRaw)
+          : 0;
+      let versao =
+        isManualSingle && bodyVersaoInicial !== null
+          ? bodyVersaoInicial
+          : cursorPersistido;
 
-      const xTotalCount = intHeader(listRes, "x-total-count");
-      const xMaxVersion = intHeader(listRes, "x-max-version");
+      let quantasBuscas = 0;
+      let notasEncontradas = 0;
+      const focusHttpMs: number[] = [];
+      const tCompany0 = performance.now();
+      const xmlGapMs = throttleMsBetweenXmlDownloads();
+      let companySyncOk = true;
 
-      const listText = await listRes.text();
-      if (!listRes.ok) {
-        detail.push({
-          company_id: companyId,
-          cnpj: cnpjDigits,
-          ok: false,
-          error: `Focus lista HTTP ${listRes.status}: ${listText.slice(0, 200)}`,
-          quantasBuscasForamExecutadas: quantasBuscas,
-          notasEncontradas: notasEncontradas,
-        });
-        break;
-      }
-
-      let lista: unknown;
-      try {
-        lista = listText ? JSON.parse(listText) : [];
-      } catch {
-        detail.push({
-          company_id: companyId,
-          cnpj: cnpjDigits,
-          ok: false,
-          error: `Resposta lista inválida (HTTP ${listRes.status})`,
-          quantasBuscasForamExecutadas: quantasBuscas,
-          notasEncontradas: notasEncontradas,
-        });
-        break;
-      }
-
-      if (!Array.isArray(lista)) {
-        detail.push({
-          company_id: companyId,
-          cnpj: cnpjDigits,
-          ok: false,
-          error: `Formato de lista inesperado (HTTP ${listRes.status})`,
-          quantasBuscasForamExecutadas: quantasBuscas,
-          notasEncontradas: notasEncontradas,
-        });
-        break;
+      if (onboardingFlow && !onboardingRetry) {
+        const { error: obResetErr } = await applyOnboardingFiscalDefaults(
+          admin,
+          companyId,
+        );
+        if (obResetErr) {
+          console.warn(LOG, "onboarding_fiscal_reset", companyId, obResetErr);
+          detail.push({
+            company_id: companyId,
+            ok: false,
+            error: `onboarding_fiscal reset: ${obResetErr}`,
+          });
+          continue;
+        }
+        console.log(
+          LOG,
+          JSON.stringify({
+            fase: "onboarding_processamento",
+            company_id: companyId,
+            exec_id: execId,
+          }),
+        );
+      } else if (onboardingFlow && onboardingRetry) {
+        const { error: clrErr } = await clearOnboardingFiscalSefazForRetry(
+          admin,
+          companyId,
+        );
+        if (clrErr) {
+          console.warn(LOG, "onboarding_fiscal_retry_clear", companyId, clrErr);
+        }
+        console.log(
+          LOG,
+          JSON.stringify({
+            fase: "onboarding_retry",
+            company_id: companyId,
+            exec_id: execId,
+          }),
+        );
       }
 
-      const cabList = lista as NfeCabLike[];
+      for (let page = 0; page < maxPages; page++) {
+        const listUrl = `${apiBase}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpjDigits)}&versao=${versao}`;
 
-      if (onboardingFlow && !onboardingFirstListMaxWritten) {
-        onboardingFirstListMaxWritten = true;
-        const xTc = xTotalCount ?? 0;
-        const maxNfes = Math.max(0, cabList.length + xTc);
+        const tHttp0 = performance.now();
+        let listRes: Response;
+        try {
+          listRes = await fetch(listUrl, {
+            method: "GET",
+            headers: {
+              Authorization: focusBasicAuthHeader(focusToken),
+              Accept: "application/json",
+            },
+          });
+        } catch (e) {
+          console.error(LOG, "fetch lista", companyId, e);
+          companySyncOk = false;
+          const errMsg = "falha de rede na lista Focus";
+          if (onboardingFlow) {
+            await applyOnboardingFiscalSefazUnavailable(
+              admin,
+              companyId,
+              errMsg,
+            );
+          }
+          detail.push({
+            company_id: companyId,
+            cnpj: cnpjDigits,
+            ok: false,
+            error: errMsg,
+            sefaz_unavailable: onboardingFlow,
+            quantasBuscasForamExecutadas: quantasBuscas,
+            notasEncontradas: 0,
+          });
+          break;
+        }
+        focusHttpMs.push(Math.round(performance.now() - tHttp0));
+        quantasBuscas += 1;
+
+        const xTotalCount = intHeader(listRes, "x-total-count");
+        const xMaxVersion = intHeader(listRes, "x-max-version");
+
+        const listText = await listRes.text();
+        if (!listRes.ok) {
+          const errMsg = `Focus lista HTTP ${listRes.status}: ${listText.slice(0, 200)}`;
+          companySyncOk = false;
+          if (
+            onboardingFlow &&
+            isSefazUnavailableListError(listRes.status, false)
+          ) {
+            await applyOnboardingFiscalSefazUnavailable(
+              admin,
+              companyId,
+              errMsg,
+            );
+          }
+          detail.push({
+            company_id: companyId,
+            cnpj: cnpjDigits,
+            ok: false,
+            error: errMsg,
+            sefaz_unavailable:
+              onboardingFlow &&
+              isSefazUnavailableListError(listRes.status, false),
+            quantasBuscasForamExecutadas: quantasBuscas,
+            notasEncontradas: notasEncontradas,
+          });
+          break;
+        }
+
+        let lista: unknown;
+        try {
+          lista = listText ? JSON.parse(listText) : [];
+        } catch {
+          const errMsg = `Resposta lista inválida (HTTP ${listRes.status})`;
+          companySyncOk = false;
+          if (onboardingFlow) {
+            await applyOnboardingFiscalSefazUnavailable(
+              admin,
+              companyId,
+              errMsg,
+            );
+          }
+          detail.push({
+            company_id: companyId,
+            cnpj: cnpjDigits,
+            ok: false,
+            error: errMsg,
+            sefaz_unavailable: onboardingFlow,
+            quantasBuscasForamExecutadas: quantasBuscas,
+            notasEncontradas: notasEncontradas,
+          });
+          break;
+        }
+
+        if (!Array.isArray(lista)) {
+          const errMsg = `Formato de lista inesperado (HTTP ${listRes.status})`;
+          companySyncOk = false;
+          if (onboardingFlow) {
+            await applyOnboardingFiscalSefazUnavailable(
+              admin,
+              companyId,
+              errMsg,
+            );
+          }
+          detail.push({
+            company_id: companyId,
+            cnpj: cnpjDigits,
+            ok: false,
+            error: errMsg,
+            sefaz_unavailable: onboardingFlow,
+            quantasBuscasForamExecutadas: quantasBuscas,
+            notasEncontradas: notasEncontradas,
+          });
+          break;
+        }
+
+        const cabList = lista as NfeCabLike[];
+
+        const completas = cabList.filter(
+          (cab) =>
+            isNfeCompletaExplicitTrue(cab["nfe_completa"]) &&
+            cab["situacao"] === "autorizada",
+        );
+
+        const completasComChave = completas
+          .map((cab) => ({
+            cab,
+            chave: String(cab["chave_nfe"] ?? "").replace(/\D/g, ""),
+          }))
+          .filter((x) => x.chave.length === 44);
+
+        for (
+          let chunkStart = 0;
+          chunkStart < completasComChave.length;
+          chunkStart += XML_DOWNLOAD_PARALLEL
+        ) {
+          if (chunkStart > 0 && xmlGapMs > 0) await sleep(xmlGapMs);
+          const chunk = completasComChave.slice(
+            chunkStart,
+            chunkStart + XML_DOWNLOAD_PARALLEL,
+          );
+
+          const chunkWithXml = await Promise.all(
+            chunk.map(async ({ cab, chave }) => {
+              const xmlUrl = `${apiBase}/v2/nfes_recebidas/${encodeURIComponent(chave)}.xml?cnpj=${encodeURIComponent(cnpjDigits)}`;
+              const got = await fetchNfeRecebidaXmlWithRetry(
+                xmlUrl,
+                focusToken,
+                chave,
+              );
+              let xmlContent: string | null = null;
+              if (got.ok) {
+                const raw = new TextDecoder("utf-8", { fatal: false }).decode(
+                  got.buf,
+                );
+                const head = raw
+                  .slice(0, Math.min(200, raw.length))
+                  .toLowerCase();
+                if (head.includes("nfe") || head.includes("nfeproc")) {
+                  xmlContent = raw;
+                } else {
+                  console.warn(
+                    LOG,
+                    JSON.stringify({
+                      fase: "xml_corpo_suspeito",
+                      chave_nfe_44: chave,
+                      company_id: companyId,
+                    }),
+                  );
+                }
+              }
+              return { cab, chave, xmlContent };
+            }),
+          );
+
+          for (const { cab, chave, xmlContent } of chunkWithXml) {
+            const vnf = cab["versao"];
+            const versaoNf =
+              vnf !== undefined && vnf !== null && Number.isFinite(Number(vnf))
+                ? Math.floor(Number(vnf))
+                : null;
+            const situacao =
+              cab["situacao"] !== undefined && cab["situacao"] !== null
+                ? String(cab["situacao"])
+                : null;
+
+            const { error: insErr } = await admin
+              .from("focus_get_sync_nfe_staging")
+              .insert({
+                exec_id: execId,
+                company_id: companyId,
+                cnpj: cnpjDigits,
+                chave_nfe: chave,
+                versao_nf: versaoNf,
+                situacao,
+                nfe_completa: true,
+                payload: cab,
+                page_index: page,
+                versao_query_used: versao,
+                x_total_count_snapshot: xTotalCount,
+                x_max_version_snapshot: xMaxVersion,
+                xml_content: xmlContent,
+              });
+            if (insErr) {
+              console.warn(LOG, "staging_insert", companyId, insErr.message);
+            } else {
+              notasEncontradas += 1;
+            }
+          }
+        }
+
+        // x-total-count == 0 → não há mais notas a consultar (regra Focus / pedido de produto).
+        if (xTotalCount === 0) {
+          break;
+        }
+
+        if (cabList.length === 0) {
+          if (
+            xMaxVersion != null &&
+            Number.isFinite(xMaxVersion) &&
+            xMaxVersion > versao
+          ) {
+            versao = xMaxVersion;
+            continue;
+          }
+          break;
+        }
+
+        if (xMaxVersion === null || !Number.isFinite(xMaxVersion)) {
+          break;
+        }
+        if (xMaxVersion === versao) {
+          break;
+        }
+        versao = xMaxVersion;
+      }
+
+      const temposDeProcessamento = {
+        focus_http_ms_por_busca: focusHttpMs,
+        focus_http_ms_total: focusHttpMs.reduce((a, b) => a + b, 0),
+        empresa_total_ms: Math.round(performance.now() - tCompany0),
+        wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
+      };
+
+      if (onboardingFlow && companySyncOk) {
         const { error: obErr } = await mergeOnboardingFiscalMaxNfes(
           admin,
           companyId,
-          maxNfes,
+          notasEncontradas,
         );
         if (obErr) {
           console.warn(LOG, "onboarding_fiscal_max_nfes", companyId, obErr);
+        } else {
+          console.log(
+            LOG,
+            "onboarding_fiscal_max_nfes_final",
+            JSON.stringify({
+              company_id: companyId,
+              exec_id: execId,
+              max_nfes_sync: notasEncontradas,
+            }),
+          );
         }
       }
 
-      const completas = cabList.filter(
-        (cab) =>
-          isNfeCompletaExplicitTrue(cab["nfe_completa"]) &&
-          cab["situacao"] === "autorizada",
-      );
-
-      const completasComChave = completas
-        .map((cab) => ({
-          cab,
-          chave: String(cab["chave_nfe"] ?? "").replace(/\D/g, ""),
-        }))
-        .filter((x) => x.chave.length === 44);
-
-      for (
-        let chunkStart = 0;
-        chunkStart < completasComChave.length;
-        chunkStart += XML_DOWNLOAD_PARALLEL
-      ) {
-        if (chunkStart > 0 && xmlGapMs > 0) await sleep(xmlGapMs);
-        const chunk = completasComChave.slice(
-          chunkStart,
-          chunkStart + XML_DOWNLOAD_PARALLEL,
-        );
-
-        const chunkWithXml = await Promise.all(
-          chunk.map(async ({ cab, chave }) => {
-            const xmlUrl = `${apiBase}/v2/nfes_recebidas/${encodeURIComponent(chave)}.xml?cnpj=${encodeURIComponent(cnpjDigits)}`;
-            const got = await fetchNfeRecebidaXmlWithRetry(
-              xmlUrl,
-              focusToken,
-              chave,
-            );
-            let xmlContent: string | null = null;
-            if (got.ok) {
-              const raw = new TextDecoder("utf-8", { fatal: false }).decode(
-                got.buf,
-              );
-              const head = raw
-                .slice(0, Math.min(200, raw.length))
-                .toLowerCase();
-              if (head.includes("nfe") || head.includes("nfeproc")) {
-                xmlContent = raw;
-              } else {
-                console.warn(
-                  LOG,
-                  JSON.stringify({
-                    fase: "xml_corpo_suspeito",
-                    chave_nfe_44: chave,
-                    company_id: companyId,
-                  }),
-                );
-              }
-            }
-            return { cab, chave, xmlContent };
-          }),
-        );
-
-        for (const { cab, chave, xmlContent } of chunkWithXml) {
-          const vnf = cab["versao"];
-          const versaoNf =
-            vnf !== undefined && vnf !== null && Number.isFinite(Number(vnf))
-              ? Math.floor(Number(vnf))
-              : null;
-          const situacao =
-            cab["situacao"] !== undefined && cab["situacao"] !== null
-              ? String(cab["situacao"])
-              : null;
-
-          const { error: insErr } = await admin
-            .from("focus_get_sync_nfe_staging")
+      if (notasEncontradas > 0) {
+        const { data: existingJob, error: selJobErr } = await admin
+          .from("focus_get_sync_nfe_interpret_jobs")
+          .select("id,status")
+          .eq("exec_id", execId)
+          .eq("company_id", companyId)
+          .maybeSingle();
+        if (selJobErr) {
+          console.warn(
+            LOG,
+            "interpret_job_select",
+            companyId,
+            selJobErr.message,
+          );
+        } else if (!existingJob?.id) {
+          const { error: insJobErr } = await admin
+            .from("focus_get_sync_nfe_interpret_jobs")
             .insert({
               exec_id: execId,
               company_id: companyId,
-              cnpj: cnpjDigits,
-              chave_nfe: chave,
-              versao_nf: versaoNf,
-              situacao,
-              nfe_completa: true,
-              payload: cab,
-              page_index: page,
-              versao_query_used: versao,
-              x_total_count_snapshot: xTotalCount,
-              x_max_version_snapshot: xMaxVersion,
-              xml_content: xmlContent,
+              status: "pending",
+              onboarding: onboardingFlow,
             });
-          if (insErr) {
-            console.warn(LOG, "staging_insert", companyId, insErr.message);
-          } else {
-            notasEncontradas += 1;
+          if (insJobErr) {
+            console.warn(
+              LOG,
+              "interpret_job_insert",
+              companyId,
+              insJobErr.message,
+            );
+          }
+        } else {
+          const { error: updOnbErr } = await admin
+            .from("focus_get_sync_nfe_interpret_jobs")
+            .update({ onboarding: onboardingFlow })
+            .eq("id", existingJob.id);
+          if (updOnbErr) {
+            console.warn(
+              LOG,
+              "interpret_job_onboarding",
+              companyId,
+              updOnbErr.message,
+            );
           }
         }
       }
 
-      // x-total-count == 0 → não há mais notas a consultar (regra Focus / pedido de produto).
-      if (xTotalCount === 0) {
-        break;
-      }
+      const linhaLog = {
+        cnpj: cnpjDigits,
+        notasEncontradas,
+        quantasBuscasForamExecutadas: quantasBuscas,
+        temposDeProcessamento,
+        company_id: companyId,
+        exec_id: execId,
+      };
+      console.log(LOG, JSON.stringify(linhaLog));
 
-      if (cabList.length === 0) {
-        if (
-          xMaxVersion != null &&
-          Number.isFinite(xMaxVersion) &&
-          xMaxVersion > versao
-        ) {
-          versao = xMaxVersion;
-          continue;
-        }
-        break;
-      }
-
-      if (xMaxVersion === null || !Number.isFinite(xMaxVersion)) {
-        break;
-      }
-      if (xMaxVersion === versao) {
-        break;
-      }
-      versao = xMaxVersion;
-    }
-
-    const temposDeProcessamento = {
-      focus_http_ms_por_busca: focusHttpMs,
-      focus_http_ms_total: focusHttpMs.reduce((a, b) => a + b, 0),
-      empresa_total_ms: Math.round(performance.now() - tCompany0),
-      wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
-    };
-
-    if (notasEncontradas > 0) {
-      const { data: existingJob, error: selJobErr } = await admin
-        .from("focus_get_sync_nfe_interpret_jobs")
-        .select("id,status")
-        .eq("exec_id", execId)
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (selJobErr) {
-        console.warn(LOG, "interpret_job_select", companyId, selJobErr.message);
-      } else if (!existingJob?.id) {
-        const { error: insJobErr } = await admin
-          .from("focus_get_sync_nfe_interpret_jobs")
-          .insert({
-            exec_id: execId,
-            company_id: companyId,
-            status: "pending",
-            onboarding: onboardingFlow,
-          });
-        if (insJobErr) {
-          console.warn(LOG, "interpret_job_insert", companyId, insJobErr.message);
-        }
-      } else {
-        const { error: updOnbErr } = await admin
-          .from("focus_get_sync_nfe_interpret_jobs")
-          .update({ onboarding: onboardingFlow })
-          .eq("id", existingJob.id);
-        if (updOnbErr) {
-          console.warn(LOG, "interpret_job_onboarding", companyId, updOnbErr.message);
-        }
+      if (companySyncOk) {
+        detail.push({
+          company_id: companyId,
+          cnpj: cnpjDigits,
+          ok: true,
+          exec_id: execId,
+          notasEncontradas,
+          quantasBuscasForamExecutadas: quantasBuscas,
+          temposDeProcessamento,
+        });
       }
     }
 
-    const linhaLog = {
-      cnpj: cnpjDigits,
-      notasEncontradas,
-      quantasBuscasForamExecutadas: quantasBuscas,
-      temposDeProcessamento,
-      company_id: companyId,
-      exec_id: execId,
-    };
-    console.log(LOG, JSON.stringify(linhaLog));
-
-    detail.push({
-      company_id: companyId,
-      cnpj: cnpjDigits,
+    return json({
       ok: true,
       exec_id: execId,
-      notasEncontradas,
-      quantasBuscasForamExecutadas: quantasBuscas,
-      temposDeProcessamento,
+      detail,
+      metrics: {
+        empresas_processadas: eligible.length,
+        wall_total_ms: Math.round(performance.now() - tWall0),
+      },
     });
-  }
-
-  return json({
-    ok: true,
-    exec_id: execId,
-    detail,
-    metrics: {
-      empresas_processadas: eligible.length,
-      wall_total_ms: Math.round(performance.now() - tWall0),
-    },
-  });
   } catch (e) {
     console.error(LOG, "unhandled_error", e);
     return json(

@@ -19,6 +19,11 @@ interface OnboardingFiscalMetrics {
   nfes_ignored: number;
   /** Etapa fiscal concluída (confirmação manual no dashboard). */
   completed?: boolean;
+  /** SEFAZ/Focus sem resposta no sync de onboarding. */
+  sefaz_unavailable?: boolean;
+  sefaz_unavailable_at?: string | null;
+  /** Próxima tentativa automática (cron 30 min). */
+  sefaz_retry_at?: string | null;
 }
 
 export interface Company {
