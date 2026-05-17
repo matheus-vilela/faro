@@ -15,9 +15,12 @@ import {
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
 import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
 import {
-  appendSemNcmProductsForLlmReview,
-  productCatalogSemNcm,
-} from "./productImport/semNcmCatalogForLlm.ts";
+  buildLlmCatalogForInvoiceLine,
+  catalogMatchNameKey,
+  catalogToLlmArbiterCandidates,
+  findCatalogProductByNormalizedName,
+  findDirectMatchByNcmAndName,
+} from "./productImport/llmCatalogCandidates.ts";
 import type { NfeRagArbiterCandidate } from "./productImport/productMatchLlmAssist.ts";
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";
 import {
@@ -228,9 +231,7 @@ function criterioProdutoCriadoLabel(contexto: string): string {
 function stagingLineCatalogNameKey(
   line: StagingNfeInterpretLog["produtos"][number],
 ): string {
-  return sanitizeCatalogProductName(
-    String(line.nome ?? "").trim(),
-  ).toLowerCase();
+  return catalogMatchNameKey(String(line.nome ?? "").trim());
 }
 
 /** Chave estável (NCM + EAN + nome): reuso no chunk e na mesma NF sem novo insert. */
@@ -255,7 +256,7 @@ function findCatalogProductSemNcmByName(
   if (!lineKey) return undefined;
   return catalog.find((p) => {
     if (normalizeNcm8(p.ncm)) return false;
-    return sanitizeCatalogProductName(p.name).toLowerCase() === lineKey;
+    return catalogMatchNameKey(p.name) === lineKey;
   });
 }
 
@@ -506,6 +507,18 @@ export async function resolveProductsForInterpretLog(
       continue;
     }
 
+    const directNcmName = findDirectMatchByNcmAndName(
+      activeCatalog,
+      line.ncm,
+      String(line.nome ?? ""),
+    );
+    if (directNcmName) {
+      productIdByLineIndex.set(lineIndex, directNcmName.id);
+      invoiceResolvedProductByDedupeKey.set(dedupeKey, directNcmName.id);
+      chunkProductDedupeByKey.set(dedupeKey, directNcmName.id);
+      continue;
+    }
+
     if (!n8) {
       const catalogHit = findCatalogProductSemNcmByName(activeCatalog, line);
       if (catalogHit) {
@@ -514,49 +527,11 @@ export async function resolveProductsForInterpretLog(
         chunkProductDedupeByKey.set(dedupeKey, catalogHit.id);
         continue;
       }
-
-      const semNcmCatalog = activeCatalog.filter((p) => productCatalogSemNcm(p.ncm));
-      if (semNcmCatalog.length > 0 && openaiKey) {
-        const includedIds = new Set<string>();
-        const candidates: NfeRagArbiterCandidate[] = appendSemNcmProductsForLlmReview(
-          semNcmCatalog,
-          includedIds,
-        ).map((c, idx) => ({
-          rank: idx + 1,
-          product_id: c.id,
-          name: c.name,
-          catalog_unit: c.unit,
-          ncm: c.ncm,
-          barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
-          similarity_0_100: 50,
-          match_detail: "cadastro sem NCM — IA compara nome da nota com o catálogo",
-        }));
-
-        const arb = await assistStagingNfeLineStockNormalizeAndMatch(
-          openaiKey,
-          openaiModel,
-          { line, candidates },
-        );
-
-        if (arb.kind === "LINK") {
-          const hit = semNcmCatalog.find((c) => c.id === arb.product_id);
-          if (hit) {
-            productIdByLineIndex.set(lineIndex, hit.id);
-            invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
-            chunkProductDedupeByKey.set(dedupeKey, hit.id);
-            continue;
-          }
-        }
-
-      }
-
-      logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
-      continue;
     }
 
-    const candidatosNcm = ncmBuckets.get(n8) ?? [];
+    const llmCatalog = buildLlmCatalogForInvoiceLine(activeCatalog, line.ncm);
 
-    if (candidatosNcm.length === 0) {
+    if (!openaiKey || llmCatalog.length === 0) {
       const data = productInsertPayload(companyId, line);
       if (!data) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
@@ -569,7 +544,7 @@ export async function resolveProductsForInterpretLog(
         chunkProductDedupeByKey,
         dedupeKey,
         data,
-        "sem_candidatos_ncm",
+        !openaiKey ? "sem_openai" : llmCatalog.length === 0 ? "sem_candidatos_ncm" : "sem_openai",
       );
       if (newId) {
         productIdByLineIndex.set(lineIndex, newId);
@@ -578,64 +553,20 @@ export async function resolveProductsForInterpretLog(
       continue;
     }
 
-    if (!openaiKey) {
-      const data = productInsertPayload(companyId, line);
-      if (!data) {
-        logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
-        continue;
-      }
-      const newId = await stagingInterpretCreateProduct(
-        admin,
-        productCatalog,
-        ncmBuckets,
-        chunkProductDedupeByKey,
-        dedupeKey,
-        data,
-        "sem_openai",
-      );
-      if (newId) {
-        productIdByLineIndex.set(lineIndex, newId);
-        invoiceResolvedProductByDedupeKey.set(dedupeKey, newId);
-      }
-      continue;
-    }
-
-    const includedForLlm = new Set(candidatosNcm.map((c) => c.id));
-    const semNcmExtras = appendSemNcmProductsForLlmReview(
-      activeCatalog,
-      includedForLlm,
+    const candidates = catalogToLlmArbiterCandidates(
+      llmCatalog.map((c) => ({
+        id: c.id,
+        name: c.name,
+        unit: c.unit,
+        ncm: c.ncm,
+        ean: c.ean,
+      })),
     );
-    const candidates: NfeRagArbiterCandidate[] = [
-      ...candidatosNcm.map((c, idx) => ({
-        rank: idx + 1,
-        product_id: c.id,
-        name: c.name,
-        catalog_unit: c.unit,
-        ncm: c.ncm,
-        barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
-        similarity_0_100: Math.max(40, 85 - idx * 3),
-        match_detail: "candidato do cadastro com mesmo NCM (8 dígitos)",
-      })),
-      ...semNcmExtras.map((c, idx) => ({
-        rank: candidatosNcm.length + idx + 1,
-        product_id: c.id,
-        name: c.name,
-        catalog_unit: c.unit,
-        ncm: c.ncm,
-        barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
-        similarity_0_100: 42,
-        match_detail:
-          "cadastro sem NCM no sistema — comparar nome da nota (pode ser o mesmo item abreviado)",
-      })),
-    ];
 
     const arb = await assistStagingNfeLineStockNormalizeAndMatch(
       openaiKey,
       openaiModel,
-      {
-        line,
-        candidates,
-      },
+      { line, candidates },
     );
 
     if (arb.kind === "LINK") {
@@ -649,11 +580,31 @@ export async function resolveProductsForInterpretLog(
     }
 
     if (arb.kind === "NEW_PRODUCT") {
-      const preview = stockEntradaPreviewFromLlm(line, arb);
       const nomeCadastro =
         String(arb.normalized_product_name ?? "").trim().length > 0
           ? arb.normalized_product_name
           : arb.suggested_catalog_name;
+      const existingByNorm = findCatalogProductByNormalizedName(
+        activeCatalog,
+        nomeCadastro,
+      );
+      if (existingByNorm) {
+        console.log(
+          LOG,
+          "produto_vinculado_por_nome_normalizado",
+          JSON.stringify({
+            product_id: existingByNorm.id,
+            nome_cadastro: nomeCadastro,
+            nome_catalogo: existingByNorm.name,
+            linha_nota: String(line.nome ?? "").trim(),
+          }),
+        );
+        productIdByLineIndex.set(lineIndex, existingByNorm.id);
+        invoiceResolvedProductByDedupeKey.set(dedupeKey, existingByNorm.id);
+        chunkProductDedupeByKey.set(dedupeKey, existingByNorm.id);
+        continue;
+      }
+      const preview = stockEntradaPreviewFromLlm(line, arb);
       const data = productInsertPayload(companyId, line, nomeCadastro, preview);
       if (!data) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
@@ -673,6 +624,25 @@ export async function resolveProductsForInterpretLog(
         invoiceResolvedProductByDedupeKey.set(dedupeKey, newId);
       }
       continue;
+    }
+
+    const data = productInsertPayload(companyId, line);
+    if (!data) {
+      logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+      continue;
+    }
+    const newId = await stagingInterpretCreateProduct(
+      admin,
+      productCatalog,
+      ncmBuckets,
+      chunkProductDedupeByKey,
+      dedupeKey,
+      data,
+      "llm_skip_fallback",
+    );
+    if (newId) {
+      productIdByLineIndex.set(lineIndex, newId);
+      invoiceResolvedProductByDedupeKey.set(dedupeKey, newId);
     }
   }
 }

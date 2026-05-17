@@ -7,6 +7,7 @@ import {
 } from "@/lib/companyIntegrationEvents";
 import {
   clearEpocCsvSyncPending,
+  isEpocCsvSyncUiBusy,
   readEpocCsvSyncPending,
 } from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
@@ -87,6 +88,10 @@ export function DashboardIntegrationCsvRevenueCard({
   const { refetchCompanies } = useCompany();
   const companyId = company.id;
   const pdvSyncLocked = company.syncing_pdv === true;
+  const [retryBusy, setRetryBusy] = useState(false);
+  const epocSyncUiBusy = companyId
+    ? isEpocCsvSyncUiBusy(companyId, { localSyncing: retryBusy })
+    : false;
   const [bootLoading, setBootLoading] = useState(true);
   const [epocEnabled, setEpocEnabled] = useState(false);
 
@@ -96,7 +101,6 @@ export function DashboardIntegrationCsvRevenueCard({
   const [latestSyncRun, setLatestSyncRun] = useState<SyncRunRow | null>(null);
 
   const [edgeSyncPending, setEdgeSyncPending] = useState(false);
-  const [retryBusy, setRetryBusy] = useState(false);
   const [completeIntegrationBusy, setCompleteIntegrationBusy] = useState(false);
 
   const loadBootstrap = useCallback(
@@ -593,7 +597,7 @@ export function DashboardIntegrationCsvRevenueCard({
               <Button
                 size="sm"
                 type="button"
-                disabled={retryBusy || pdvSyncLocked}
+                disabled={epocSyncUiBusy}
                 onClick={() => void retryOnboardingEpocImport()}
               >
                 {retryBusy ? (

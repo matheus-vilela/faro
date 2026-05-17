@@ -182,6 +182,23 @@ export async function invokeEpocCsvSync(
   }
 }
 
+/** Repõe `syncing_pdv` quando a trava ficou órfã (sync já terminou, sem job ativo). */
+export async function releaseStalePdvSyncLockIfIdle(
+  companyId: string,
+): Promise<boolean> {
+  if (readEpocCsvSyncPending(companyId)) return false;
+  const { data: activeJobs } = await supabase
+    .from("integration_csv_revenue_import_jobs")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("provider", "epoc")
+    .in("status", ["PENDING", "PROCESSING"])
+    .limit(1);
+  if (activeJobs?.length) return false;
+  const { error } = await patchCompanyMaps(companyId, { syncing_pdv: false });
+  return !error;
+}
+
 export function triggerEpocCsvSyncInBackground(
   companyId: string,
   options?: InvokeEpocCsvSyncOptions,

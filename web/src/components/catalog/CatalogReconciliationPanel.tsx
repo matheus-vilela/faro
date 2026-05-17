@@ -8,7 +8,6 @@ import {
   fetchDraftClustersByIds,
   fetchRawDescriptions,
   removeRawItemFromCluster,
-  runReconciliationPipeline,
 } from "@/services/onboardingCatalogReconciliationService";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -88,19 +87,6 @@ export function CatalogReconciliationPanel({
     setMemberCache((prev) => ({ ...prev, [clusterId]: lines }));
   };
 
-  const handleRun = async () => {
-    if (!companyId) return;
-    setLoading(true);
-    const r = await runReconciliationPipeline(companyId);
-    setLoading(false);
-    if (!r.ok) {
-      toast.error(r.error ?? "Falha na reconciliação.");
-      return;
-    }
-    toast.success("Sugestões de catálogo geradas.");
-    await load();
-  };
-
   const handleApprove = async (clusterId: string) => {
     if (!companyId) return;
     setLoading(true);
@@ -152,25 +138,14 @@ export function CatalogReconciliationPanel({
     <div className="space-y-4">
       {!isSheet ? (
         <div>
-          <h3 className="text-sm font-semibold">Reconciliação inteligente do catálogo</h3>
+          <h3 className="text-sm font-semibold">Reconciliação do catálogo</h3>
           <p className="text-sm text-muted-foreground">
-            Consolide descrições equivalentes. Pares ambíguos aparecem como grupos de
-            revisão. Você pode aprovar o agrupamento ou separar uma linha.
+            Revise agrupamentos sugeridos, aprove merges ou separe linhas que não
+            pertencem ao mesmo produto.
           </p>
         </div>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        {!isSheet ? (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            disabled={loading}
-            onClick={() => void handleRun()}
-          >
-            {loading ? "Processando…" : "Rodar análise (retrieval + IA)"}
-          </Button>
-        ) : null}
         <Button
           type="button"
           variant="secondary"
@@ -197,7 +172,7 @@ export function CatalogReconciliationPanel({
             ? "Carregando…"
             : isSheet
               ? "Nenhum grupo pendente para este recorte, ou já foi processado."
-              : "Nenhum grupo pendente. Importe notas e rode a análise, ou use a importação com processamento em segundo plano."}
+              : "Nenhum grupo pendente para revisar."}
         </p>
       ) : (
         <ul className="space-y-3">

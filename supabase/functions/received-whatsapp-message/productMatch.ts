@@ -45,9 +45,12 @@ import {
   embeddingModelFromEnv,
 } from "../_shared/productEmbedding.ts";
 import {
-  appendSemNcmProductsForLlmReview,
-  productCatalogSemNcm,
-} from "../_shared/productImport/semNcmCatalogForLlm.ts";
+  eanLookupKeys,
+} from "../_shared/productImport/llmCatalogCandidates.ts";
+import {
+  matchImportBatchLineWithCatalogLlm,
+  type ImportBatchCatalogLlmMatchResult,
+} from "../_shared/productImport/importBatchCatalogLlmMatch.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -350,6 +353,130 @@ function enrichProductMatch(
       ? `${partial.matchReason} · estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`
       : `estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`,
   };
+}
+
+function buildImportBatchMatchOutput(params: {
+  it: ExtractedExpenseItem;
+  name: string;
+  invoiceU: NormalizedUnitCode;
+  batchResult: ImportBatchCatalogLlmMatchResult;
+  products: ProductRow[];
+  thresholds: ImportMatchThresholds;
+  autoApplyGlobalMassVolume: boolean;
+  rulesByProduct: Map<string, ProductUnitRuleRow[]>;
+  rawUnit: string | null;
+}): ItemWithProductMatch {
+  const {
+    it,
+    invoiceU,
+    batchResult,
+    thresholds,
+    autoApplyGlobalMassVolume,
+    rulesByProduct,
+    rawUnit,
+  } = params;
+
+  const linkProduct =
+    batchResult.kind === "DIRECT_EAN" ||
+    batchResult.kind === "DIRECT_NCM_NAME" ||
+    batchResult.kind === "LLM_LINK"
+      ? batchResult.product
+      : null;
+
+  if (linkProduct) {
+    const prules = rulesByProduct.get(linkProduct.id) ?? [];
+    const matchReason =
+      batchResult.kind === "DIRECT_EAN"
+        ? "EAN igual ao cadastro"
+        : batchResult.kind === "DIRECT_NCM_NAME"
+          ? "NCM e nome idênticos ao cadastro"
+          : `IA: ${batchResult.rationale}`;
+    const decisionPath =
+      batchResult.kind === "DIRECT_EAN"
+        ? "import_batch_direct_ean"
+        : batchResult.kind === "DIRECT_NCM_NAME"
+          ? "import_batch_direct_ncm_name"
+          : "import_batch_llm_link";
+    const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
+      resolvedProductId: linkProduct.id,
+      suggestedProductId: linkProduct.id,
+      suggestedProductName: linkProduct.name,
+      suggestedScore: 100,
+      needsConfirmation: false,
+      resolutionStatus: "AUTO_MATCH",
+      matchReason,
+      invoiceUnitNormalized: invoiceU,
+      catalogUnitNormalized: normalizeUnitLabel(linkProduct.unit),
+      unitConvertible: false,
+      decisionPath,
+      borderlineLlmRationale:
+        batchResult.kind === "LLM_LINK" ? batchResult.rationale : undefined,
+    };
+    const m = enrichProductMatch(
+      it,
+      partial,
+      linkProduct,
+      invoiceU,
+      autoApplyGlobalMassVolume,
+      prules,
+      null,
+    );
+    return { ...it, productId: m.resolvedProductId, productMatch: m };
+  }
+
+  const suggestedRaw =
+    batchResult.kind === "LLM_NEW_PRODUCT"
+      ? batchResult.suggestedCatalogName
+      : batchResult.kind === "LLM_SKIP" || batchResult.kind === "NO_OPENAI" ||
+          batchResult.kind === "EMPTY_CATALOG"
+        ? batchResult.fallbackSuggestedName
+        : finalizeSuggestedCatalogName(params.name.trim()) ?? params.name.trim();
+
+  const suggestedName = finalizeSuggestedCatalogName(suggestedRaw) ?? suggestedRaw;
+  const rationale =
+    batchResult.kind === "LLM_NEW_PRODUCT"
+      ? batchResult.rationale
+      : batchResult.kind === "LLM_SKIP"
+        ? batchResult.rationale
+        : batchResult.kind === "NO_OPENAI"
+          ? "Sem OpenAI — cadastro automático com nome da nota."
+          : batchResult.kind === "EMPTY_CATALOG"
+            ? "Catálogo vazio — cadastro automático."
+            : "—";
+
+  const stubProduct: ProductRow = {
+    id: "",
+    name: suggestedName,
+    unit: rawUnit ?? null,
+  };
+  const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
+    resolvedProductId: null,
+    suggestedProductId: null,
+    suggestedProductName: null,
+    suggestedScore: 0,
+    needsConfirmation: false,
+    resolutionStatus: "NEW_PRODUCT_STAGED",
+    matchReason: `IA: ${rationale}`,
+    invoiceUnitNormalized: invoiceU,
+    catalogUnitNormalized: normalizeUnitLabel(stubProduct.unit),
+    unitConvertible: false,
+    decisionPath:
+      batchResult.kind === "LLM_NEW_PRODUCT"
+        ? "import_batch_llm_new_product"
+        : "import_batch_llm_fallback_new",
+    borderlineLlmSuggestedName: suggestedName,
+    borderlineLlmRationale: rationale,
+  };
+  const m = enrichProductMatch(
+    it,
+    partial,
+    stubProduct,
+    invoiceU,
+    autoApplyGlobalMassVolume,
+    [],
+    null,
+  );
+  return { ...it, productId: null, productMatch: m };
 }
 
 function decideWithUnits(params: {
@@ -753,6 +880,43 @@ export async function resolveProductMatches(
       }
     }
 
+    if (opts?.importBatch === true) {
+      if (!opts.skipLlmAssist && openaiKey && borderlineLlmRemaining > 0) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+      }
+      const batchResult = await matchImportBatchLineWithCatalogLlm({
+        item: it,
+        productName: name,
+        invoiceUnitNormalized: invoiceU,
+        products,
+        itemNcm,
+        itemEan,
+        openaiKey: openaiKey ?? "",
+        openaiModel,
+        thresholds,
+        eanLookupKeys,
+        skipLlm: opts.skipLlmAssist || !openaiKey,
+      });
+
+      const batchOut = buildImportBatchMatchOutput({
+        it,
+        name,
+        invoiceU,
+        batchResult,
+        products,
+        thresholds,
+        autoApplyGlobalMassVolume,
+        rulesByProduct,
+        rawUnit,
+      });
+      if (batchOut.productMatch?.needsConfirmation) {
+        requiresProductConfirmation = true;
+      }
+      out.push(batchOut);
+      continue;
+    }
+
     const normInvoice = normalizeInvoiceProductLabel(name);
     const exactNameHits = products.filter(
       (p) => normalizeInvoiceProductLabel(p.name) === normInvoice,
@@ -846,17 +1010,6 @@ export async function resolveProductMatches(
       }
     }
 
-    if (opts?.importBatch && !opts?.skipLlmAssist && openaiKey) {
-      const inList = new Set(scoredList.map((s) => s.product.id));
-      for (const p of appendSemNcmProductsForLlmReview(products, inList)) {
-        scoredList.push({
-          product: p,
-          score: 0,
-          detail: "cadastro sem NCM — candidato para IA (nome abreviado vs nota)",
-        });
-      }
-    }
-
     if (!scoredList.length) {
       const autoNewEmpty = opts?.importBatch === true;
       if (!autoNewEmpty) requiresProductConfirmation = true;
@@ -914,15 +1067,7 @@ export async function resolveProductMatches(
         borderlineLlmRemaining -= 1;
         borderlineLlmCalls += 1;
         const sliceN = Math.min(maxCand, scoredList.length);
-        const arbPool: Scored[] = scoredList.slice(0, sliceN);
-        const arbIds = new Set(arbPool.map((s) => s.product.id));
-        for (const s of scoredList) {
-          if (!productCatalogSemNcm(s.product.ncm)) continue;
-          if (arbIds.has(s.product.id)) continue;
-          arbPool.push(s);
-          arbIds.add(s.product.id);
-        }
-        const arbInputCands = arbPool.map((s, idx) => ({
+        const arbInputCands = scoredList.slice(0, sliceN).map((s, idx) => ({
           rank: idx + 1,
           product_id: s.product.id,
           name: s.product.name,
@@ -991,20 +1136,7 @@ export async function resolveProductMatches(
         !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name)
       );
     };
-    let linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
-    if (opts?.importBatch && openaiKey) {
-      const inLink = new Set(linkCandidates.map((s) => s.product.id));
-      for (const p of products) {
-        if (!productCatalogSemNcm(p.ncm)) continue;
-        if (inLink.has(p.id)) continue;
-        linkCandidates.push({
-          product: p,
-          score: 0,
-          detail: "cadastro sem NCM — IA avalia por nome",
-        });
-        inLink.add(p.id);
-      }
-    }
+    const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
 
     const importBatchNoSafeLink =
       opts?.importBatch === true &&

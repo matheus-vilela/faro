@@ -4,6 +4,7 @@
  */
 
 import { sanitizeCatalogProductName } from "./canonicalName.ts";
+import { findCandidateProductIdByNormalizedName } from "./llmCatalogCandidates.ts";
 import {
   PRODUCT_MATCH_SYSTEM_BORDERLINE,
   PRODUCT_MATCH_SYSTEM_IMPORT_BATCH,
@@ -168,14 +169,8 @@ export async function assistNfeRagArbiterMatch(
       ncm: input.invoice_ncm,
     },
     candidates: input.candidates.map((c) => ({
-      rank: c.rank,
       product_id: c.product_id,
       name: c.name,
-      unit: c.catalog_unit,
-      ncm: c.ncm,
-      barcode_digits: c.barcode_digits,
-      score_0_100: c.similarity_0_100,
-      detail: c.match_detail,
     })),
   };
 
@@ -227,6 +222,17 @@ export async function assistNfeRagArbiterMatch(
       const name = sanitizeCatalogProductName(nameRaw).trim();
       if (!name) {
         return { kind: "SKIP", rationale };
+      }
+      const existingPid = findCandidateProductIdByNormalizedName(
+        input.candidates.map((c) => ({ product_id: c.product_id, name: c.name })),
+        name,
+      );
+      if (existingPid) {
+        return {
+          kind: "LINK",
+          product_id: existingPid,
+          rationale: `Nome sugerido coincide com candidato (${name}): ${rationale}`,
+        };
       }
       return {
         kind: "NEW_PRODUCT",

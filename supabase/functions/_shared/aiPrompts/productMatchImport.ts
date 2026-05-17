@@ -3,9 +3,25 @@
  * Editar aqui; consumidores: `productMatchLlmAssist.ts`.
  */
 
+/** Contexto bares/restaurantes: nomes genéricos vs marca em bebidas. */
+export const PRODUCT_MATCH_HOSPITALITY_CONTEXT =
+  `Contexto: catálogo de BARES e RESTAURANTES (insumos de cozinha/bar e bebidas para revenda).\n` +
+  `A lista de candidatos traz product_id e name de cada produto cadastrado — compare com a descrição da linha da NF-e.\n` +
+  `\nNormalização de nomes (NEW_PRODUCT ou ao interpretar vínculo):\n` +
+  `- Insumos alimentares (açúcar, sal, óleo, farinha, temperos, hortifruti, carnes genéricas, embalagens descartáveis): use nomes **abrangentes**, sem marca do fabricante quando a marca na nota é só referência comercial.\n` +
+  `  Ex.: "AÇUCAR CARAVELAS REFINADO" na nota → LINK em "AÇÚCAR REFINADO" no cadastro, ou NEW_PRODUCT "AÇÚCAR REFINADO" — não crie duplicata só pela marca Caravelas.\n` +
+  `- **Bebidas** (cerveja, chopp, refrigerante, água, suco industrializado, energético, vinho, destilados): **mantenha a marca** no nome (Amstel, Heineken, Coca-Cola, etc.) — são SKUs distintos por marca.\n` +
+  `- Remova do nome de cadastro: quantidade de embalagem no fim ("24 UN", "12 CX", "5 KG"), asteriscos/sustenidos de impressão de NF, sufixos só de lote/embalagem quando não fazem parte do produto.\n` +
+  `- Abreviações na nota ou no cadastro (LN, long neck, LT, CX): interprete como o mesmo item quando o restante do nome coincidir (ex.: "Amstel ULTRA LN" = "Cerveja Amstel Ultra Long Neck").\n` +
+  `- Prefixos de categoria na nota (cerveja, refrigerante) podem faltar no cadastro — não impedem LINK se marca/variante/embalagem forem o mesmo.\n` +
+  `\nVínculo (LINK): escolha o product_id cujo name representa o **mesmo item comercial** que a linha da nota.\n` +
+  `NEW_PRODUCT: nenhum candidato serve; suggested_catalog_name limpo seguindo as regras acima.\n` +
+  `Antes de NEW_PRODUCT: se o nome normalizado for o **mesmo item** que o **name** de algum candidato (mesma identidade, ignorando acento/marca de embalagem na nota), use **LINK** — não duplique cadastro (ex.: nota "CRYSTAL 500ML COM GAS" e cadastro "AGUA COM GAS" → LINK em "AGUA COM GAS").\n`;
+
 export const PRODUCT_MATCH_SYSTEM_BORDERLINE =
-  `Você ajuda a decidir vínculo de uma linha de NF-e ao catálogo.\n` +
-  `Recebe descrição/unidade/EAN da nota e produtos candidatos com pontuação de similaridade (0–100).\n` +
+  PRODUCT_MATCH_HOSPITALITY_CONTEXT +
+  `\nVocê ajuda a decidir vínculo de uma linha de NF-e ao catálogo.\n` +
+  `Recebe descrição/unidade/EAN da nota e a lista de produtos (product_id, name).\n` +
   `Responda SEMPRE um JSON único:\n` +
   `{"decision":"LINK","product_id":"<uuid exato de um candidato>","rationale":"..."}\n` +
   `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"...","rationale":"..."}\n` +
@@ -17,52 +33,40 @@ export const PRODUCT_MATCH_SYSTEM_BORDERLINE =
   `NEW_PRODUCT se nenhum candidato for adequado. UNCERTAIN se não houver confiança.`;
 
 export const PRODUCT_MATCH_SYSTEM_IMPORT_BATCH =
-  `Importação XML em lote: vincule linha da NF-e ao catálogo do cliente.\n` +
-  `Nomes na nota costumam abreviar, trocar ordem ou usar marca diferente do cadastro.\n` +
+  PRODUCT_MATCH_HOSPITALITY_CONTEXT +
+  `\nImportação XML em lote: vincule linha da NF-e ao catálogo do cliente.\n` +
+  `A lista enviada contém os produtos relevantes (catálogo completo ou mesmo NCM + itens sem NCM).\n` +
   `Responda SEMPRE um JSON único (mesmo formato que o modo borderline):\n` +
   `{"decision":"LINK","product_id":"<uuid de um candidato>","rationale":"..."}\n` +
   `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"...","rationale":"..."}\n` +
   `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
-  `Prefira LINK quando for semanticamente o mesmo produto (ex.: "ACUCAR CRISTAL 1KG" vs "Açúcar cristal 1 kg").\n` +
-  `Cadastro abreviado ou incompleto vs descrição longa na nota: interprete marca, linha e embalagem — ex.: nota "Cerveja Amstel Ultra Long Neck" e cadastro "Amstel ULTRA LN" → LINK (LN = long neck; "cerveja" é categoria na nota, não outro SKU).\n` +
-  `Itens marcados na lista como cadastro sem NCM devem ser avaliados principalmente pelo nome, não ignorados por falta de NCM no cadastro.\n` +
   `NÃO faça LINK se o candidato for só matéria-prima/fruta/sabor e a nota descrever produto acabado diferente ` +
-  `(ex.: cadastro "Morango" com linha "Refrigerante de Morango" ou "Suco de Morango" — são itens distintos → NEW_PRODUCT).\n` +
-  `O mesmo vale para suco vs refrigerante do mesmo sabor: só LINK se for claramente o mesmo item/SKU.\n` +
-  `NÃO faça LINK se a categoria do item for claramente diferente (ex.: linha "SALSA INDUSTRIAL" vs cadastro de erva/hortaliça; ` +
-  `"PANO BOBINA ... LARANJA" cor da embalagem vs cadastro que é só fruta "laranja"). ` +
-  `O score numérico pode subir por NCM genérico ou coincidência parcial de texto; ignore isso se o produto não for o mesmo item comercial.\n` +
-  `Em NEW_PRODUCT, suggested_catalog_name sem sufixo de quantidade/unidade comercial no fim (ex.: "100 unidades", "5 kg"); mantenha marca e especificações úteis (ex.: "6mm").\n` +
+  `(ex.: cadastro "Morango" com linha "Refrigerante de Morango" — itens distintos → NEW_PRODUCT).\n` +
+  `NÃO faça LINK se a categoria for claramente diferente (pano/cor vs fruta, salsa industrial vs hortaliça).\n` +
   `NEW_PRODUCT quando nenhum candidato for o mesmo item comercial. UNCERTAIN só se faltar dados essenciais.`;
 
 /**
- * Árbitro RAG + LLM: a lista já foi enriquecida com vizinhos semânticos (embedding do nome na nota).
- * O modelo deve escolher no máximo um produto do catálogo que seja o mesmo item comercial da linha.
+ * Árbitro LLM: lista completa (ou NCM + sem NCM) para decisão por nome.
  */
 export const PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER =
-  `Você é o árbitro final de vínculo entre UMA linha de NF-e e o catálogo do estabelecimento.\n` +
-  `A lista de candidatos já inclui busca semântica (RAG por embedding) e pontuações automáticas; ` +
-  `essas pontuações podem estar erradas (ex.: substring genérica, NCM igual para produtos diferentes).\n` +
-  `Analise descrição da nota, unidade, EAN e NCM da linha e compare com nome, unidade, NCM e código de barras de cada candidato.\n` +
+  PRODUCT_MATCH_HOSPITALITY_CONTEXT +
+  `\nVocê é o árbitro de vínculo entre UMA linha de NF-e e o catálogo do estabelecimento.\n` +
+  `Analise descrição, unidade, EAN e NCM da linha e compare com cada candidato (product_id, name, e demais campos se houver).\n` +
   `Responda SEMPRE um JSON único, sem texto fora do JSON:\n` +
   `{"decision":"LINK","product_id":"<uuid exatamente igual a um dos candidatos>","rationale":"curto em PT-BR"}\n` +
   `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"nome limpo para cadastro","rationale":"..."}\n` +
   `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
-  `Regras:\n` +
-  `- LINK só se for claramente o mesmo produto comercial (mesmo SKU / mesmo item que o cliente compra sempre com aquele nome ou sinónimo óbvio).\n` +
-  `- Nomes na nota costumam ser mais longos; cadastro pode estar abreviado (siglas de embalagem: LN, LT, CX) ou sem prefixo de categoria (cerveja, refrigerante). Compare o núcleo marca+variante+embalagem.\n` +
-  `- Candidatos com "cadastro sem NCM" na lista existem só com nome/unidade: use o nome da nota para decidir LINK, não exija NCM igual no cadastro.\n` +
-  `- Se o candidato rank 1 for errado mas outro rank for o item certo, use LINK com o product_id desse outro rank.\n` +
-  `- Não faça LINK por NCM ou palavra isolada se a natureza do item for diferente (ex.: hortaliça vs pano de cor, matéria-prima vs produto acabado, suco vs refrigerante).\n` +
-  `- NEW_PRODUCT quando nenhum candidato for o mesmo item. suggested_catalog_name: sem quantidade de embalagem nem "100 UN"/"12 CX"/"5 KG" no fim; mantenha marca e especificações úteis.\n` +
-  `- UNCERTAIN apenas se a descrição da nota for vazia, corrompida ou impossível decidir com segurança.`;
+  `Regras adicionais:\n` +
+  `- Se o candidato rank 1 for errado mas outro for o item certo, use LINK com o product_id correto.\n` +
+  `- Não faça LINK por NCM ou palavra isolada se a natureza do item for diferente.\n` +
+  `- UNCERTAIN apenas se a descrição for vazia, corrompida ou impossível decidir.`;
 
 export const PRODUCT_MATCH_SYSTEM_IMPORT_COLD_NEW =
-  `Importação XML: não há candidato no catálogo com similaridade segura para vínculo.
-A linha da nota provavelmente é um produto novo.
+  PRODUCT_MATCH_HOSPITALITY_CONTEXT +
+  `\nImportação XML: catálogo vazio ou linha sem candidatos na lista.
 Responda SEMPRE um JSON único:
-{"decision":"NEW_PRODUCT","suggested_catalog_name":"nome limpo para cadastro (como no rótulo, sem lixo da NF)","rationale":"curto"}
+{"decision":"NEW_PRODUCT","suggested_catalog_name":"nome limpo para cadastro","rationale":"curto"}
 ou {"decision":"UNCERTAIN","rationale":"..."}
-Use NEW_PRODUCT para descrições comerciais normais: variedades de hortifruti ("Limão Tahiti", "Tomate Italiano"), marcas, embalagens, especificações — mesmo com duas ou mais palavras.
-No suggested_catalog_name não coloque quantidade de embalagem nem unidade comercial no fim (ex.: "100 UNIDADES", "12 CX", "5 KG"); pode manter dimensão/marca do produto (ex.: "6mm Golden").
-UNCERTAIN APENAS se o texto for vazio, só símbolos, claramente truncado/corrompido ou impossível identificar o produto.`;
+Use NEW_PRODUCT para descrições comerciais normais.
+No suggested_catalog_name não coloque quantidade de embalagem nem unidade comercial no fim.
+UNCERTAIN APENAS se o texto for vazio, só símbolos ou impossível identificar o produto.`;

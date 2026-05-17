@@ -40,3 +40,16 @@ export function readEpocCsvSyncPending(companyId: string): boolean {
     return false;
   }
 }
+
+/**
+ * Bloqueia botões de sync manual só enquanto a edge ou o import estão realmente a correr.
+ * `companies.syncing_pdv` pode ficar true após sucesso no onboarding (até «Concluir integração»)
+ * e não deve desabilitar novo disparo.
+ */
+export function isEpocCsvSyncUiBusy(
+  companyId: string,
+  opts?: { localSyncing?: boolean },
+): boolean {
+  if (opts?.localSyncing) return true;
+  return readEpocCsvSyncPending(companyId);
+}

@@ -23,11 +23,12 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
 import { cn } from "@/lib/utils";
+import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
 import {
   invokeEpocCsvSync,
+  releaseStalePdvSyncLockIfIdle,
   triggerEpocCsvSyncInBackground,
 } from "@/services/epocSyncCsvService";
-import { patchCompanyMaps } from "@/services/unitSetupService";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -91,7 +92,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const lockOnboardingPdv = companyMeta
     ? companyMeta.onboarding_integration_pdv_completed !== true
     : false;
-  const syncingPdvServer = companyMeta?.syncing_pdv === true;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -112,6 +112,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   >(null);
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
+  const epocSyncUiBusy = useMemo(
+    () => isEpocCsvSyncUiBusy(companyId, { localSyncing: syncingFull }),
+    [companyId, syncingFull],
+  );
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
   const [purgeCountLoading, setPurgeCountLoading] = useState(false);
@@ -191,6 +195,13 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  useEffect(() => {
+    if (!companyMeta?.syncing_pdv) return;
+    void releaseStalePdvSyncLockIfIdle(companyId).then((released) => {
+      if (released) void refetchCompanies();
+    });
+  }, [companyId, companyMeta?.syncing_pdv, refetchCompanies]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -466,18 +477,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
-    const { error: lockErr } = await patchCompanyMaps(companyId, {
-      syncing_pdv: true,
-      onboarding_integration_pdv_completed: false,
-    });
-    if (lockErr) {
-      toast.error(
-        lockErr.slice(0, 220) ??
-          "Não foi possível iniciar a sincronização (trava PDV).",
-      );
-      return;
-    }
-    await refetchCompanies();
     const oldPaths = [lastEpocCsvStoragePath?.trim() ?? ""].filter(Boolean);
     const uniqueOldPaths = Array.from(new Set(oldPaths));
     if (uniqueOldPaths.length > 0) {
@@ -578,7 +577,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
         lockOnboardingPdv,
-        resetPdvOnboardingCompleted: true,
       });
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
@@ -997,10 +995,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     className="w-full"
                     onClick={() => void handleSyncNow()}
                     disabled={
-                      !enabled ||
-                      !baseUrl.trim() ||
-                      syncingFull ||
-                      syncingPdvServer
+                      !enabled || !baseUrl.trim() || epocSyncUiBusy
                     }
                   >
                     {syncingFull ? (
@@ -1170,7 +1165,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 disabled={
                                   !enabled ||
                                   replayRunId === item.id ||
-                                  syncingPdvServer
+                                  epocSyncUiBusy
                                 }
                                 onClick={() => void handleReplaySyncRun(item)}
                               >

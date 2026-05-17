@@ -5,17 +5,16 @@
 import { PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER } from "./aiPrompts/productMatchImport.ts";
 import type { NfeRagArbiterCandidate } from "./productImport/productMatchLlmAssist.ts";
 import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
+import { findCandidateProductIdByNormalizedName } from "./productImport/llmCatalogCandidates.ts";
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";
 
 const STAGING_NFE_LINE_STOCK_SYSTEM =
   PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER +
-  `\n\n--- Contexto staging (candidatos = mesmo NCM 8 dígitos no cadastro da empresa) ---\n` +
-  `- A nota pode truncar ou abreviar; ainda pode ser o mesmo item do cadastro.\n` +
-  `- Cadastro **sem marca** no nome vs nota **com marca** (ex.: nota "LINGUIÇA TOSCANA SADIA", cadastro "Linguica toscana") → pode LINK.\n` +
-  `- Cadastro **abreviado** vs nota **por extenso** (ex.: cadastro "Amstel ULTRA LN", nota "Cerveja Amstel Ultra Long Neck") → LINK se for o mesmo item (LN = long neck).\n` +
-  `- Na lista há produtos **sem NCM no cadastro** (marcados na lista): avalie pelo nome comercial; podem ser o item certo mesmo com NCM só na nota.\n` +
+  `\n\n--- Contexto staging NF-e recebidas ---\n` +
+  `Lista enviada: catálogo inteiro (linha sem NCM na nota) ou produtos com o mesmo NCM da linha + todos os produtos sem NCM no cadastro.\n` +
+  `EAN e NCM+nome idênticos já foram tentados antes desta chamada — decida pelo **name** de cada product_id.\n` +
   `- Cadastro **com marca A** e nota **marca B** distinta (ex.: Sadia vs Seara) → não LINK.\n` +
-  `- Marcas concorrentes (Coca vs Pepsi, etc.) → não LINK.\n` +
+  `- Marcas concorrentes de bebida (Coca vs Pepsi) → não LINK.\n` +
   `\n--- Nome normalizado e estoque (obrigatório ler com atenção) ---\n` +
   `Muitas NF-e trazem no **nome do item** a contagem da embalagem (ex.: "HEINEKEN LONG NECK 24UN", "CERVEJA 12X350ML", "REFRIGERANTE CX 6", "FARDO AGUA 12UN") enquanto **qCom** na linha é 1 (uma embalada) e o **valor total da linha** já é o da compra inteira.\n` +
   `Para **entrada em estoque** o sistema precisa da **quantidade de unidades de consumo** (ex.: 24 garrafas) e do **valor unitário de cada uma** (valor total da linha ÷ essa quantidade).\n` +
@@ -29,6 +28,7 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `\n**suggested_catalog_name** (NEW_PRODUCT): deve ser **o mesmo nome limpo** que normalized_product_name (ou abreviação mínima sem perder a identidade do item); **não** repita o texto bruto da nota com pesos, packs ou medidas.\n` +
   `\n**stock_quantity** e **stock_unit_value** (números > 0, use ponto decimal):\n` +
   `- Em NEW_PRODUCT: **obrigatórios** — quantidade física de unidades do produto normalizado e preço unitário coerente com valor total da linha (stock_quantity × stock_unit_value ≈ valor total da linha; tolerância centavos).\n` +
+  `- Antes de NEW_PRODUCT: se **normalized_product_name** ou **suggested_catalog_name** for o **mesmo item** que o **name** de algum candidato (mesma identidade comercial, ignorando acento/marca de embalagem na nota), use **LINK** com esse product_id — não proponha produto novo duplicado (ex.: nota "CRYSTAL 500ML COM GAS" e cadastro "AGUA COM GAS" → LINK).\n` +
   `- Em LINK: **opcionais** — preencha se a linha XML esconder pack no nome e precisar corrigir quantidade/valor para estoque; se não precisar correção, use quantidade e valor unitário da linha XML (repita nos campos ou omita e o sistema usa XML).\n` +
   `- Marque **uses_packaging_from_description** = true quando a contagem efetiva veio principalmente do texto do nome e não só do XML.\n` +
   `\nResponda **apenas** um JSON válido (sem markdown), com esta forma:\n` +
@@ -233,6 +233,29 @@ export async function assistStagingNfeLineStockNormalizeAndMatch(
 
       if (rec.unit_value <= 0) {
         return { kind: "SKIP", rationale: `NEW_PRODUCT sem valor unitário coerente: ${rationale}` };
+      }
+
+      const existingPid = findCandidateProductIdByNormalizedName(
+        candidates,
+        normFinal,
+      );
+      if (existingPid) {
+        const usesFromDescLink =
+          usesPack ||
+          (sq != null &&
+            su != null &&
+            !rec.recalibrated &&
+            Math.abs(Number(line.quantidade) - rec.quantity) > 1e-6);
+        return {
+          kind: "LINK",
+          product_id: existingPid,
+          rationale: `Nome normalizado coincide com candidato no cadastro (${normFinal}): ${rationale}`,
+          normalized_product_name: normFinal.slice(0, 512),
+          stock_quantity: rec.quantity,
+          stock_unit_value: rec.unit_value,
+          uses_packaging_from_description: usesFromDescLink,
+          stock_recalibrated_from_xml: rec.recalibrated,
+        };
       }
 
       const usesFromDescNew =

@@ -17,8 +17,7 @@ function parseLooseNumber(v: unknown): number {
 }
 
 /**
- * Normaliza itens tal como `process-import-job-batch` antes de `resolveProductMatches`,
- * garantindo paridade de fingerprint com o lote.
+ * Normaliza itens antes de `resolveProductMatches`.
  */
 export function normalizeExtractedItemsLikeBatch(
   data: ExtractedDocumentResult,
@@ -62,75 +61,75 @@ export function buildXmlLineIdentities(items: ExtractedExpenseItem[]): string[] 
 export type LoadedNfeMotorContext = {
   items: ExtractedExpenseItem[];
   xml_line_identities: string[];
-  /** Sempre `null` — o motor usa só o `payload` do log; reconciliação financeira usa total da despesa + linhas. */
   xml_text: string | null;
   payload_enriched: ExtractedDocumentResult;
   import_job_file_id: string | null;
-  /** Copiado de `company_nfe_import_logs.import_job_batch_id` quando existir. */
   import_job_batch_id: string | null;
-  /** Linhas brutas onboarding ligadas aos `expense_items` desta despesa (ordenadas como os itens). */
   raw_rows_ordered: Array<{ id: string; expense_item_id: string | null }>;
 };
 
 /**
- * Carrega o payload gravado em `company_nfe_import_logs` (mesma fonte da criação da despesa).
- * Não lê `import_job_files` nem XML em base64 — o match e os metadados vêm do JSON persistido no log.
+ * Monta contexto do motor a partir de `expense_items` (sem `company_nfe_import_logs`).
  */
 export async function loadNfeMotorExtractContext(
   supabase: SupabaseClient,
   companyId: string,
   expenseId: string,
-  importJobFileIdHint?: string,
+  _importJobFileIdHint?: string,
 ): Promise<LoadedNfeMotorContext | null> {
-  const q = importJobFileIdHint
-    ? supabase
-      .from("company_nfe_import_logs")
-      .select("payload, import_job_file_id, import_job_batch_id")
-      .eq("company_id", companyId)
-      .eq("expense_id", expenseId)
-      .eq("import_job_file_id", importJobFileIdHint)
-      .order("created_at", { ascending: false })
-      .limit(1)
-    : supabase
-      .from("company_nfe_import_logs")
-      .select("payload, import_job_file_id, import_job_batch_id")
-      .eq("company_id", companyId)
-      .eq("expense_id", expenseId)
-      .eq("status", "success")
-      .order("created_at", { ascending: false })
-      .limit(1);
+  const { data: expenseRow, error: expErr } = await supabase
+    .from("expenses")
+    .select("supplier_document, notes, financial_reconciliation_json")
+    .eq("id", expenseId)
+    .eq("company_id", companyId)
+    .maybeSingle();
 
-  const { data: logRow, error: logErr } = await q.maybeSingle();
-
-  if (logErr || !logRow?.payload || typeof logRow.payload !== "object") {
+  if (expErr || !expenseRow) {
     return null;
   }
 
-  const payload = enrichExtractedWithTaxId(
-    logRow.payload as ExtractedDocumentResult,
-  );
+  const { data: expenseItemRows, error: itemsErr } = await supabase
+    .from("expense_items")
+    .select(
+      "id, product_name, quantity, unit_value, invoice_unit, ncm, ean, product_id",
+    )
+    .eq("expense_id", expenseId)
+    .order("created_at", { ascending: true });
+
+  if (itemsErr || !expenseItemRows?.length) {
+    return null;
+  }
+
+  const rawItems = (expenseItemRows as Array<Record<string, unknown>>).map((row) => {
+    const qty = parseLooseNumber(row.quantity);
+    const unitValue = parseLooseNumber(row.unit_value);
+    return {
+      productName: String(row.product_name ?? "").trim() || "Item",
+      quantity: qty > 0 ? qty : 0.0001,
+      unitValue,
+      lineTotal: qty * unitValue,
+      unitCommercial: row.invoice_unit == null ? null : String(row.invoice_unit),
+      ncm: row.ncm == null ? null : String(row.ncm),
+      ean: row.ean == null ? null : String(row.ean),
+      productCode: null,
+    };
+  });
+
+  const payload = enrichExtractedWithTaxId({
+    items: rawItems,
+    supplierDocument: expenseRow.supplier_document ?? null,
+    notes: expenseRow.notes ?? null,
+  } as ExtractedDocumentResult);
+
   if (!payload?.items?.length) {
     return null;
   }
 
-  const import_job_file_id = logRow.import_job_file_id
-    ? String(logRow.import_job_file_id)
-    : null;
-  const import_job_batch_id = logRow.import_job_batch_id
-    ? String(logRow.import_job_batch_id)
-    : null;
-
   const items = normalizeExtractedItemsLikeBatch(payload);
   const xml_line_identities = buildXmlLineIdentities(items);
 
-  const { data: expenseItemRows } = await supabase
-    .from("expense_items")
-    .select("id")
-    .eq("expense_id", expenseId)
-    .order("created_at", { ascending: true });
-
-  const expenseItemIds = (expenseItemRows ?? []).map((r: { id: string }) =>
-    String(r.id)
+  const expenseItemIds = (expenseItemRows as Array<{ id: string }>).map((r) =>
+    String(r.id),
   );
 
   let rawCandidate: Array<{
@@ -150,10 +149,7 @@ export async function loadNfeMotorExtractContext(
   }
 
   const byEi = new Map<string, { id: string; expense_item_id: string | null }>();
-  for (const r of rawCandidate as Array<{
-    id: string;
-    expense_item_id: string | null;
-  }>) {
+  for (const r of rawCandidate) {
     if (r.expense_item_id) byEi.set(String(r.expense_item_id), r);
   }
 
@@ -166,8 +162,8 @@ export async function loadNfeMotorExtractContext(
     xml_line_identities,
     xml_text: null,
     payload_enriched: payload,
-    import_job_file_id,
-    import_job_batch_id,
+    import_job_file_id: null,
+    import_job_batch_id: null,
     raw_rows_ordered,
   };
 }

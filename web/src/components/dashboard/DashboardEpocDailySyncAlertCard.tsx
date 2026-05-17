@@ -2,8 +2,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
+import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
-import { patchCompanyMaps } from "@/services/unitSetupService";
 import { parseEpocSettings } from "@/types/companyIntegration";
 import { AlertTriangle, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -44,12 +44,10 @@ export function DashboardEpocDailySyncAlertCard({
     !!companyId &&
     currentCompany?.id === companyId &&
     currentCompany.onboarding_integration_pdv_completed !== true;
-  const pdvSyncLocked =
-    !!companyId &&
-    currentCompany?.id === companyId &&
-    currentCompany.syncing_pdv === true;
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
+  const epocSyncUiBusy =
+    !!companyId && isEpocCsvSyncUiBusy(companyId, { localSyncing: retrying });
   const [enabled, setEnabled] = useState(false);
   const [settingsRaw, setSettingsRaw] = useState<Record<string, unknown>>({});
   /** Alinhado ao localStorage após dismiss ou quando muda `epoc_daily_sync_last_attempt_at`. */
@@ -155,18 +153,6 @@ export function DashboardEpocDailySyncAlertCard({
 
   const handleRetryDaily = async () => {
     if (!companyId) return;
-    const { error: lockErr } = await patchCompanyMaps(companyId, {
-      syncing_pdv: true,
-      onboarding_integration_pdv_completed: false,
-    });
-    if (lockErr) {
-      toast.error(
-        lockErr.slice(0, 220) ??
-          "Não foi possível iniciar a sincronização (trava PDV).",
-      );
-      return;
-    }
-    await refetchCompanies();
     setRetrying(true);
     const data = await invokeEpocCsvSync(companyId, {
       sync_mode: "previous_day",
@@ -220,7 +206,7 @@ export function DashboardEpocDailySyncAlertCard({
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
           <Button
             type="button"
-            disabled={retrying || pdvSyncLocked}
+            disabled={epocSyncUiBusy}
             className="w-full sm:w-auto"
             onClick={() => void handleRetryDaily()}
           >

@@ -1,7 +1,6 @@
 import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
-import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
@@ -35,12 +34,6 @@ interface AlertSummary {
   boletoD1: number;
   importPending: number;
 }
-
-type ImportBatchProgressRow = {
-  status: string;
-  total_files: number | null;
-  processed_files: number | null;
-};
 
 function formatLongDate(d: Date): string {
   return d.toLocaleDateString("pt-BR", {
@@ -76,9 +69,6 @@ export function Dashboard() {
     boletoD1: 0,
     importPending: 0,
   });
-  const [loadingImportProgress, setLoadingImportProgress] = useState(true);
-  const [activeImportFiles, setActiveImportFiles] = useState(0);
-  const [activeImportPercent, setActiveImportPercent] = useState(0);
   const [importReviewSeq, setImportReviewSeq] = useState(0);
 
   const bumpImportReviewPipeline = useCallback(() => {
@@ -180,67 +170,6 @@ export function Dashboard() {
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
 
-  const loadImportProgress = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      if (!companyId) {
-        setLoadingImportProgress(false);
-        setActiveImportFiles(0);
-        setActiveImportPercent(0);
-        return;
-      }
-
-      if (!opts?.silent) {
-        setLoadingImportProgress(true);
-      }
-      const { data, error } = await supabase
-        .from("import_job_batches")
-        .select("status, total_files, processed_files")
-        .eq("company_id", companyId)
-        .in("status", ["QUEUED", "PROCESSING"])
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (error) {
-        setActiveImportFiles(0);
-        setActiveImportPercent(0);
-        setLoadingImportProgress(false);
-        return;
-      }
-
-      const rows = (data ?? []) as ImportBatchProgressRow[];
-      const totals = rows.reduce(
-        (acc, row) => {
-          const total = Math.max(Number(row.total_files ?? 0), 0);
-          const processed = Math.min(
-            Math.max(Number(row.processed_files ?? 0), 0),
-            total,
-          );
-          return {
-            totalFiles: acc.totalFiles + total,
-            processedFiles: acc.processedFiles + processed,
-          };
-        },
-        { totalFiles: 0, processedFiles: 0 },
-      );
-
-      const pendingFiles = Math.max(
-        totals.totalFiles - totals.processedFiles,
-        0,
-      );
-      const progress =
-        totals.totalFiles > 0
-          ? Number(
-              ((totals.processedFiles / totals.totalFiles) * 100).toFixed(0),
-            )
-          : 0;
-
-      setActiveImportFiles(pendingFiles);
-      setActiveImportPercent(progress);
-      setLoadingImportProgress(false);
-    },
-    [companyId],
-  );
-
   useEffect(() => {
     queueMicrotask(() => void loadBoletos());
   }, [loadBoletos]);
@@ -248,18 +177,6 @@ export function Dashboard() {
   useEffect(() => {
     queueMicrotask(() => void loadAlertSummary());
   }, [loadAlertSummary]);
-
-  useEffect(() => {
-    queueMicrotask(() => void loadImportProgress());
-  }, [loadImportProgress]);
-
-  useEffect(() => {
-    if (!companyId) return;
-    const interval = globalThis.setInterval(() => {
-      void loadImportProgress({ silent: true });
-    }, 5000);
-    return () => globalThis.clearInterval(interval);
-  }, [companyId, loadImportProgress]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
@@ -306,13 +223,6 @@ export function Dashboard() {
         icon={LayoutDashboard}
       />
 
-      {!loadingImportProgress && companyId && activeImportFiles > 0 ? (
-        <DashboardImportProgressBanner
-          loading={loadingImportProgress}
-          activeImportFiles={activeImportFiles}
-          activeImportPercent={activeImportPercent}
-        />
-      ) : null}
       {currentCompany &&
       isOnboardingFiscalDashboardCardVisible(
         currentCompany.onboarding_fiscal,

@@ -1,5 +1,5 @@
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
-import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 export type OnboardingClusterRow = {
   id: string;
@@ -414,51 +414,6 @@ export async function approveHighConfidenceClusters(
     else if (res.error) errors.push(res.error);
   }
   return { approved, errors };
-}
-
-export async function runReconciliationPipeline(
-  companyId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return {
-      ok: false,
-      error:
-        "Supabase não configurado (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).",
-    };
-  }
-
-  const { data: sessData } = await supabase.auth.getSession();
-  const token = sessData.session?.access_token;
-  if (!token) return { ok: false, error: "Sessão expirada." };
-
-  const base = supabaseUrl.replace(/\/$/, "");
-  const res = await fetch(`${base}/functions/v1/run-onboarding-product-reconciliation`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ company_id: companyId }),
-  });
-
-  let parsed: unknown;
-  try {
-    parsed = await res.json();
-  } catch {
-    return { ok: false, error: "Resposta inválida da reconciliação." };
-  }
-  const o = parsed as Record<string, unknown>;
-  if (!res.ok || o.ok !== true) {
-    return {
-      ok: false,
-      error:
-        typeof o.error === "string"
-          ? o.error
-          : `Falha (${res.status}) ao rodar reconciliação.`,
-    };
-  }
-  return { ok: true };
 }
 
 export async function markCatalogReconciliationComplete(
