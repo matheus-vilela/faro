@@ -19,9 +19,15 @@ type QuickItem = {
 
 const ITEMS: QuickItem[] = [
   {
-    to: "/app/fluxo-de-caixa",
-    label: "Fluxo de caixa",
-    description: "Boletos e vencimentos",
+    to: "/app/contas-a-pagar",
+    label: "Contas a pagar",
+    description: "Vencimentos e saídas",
+    icon: FileText,
+  },
+  {
+    to: "/app/vendas-realizadas",
+    label: "Vendas realizadas",
+    description: "Recebimentos previstos",
     icon: FileText,
   },
   {

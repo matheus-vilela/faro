@@ -1,14 +1,7 @@
-import { ProductUnitConversionQuickAdd } from "@/components/products/ProductUnitConversionQuickAdd";
+import { ProductUnitPickerWithConversion } from "@/components/products/ProductUnitPickerWithConversion";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   convertQuantityForProduct,
   type UnitConversionCodeRow,
@@ -212,31 +205,19 @@ export function DashboardRecipeMatchIngredientConfig({
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="recipe-match-input-unit">Unidade na ficha</Label>
-          <Select
-            value={inputUnitCode}
-            onValueChange={(v) => setInputUnitCode(v.trim().toLowerCase())}
-          >
-            <SelectTrigger id="recipe-match-input-unit" className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {allowedUnits.map((code) => (
-                <SelectItem key={code} value={code}>
-                  {code === hubUnit
-                    ? `${systemUnitLabel(code)} (estoque)`
-                    : systemUnitLabel(code)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <ProductUnitConversionQuickAdd
+          <ProductUnitPickerWithConversion
             companyId={companyId}
             stockUnitCode={hubUnit}
+            hubUnitCode={hubUnit}
+            unitCodes={allowedUnits}
+            value={inputUnitCode}
+            onValueChange={(v) => setInputUnitCode(v.trim().toLowerCase())}
             conversions={conversions}
             onConversionsChange={(next) => void handleConversionsChange(next)}
-            disabled={savingConversions}
             onSecondaryUnitAdded={(code) => setInputUnitCode(code)}
-            className="mt-2 w-full sm:w-auto"
+            disabled={savingConversions}
+            triggerId="recipe-match-input-unit"
+            triggerClassName="h-9"
           />
         </div>
 
@@ -256,8 +237,8 @@ export function DashboardRecipeMatchIngredientConfig({
 
       {usesAlternateUnit && !hasConversionForSelectedUnit ? (
         <p className="text-xs text-amber-800 dark:text-amber-200">
-          Use «Cadastrar conversão» (ex.: 1 {systemUnitLabel(hubUnit)} = 1000{" "}
-          {systemUnitLabel(inputUnitCode)}) para liberar esta unidade na ficha.
+          Busque a unidade na lista e use «Cadastrar conversão» (ex.: 1{" "}
+          {systemUnitLabel(hubUnit)} = 1000 {systemUnitLabel(inputUnitCode)}).
         </p>
       ) : null}
 

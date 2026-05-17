@@ -59,6 +59,8 @@ interface CreateProductSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   companyId: string
+  /** Nome sugerido ao abrir (ex.: termo da busca no seletor de insumos). */
+  defaultName?: string
   onSuccess?: (product: Product) => void
 }
 
@@ -66,6 +68,7 @@ export function CreateProductSheet({
   open,
   onOpenChange,
   companyId,
+  defaultName,
   onSuccess,
 }: CreateProductSheetProps) {
   const roundUnitPrice = (value: number) =>
@@ -126,7 +129,18 @@ export function CreateProductSheet({
     setLastUnitValueUnitCode(defaultProductStockUnitCode())
     setComposesCmv(true)
     setPendingConversions([])
-  }, [open, companyId, loadCompanyProductCategories])
+    const suggested = defaultName?.trim()
+    if (suggested) {
+      setName(sanitizeCatalogProductName(suggested) || suggested)
+    } else {
+      setName('')
+    }
+    setSku('')
+    setMinQuantity('')
+    setLastUnitValue('')
+    setBarcode('')
+    setProductCategoryIds([])
+  }, [open, companyId, defaultName, loadCompanyProductCategories])
 
   const unitOptions = useMemo(
     () => getSystemProductUnitSelectOptionsWithLegacy(unit),

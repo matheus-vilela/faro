@@ -27,6 +27,12 @@ describe("stripPackSizeFromLabel", () => {
     );
     expect(stripPackSizeFromLabel("PROD caixa12 fim")).toBe("PROD fim");
   });
+
+  it("remove GFA, DES, NxM UN e ruído PBR (Heineken 0,0%)", () => {
+    expect(
+      stripPackSizeFromLabel("CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR"),
+    ).toBe("CERV HEINEKEN 0,0%");
+  });
 });
 
 describe("parsePackagingNameSlashPattern", () => {
@@ -69,6 +75,14 @@ describe("packSizeFromLabel", () => {
     const { packFactor } = packSizeFromLabel("CEBOLA NACIONAL CX4");
     expect(packFactor).toBe(4);
   });
+
+  it("4X6UN → fator 24 unidades", () => {
+    const { packFactor, rationale } = packSizeFromLabel(
+      "CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR",
+    );
+    expect(packFactor).toBe(24);
+    expect(rationale).toContain("24");
+  });
 });
 
 describe("normalizeUnitLabel (UNI NF-e)", () => {
@@ -97,5 +111,13 @@ describe("volumePerCountUnitFromLabelLiters", () => {
     expect(volumePerCountUnitFromLabelLiters("Cachaça Bakkana 750ml")).toBe(
       0.75,
     );
+  });
+
+  it("lê litros em 0,330GFA (garrafa 330 ml)", () => {
+    expect(
+      volumePerCountUnitFromLabelLiters(
+        "CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR",
+      ),
+    ).toBe(0.33);
   });
 });

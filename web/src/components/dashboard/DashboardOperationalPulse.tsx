@@ -54,8 +54,8 @@ export function DashboardOperationalPulse({
             className="h-8 px-2 text-xs"
             asChild
           >
-            <Link to="/app/fluxo-de-caixa">
-              Fluxo
+            <Link to="/app/contas-a-pagar">
+              Contas
               <ArrowRight className="ml-1 h-3 w-3" />
             </Link>
           </Button>
@@ -77,8 +77,8 @@ export function DashboardOperationalPulse({
             className="h-8 px-2 text-xs"
             asChild
           >
-            <Link to="/app/fluxo-de-caixa">
-              Fluxo
+            <Link to="/app/contas-a-pagar">
+              Contas
               <ArrowRight className="ml-1 h-3 w-3" />
             </Link>
           </Button>

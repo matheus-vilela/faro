@@ -210,9 +210,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
       return {
         title: "A obter dados na SEFAZ",
         subtitle:
-          "Estamos a consultar a SEFAZ e a preparar as NF-e recebidas desta unidade. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.",
+          "Estamos a consultar a SEFAZ e a preparar as NF-e recebidas desta unidade. Este processo pode demorar um pouco. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.",
         showSpinner: true,
-        percent: 12,
+        percent: 0,
         icon: "sync" as const,
       };
     }
@@ -324,17 +324,19 @@ export function DashboardFocusNfeRecebidasSyncCard({
           </div>
         </div>
 
-        <div className={theme.progressTrack}>
-          <div
-            className={theme.progressFill}
-            style={{ width: `${barWidth}%` }}
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={barWidth}
-            aria-label="Progresso do onboarding fiscal"
-          />
-        </div>
+        {!awaitingSefazEstimate && (
+          <div className={theme.progressTrack}>
+            <div
+              className={theme.progressFill}
+              style={{ width: `${barWidth}%` }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={barWidth}
+              aria-label="Progresso do onboarding fiscal"
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

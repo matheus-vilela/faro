@@ -54,12 +54,29 @@ function formatDayHeading(y: number, m: number, d: number): string {
   });
 }
 
+function monthShortLabel(m: number, y: number): string {
+  return new Date(y, m - 1, 1)
+    .toLocaleDateString("pt-BR", { month: "short" })
+    .replace(".", "");
+}
+
 export type CalendarDayListPayload = {
   /** YYYY-MM-DD */
   dateKey: string;
   title: string;
   items: Boleto[];
 };
+
+export type BoletosCalendarViewMode = "all" | "payable" | "receivable";
+
+function filterBoletosForView(
+  boletos: Boleto[],
+  viewMode: BoletosCalendarViewMode,
+): Boleto[] {
+  if (viewMode === "all") return boletos;
+  if (viewMode === "payable") return boletos.filter((b) => isBoletoPayable(b));
+  return boletos.filter((b) => !isBoletoPayable(b));
+}
 
 interface BoletosCalendarProps {
   month: number;
@@ -68,6 +85,8 @@ interface BoletosCalendarProps {
   loading: boolean;
   onDayListOpen: (payload: CalendarDayListPayload) => void;
   formatCurrency: (v: number) => string;
+  /** Quando definido, o calendário mostra só saídas ou só entradas (vendas realizadas). */
+  viewMode?: BoletosCalendarViewMode;
 }
 
 export function BoletosCalendar({
@@ -77,8 +96,10 @@ export function BoletosCalendar({
   loading,
   onDayListOpen,
   formatCurrency,
+  viewMode = "all",
 }: BoletosCalendarProps) {
-  const byDay = groupByDueDate(boletos);
+  const visibleBoletos = filterBoletosForView(boletos, viewMode);
+  const byDay = groupByDueDate(visibleBoletos);
   const cells = buildCalendarCells(year, month);
 
   if (loading) {
@@ -104,6 +125,14 @@ export function BoletosCalendar({
                 </div>
               ))}
               {cells.map((cell, i) => {
+                const prev = i > 0 ? cells[i - 1] : null;
+                const monthChanged =
+                  prev != null &&
+                  (prev.month !== cell.month || prev.year !== cell.year);
+                const entersCurrentMonth = monthChanged && cell.inCurrentMonth;
+                const leavesCurrentMonth =
+                  monthChanged && prev?.inCurrentMonth && !cell.inCurrentMonth;
+
                 const dateStr = dateKey(cell.year, cell.month, cell.day);
                 const list = byDay.get(dateStr) ?? [];
                 const { payable, receivable } = dayTotals(list);
@@ -112,6 +141,8 @@ export function BoletosCalendar({
                   return false;
                 })();
                 const isAdjacent = !cell.inCurrentMonth;
+                const showMonthLabel =
+                  cell.day === 1 || monthChanged || (i === 0 && isAdjacent);
 
                 const dayListPayload: CalendarDayListPayload = {
                   dateKey: dateStr,
@@ -127,10 +158,15 @@ export function BoletosCalendar({
                     role="presentation"
                     onClick={() => onDayListOpen(dayListPayload)}
                     className={cn(
-                      "relative flex min-h-[104px] cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5 sm:min-h-[118px]",
+                      "relative flex min-h-[112px] cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5 sm:min-h-[128px]",
                       !isAdjacent && "bg-background",
                       !isAdjacent && isWeekend && "bg-muted/20",
-                      isAdjacent && "border-border bg-muted/30",
+                      isAdjacent &&
+                        "border-dashed border-border/80 bg-muted/45 bg-[repeating-linear-gradient(-45deg,transparent,transparent_6px,hsl(var(--muted)/0.35)_6px,hsl(var(--muted)/0.35)_7px)]",
+                      entersCurrentMonth &&
+                        "border-l-[4px] border-l-primary shadow-[inset_4px_0_0_0] shadow-primary/15",
+                      leavesCurrentMonth &&
+                        "border-l-[4px] border-l-muted-foreground/50 border-dashed",
                       today &&
                         cell.inCurrentMonth &&
                         "ring-2 ring-primary/50 ring-inset sm:ring-[3px]",
@@ -138,7 +174,7 @@ export function BoletosCalendar({
                   >
                     {isAdjacent && (
                       <div
-                        className="pointer-events-none absolute inset-0 z-0 backdrop-blur-[6px] sm:backdrop-blur-sm"
+                        className="pointer-events-none absolute inset-0 z-0 bg-background/25"
                         aria-hidden
                       />
                     )}
@@ -150,40 +186,60 @@ export function BoletosCalendar({
                     >
                       <div
                         className={cn(
-                          "mb-1 flex shrink-0 items-center justify-between gap-1 text-xs font-semibold",
-                          today && cell.inCurrentMonth
-                            ? "text-primary"
-                            : isAdjacent
-                              ? "text-muted-foreground"
-                              : "text-foreground",
+                          "mb-1 flex shrink-0 flex-col gap-0.5",
+                          today && cell.inCurrentMonth && "text-primary",
                         )}
                       >
-                        <span className="tabular-nums">{cell.day}</span>
-                        {hasAny && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                tabIndex={0}
-                                className={cn(
-                                  "inline-flex min-h-[22px] min-w-[22px] cursor-default items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                                  isAdjacent
-                                    ? "bg-muted-foreground/15 text-muted-foreground"
-                                    : "bg-primary/12 text-primary",
-                                )}
-                                onClick={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                              >
-                                {list.length}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent
-                              side="top"
-                              className="max-w-[220px]"
-                            >
-                              — Lançamentos neste dia
-                            </TooltipContent>
-                          </Tooltip>
+                        {showMonthLabel && (
+                          <span
+                            className={cn(
+                              "text-[10px] font-semibold uppercase leading-none tracking-wide sm:text-[11px]",
+                              isAdjacent
+                                ? "text-muted-foreground/80"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {monthShortLabel(cell.month, cell.year)}
+                          </span>
                         )}
+                        <div className="flex items-center justify-between gap-1">
+                          <span
+                            className={cn(
+                              "tabular-nums leading-none",
+                              cell.inCurrentMonth
+                                ? "text-xl font-bold sm:text-2xl"
+                                : "text-base font-semibold text-muted-foreground sm:text-lg",
+                              today && cell.inCurrentMonth && "text-primary",
+                            )}
+                          >
+                            {cell.day}
+                          </span>
+                          {hasAny && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  tabIndex={0}
+                                  className={cn(
+                                    "inline-flex min-h-[22px] min-w-[22px] cursor-default items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                                    isAdjacent
+                                      ? "bg-muted-foreground/15 text-muted-foreground"
+                                      : "bg-primary/12 text-primary",
+                                  )}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                >
+                                  {list.length}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                className="max-w-[220px]"
+                              >
+                                — Lançamentos neste dia
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
                       </div>
                       <div className="flex min-h-0 flex-1 flex-col justify-end gap-1">
                         {!hasAny ? (
@@ -200,46 +256,50 @@ export function BoletosCalendar({
                         ) : (
                           <>
                             <div className="flex w-full flex-col gap-1">
-                              {receivable > 0 && (
-                                <div
-                                  className={cn(
-                                    "flex w-full min-w-0 overflow-hidden rounded-md border border-emerald-600/25 bg-emerald-500/[0.07] shadow-[inset_3px_0_0_0] shadow-emerald-600/75 dark:bg-emerald-500/10 dark:shadow-emerald-500/70",
-                                    isAdjacent && "opacity-85",
-                                  )}
-                                >
-                                  <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
-                                    <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-emerald-700 dark:text-emerald-400/95 sm:text-[7px]">
-                                      Vendas realizadas no dia
-                                    </span>
-                                    <p
-                                      className="text-right text-[9px] font-semibold tabular-nums leading-none text-emerald-600 dark:text-emerald-400 sm:text-[10px]"
-                                      title="Contas a receber"
-                                    >
-                                      + {formatCurrency(receivable)}
-                                    </p>
+                              {receivable > 0 &&
+                                (viewMode === "all" ||
+                                  viewMode === "receivable") && (
+                                  <div
+                                    className={cn(
+                                      "flex w-full min-w-0 overflow-hidden rounded-md border border-emerald-600/25 bg-emerald-500/[0.07] shadow-[inset_3px_0_0_0] shadow-emerald-600/75 dark:bg-emerald-500/10 dark:shadow-emerald-500/70",
+                                      isAdjacent && "opacity-85",
+                                    )}
+                                  >
+                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                                      <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-emerald-700 dark:text-emerald-400/95 sm:text-[10px]">
+                                        Vendas realizadas
+                                      </span>
+                                      <p
+                                        className="text-right text-[9px] font-semibold tabular-nums leading-none text-emerald-600 dark:text-emerald-400 sm:text-[12px]"
+                                        title="Contas a receber"
+                                      >
+                                        + {formatCurrency(receivable)}
+                                      </p>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                              {payable > 0 && (
-                                <div
-                                  className={cn(
-                                    "flex w-full min-w-0 overflow-hidden rounded-md border border-destructive/20 bg-destructive/[0.06] shadow-[inset_3px_0_0_0] shadow-destructive/70 dark:bg-destructive/10 dark:shadow-destructive/80",
-                                    isAdjacent && "opacity-85",
-                                  )}
-                                >
-                                  <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
-                                    <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[7px]">
-                                      Valores a Pagar
-                                    </span>
-                                    <p
-                                      className="text-right text-[9px] font-semibold tabular-nums leading-none text-destructive sm:text-[10px]"
-                                      title="Contas a pagar"
-                                    >
-                                      − {formatCurrency(payable)}
-                                    </p>
+                                )}
+                              {payable > 0 &&
+                                (viewMode === "all" ||
+                                  viewMode === "payable") && (
+                                  <div
+                                    className={cn(
+                                      "flex w-full min-w-0 overflow-hidden rounded-md border border-destructive/20 bg-destructive/[0.06] shadow-[inset_3px_0_0_0] shadow-destructive/70 dark:bg-destructive/10 dark:shadow-destructive/80",
+                                      isAdjacent && "opacity-85",
+                                    )}
+                                  >
+                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                                      <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[10px]">
+                                        Valores a Pagar
+                                      </span>
+                                      <p
+                                        className="text-right text-[9px] font-semibold tabular-nums leading-none text-destructive sm:text-[12px]"
+                                        title="Contas a pagar"
+                                      >
+                                        − {formatCurrency(payable)}
+                                      </p>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                )}
                             </div>
                             <Button
                               type="button"

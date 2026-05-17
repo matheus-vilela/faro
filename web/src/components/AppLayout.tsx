@@ -35,7 +35,6 @@ import {
   Bell,
   Building2,
   CircleDollarSign,
-  FileText,
   FlaskConical,
   LayoutDashboard,
   ListChecks,
@@ -47,6 +46,8 @@ import {
   Plug,
   Settings2,
   Sun,
+  TrendingDown,
+  TrendingUp,
   Truck,
   Wallet,
   type LucideIcon,
@@ -117,9 +118,15 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: "Financeiro",
     items: [
       {
-        title: "Fluxo de Caixa",
-        url: "/app/fluxo-de-caixa",
-        icon: FileText,
+        title: "Contas a pagar",
+        url: "/app/contas-a-pagar",
+        icon: TrendingDown,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Vendas realizadas",
+        url: "/app/vendas-realizadas",
+        icon: TrendingUp,
         roles: ["operador", "gestor", "owner"],
       },
       {

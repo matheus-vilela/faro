@@ -64,19 +64,6 @@ function statusLabel(s: IntegrationCsvRevenueJobStatus): string {
   }
 }
 
-function formatRelativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "";
-  const diff = Date.now() - t;
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "agora";
-  if (m < 60) return `há ${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `há ${h} h`;
-  const d = Math.floor(h / 24);
-  return `há ${d} d`;
-}
-
 /**
  * Receitas via CSV EPOC no onboarding: visível só enquanto `onboarding_pdv.completed` ≠ true.
  */
@@ -469,10 +456,9 @@ export function DashboardIntegrationCsvRevenueCard({
     }
     const meta = primary.metadata ?? {};
     const created = Number(meta.revenue_entries_created_total ?? 0) || 0;
-    const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
     const totalRows = Number(meta.csv_total_data_rows ?? 0) || null;
     if (primary.status === "COMPLETED") {
-      return `${created} vendas encontradas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}. Foram cadastradas todas as movimentações de vendas encontradas e sua movimentação de estoque respectiva.`;
+      return `${created} vendas encontradas. Foram cadastradas todas as movimentações de vendas encontradas e sua movimentação de estoque respectiva.`;
     }
     if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
       return (
@@ -483,7 +469,8 @@ export function DashboardIntegrationCsvRevenueCard({
     if (primary.status === "PENDING") {
       return "A processar o CSV das receitas na integração. Pode demorar alguns segundos.";
     }
-    return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · Total: ${totalRows}` : ""}.`;
+    return `${Math.round((created / (totalRows ?? 1)) * 100)}% do total de vendas encontradas foram processadas (${created}/${totalRows})`;
+    // return `${created} receita(s) até agora · ${skipped} ignoradas${totalRows ? ` · Total: ${totalRows}` : ""}.`;
   }, [
     primary,
     edgePendingEffective,
@@ -528,7 +515,7 @@ export function DashboardIntegrationCsvRevenueCard({
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActive
-                  ? "Import de receitas em curso"
+                  ? "Processando vendas do EPOC"
                   : edgePendingEffective
                     ? "Sincronização com o portal EPOC"
                     : primary
@@ -540,15 +527,6 @@ export function DashboardIntegrationCsvRevenueCard({
               <p className="mt-1 text-sm font-medium text-sky-950/90 dark:text-sky-100/90">
                 {subtitle}
               </p>
-              {primary && !(edgePendingEffective && !hasActive) ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatRelativeTime(primary.created_at)} ·{" "}
-                  <span className="font-mono text-[11px]">
-                    {primary.id.slice(0, 8)}…
-                  </span>
-                  {primary.provider ? ` · ${primary.provider}` : null}
-                </p>
-              ) : null}
             </div>
           </div>
 

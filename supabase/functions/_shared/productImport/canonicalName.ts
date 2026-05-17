@@ -1,6 +1,7 @@
 /**
  * Nome canônico para deduplicação: acentos, caixa, pontuação, tokens de ruído.
  */
+import { stripPackSizeFromLabel } from "./packSizeFromLabel.ts";
 
 const NOISE_TOKENS = new Set([
   "de",
@@ -98,11 +99,63 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(raw: string | nu
   return s.length ? s : orig;
 }
 
+/** Indica se o nome já especifica gaseificação (com/sem gás). */
+export function mineralWaterHasGasSpecification(
+  catalogName: string | null | undefined,
+): boolean {
+  const n = stripDiacriticsLower(catalogName);
+  if (!n) return false;
+  return (
+    /\b(com|sem|c\/|s\/)\s*gas\b/.test(n) ||
+    /\bgaseificad/.test(n) ||
+    /\bgasada\b/.test(n) ||
+    /\bcom\s+gases\b/.test(n)
+  );
+}
+
+/**
+ * Água mineral sem especificação de gás → padrão SEM GAS (cadastro de bares).
+ */
+export function applyCatalogProductNameDefaults(
+  catalogNameUpper: string | null | undefined,
+): string {
+  const name = String(catalogNameUpper ?? "").trim();
+  if (!name) return "";
+  const n = stripDiacriticsLower(name);
+  if (!/\bagua\b/.test(n) || !/\bmineral\b/.test(n)) return name;
+  if (mineralWaterHasGasSpecification(name)) return name;
+  return `${name} SEM GAS`;
+}
+
+/** Abreviações comuns em xProd de NF-e → nome de cadastro. */
+export function expandCatalogNameAbbreviations(
+  catalogNameUpper: string | null | undefined,
+): string {
+  let s = String(catalogNameUpper ?? "").trim();
+  if (!s) return "";
+  if (/^CERV\b/.test(s)) s = s.replace(/^CERV\b/, "CERVEJA");
+  if (/^REFR\b/.test(s)) s = s.replace(/^REFR\b/, "REFRIGERANTE");
+  return s;
+}
+
+/** MAIÚSCULAS sem acentos — padrão do catálogo Faro. */
+function toCatalogCase(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toUpperCase();
+}
+
 /** Nome de cadastro a partir de rótulo de NF-e ou resposta LLM: limpa prefixos/sufixos e normaliza em MAIÚSCULAS. */
 export function sanitizeCatalogProductName(raw: string | null | undefined): string {
   const led = stripLeadingInvoiceDecorativeMarks(raw);
-  const cleaned = stripTrailingPackagingQtyAndUnitsForCatalogName(led).trim();
-  return cleaned.length > 0 ? cleaned.toUpperCase() : "";
+  let cleaned = stripTrailingPackagingQtyAndUnitsForCatalogName(led).trim();
+  cleaned = stripPackSizeFromLabel(cleaned).trim() || cleaned;
+  cleaned = stripTrailingPackagingQtyAndUnitsForCatalogName(cleaned).trim();
+  if (!cleaned) return "";
+  return applyCatalogProductNameDefaults(
+    expandCatalogNameAbbreviations(toCatalogCase(cleaned)),
+  );
 }
 
 function singularizeToken(t: string): string {

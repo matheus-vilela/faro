@@ -1591,7 +1591,7 @@ export function ExpenseDetailSheet({
               <SheetFooter className="flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/app/fluxo-de-caixa")}
+                  onClick={() => navigate("/app/contas-a-pagar")}
                 >
                   Ir para Fluxo de Caixa
                 </Button>

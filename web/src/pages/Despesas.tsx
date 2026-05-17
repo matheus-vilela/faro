@@ -1784,7 +1784,7 @@ export function Despesas() {
                   setBoletoSheetOpen(true);
                 } else {
                   setLinkDialogOpen(false);
-                  navigate("/app/fluxo-de-caixa");
+                  navigate("/app/contas-a-pagar");
                 }
               }}
             >
@@ -1935,7 +1935,7 @@ export function Despesas() {
               <SheetFooter className="flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/app/fluxo-de-caixa")}
+                  onClick={() => navigate("/app/contas-a-pagar")}
                 >
                   Ir para Fluxo de Caixa
                 </Button>

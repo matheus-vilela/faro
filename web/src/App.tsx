@@ -23,7 +23,9 @@ import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
 import { Dre } from "@/pages/Dre";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
+import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
+import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
 import { Landing } from "@/pages/Landing";
@@ -83,10 +85,12 @@ function AuthenticatedLayout() {
             path="lancamento-receitas"
             element={<Navigate to="/app/vendas" replace />}
           />
+          <Route path="contas-a-pagar" element={<ContasAPagar />} />
+          <Route path="vendas-realizadas" element={<VendasRealizadasFluxo />} />
           <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
           <Route
             path="boletos"
-            element={<Navigate to="/app/fluxo-de-caixa" replace />}
+            element={<Navigate to="/app/contas-a-pagar" replace />}
           />
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />

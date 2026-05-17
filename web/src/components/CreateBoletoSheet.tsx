@@ -99,6 +99,8 @@ interface CreateBoletoSheetProps {
   expenseId?: string | null;
   /** YYYY-MM-DD — preenche vencimento ao abrir (ex.: dia clicado no calendário) */
   defaultDueDate?: string | null;
+  /** Tipo de lançamento ao abrir sem despesa vinculada. */
+  defaultAccountFlow?: BoletoFlowType;
   onSuccess?: (boleto: Boleto) => void;
 }
 
@@ -108,9 +110,10 @@ export function CreateBoletoSheet({
   companyId,
   expenseId,
   defaultDueDate,
+  defaultAccountFlow = "payable",
   onSuccess,
 }: CreateBoletoSheetProps) {
-  const [accountFlow, setAccountFlow] = useState<BoletoFlowType>("payable");
+  const [accountFlow, setAccountFlow] = useState<BoletoFlowType>(defaultAccountFlow);
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
   const [companyCategories, setCompanyCategories] = useState<
     CompanyCategory[]
@@ -139,12 +142,13 @@ export function CreateBoletoSheet({
 
   useEffect(() => {
     if (!open) return;
+    if (!expenseId) setAccountFlow(defaultAccountFlow);
     if (defaultDueDate?.trim()) {
       setDueDate(defaultDueDate.trim().slice(0, 10));
     } else {
       setDueDate("");
     }
-  }, [open, defaultDueDate]);
+  }, [open, defaultDueDate, defaultAccountFlow, expenseId]);
 
   const effectiveFlow: BoletoFlowType = expenseId ? "payable" : accountFlow;
   const requiresPaymentDetails = effectiveFlow === "payable";

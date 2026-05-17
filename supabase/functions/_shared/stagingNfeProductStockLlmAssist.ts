@@ -25,6 +25,7 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `- **Nunca** começar o nome com asterisco (*), sustenido (#) ou outros prefixos de impressão de NF; remova-os por completo.\n` +
   `- Remova siglas que são só **embalagem/medida de lote** (UN, CX, FD, PCT, PÇ, KG no contexto de fardo, etc.) quando não fazem parte do nome da marca/produto.\n` +
   `- Mantenha **marca** e **tipo** do item (ex.: "Heineken Long Neck", "Linguiça Toscana Sadia").\n` +
+  `- **Água mineral** sem menção a gás no nome → **SEM GAS** no normalized_product_name / suggested_catalog_name (ex.: "AGUA MINERAL" → "AGUA MINERAL SEM GAS"). Com gás/gaseificada na nota → preserve "COM GAS" ou equivalente.\n` +
   `\n**suggested_catalog_name** (NEW_PRODUCT): deve ser **o mesmo nome limpo** que normalized_product_name (ou abreviação mínima sem perder a identidade do item); **não** repita o texto bruto da nota com pesos, packs ou medidas.\n` +
   `\n**stock_quantity** e **stock_unit_value** (números > 0, use ponto decimal):\n` +
   `- Em NEW_PRODUCT: **obrigatórios** — quantidade física de unidades do produto normalizado e preço unitário coerente com valor total da linha (stock_quantity × stock_unit_value ≈ valor total da linha; tolerância centavos).\n` +

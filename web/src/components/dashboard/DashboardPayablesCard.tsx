@@ -43,7 +43,7 @@ export function DashboardPayablesCard({
             </div>
           </div>
           <Button variant="outline" size="sm" className="shrink-0" asChild>
-            <Link to="/app/fluxo-de-caixa">
+            <Link to="/app/contas-a-pagar">
               Fluxo completo
               <ArrowRight className="ml-1 h-4 w-4" />
             </Link>

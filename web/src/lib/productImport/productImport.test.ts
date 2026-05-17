@@ -5,6 +5,7 @@ import {
   sanitizeCatalogProductName,
   stripTrailingPackagingQtyAndUnitsForCatalogName,
 } from "./canonicalName";
+import { stripPackSizeFromLabel } from "./packSizeFromLabel";
 import { consolidateInvoiceItems, pickInvoiceUnitRaw } from "./consolidateItems";
 import {
   applySecondarySignals,
@@ -160,6 +161,36 @@ describe("canonicalName — sanitizeCatalogProductName", () => {
   it("remove asteriscos à esquerda e sufixos de embalagem", () => {
     expect(sanitizeCatalogProductName("* CHIMICHURRI SEM PIMENTA PC 1KG")).toBe(
       "CHIMICHURRI SEM PIMENTA",
+    );
+  });
+
+  it("água mineral sem gás explícito recebe SEM GAS", () => {
+    expect(sanitizeCatalogProductName("AGUA MINERAL")).toBe(
+      "AGUA MINERAL SEM GAS",
+    );
+    expect(sanitizeCatalogProductName("Água Mineral Crystal")).toBe(
+      "AGUA MINERAL CRYSTAL SEM GAS",
+    );
+  });
+
+  it("Heineken 0,0% — só marca/variante no cadastro", () => {
+    expect(
+      sanitizeCatalogProductName("CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR"),
+    ).toBe("CERVEJA HEINEKEN 0,0%");
+    expect(
+      stripPackSizeFromLabel("CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR"),
+    ).toBe("CERV HEINEKEN 0,0%");
+  });
+
+  it("água mineral com gás não altera especificação", () => {
+    expect(sanitizeCatalogProductName("AGUA MINERAL COM GAS")).toBe(
+      "AGUA MINERAL COM GAS",
+    );
+    expect(sanitizeCatalogProductName("AGUA MINERAL GASEIFICADA")).toBe(
+      "AGUA MINERAL GASEIFICADA",
+    );
+    expect(sanitizeCatalogProductName("AGUA MINERAL SEM GAS")).toBe(
+      "AGUA MINERAL SEM GAS",
     );
   });
 });

@@ -16,7 +16,7 @@ Embalagens compostas no xProd (crítico):
 Exemplo fixo: xProd «PAO ALHO TRD 10B/400GR», quantity=3, unit_commercial=CX → interpretation deve mencionar 3 caixas, 10 unidades internas (ex. bandejas) por caixa, 400 g por unidade interna — não «apenas 400 g».
 
 Tarefas:
-1) Propor nome limpo para cadastro: SEM códigos de unidade no texto (UN, UND, PCT, PAC, CX, FD, KG, G, GR, L, ML, etc.), SEM sufixos «- 5 kg», «(500g)», «40 UN». A unidade de medida do cadastro NÃO vem do modelo: o sistema define-a a partir da unidade da nota. Se a unidade da nota repetir no fim do nome, remove do nome limpo.
+1) Propor nome limpo para cadastro: SEM códigos de unidade no texto (UN, UND, PCT, PAC, CX, FD, KG, G, GR, L, ML, etc.), SEM sufixos «- 5 kg», «(500g)», «40 UN», «4X6UN», «0,330GFA» (garrafa/volume), «DES», «PBR». CERV → CERVEJA. A unidade de medida do cadastro NÃO vem do modelo: o sistema define-a a partir da unidade da nota. Se a unidade da nota repetir no fim do nome, remove do nome limpo. Ex.: xProd «CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR» → cleaned_product_name «CERVEJA HEINEKEN 0,0%» (pack 24×330 ml só na interpretation). **Água mineral** sem gás no xProd → **SEM GAS** no cleaned_product_name; com gás/gaseificada → preserve.
 2) Na interpretação (texto curto): se xProd indicar conteúdo interno (ex.: N unidades por pacote, peso por embalagem), recomenda cadastrar conversão em product_unit_conversions entre a unidade da nota e a unidade interna — sem alterar a unidade principal do produto (que segue a nota).
 3) Validar mentalmente se quantity × unit_value bate com line_total (tolerância ~1%); útil para confidence no nome.
 

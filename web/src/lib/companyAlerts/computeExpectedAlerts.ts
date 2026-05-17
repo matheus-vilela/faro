@@ -134,7 +134,7 @@ export async function computeExpectedCompanyAlerts(
         message: baseMsg,
         link_path: row.expense_id
           ? `/app/despesas?expense=${row.expense_id}`
-          : "/app/fluxo-de-caixa",
+          : "/app/contas-a-pagar",
         payload: {
           boleto_id: row.id,
           due_date: row.due_date,
@@ -152,7 +152,7 @@ export async function computeExpectedCompanyAlerts(
         message: baseMsg,
         link_path: row.expense_id
           ? `/app/despesas?expense=${row.expense_id}`
-          : "/app/fluxo-de-caixa",
+          : "/app/contas-a-pagar",
         payload: {
           boleto_id: row.id,
           due_date: row.due_date,

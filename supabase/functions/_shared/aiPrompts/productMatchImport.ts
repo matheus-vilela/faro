@@ -11,7 +11,8 @@ export const PRODUCT_MATCH_HOSPITALITY_CONTEXT =
   `- Insumos alimentares (açúcar, sal, óleo, farinha, temperos, hortifruti, carnes genéricas, embalagens descartáveis): use nomes **abrangentes**, sem marca do fabricante quando a marca na nota é só referência comercial.\n` +
   `  Ex.: "AÇUCAR CARAVELAS REFINADO" na nota → LINK em "AÇÚCAR REFINADO" no cadastro, ou NEW_PRODUCT "AÇÚCAR REFINADO" — não crie duplicata só pela marca Caravelas.\n` +
   `- **Bebidas** (cerveja, chopp, refrigerante, água, suco industrializado, energético, vinho, destilados): **mantenha a marca** no nome (Amstel, Heineken, Coca-Cola, etc.) — são SKUs distintos por marca.\n` +
-  `- Remova do nome de cadastro: quantidade de embalagem no fim ("24 UN", "12 CX", "5 KG"), asteriscos/sustenidos de impressão de NF, sufixos só de lote/embalagem quando não fazem parte do produto.\n` +
+  `- **Água mineral** sem menção a gás no nome (nem "COM GAS", "SEM GAS", "GASEIFICADA", etc.): cadastre com sufixo **SEM GAS** (ex.: "AGUA MINERAL" → "AGUA MINERAL SEM GAS"; "AGUA MINERAL CRYSTAL" → "AGUA MINERAL CRYSTAL SEM GAS"). Se a nota indicar gaseificada/com gás, preserve (ex.: "COM GAS", "GASEIFICADA").\n` +
+  `- Remova do nome de cadastro: quantidade de embalagem no fim ("24 UN", "12 CX", "4X6UN", "5 KG"), volume/embalagem no meio ("0,330GFA" = garrafa 330 ml, "750ML"), tokens de ruído ("DES", "PBR"), asteriscos/sustenidos de NF. Expanda abreviações: CERV → CERVEJA. Mantenha marca e variante (ex.: "HEINEKEN 0,0%").\n` +
   `- Abreviações na nota ou no cadastro (LN, long neck, LT, CX): interprete como o mesmo item quando o restante do nome coincidir (ex.: "Amstel ULTRA LN" = "Cerveja Amstel Ultra Long Neck").\n` +
   `- Prefixos de categoria na nota (cerveja, refrigerante) podem faltar no cadastro — não impedem LINK se marca/variante/embalagem forem o mesmo.\n` +
   `\nVínculo (LINK): escolha o product_id cujo name representa o **mesmo item comercial** que a linha da nota.\n` +
