@@ -14,6 +14,10 @@ import {
 } from "./expenseSupplierEnsure.ts";
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
 import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
+import {
+  appendSemNcmProductsForLlmReview,
+  productCatalogSemNcm,
+} from "./productImport/semNcmCatalogForLlm.ts";
 import type { NfeRagArbiterCandidate } from "./productImport/productMatchLlmAssist.ts";
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";
 import {
@@ -510,6 +514,42 @@ export async function resolveProductsForInterpretLog(
         chunkProductDedupeByKey.set(dedupeKey, catalogHit.id);
         continue;
       }
+
+      const semNcmCatalog = activeCatalog.filter((p) => productCatalogSemNcm(p.ncm));
+      if (semNcmCatalog.length > 0 && openaiKey) {
+        const includedIds = new Set<string>();
+        const candidates: NfeRagArbiterCandidate[] = appendSemNcmProductsForLlmReview(
+          semNcmCatalog,
+          includedIds,
+        ).map((c, idx) => ({
+          rank: idx + 1,
+          product_id: c.id,
+          name: c.name,
+          catalog_unit: c.unit,
+          ncm: c.ncm,
+          barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
+          similarity_0_100: 50,
+          match_detail: "cadastro sem NCM — IA compara nome da nota com o catálogo",
+        }));
+
+        const arb = await assistStagingNfeLineStockNormalizeAndMatch(
+          openaiKey,
+          openaiModel,
+          { line, candidates },
+        );
+
+        if (arb.kind === "LINK") {
+          const hit = semNcmCatalog.find((c) => c.id === arb.product_id);
+          if (hit) {
+            productIdByLineIndex.set(lineIndex, hit.id);
+            invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
+            chunkProductDedupeByKey.set(dedupeKey, hit.id);
+            continue;
+          }
+        }
+
+      }
+
       logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
       continue;
     }
@@ -560,8 +600,13 @@ export async function resolveProductsForInterpretLog(
       continue;
     }
 
-    const candidates: NfeRagArbiterCandidate[] = candidatosNcm.map(
-      (c, idx) => ({
+    const includedForLlm = new Set(candidatosNcm.map((c) => c.id));
+    const semNcmExtras = appendSemNcmProductsForLlmReview(
+      activeCatalog,
+      includedForLlm,
+    );
+    const candidates: NfeRagArbiterCandidate[] = [
+      ...candidatosNcm.map((c, idx) => ({
         rank: idx + 1,
         product_id: c.id,
         name: c.name,
@@ -570,8 +615,19 @@ export async function resolveProductsForInterpretLog(
         barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
         similarity_0_100: Math.max(40, 85 - idx * 3),
         match_detail: "candidato do cadastro com mesmo NCM (8 dígitos)",
-      }),
-    );
+      })),
+      ...semNcmExtras.map((c, idx) => ({
+        rank: candidatosNcm.length + idx + 1,
+        product_id: c.id,
+        name: c.name,
+        catalog_unit: c.unit,
+        ncm: c.ncm,
+        barcode_digits: c.ean != null ? String(c.ean).replace(/\D/g, "") : null,
+        similarity_0_100: 42,
+        match_detail:
+          "cadastro sem NCM no sistema — comparar nome da nota (pode ser o mesmo item abreviado)",
+      })),
+    ];
 
     const arb = await assistStagingNfeLineStockNormalizeAndMatch(
       openaiKey,
@@ -583,7 +639,7 @@ export async function resolveProductsForInterpretLog(
     );
 
     if (arb.kind === "LINK") {
-      const hit = candidatosNcm.find((c) => c.id === arb.product_id);
+      const hit = activeCatalog.find((c) => c.id === arb.product_id);
       if (hit) {
         productIdByLineIndex.set(lineIndex, hit.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);

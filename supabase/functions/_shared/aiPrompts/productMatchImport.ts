@@ -24,6 +24,8 @@ export const PRODUCT_MATCH_SYSTEM_IMPORT_BATCH =
   `ou {"decision":"NEW_PRODUCT","suggested_catalog_name":"...","rationale":"..."}\n` +
   `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
   `Prefira LINK quando for semanticamente o mesmo produto (ex.: "ACUCAR CRISTAL 1KG" vs "Açúcar cristal 1 kg").\n` +
+  `Cadastro abreviado ou incompleto vs descrição longa na nota: interprete marca, linha e embalagem — ex.: nota "Cerveja Amstel Ultra Long Neck" e cadastro "Amstel ULTRA LN" → LINK (LN = long neck; "cerveja" é categoria na nota, não outro SKU).\n` +
+  `Itens marcados na lista como cadastro sem NCM devem ser avaliados principalmente pelo nome, não ignorados por falta de NCM no cadastro.\n` +
   `NÃO faça LINK se o candidato for só matéria-prima/fruta/sabor e a nota descrever produto acabado diferente ` +
   `(ex.: cadastro "Morango" com linha "Refrigerante de Morango" ou "Suco de Morango" — são itens distintos → NEW_PRODUCT).\n` +
   `O mesmo vale para suco vs refrigerante do mesmo sabor: só LINK se for claramente o mesmo item/SKU.\n` +
@@ -48,6 +50,8 @@ export const PRODUCT_MATCH_SYSTEM_NFE_RAG_ARBITER =
   `ou {"decision":"UNCERTAIN","rationale":"..."}\n` +
   `Regras:\n` +
   `- LINK só se for claramente o mesmo produto comercial (mesmo SKU / mesmo item que o cliente compra sempre com aquele nome ou sinónimo óbvio).\n` +
+  `- Nomes na nota costumam ser mais longos; cadastro pode estar abreviado (siglas de embalagem: LN, LT, CX) ou sem prefixo de categoria (cerveja, refrigerante). Compare o núcleo marca+variante+embalagem.\n` +
+  `- Candidatos com "cadastro sem NCM" na lista existem só com nome/unidade: use o nome da nota para decidir LINK, não exija NCM igual no cadastro.\n` +
   `- Se o candidato rank 1 for errado mas outro rank for o item certo, use LINK com o product_id desse outro rank.\n` +
   `- Não faça LINK por NCM ou palavra isolada se a natureza do item for diferente (ex.: hortaliça vs pano de cor, matéria-prima vs produto acabado, suco vs refrigerante).\n` +
   `- NEW_PRODUCT quando nenhum candidato for o mesmo item. suggested_catalog_name: sem quantidade de embalagem nem "100 UN"/"12 CX"/"5 KG" no fim; mantenha marca e especificações úteis.\n` +

@@ -44,6 +44,10 @@ import {
   ensureCompanyProductNameEmbeddings,
   embeddingModelFromEnv,
 } from "../_shared/productEmbedding.ts";
+import {
+  appendSemNcmProductsForLlmReview,
+  productCatalogSemNcm,
+} from "../_shared/productImport/semNcmCatalogForLlm.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -842,6 +846,17 @@ export async function resolveProductMatches(
       }
     }
 
+    if (opts?.importBatch && !opts?.skipLlmAssist && openaiKey) {
+      const inList = new Set(scoredList.map((s) => s.product.id));
+      for (const p of appendSemNcmProductsForLlmReview(products, inList)) {
+        scoredList.push({
+          product: p,
+          score: 0,
+          detail: "cadastro sem NCM — candidato para IA (nome abreviado vs nota)",
+        });
+      }
+    }
+
     if (!scoredList.length) {
       const autoNewEmpty = opts?.importBatch === true;
       if (!autoNewEmpty) requiresProductConfirmation = true;
@@ -899,7 +914,15 @@ export async function resolveProductMatches(
         borderlineLlmRemaining -= 1;
         borderlineLlmCalls += 1;
         const sliceN = Math.min(maxCand, scoredList.length);
-        const arbInputCands = scoredList.slice(0, sliceN).map((s, idx) => ({
+        const arbPool: Scored[] = scoredList.slice(0, sliceN);
+        const arbIds = new Set(arbPool.map((s) => s.product.id));
+        for (const s of scoredList) {
+          if (!productCatalogSemNcm(s.product.ncm)) continue;
+          if (arbIds.has(s.product.id)) continue;
+          arbPool.push(s);
+          arbIds.add(s.product.id);
+        }
+        const arbInputCands = arbPool.map((s, idx) => ({
           rank: idx + 1,
           product_id: s.product.id,
           name: s.product.name,
@@ -968,7 +991,20 @@ export async function resolveProductMatches(
         !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name)
       );
     };
-    const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
+    let linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
+    if (opts?.importBatch && openaiKey) {
+      const inLink = new Set(linkCandidates.map((s) => s.product.id));
+      for (const p of products) {
+        if (!productCatalogSemNcm(p.ncm)) continue;
+        if (inLink.has(p.id)) continue;
+        linkCandidates.push({
+          product: p,
+          score: 0,
+          detail: "cadastro sem NCM — IA avalia por nome",
+        });
+        inLink.add(p.id);
+      }
+    }
 
     const importBatchNoSafeLink =
       opts?.importBatch === true &&

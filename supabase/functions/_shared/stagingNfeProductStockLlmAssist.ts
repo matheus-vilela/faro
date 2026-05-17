@@ -12,6 +12,8 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `\n\n--- Contexto staging (candidatos = mesmo NCM 8 dígitos no cadastro da empresa) ---\n` +
   `- A nota pode truncar ou abreviar; ainda pode ser o mesmo item do cadastro.\n` +
   `- Cadastro **sem marca** no nome vs nota **com marca** (ex.: nota "LINGUIÇA TOSCANA SADIA", cadastro "Linguica toscana") → pode LINK.\n` +
+  `- Cadastro **abreviado** vs nota **por extenso** (ex.: cadastro "Amstel ULTRA LN", nota "Cerveja Amstel Ultra Long Neck") → LINK se for o mesmo item (LN = long neck).\n` +
+  `- Na lista há produtos **sem NCM no cadastro** (marcados na lista): avalie pelo nome comercial; podem ser o item certo mesmo com NCM só na nota.\n` +
   `- Cadastro **com marca A** e nota **marca B** distinta (ex.: Sadia vs Seara) → não LINK.\n` +
   `- Marcas concorrentes (Coca vs Pepsi, etc.) → não LINK.\n` +
   `\n--- Nome normalizado e estoque (obrigatório ler com atenção) ---\n` +

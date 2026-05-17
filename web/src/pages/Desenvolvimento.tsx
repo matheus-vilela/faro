@@ -247,9 +247,7 @@ export function Desenvolvimento() {
       const ok = typed.ok === true;
       const d0 = Array.isArray(typed.detail) ? typed.detail[0] : undefined;
       if (ok && d0?.ok === true) {
-        toast.success(
-          `Listagem resumida concluída. Notas gravadas (nfe_completa): ${String(d0.notasEncontradas ?? 0)}.`,
-        );
+        toast.success(`Busca na SEFAZ concluída.`);
         if (getSyncOnboarding) await refetchCompanies();
       } else if (ok && d0?.skipped) {
         toast.message(String(d0.skipped));

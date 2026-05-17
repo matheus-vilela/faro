@@ -99,10 +99,8 @@ export function scoreNameMatch(
   if (!x.length || !y.length) return 0
   if (x === y) return 100
 
-  const invLine = String(invoiceLine ?? "")
-  const catLine = String(catalogName ?? "")
-  const cx = canonicalProductName(invLine)
-  const cy = canonicalProductName(catLine)
+  const cx = canonicalProductName(invoiceLine)
+  const cy = canonicalProductName(catalogName)
   if (cx && cx === cy) return 98
   if (cx && cy) {
     if (cx.includes(cy) || cy.includes(cx)) {
@@ -111,10 +109,19 @@ export function scoreNameMatch(
       let s = Math.round(82 + (shorter / longer) * 12)
       const invN = cx.split(" ").filter(Boolean).length
       const catN = cy.split(" ").filter(Boolean).length
-      if (invN >= 4 && catN <= 2 && !shortCatalogAnchorsInvoiceHead(invLine, catLine)) {
+      if (
+        invN >= 4 &&
+        catN <= 2 &&
+        !shortCatalogAnchorsInvoiceHead(String(invoiceLine ?? ""), String(catalogName ?? ""))
+      ) {
         s = Math.min(s, 58)
       }
-      if (isFlavorOnlyCatalogInsideCompositeInvoice(invLine, catLine)) {
+      if (
+        isFlavorOnlyCatalogInsideCompositeInvoice(
+          String(invoiceLine ?? ""),
+          String(catalogName ?? ""),
+        )
+      ) {
         s = Math.min(s, 68)
       }
       return s
