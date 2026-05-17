@@ -1,3 +1,4 @@
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 
 export type OnboardingClusterRow = {
@@ -169,10 +170,13 @@ async function materializeProductFromClusterMembers(
     .maybeSingle();
   if (cErr) return { ok: false, error: cErr.message };
 
-  const canonical = String(
+  const canonicalRaw = String(
     (clusterRow as { canonical_name_suggested?: string } | null)
       ?.canonical_name_suggested ?? "",
-  ).trim() || "Produto";
+  ).trim();
+  const canonical =
+    sanitizeCatalogProductName(canonicalRaw) ||
+    sanitizeCatalogProductName("Produto");
 
   const primaryUnit = (
     clusterRow as { primary_unit_suggested?: string | null }

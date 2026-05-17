@@ -33,6 +33,7 @@ import {
   type RevenueOperationalLeaf,
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
+import { sanitizeCatalogProductName } from "../_shared/productImport/canonicalName.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -936,11 +937,14 @@ Deno.serve(async (req) => {
           rawProdutoForMatch,
         );
         const autoStock = mapOperationalTypeToStockControl(autoOpType);
+        const catalogName =
+          sanitizeCatalogProductName(rawProdutoForMatch) ||
+          sanitizeCatalogProductName("Produto");
         const { data: createdProduct, error: createErr } = await admin
           .from("products")
           .insert({
             company_id: job.company_id,
-            name: rawProdutoForMatch,
+            name: catalogName,
             unit: inferredUnit,
             min_quantity: 0,
             current_quantity: 0,

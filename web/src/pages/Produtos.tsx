@@ -76,6 +76,7 @@ import {
 } from "@/lib/companyUnits/productUnitOptions";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -1171,7 +1172,7 @@ export function Produtos() {
 
   const handleStockSave = async () => {
     if (!stockProduct) return;
-    const newName = stockName.trim();
+    const newName = sanitizeCatalogProductName(stockName);
     if (!newName) return;
     const newQty = parseFloat(stockQuantity);
     if (Number.isNaN(newQty) || newQty < 0) return;
@@ -1181,7 +1182,8 @@ export function Produtos() {
     const currentMinQty = Number(stockProduct.min_quantity ?? 0);
     const currentActive = stockProduct.is_active !== false;
     const delta = newQty - currentQty;
-    const nameChanged = newName !== (stockProduct.name ?? "").trim();
+    const nameChanged =
+      newName !== sanitizeCatalogProductName(stockProduct.name ?? "");
     const minChanged = newMinQty !== currentMinQty;
     const activeChanged = stockIsActive !== currentActive;
     const qtyChanged = delta !== 0;

@@ -9,6 +9,7 @@ import {
   pickInvoiceUnitRaw,
   type ExtractedItemWithInvoiceMeta,
 } from "../productImport/consolidateItems.ts";
+import { sanitizeCatalogProductName } from "../productImport/canonicalName.ts";
 import { stripPackSizeFromLabel } from "../productImport/packSizeFromLabel.ts";
 import {
   normalizeUnitLabel,
@@ -43,7 +44,8 @@ export function catalogRegistrationNameFromNfeLine(
   item: ExtractedExpenseItem,
   pm: NonNullable<ItemWithProductMatch["productMatch"]>,
 ): string {
-  return pickBaseNameForCatalog(item, pm);
+  const base = pickBaseNameForCatalog(item, pm);
+  return sanitizeCatalogProductName(base) || sanitizeCatalogProductName("Item");
 }
 
 /**

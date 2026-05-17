@@ -30,6 +30,7 @@ import {
   convertQuantityForProduct,
   rebaseProductConversionsToHub,
 } from '@/lib/companyUnits/convert'
+import { sanitizeCatalogProductName } from '@/lib/productImport/canonicalName'
 import {
   defaultProductStockUnitCode,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -183,7 +184,8 @@ export function CreateProductSheet({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!companyId || !name.trim()) return
+    const catalogName = sanitizeCatalogProductName(name)
+    if (!companyId || !catalogName) return
     setLoading(true)
     const finalSku = sku.trim() || generateRandomSku()
     const parsedLast = parseCurrencyInput(lastUnitValue)
@@ -212,7 +214,7 @@ export function CreateProductSheet({
       .from('products')
       .insert({
         company_id: companyId,
-        name: name.trim(),
+        name: catalogName,
         sku: finalSku,
         unit,
         min_quantity: parseFloat(minQuantity || '0') || 0,

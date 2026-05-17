@@ -22,6 +22,7 @@ import {
   computeStockQuantityAfterHubChange,
 } from "@/lib/companyUnits/stockHubUnitChange";
 import type { UnitConversionCodeRow } from "@/lib/companyUnits/convert";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import { Loader2 } from "lucide-react";
@@ -101,7 +102,7 @@ export function DashboardImportReviewProductCadastroModal({
 
   const handleSave = async () => {
     if (!product) return;
-    const newName = name.trim();
+    const newName = sanitizeCatalogProductName(name);
     if (!newName) {
       toast.error("Informe o nome do produto.");
       return;
@@ -111,7 +112,8 @@ export function DashboardImportReviewProductCadastroModal({
       toast.error("Informe a unidade de estoque.");
       return;
     }
-    const nameChanged = newName !== (product.name ?? "").trim();
+    const nameChanged =
+      newName !== sanitizeCatalogProductName(product.name ?? "");
     const unitChanged = newUnit !== (product.unit || "un").trim().toLowerCase();
     const skuChanged = (sku.trim() || null) !== (product.sku?.trim() || null);
     const barcodeChanged = (barcode.trim() || null) !== (product.barcode?.trim() || null);

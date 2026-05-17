@@ -97,10 +97,11 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(raw: string | nu
   return s.length ? s : orig;
 }
 
-/** Nome de cadastro a partir de rótulo de NF-e ou resposta LLM: limpa prefixos e sufixos de lote/embalagem. */
+/** Nome de cadastro a partir de rótulo de NF-e ou resposta LLM: limpa prefixos/sufixos e normaliza em MAIÚSCULAS. */
 export function sanitizeCatalogProductName(raw: string | null | undefined): string {
   const led = stripLeadingInvoiceDecorativeMarks(raw);
-  return stripTrailingPackagingQtyAndUnitsForCatalogName(led).trim();
+  const cleaned = stripTrailingPackagingQtyAndUnitsForCatalogName(led).trim();
+  return cleaned.length > 0 ? cleaned.toUpperCase() : "";
 }
 
 function singularizeToken(t: string): string {

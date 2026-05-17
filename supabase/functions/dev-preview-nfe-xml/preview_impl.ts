@@ -16,6 +16,7 @@ import {
   stripPackSizeFromLabel,
   volumePerCountUnitFromLabelLiters,
 } from "../_shared/productImport/packSizeFromLabel.ts";
+import { sanitizeCatalogProductName } from "../_shared/productImport/canonicalName.ts";
 import { pickInvoiceUnitRaw } from "../_shared/productImport/consolidateItems.ts";
 import { parseNfeXmlToExtracted } from "../_shared/parseNfeXml.ts";
 import { matchNfeExpenseCatalogLines } from "../_shared/nfeExpenseProducts/matchPipeline.ts";
@@ -878,7 +879,8 @@ function attachPreviewLineSimulation(
     const { packFactor, rationale } = packSizeFromLabel(it.productName);
     const rawName = String(it.productName ?? "").trim() || "Item";
     const catalogNameForRegistration =
-      stripPackSizeFromLabel(rawName).trim() || rawName;
+      sanitizeCatalogProductName(stripPackSizeFromLabel(rawName).trim() || rawName) ||
+      sanitizeCatalogProductName(rawName);
     const massPerPackageKg = massPerCountUnitFromLabelKg(rawName);
     const impliedTotalMassKg =
       massPerPackageKg != null && massPerPackageKg > 0
