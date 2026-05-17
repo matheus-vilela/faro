@@ -2,6 +2,7 @@ import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard"
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
+import { DashboardProductRecipeMatchPanel } from "@/components/dashboard/DashboardProductRecipeMatchPanel";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
 import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
@@ -10,6 +11,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
 import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingProductRecipeMatchVisible } from "@/lib/onboardingProductRecipeMatch";
 import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
@@ -50,12 +52,12 @@ export function Dashboard() {
   const companyId = currentCompany?.id;
   const canSeeAlerts = currentRole === "gestor" || currentRole === "owner";
   const isOwner = currentRole === "owner";
-
-  useEffect(() => {
-    if (currentCompany) {
-      console.log("currentCompany", currentCompany.onboarding_fiscal);
-    }
-  }, [currentCompany]);
+  const showProductRecipeMatch =
+    !!currentCompany &&
+    isOnboardingProductRecipeMatchVisible(
+      currentCompany.onboarding_fiscal,
+      currentCompany.onboarding_pdv,
+    );
 
   const [loadingBoletos, setLoadingBoletos] = useState(true);
   const [todayBoletos, setTodayBoletos] = useState<Boleto[]>([]);
@@ -260,7 +262,14 @@ export function Dashboard() {
 
       <div className="grid gap-6">
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
-        {canSeeAlerts && companyId ? (
+        {canSeeAlerts && companyId && showProductRecipeMatch ? (
+          <DashboardProductRecipeMatchPanel
+            companyId={companyId}
+            refreshSignal={importReviewSeq}
+            onLinked={bumpImportReviewPipeline}
+          />
+        ) : null}
+        {canSeeAlerts && companyId && !showProductRecipeMatch ? (
           <DashboardImportReviewHub
             companyId={companyId}
             importPendingOpenCount={alertSummary.importPending}

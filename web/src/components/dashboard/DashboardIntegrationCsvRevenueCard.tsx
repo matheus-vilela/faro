@@ -472,7 +472,7 @@ export function DashboardIntegrationCsvRevenueCard({
     const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
     const totalRows = Number(meta.csv_total_data_rows ?? 0) || null;
     if (primary.status === "COMPLETED") {
-      return `${created} vendas encontradas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}. Foram criadas despesas, cobranças e produtos automaticamente.`;
+      return `${created} vendas encontradas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}. Foram cadastradas todas as movimentações de vendas encontradas e sua movimentação de estoque respectiva.`;
     }
     if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
       return (
@@ -582,7 +582,7 @@ export function DashboardIntegrationCsvRevenueCard({
                 ) : (
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
-                Concluir integração
+                Confirmar e fechar
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
