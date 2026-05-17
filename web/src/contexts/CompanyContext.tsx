@@ -32,7 +32,6 @@ export interface Company {
   document: string | null;
   email: string | null;
   phone: string | null;
-  address: string | null;
   /** WhatsApp: proprietário (normalizado para validação webhook). */
   owner_whatsapp_normalized?: string | null;
   owner_whatsapp_display?: string | null;
@@ -45,14 +44,12 @@ export interface Company {
   focusnfe?: Record<string, unknown> | null;
   setup?: Record<string, unknown> | null;
   focus_cnpj_consulta?: Record<string, unknown> | null;
-  representante_legal?: Record<string, unknown> | null;
   /** Onboarding: ver migration `company_onboarding_flags`; `onboarding_completed` é derivado no Postgres. */
   onboarding_completed?: boolean;
   /** Métricas do card NF-e recebidas (sync, completed, max_nfes_sync, nfes_sync, nfes_ignored). */
   onboarding_fiscal?: OnboardingFiscalMetrics | null;
-  onboarding_integration_pdv_completed?: boolean;
-  /** Onboarding PDV: sincronização EPOC em curso — desativa disparos manuais na UI. */
-  syncing_pdv?: boolean;
+  /** Onboarding PDV/EPOC: `completed`, `sync`. */
+  onboarding_pdv?: { completed?: boolean; sync?: boolean } | null;
 }
 
 export interface UserCompany {

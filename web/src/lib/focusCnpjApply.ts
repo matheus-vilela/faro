@@ -3,7 +3,6 @@ import type {
   EmpresaMap,
   EnderecoPrincipalMap,
   FocusCnpjLockState,
-  RepresentanteLegalMap,
 } from "@/types/companySetup";
 
 function str(v: unknown): string | undefined {
@@ -55,7 +54,6 @@ export function buildFocusCnpjConsultaRecord(
 export type AppliedFocusCnpjResult = {
   empresa: EmpresaMap;
   endereco: EnderecoPrincipalMap;
-  representante: RepresentanteLegalMap;
   lock: FocusCnpjLockState;
 };
 
@@ -69,7 +67,6 @@ export function applyFocusCnpjConsulta(
   const cnpjDigits = (data.cnpj ?? "").replace(/\D/g, "").slice(0, 14);
   const lockEmpresa: string[] = [];
   const lockEndereco: string[] = [];
-  const lockRep: string[] = [];
 
   const empresa: EmpresaMap = {};
   if (data.razao_social != null && String(data.razao_social).trim()) {
@@ -149,34 +146,14 @@ export function applyFocusCnpjConsulta(
   lockEndereco.length = 0;
   lockEndereco.push(...lockEnderecoUnique);
 
-  const representante: RepresentanteLegalMap = {};
-  if (data.nome_responsavel != null && String(data.nome_responsavel).trim()) {
-    representante.nome_responsavel = String(data.nome_responsavel).trim();
-    lockRep.push("nome_responsavel");
-  }
-  if (data.cpf_responsavel != null) {
-    const cpf = String(data.cpf_responsavel).replace(/\D/g, "").slice(0, 11);
-    if (cpf.length === 11) {
-      representante.cpf_responsavel = cpf;
-      lockRep.push("cpf_responsavel");
-    }
-  }
-  if (data.data_nascimento != null && String(data.data_nascimento).trim()) {
-    representante.data_nascimento = normalizeApiDateToIso(
-      String(data.data_nascimento).trim(),
-    );
-    if (representante.data_nascimento) lockRep.push("data_nascimento");
-  }
-
   const lock: FocusCnpjLockState = {
     validated_cnpj_digits: cnpjDigits.length === 14 ? cnpjDigits : "",
     locked_empresa_keys: lockEmpresa,
     locked_endereco_keys: lockEndereco,
-    locked_representante_keys: [...new Set(lockRep)],
     validated_at: new Date().toISOString(),
   };
 
-  return { empresa, endereco, representante, lock };
+  return { empresa, endereco, lock };
 }
 
 /**
@@ -266,15 +243,13 @@ export function normalizeApiDateToIso(raw: string): string | undefined {
 export function clearFocusCnpjFilledFields(
   empresa: EmpresaMap,
   endereco: EnderecoPrincipalMap,
-  representante: RepresentanteLegalMap,
   lock: FocusCnpjLockState | undefined,
 ): {
   empresa: EmpresaMap;
   endereco: EnderecoPrincipalMap;
-  representante: RepresentanteLegalMap;
 } {
   if (!lock) {
-    return { empresa: { ...empresa }, endereco: { ...endereco }, representante: { ...representante } };
+    return { empresa: { ...empresa }, endereco: { ...endereco } };
   }
   const e = { ...empresa };
   for (const k of lock.locked_empresa_keys) {
@@ -284,9 +259,5 @@ export function clearFocusCnpjFilledFields(
   for (const k of lock.locked_endereco_keys) {
     delete (en as Record<string, unknown>)[k];
   }
-  const r = { ...representante };
-  for (const k of lock.locked_representante_keys) {
-    delete (r as Record<string, unknown>)[k];
-  }
-  return { empresa: e, endereco: en, representante: r };
+  return { empresa: e, endereco: en };
 }

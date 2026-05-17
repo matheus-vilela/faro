@@ -43,7 +43,7 @@ export function DashboardEpocDailySyncAlertCard({
   const pdvOnboardingPending =
     !!companyId &&
     currentCompany?.id === companyId &&
-    currentCompany.onboarding_integration_pdv_completed !== true;
+    currentCompany.onboarding_pdv?.completed !== true;
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const epocSyncUiBusy =

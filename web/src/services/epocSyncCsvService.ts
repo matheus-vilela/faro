@@ -3,7 +3,7 @@ import {
   markEpocCsvSyncPending,
 } from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
-import { patchCompanyMaps } from "@/services/unitSetupService";
+import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { toast } from "sonner";
 
 function coerceInvokeResponse(
@@ -75,10 +75,10 @@ export type InvokeEpocCsvSyncOptions = {
   /** Datas no formato EPOC dd/MM/aaaa (repetição a partir do histórico). */
   consulta_dias_br?: string[];
   /**
-   * Se true: em sucesso mantém `companies.syncing_pdv` até
-   * `completeCompanyOnboardingIntegrationPdvStep`. Se false: em sucesso repõe `syncing_pdv`
+   * Se true: em sucesso mantém `onboarding_pdv.sync` até
+   * `completeCompanyOnboardingIntegrationPdvStep`. Se false: em sucesso repõe `sync`
    * logo após a edge concluir (sync manual pós-onboarding).
-   * Qualquer invocação define `syncing_pdv` a true no arranque e repõe false em falha.
+   * Qualquer invocação define `onboarding_pdv.sync` a true no arranque e repõe false em falha.
    */
   lockOnboardingPdv?: boolean;
   /**
@@ -116,11 +116,9 @@ export async function invokeEpocCsvSync(
   const resetPdvOnboarding =
     options?.resetPdvOnboardingCompleted === true;
 
-  const { error: syncStartErr } = await patchCompanyMaps(companyId, {
-    syncing_pdv: true,
-    ...(resetPdvOnboarding
-      ? { onboarding_integration_pdv_completed: false }
-      : {}),
+  const { error: syncStartErr } = await patchCompanyOnboardingPdv(companyId, {
+    sync: true,
+    ...(resetPdvOnboarding ? { completed: false } : {}),
   });
   if (syncStartErr) {
     return {
@@ -148,7 +146,7 @@ export async function invokeEpocCsvSync(
       });
     if (error) {
       clearEpocCsvSyncPending(companyId);
-      await patchCompanyMaps(companyId, { syncing_pdv: false });
+      await patchCompanyOnboardingPdv(companyId, { sync: false });
       return {
         ok: false,
         error: await messageFromInvokeFailure(error, response),
@@ -156,12 +154,12 @@ export async function invokeEpocCsvSync(
     }
     if (!data) {
       clearEpocCsvSyncPending(companyId);
-      await patchCompanyMaps(companyId, { syncing_pdv: false });
+      await patchCompanyOnboardingPdv(companyId, { sync: false });
       return { ok: false, error: "Resposta vazia da função" };
     }
     if (!data.ok) {
       clearEpocCsvSyncPending(companyId);
-      await patchCompanyMaps(companyId, { syncing_pdv: false });
+      await patchCompanyOnboardingPdv(companyId, { sync: false });
       return data;
     }
     // Mantém o card do dashboard visível durante a janela de transição
@@ -169,12 +167,12 @@ export async function invokeEpocCsvSync(
     window.setTimeout(() => clearEpocCsvSyncPending(companyId), 120_000);
     // Com onboarding PDV concluído, o lock já não aplica — repõe para o dash/UI refletirem o fim da sync.
     if (!lockOnboardingPdv) {
-      await patchCompanyMaps(companyId, { syncing_pdv: false });
+      await patchCompanyOnboardingPdv(companyId, { sync: false });
     }
     return data;
   } catch (e) {
     clearEpocCsvSyncPending(companyId);
-    await patchCompanyMaps(companyId, { syncing_pdv: false });
+    await patchCompanyOnboardingPdv(companyId, { sync: false });
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Falha ao executar sincronização.",
@@ -182,7 +180,7 @@ export async function invokeEpocCsvSync(
   }
 }
 
-/** Repõe `syncing_pdv` quando a trava ficou órfã (sync já terminou, sem job ativo). */
+/** Repõe `onboarding_pdv.sync` quando a trava ficou órfã (sync já terminou, sem job ativo). */
 export async function releaseStalePdvSyncLockIfIdle(
   companyId: string,
 ): Promise<boolean> {
@@ -195,7 +193,7 @@ export async function releaseStalePdvSyncLockIfIdle(
     .in("status", ["PENDING", "PROCESSING"])
     .limit(1);
   if (activeJobs?.length) return false;
-  const { error } = await patchCompanyMaps(companyId, { syncing_pdv: false });
+  const { error } = await patchCompanyOnboardingPdv(companyId, { sync: false });
   return !error;
 }
 

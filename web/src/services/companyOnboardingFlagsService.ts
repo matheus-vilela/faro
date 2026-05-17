@@ -1,3 +1,4 @@
+import { mergeOnboardingPdv } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 
 function mergeOnboardingFiscalFinalize(
@@ -44,11 +45,20 @@ export async function confirmOnboardingFiscalInterpretPhase(
 export async function completeCompanyOnboardingIntegrationPdvStep(
   companyId: string,
 ): Promise<{ error?: string }> {
+  const { data: row, error: readErr } = await supabase
+    .from("companies")
+    .select("onboarding_pdv")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+
   const { error } = await supabase
     .from("companies")
     .update({
-      onboarding_integration_pdv_completed: true,
-      syncing_pdv: false,
+      onboarding_pdv: mergeOnboardingPdv(row?.onboarding_pdv, {
+        completed: true,
+        sync: false,
+      }),
     })
     .eq("id", companyId);
   return { error: error?.message };

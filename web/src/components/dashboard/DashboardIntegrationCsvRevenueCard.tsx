@@ -10,6 +10,7 @@ import {
   isEpocCsvSyncUiBusy,
   readEpocCsvSyncPending,
 } from "@/lib/epocCsvSyncProgress";
+import { isOnboardingPdvJsonCompleted } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import { completeCompanyOnboardingIntegrationPdvStep } from "@/services/companyOnboardingFlagsService";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
@@ -77,7 +78,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 /**
- * Receitas via CSV EPOC: onboarding até `onboarding_integration_pdv_completed`; depois só quando
+ * Receitas via CSV EPOC: onboarding até `onboarding_pdv.completed`; depois só quando
  * há sync/import em curso ou estado que precise de ação (erro, retry).
  */
 export function DashboardIntegrationCsvRevenueCard({
@@ -87,7 +88,7 @@ export function DashboardIntegrationCsvRevenueCard({
 }) {
   const { refetchCompanies } = useCompany();
   const companyId = company.id;
-  const pdvSyncLocked = company.syncing_pdv === true;
+  const pdvSyncLocked = company.onboarding_pdv?.sync === true;
   const [retryBusy, setRetryBusy] = useState(false);
   const epocSyncUiBusy = companyId
     ? isEpocCsvSyncUiBusy(companyId, { localSyncing: retryBusy })
@@ -300,8 +301,7 @@ export function DashboardIntegrationCsvRevenueCard({
   }, [jobs]);
 
   /** Flags só a partir da prop `company` (igual ao cartão fiscal · NF-e): estável ao mudar de ecrã. */
-  const onboardingPdvDone =
-    company.onboarding_integration_pdv_completed === true;
+  const onboardingPdvDone = isOnboardingPdvJsonCompleted(company.onboarding_pdv);
 
   /**
    * Mesma fonte que o resto do onboarding: `setup.epoc` no objeto `company` até
@@ -317,8 +317,9 @@ export function DashboardIntegrationCsvRevenueCard({
   }, [epocEnabled, company.setup?.epoc]);
 
   /** Em fase de onboarding PDV: critério síncrono a partir da prop `company` (sem esperar re-fetch). */
-  const inPdvIntegrationOnboarding =
-    company.onboarding_integration_pdv_completed !== true;
+  const inPdvIntegrationOnboarding = !isOnboardingPdvJsonCompleted(
+    company.onboarding_pdv,
+  );
 
   /**
    * Com `primary === null`, `primary?.status !== "COMPLETED"` era verdadeiro e, junto a

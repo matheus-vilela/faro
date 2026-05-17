@@ -5,13 +5,13 @@ import {
   mergeSetupPatch,
 } from "@/lib/setup/setupProgress";
 import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
+import { defaultOnboardingPdvRecord } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import type {
   CompanySetupMap,
   EmpresaMap,
   EnderecoPrincipalMap,
   FocusNfeMap,
-  RepresentanteLegalMap,
   SetupEpocState,
 } from "@/types/companySetup";
 
@@ -157,7 +157,6 @@ export function initialSetupMap(): CompanySetupMap {
 
 type CreateUnitStep1Maps = {
   endereco_principal?: EnderecoPrincipalMap;
-  representante_legal?: RepresentanteLegalMap;
   /** Snapshot bruto retornado pela edge `focus-consulta-cnpj`. */
   focus_cnpj_consulta?: Record<string, unknown>;
   /** Mesclado no `setup` inicial (ex.: `focus_cnpj_lock`, certificado após passo 3). */
@@ -219,7 +218,6 @@ export async function createCompanyFromSetupStep1(
   if (input.setupExtension) {
     setup = mergeSetupPatch(setup, input.setupExtension);
   }
-
   const empresaPayload: EmpresaMap = {
     ...e,
     cnpj_cpf: docDigits,
@@ -238,10 +236,6 @@ export async function createCompanyFromSetupStep1(
       string,
       unknown
     >,
-    representante_legal: (input.representante_legal ?? {}) as unknown as Record<
-      string,
-      unknown
-    >,
     focus_cnpj_consulta: (input.focus_cnpj_consulta ?? {}) as unknown as Record<
       string,
       unknown
@@ -252,6 +246,7 @@ export async function createCompanyFromSetupStep1(
     >,
     setup: setup as unknown as Record<string, unknown>,
     onboarding_fiscal: defaultOnboardingFiscalRecord(),
+    onboarding_pdv: defaultOnboardingPdvRecord(),
   });
   if (cErr) return { error: cErr.message };
 
@@ -297,7 +292,6 @@ export async function patchCompanyMaps(
   patch: {
     empresa?: EmpresaMap;
     endereco_principal?: EnderecoPrincipalMap;
-    representante_legal?: RepresentanteLegalMap;
     focus_cnpj_consulta?: Record<string, unknown>;
     focusnfe?: FocusNfeMap;
     setup?: Partial<CompanySetupMap>;
@@ -306,8 +300,7 @@ export async function patchCompanyMaps(
     document?: string | null;
     email?: string | null;
     phone?: string | null;
-    onboarding_integration_pdv_completed?: boolean;
-    syncing_pdv?: boolean;
+    onboarding_pdv?: Record<string, unknown>;
     onboarding_fiscal?: Record<string, unknown>;
   },
 ): Promise<{ error?: string }> {
@@ -316,11 +309,6 @@ export async function patchCompanyMaps(
     row.empresa = patch.empresa as unknown as Record<string, unknown>;
   if (patch.endereco_principal !== undefined)
     row.endereco_principal = patch.endereco_principal as unknown as Record<
-      string,
-      unknown
-    >;
-  if (patch.representante_legal !== undefined)
-    row.representante_legal = patch.representante_legal as unknown as Record<
       string,
       unknown
     >;
@@ -341,12 +329,8 @@ export async function patchCompanyMaps(
   if (patch.onboarding_fiscal !== undefined) {
     row.onboarding_fiscal = patch.onboarding_fiscal;
   }
-  if (patch.onboarding_integration_pdv_completed !== undefined) {
-    row.onboarding_integration_pdv_completed =
-      patch.onboarding_integration_pdv_completed;
-  }
-  if (patch.syncing_pdv !== undefined) {
-    row.syncing_pdv = patch.syncing_pdv;
+  if (patch.onboarding_pdv !== undefined) {
+    row.onboarding_pdv = patch.onboarding_pdv;
   }
 
   const { error } = await supabase

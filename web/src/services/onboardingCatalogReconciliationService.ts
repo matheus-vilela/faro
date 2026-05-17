@@ -415,27 +415,3 @@ export async function approveHighConfidenceClusters(
   }
   return { approved, errors };
 }
-
-export async function markCatalogReconciliationComplete(
-  companyId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const iso = new Date().toISOString();
-  const { error } = await supabase
-    .from("companies")
-    .update({
-      onboarding_catalog_reconciliation_completed_at: iso,
-      updated_at: iso,
-    })
-    .eq("id", companyId);
-
-  if (error) return { ok: false, error: error.message };
-  await supabase.from("onboarding_catalog_decision_memory").insert({
-    company_id: companyId,
-    decision_kind: "CANONICAL_OVERRIDE",
-    payload: {
-      onboarding_catalog_closed_at: iso,
-      note: "Fluxo único de reconciliação de onboarding encerrado.",
-    },
-  });
-  return { ok: true };
-}

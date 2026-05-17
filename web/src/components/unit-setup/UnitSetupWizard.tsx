@@ -11,6 +11,7 @@ import {
   resolveFocusCnpjLockForResume,
 } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
+import { mergeOnboardingPdv } from "@/lib/onboardingPdvDefaults";
 import { maskCpfCnpj, unmask } from "@/lib/masks";
 import {
   getNextPendingStep,
@@ -64,7 +65,6 @@ import type {
   EmpresaMap,
   EnderecoPrincipalMap,
   FocusNfeMap,
-  RepresentanteLegalMap,
   SetupStepNumber,
 } from "@/types/companySetup";
 import { Building2, Loader2 } from "lucide-react";
@@ -91,10 +91,6 @@ function emptyEndereco(): EnderecoPrincipalMap {
 }
 
 function emptyFocus(): FocusNfeMap {
-  return {};
-}
-
-function emptyRepresentante(): RepresentanteLegalMap {
   return {};
 }
 
@@ -144,8 +140,6 @@ export function UnitSetupWizard({
   const [empresa, setEmpresa] = useState<EmpresaMap>(emptyEmpresa);
   const [endereco, setEndereco] = useState<EnderecoPrincipalMap>(emptyEndereco);
   const [focusnfe, setFocusnfe] = useState<FocusNfeMap>(emptyFocus);
-  const [representanteLegal, setRepresentanteLegal] =
-    useState<RepresentanteLegalMap>(emptyRepresentante);
   const [focusConsultaRecord, setFocusConsultaRecord] = useState<
     Record<string, unknown>
   >({});
@@ -180,7 +174,6 @@ export function UnitSetupWizard({
       return;
     }
     const c = row.company as typeof row.company & {
-      representante_legal?: Record<string, unknown> | null;
       focus_cnpj_consulta?: Record<string, unknown> | null;
     };
     setCompanyId(c.id);
@@ -189,9 +182,6 @@ export function UnitSetupWizard({
     setFocusnfe(stripFocusnfeSecrets((c.focusnfe ?? {}) as FocusNfeMap));
     setCertFileBase64("");
     setCertPassword("");
-    setRepresentanteLegal(
-      (c.representante_legal ?? {}) as RepresentanteLegalMap,
-    );
     const consultaRec =
       c.focus_cnpj_consulta && typeof c.focus_cnpj_consulta === "object"
         ? (c.focus_cnpj_consulta as Record<string, unknown>)
@@ -299,19 +289,17 @@ export function UnitSetupWizard({
         const cleared = clearFocusCnpjFilledFields(
           empresa,
           endereco,
-          representanteLegal,
           setup.focus_cnpj_lock,
         );
         setEmpresa({ ...cleared.empresa, cnpj_cpf: nextDigits });
         setEndereco(cleared.endereco);
-        setRepresentanteLegal(cleared.representante);
         setSetup((s) => mergeSetupPatch(s, { focus_cnpj_lock: undefined }));
         setFocusConsultaRecord({});
         return;
       }
       setEmpresa((prev) => ({ ...prev, ...patch }));
     },
-    [empresa, endereco, representanteLegal, setup.focus_cnpj_lock],
+    [empresa, endereco, setup.focus_cnpj_lock],
   );
 
   const handleValidarCnpj = useCallback(async () => {
@@ -332,13 +320,11 @@ export function UnitSetupWizard({
       setFocusConsultaRecord(raw);
       const nextEmpresa = { ...empresa, ...applied.empresa, cnpj_cpf: digits };
       const nextEndereco = { ...endereco, ...applied.endereco };
-      const nextRep = { ...representanteLegal, ...applied.representante };
       const nextSetup = mergeSetupPatch(setup, {
         focus_cnpj_lock: applied.lock,
       });
       setEmpresa(nextEmpresa);
       setEndereco(nextEndereco);
-      setRepresentanteLegal(nextRep);
       setSetup(nextSetup);
       if (companyId) {
         const patchRes = await patchCompanyMaps(companyId, {
@@ -347,7 +333,6 @@ export function UnitSetupWizard({
             telefone: (nextEmpresa.telefone ?? "").replace(/\D/g, ""),
           },
           endereco_principal: nextEndereco,
-          representante_legal: nextRep,
           focus_cnpj_consulta: raw,
           setup: nextSetup,
           document: digits,
@@ -363,7 +348,7 @@ export function UnitSetupWizard({
     } finally {
       setCnpjValidating(false);
     }
-  }, [empresa, endereco, representanteLegal, setup, companyId]);
+  }, [empresa, endereco, setup, companyId]);
 
   const handlePause = async () => {
     if (!user) return;
@@ -379,7 +364,6 @@ export function UnitSetupWizard({
       await patchCompanyMaps(companyId, {
         empresa,
         endereco_principal: endereco,
-        representante_legal: representanteLegal,
         focus_cnpj_consulta: focusConsultaRecord,
         focusnfe,
         setup: paused,
@@ -451,7 +435,6 @@ export function UnitSetupWizard({
             groupName: groupName.trim(),
             empresa: empresaPayload,
             endereco_principal: endereco,
-            representante_legal: representanteLegal,
             focus_cnpj_consulta: focusConsultaRecord,
             afterFocusCriaSuccess: true,
             focusnfe: focusnfeForDb,
@@ -466,7 +449,6 @@ export function UnitSetupWizard({
             groupId: newUnitGroupId!,
             empresa: empresaPayload,
             endereco_principal: endereco,
-            representante_legal: representanteLegal,
             focus_cnpj_consulta: focusConsultaRecord,
             afterFocusCriaSuccess: true,
             focusnfe: focusnfeForDb,
@@ -529,7 +511,6 @@ export function UnitSetupWizard({
     const res = await patchCompanyMaps(companyId, {
       empresa: { ...empresa, cnpj_cpf: docDigits, telefone: phoneDigits },
       endereco_principal: endereco,
-      representante_legal: representanteLegal,
       focus_cnpj_consulta: focusConsultaRecord,
       setup: nextSetup,
       name: displayName,
@@ -859,7 +840,12 @@ export function UnitSetupWizard({
     await patchCompanyMaps(companyId, {
       setup: completed,
       ...(lastSetup.epoc?.mode === "no"
-        ? { onboarding_integration_pdv_completed: true }
+        ? {
+            onboarding_pdv: mergeOnboardingPdv(undefined, {
+              completed: true,
+              sync: false,
+            }),
+          }
         : {}),
     });
     setSetup(completed);

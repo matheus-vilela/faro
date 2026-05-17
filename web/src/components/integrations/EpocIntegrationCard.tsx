@@ -90,7 +90,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     [userCompanies, companyId],
   );
   const lockOnboardingPdv = companyMeta
-    ? companyMeta.onboarding_integration_pdv_completed !== true
+    ? companyMeta.onboarding_pdv?.completed !== true
     : false;
 
   const [loading, setLoading] = useState(true);
@@ -197,11 +197,11 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   }, [load]);
 
   useEffect(() => {
-    if (!companyMeta?.syncing_pdv) return;
+    if (!companyMeta?.onboarding_pdv?.sync) return;
     void releaseStalePdvSyncLockIfIdle(companyId).then((released) => {
       if (released) void refetchCompanies();
     });
-  }, [companyId, companyMeta?.syncing_pdv, refetchCompanies]);
+  }, [companyId, companyMeta?.onboarding_pdv?.sync, refetchCompanies]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
