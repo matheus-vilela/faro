@@ -63,7 +63,10 @@ function progressPercent(max: number, synced: number, ignored: number): number {
   return Math.min(100, Math.max(0, Math.round((done / max) * 100)));
 }
 
-function formatSefazRetryLabel(retryAtIso: string | null, nowMs: number): string {
+function formatSefazRetryLabel(
+  retryAtIso: string | null,
+  nowMs: number,
+): string {
   if (!retryAtIso) return "em breve";
   const t = new Date(retryAtIso).getTime();
   if (!Number.isFinite(t)) return "em breve";
@@ -153,9 +156,8 @@ export function DashboardFocusNfeRecebidasSyncCard({
                   if (!companyId) return;
                   setInterpretClosing(true);
                   void (async () => {
-                    const res = await confirmOnboardingFiscalInterpretPhase(
-                      companyId,
-                    );
+                    const res =
+                      await confirmOnboardingFiscalInterpretPhase(companyId);
                     if (res.error) {
                       setInterpretClosing(false);
                       console.error(
@@ -170,8 +172,8 @@ export function DashboardFocusNfeRecebidasSyncCard({
               >
                 {interpretClosing ? (
                   <>
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    A guardar…
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />A
+                    guardar…
                   </>
                 ) : (
                   "Confirmar e fechar"
@@ -224,8 +226,8 @@ export function DashboardFocusNfeRecebidasSyncCard({
                   <strong>{sefazRetryLabel}</strong> de forma automática.
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Não é necessário fazer nada agora — o painel atualiza assim que
-                  a sincronização retomar.
+                  Não é necessário fazer nada agora — o painel atualiza assim
+                  que a sincronização retomar.
                 </p>
               </div>
             </div>
@@ -268,15 +270,13 @@ export function DashboardFocusNfeRecebidasSyncCard({
               {awaitingSefazEstimate ? (
                 <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
                   Estamos a consultar a SEFAZ e a preparar as{" "}
-                  <strong>NF-e recebidas</strong> desta unidade. O total de
-                  notas a processar aparece aqui assim que a sincronização
-                  terminar.
+                  <strong>NF-e recebidas</strong> desta unidade.
                 </p>
               ) : (
                 <>
                   <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
                     <strong>{done}</strong> de <strong>{max}</strong> notas
-                    processadas neste onboarding.
+                    processadas...
                   </p>
                   <div
                     className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18"
@@ -294,17 +294,12 @@ export function DashboardFocusNfeRecebidasSyncCard({
                 </>
               )}
 
-              {ultimaSyncLabel &&
-                !company?.onboarding_fiscal?.max_nfes_sync && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Última sincronização com a Focus registada{" "}
-                    <span className="font-medium text-foreground/80">
-                      {ultimaSyncLabel}
-                    </span>
-                    .
-                  </p>
-                )}
-
+              {!company?.onboarding_fiscal?.max_nfes_sync && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Assim que a sincronização terminar, o processamento das notas
+                  será iniciado automaticamente.
+                </p>
+              )}
             </div>
           </div>
 

@@ -6,6 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import { supabase } from "@/lib/supabase";
 import { ArrowDownLeft, ArrowUpRight, Loader2, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -15,8 +17,10 @@ type Row = {
   quantity: number;
   type: string;
   reference_type: string | null;
+  reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
+  expense_id: string | null;
   products: { name: string; unit: string } | null;
 };
 
@@ -46,7 +50,7 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
     const { data, error } = await supabase
       .from("stock_movements")
       .select(
-        "id, quantity, type, reference_type, created_at, unit_cost, products!inner(name, unit, company_id)",
+        "id, quantity, type, reference_type, reference_id, created_at, unit_cost, products!inner(name, unit, company_id)",
       )
       .eq("products.company_id", companyId)
       .order("created_at", { ascending: false })
@@ -58,7 +62,9 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       setRows([]);
       return;
     }
-    setRows((data ?? []) as unknown as Row[]);
+    const base = (data ?? []) as unknown as Omit<Row, "expense_id">[];
+    const enriched = await resolveExpenseIdsForStockMovements(base);
+    setRows(enriched as Row[]);
   }, [companyId]);
 
   useEffect(() => {
@@ -140,8 +146,12 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                       <td className="p-2 tabular-nums">
                         {Number(r.quantity).toLocaleString("pt-BR")} {unit}
                       </td>
-                      <td className="p-2 text-muted-foreground">
-                        {refLabel(r.reference_type)}
+                      <td className="p-2">
+                        <StockMovementOriginCell
+                          referenceType={r.reference_type}
+                          expenseId={r.expense_id}
+                          label={refLabel(r.reference_type)}
+                        />
                       </td>
                       <td className="p-2 tabular-nums text-muted-foreground">
                         {formatMoney(

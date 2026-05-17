@@ -74,6 +74,7 @@ import {
   getSystemProductUnitSelectOptionsWithLegacy,
   isSystemUnitCode,
 } from "@/lib/companyUnits/productUnitOptions";
+import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { supabase } from "@/lib/supabase";
@@ -187,15 +188,6 @@ function sameProductConversions(
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
-type StockMovementRow = {
-  id: string;
-  quantity: number;
-  type: string;
-  reference_type: string | null;
-  created_at: string;
-  unit_cost: number | null;
-};
-
 type OperationalTypeValue =
   | "INSUMO"
   | "PRODUTO_REVENDA"
@@ -234,23 +226,6 @@ type OperationalConfigSnapshot = {
 function operationalTypeLabel(value: string | null | undefined): string {
   if (!value) return "Nao classificado";
   return OPERATIONAL_TYPE_LABEL[value as OperationalTypeValue] ?? value;
-}
-
-const STOCK_REF_LABEL: Record<string, string> = {
-  inventory_count: "Contagem",
-  expense: "Despesa",
-  expense_item: "Despesa",
-  recebimento: "Recebimento",
-  recipe: "Receita",
-  revenue_entry: "Venda",
-  waste: "Perda",
-  adjustment: "Ajuste",
-  purchase_order: "Compra",
-};
-
-function stockRefLabel(type: string | null): string {
-  if (!type) return "—";
-  return STOCK_REF_LABEL[type] ?? type;
 }
 
 async function fetchProductCatalogMap(
@@ -471,10 +446,6 @@ export function Produtos() {
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
   >([]);
-  const [stockMovementRows, setStockMovementRows] = useState<StockMovementRow[]>(
-    [],
-  );
-  const [stockMovementLoading, setStockMovementLoading] = useState(false);
   const [initialStockProductConversions, setInitialStockProductConversions] =
     useState<ProductUnitConversionDraft[]>([]);
   type EstoqueTab =
@@ -1051,36 +1022,6 @@ export function Produtos() {
     };
   }, [stockProduct?.id, productSheetView, currentCompany?.id]);
 
-  useEffect(() => {
-    const productId = stockProduct?.id;
-    if (!productId) {
-      setStockMovementRows([]);
-      setStockMovementLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setStockMovementLoading(true);
-    void (async () => {
-      const { data, error } = await supabase
-        .from("stock_movements")
-        .select("id, quantity, type, reference_type, created_at, unit_cost")
-        .eq("product_id", productId)
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (cancelled) return;
-      setStockMovementLoading(false);
-      if (error) {
-        console.error(error);
-        setStockMovementRows([]);
-        return;
-      }
-      setStockMovementRows((data ?? []) as StockMovementRow[]);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [stockProduct?.id]);
-
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
       style: "currency",
@@ -1192,8 +1133,6 @@ export function Produtos() {
     setStockOperationalType("REVISAO_PENDENTE");
     setStockProductConversions([]);
     setInitialStockProductConversions([]);
-    setStockMovementRows([]);
-    setStockMovementLoading(false);
   };
 
   useEffect(() => {
@@ -2555,82 +2494,12 @@ export function Produtos() {
                 </div>
                 ) : (
                 <div className="space-y-4 p-6">
-                  <div className={SHEET_SECTION}>
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Histórico de movimentação
-                      </p>
-                      <span className="text-xs text-muted-foreground">
-                        Últimos 20 registros
-                      </span>
-                    </div>
-                    {stockMovementLoading ? (
-                      <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Carregando movimentações...
-                      </div>
-                    ) : stockMovementRows.length === 0 ? (
-                      <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-                        Nenhuma movimentação registrada para este produto.
-                      </p>
-                    ) : (
-                      <div className="overflow-x-auto rounded-xl border border-border bg-background shadow-sm">
-                        <table className="w-full text-left text-sm">
-                          <thead>
-                            <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-                              <th className="px-3 py-2 font-medium">Data</th>
-                              <th className="px-3 py-2 font-medium">Tipo</th>
-                              <th className="px-3 py-2 font-medium">Quantidade</th>
-                              <th className="px-3 py-2 font-medium">Origem</th>
-                              <th className="px-3 py-2 font-medium">Custo un.</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {stockMovementRows.map((row) => {
-                              const isIn = row.type === "in";
-                              return (
-                                <tr key={row.id} className="border-b border-border/60 last:border-b-0">
-                                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                                    {new Date(row.created_at).toLocaleString("pt-BR", {
-                                      day: "2-digit",
-                                      month: "short",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <Badge
-                                      variant={isIn ? "secondary" : "outline"}
-                                      className="gap-1 font-normal"
-                                    >
-                                      {isIn ? (
-                                        <ArrowDownLeft className="h-3 w-3" />
-                                      ) : (
-                                        <ArrowUpRight className="h-3 w-3" />
-                                      )}
-                                      {isIn ? "Entrada" : "Saída"}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-3 py-2 tabular-nums">
-                                    {Number(row.quantity).toLocaleString("pt-BR")}{" "}
-                                    {stockProduct.unit}
-                                  </td>
-                                  <td className="px-3 py-2 text-muted-foreground">
-                                    {stockRefLabel(row.reference_type)}
-                                  </td>
-                                  <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                                    {row.unit_cost != null
-                                      ? formatCurrency(Number(row.unit_cost))
-                                      : "—"}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
+                  <ProductStockMovementHistorySection
+                    productId={stockProduct.id}
+                    unit={stockProduct.unit}
+                    active={productDetailTab === "historico"}
+                    className={SHEET_SECTION}
+                  />
                 </div>
                 )}
               </div>

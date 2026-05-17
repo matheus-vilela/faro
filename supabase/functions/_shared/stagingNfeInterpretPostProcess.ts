@@ -26,19 +26,56 @@ type SupabaseAdmin = any;
 
 const LOG = "[focus-get-sync-nfe-interpret-staging|post]";
 
-/** Log pedido: fornecedor/produto (comparação / preview). */
-export type StagingEntityComparisonLog = {
-  exist: boolean;
-  dadosDoQueExiste: string;
-  dadosDoQueEstaComparando: string;
-  /** Corpo que seria enviado ao `insert` se fosse cadastrar; null se já existia ou não aplicável. */
-  data: Record<string, unknown> | null;
-};
-
+/** NCM com 8 dígitos: 2–7 dígitos recebem zeros à esquerda; 1 dígito ou vazio = inválido. */
 function normalizeNcm8(ncm: string | null | undefined): string | null {
   const d = String(ncm ?? "").replace(/\D/g, "");
-  if (d.length < 8) return null;
+  if (d.length < 1) return null;
+  if (d.length < 8) return d.padStart(8, "0");
   return d.slice(0, 8);
+}
+
+function normalizeOptionalCfop(
+  line: StagingNfeInterpretLog["produtos"][number],
+): string | null {
+  const cfop = String(line.cfop ?? "").replace(/\D/g, "").slice(0, 4);
+  return cfop.length === 4 ? cfop : null;
+}
+
+function normalizeOptionalCsosn(
+  line: StagingNfeInterpretLog["produtos"][number],
+): string | null {
+  const csosn = String(line.csosn ?? "").replace(/\D/g, "").slice(0, 4);
+  return csosn.length >= 2 ? csosn : null;
+}
+
+/** NCM (8 dígitos) obrigatório; CFOP e CSOSN/CST opcionais quando presentes no XML. */
+function normalizeLineFiscalForProduct(
+  line: StagingNfeInterpretLog["produtos"][number],
+): { ncm: string; cfop: string | null; csosn: string | null } | null {
+  const ncm = normalizeNcm8(line.ncm);
+  if (!ncm) return null;
+  return {
+    ncm,
+    cfop: normalizeOptionalCfop(line),
+    csosn: normalizeOptionalCsosn(line),
+  };
+}
+
+function logProductSkipFiscalIncomplete(
+  line: StagingNfeInterpretLog["produtos"][number],
+  motivo: string,
+): void {
+  console.error(
+    LOG,
+    "produto_skip_fiscal_incompleto",
+    JSON.stringify({
+      motivo,
+      nome: String(line.nome ?? "").trim() || "—",
+      ncm: line.ncm ?? null,
+      cfop: line.cfop ?? null,
+      csosn: line.csosn ?? null,
+    }),
+  );
 }
 
 /** Dígitos do GTIN e algumas variantes comuns para bater com o cadastro. */
@@ -78,18 +115,22 @@ function productInsertPayload(
   line: StagingNfeInterpretLog["produtos"][number],
   suggestedName?: string,
   estoquePreview?: Record<string, unknown> | null,
-): Record<string, unknown> {
+): Record<string, unknown> | null {
+  const fiscal = normalizeLineFiscalForProduct(line);
+  if (!fiscal) return null;
+
   const nameRaw = (suggestedName ?? line.nome).trim();
   const name =
     sanitizeCatalogProductName(nameRaw).slice(0, 512) || "Produto (NF-e)";
   const unit = (line.unidade_comercial ?? "un").trim().slice(0, 32) || "un";
-  const ncm = line.ncm != null ? String(line.ncm).trim() : null;
   const eanDigits = line.ean != null ? String(line.ean).replace(/\D/g, "") : "";
   const base: Record<string, unknown> = {
     company_id: companyId,
     name,
     unit,
-    ncm: ncm && ncm.length > 0 ? ncm : null,
+    ncm: fiscal.ncm,
+    cfop: fiscal.cfop,
+    csosn: fiscal.csosn,
     ean: eanDigits.length > 0 ? eanDigits : null,
     min_quantity: 0,
     current_quantity: 0,
@@ -103,14 +144,31 @@ function productInsertPayload(
 /** Colunas válidas em `products` (exclui preview JSON só para log). */
 function productRowForDbInsert(
   payload: Record<string, unknown>,
-): Record<string, unknown> {
-  const { company_id, name, unit, ncm, ean, min_quantity, current_quantity } =
-    payload;
+): Record<string, unknown> | null {
+  const {
+    company_id,
+    name,
+    unit,
+    ncm,
+    cfop,
+    csosn,
+    ean,
+    min_quantity,
+    current_quantity,
+  } = payload;
+  const ncmStr = normalizeNcm8(ncm != null ? String(ncm) : null);
+  if (!ncmStr) return null;
+  const cfopRaw =
+    cfop != null ? String(cfop).replace(/\D/g, "").slice(0, 4) : "";
+  const csosnRaw =
+    csosn != null ? String(csosn).replace(/\D/g, "").slice(0, 4) : "";
   return {
     company_id,
     name,
     unit,
-    ncm: ncm ?? null,
+    ncm: ncmStr,
+    cfop: cfopRaw.length === 4 ? cfopRaw : null,
+    csosn: csosnRaw.length >= 2 ? csosnRaw : null,
     ean: ean ?? null,
     min_quantity: min_quantity ?? 0,
     current_quantity: current_quantity ?? 0,
@@ -123,6 +181,20 @@ async function insertProductFromStagingInterpret(
   contexto: string,
 ): Promise<string | null> {
   const row = productRowForDbInsert(payload);
+  if (!row) {
+    console.error(
+      LOG,
+      "produto_insert_rejeitado",
+      contexto,
+      "ncm_obrigatorio",
+      JSON.stringify({
+        ncm: payload.ncm ?? null,
+        cfop: payload.cfop ?? null,
+        csosn: payload.csosn ?? null,
+      }),
+    );
+    return null;
+  }
   const { data, error } = await admin
     .from("products")
     .insert(row)
@@ -132,57 +204,55 @@ async function insertProductFromStagingInterpret(
     console.error(LOG, "produto_insert_err", contexto, error.message);
     return null;
   }
-  const id = data?.id != null ? String(data.id) : null;
-  console.log(
-    LOG,
-    "produto_insert_ok",
-    JSON.stringify({ contexto, name: row.name, id }),
-  );
-  return id;
+  return data?.id != null ? String(data.id) : null;
 }
 
-function logComparison(
-  kind: string,
-  row: StagingEntityComparisonLog,
-  extra?: unknown,
-) {
-  console.log(
-    LOG,
-    kind,
-    JSON.stringify(extra != null ? { ...row, extra } : row, null, 2),
-  );
+const CRITERIO_PRODUTO_CRIADO: Record<string, string> = {
+  sem_candidatos_ncm:
+    "NCM na linha sem nenhum produto no cadastro com o mesmo NCM",
+  sem_openai:
+    "existem candidatos com o mesmo NCM mas OPENAI_API_KEY não configurada",
+  llm_new_product:
+    "OpenAI (árbitro por NCM) classificou como produto novo (NEW_PRODUCT)",
+};
+
+function criterioProdutoCriadoLabel(contexto: string): string {
+  return CRITERIO_PRODUTO_CRIADO[contexto] ?? contexto;
 }
 
-/** Log enxuto por linha de produto (interpretação staging). */
-function logProdutoComparacao(payload: {
-  exist: boolean;
-  dadosExiste: { name: string } | null;
-  dadosComparado: { name: string };
-  data: Record<string, unknown> | null;
-}) {
-  console.log(LOG, "produto_comparacao", JSON.stringify(payload));
-}
-
-function nomeLinhaProduto(
+/** Nome normalizado para dedupe e match de catálogo (sem_ncm). */
+function stagingLineCatalogNameKey(
   line: StagingNfeInterpretLog["produtos"][number],
 ): string {
-  return String(line.nome ?? "").trim() || "—";
+  return sanitizeCatalogProductName(
+    String(line.nome ?? "").trim(),
+  ).toLowerCase();
 }
 
-/** Chave estável para a mesma nota: evita vários inserts quando a NF repete o mesmo item em linhas distintas. */
+/** Chave estável (NCM + EAN + nome): reuso no chunk e na mesma NF sem novo insert. */
 function stagingLineProductDedupeKey(
   line: StagingNfeInterpretLog["produtos"][number],
 ): string {
   const n8 = normalizeNcm8(line.ncm) ?? "_";
   const ean = String(line.ean ?? "").replace(/\D/g, "") || "_";
-  const nome = sanitizeCatalogProductName(
-    String(line.nome ?? "").trim(),
-  ).toLowerCase();
-  const unit =
-    String(line.unidade_comercial ?? "")
-      .trim()
-      .toLowerCase() || "_";
-  return `${n8}\x1f${ean}\x1f${nome}\x1f${unit}`;
+  const nome = stagingLineCatalogNameKey(line);
+  return `${n8}\x1f${ean}\x1f${nome}`;
+}
+
+/**
+ * Produto já cadastrado sem NCM válido (8 dígitos) e mesmo nome sanitizado.
+ * Cobre notas/chunks seguintes: o 1º passe só faz match por EAN.
+ */
+function findCatalogProductSemNcmByName(
+  catalog: StagingInterpretProductCatalogRow[],
+  line: StagingNfeInterpretLog["produtos"][number],
+): StagingInterpretProductCatalogRow | undefined {
+  const lineKey = stagingLineCatalogNameKey(line);
+  if (!lineKey) return undefined;
+  return catalog.find((p) => {
+    if (normalizeNcm8(p.ncm)) return false;
+    return sanitizeCatalogProductName(p.name).toLowerCase() === lineKey;
+  });
 }
 
 function catalogRowFromStagingInsert(
@@ -195,6 +265,8 @@ function catalogRowFromStagingInsert(
     id,
     name: String(payload.name ?? ""),
     ncm: payload.ncm != null ? String(payload.ncm).trim() || null : null,
+    cfop: payload.cfop != null ? String(payload.cfop).trim() || null : null,
+    csosn: payload.csosn != null ? String(payload.csosn).trim() || null : null,
     ean: eanDigits.length > 0 ? eanDigits : null,
     unit: payload.unit != null ? String(payload.unit).trim() || null : null,
     sku: null,
@@ -222,11 +294,27 @@ async function stagingInterpretCreateProduct(
   ncmBuckets: Map<string, StagingInterpretProductCatalogRow[]>,
   chunkProductDedupeByKey: Map<string, string>,
   dedupeKey: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown> | null,
   contexto: string,
 ): Promise<string | null> {
-  const newId = await insertProductFromStagingInterpret(admin, payload, contexto);
+  if (!payload) return null;
+  const nomeProduto = String(payload.name ?? "").trim() || "—";
+  const newId = await insertProductFromStagingInterpret(
+    admin,
+    payload,
+    contexto,
+  );
   if (!newId) return null;
+  console.log(
+    LOG,
+    "produto_criado",
+    JSON.stringify({
+      product_id: newId,
+      nome: nomeProduto,
+      criterio: contexto,
+      criterio_descricao: criterioProdutoCriadoLabel(contexto),
+    }),
+  );
   registerNewProductInStagingCatalog(
     catalog,
     ncmBuckets,
@@ -244,29 +332,12 @@ export async function ensureSupplierForInterpretLog(
   companyId: string,
   interpret: StagingNfeInterpretLog,
 ): Promise<void> {
-  if (!interpret.parse_ok) {
-    console.log(
-      LOG,
-      "fornecedor_skip",
-      JSON.stringify({ motivo: "parse_ok_false" }),
-    );
-    return;
-  }
+  if (!interpret.parse_ok) return;
 
   const digits = normalizeTaxIdForSupplierDocument(
     interpret.fornecedor.documento,
   );
-  if (!digits || (digits.length !== 11 && digits.length !== 14)) {
-    console.log(
-      LOG,
-      "fornecedor_skip",
-      JSON.stringify({
-        motivo: "documento_invalido",
-        documento: interpret.fornecedor.documento,
-      }),
-    );
-    return;
-  }
+  if (!digits || (digits.length !== 11 && digits.length !== 14)) return;
 
   const { data: rows, error } = await admin
     .from("suppliers")
@@ -284,21 +355,7 @@ export async function ensureSupplierForInterpretLog(
       normalizeTaxIdForSupplierDocument(r.document) === digits,
   );
 
-  const comparando = JSON.stringify({
-    nome: interpret.fornecedor.nome,
-    documento: digits,
-  });
-
-  if (found) {
-    const payload: StagingEntityComparisonLog = {
-      exist: true,
-      dadosDoQueExiste: JSON.stringify(found),
-      dadosDoQueEstaComparando: comparando,
-      data: null,
-    };
-    logComparison("fornecedor_comparacao", payload);
-    return;
-  }
+  if (found) return;
 
   const insertBody: Record<string, unknown> = {
     company_id: companyId,
@@ -308,27 +365,13 @@ export async function ensureSupplierForInterpretLog(
     notes: "Cadastrado automaticamente — focus-get-sync-nfe-interpret-staging",
   };
 
-  const payload: StagingEntityComparisonLog = {
-    exist: false,
-    dadosDoQueExiste: "(nenhum fornecedor com mesmo CPF/CNPJ)",
-    dadosDoQueEstaComparando: comparando,
-    data: insertBody,
-  };
-  logComparison("fornecedor_comparacao", payload);
-
-  const { data: created, error: insErr } = await admin
+  const { error: insErr } = await admin
     .from("suppliers")
     .insert(insertBody)
     .select("id")
     .single();
   if (insErr) {
     console.error(LOG, "fornecedor_insert_err", insErr.message);
-  } else {
-    console.log(
-      LOG,
-      "fornecedor_insert_ok",
-      JSON.stringify({ id: created?.id }),
-    );
   }
 }
 
@@ -336,6 +379,8 @@ export type StagingInterpretProductCatalogRow = {
   id: string;
   name: string;
   ncm: string | null;
+  cfop: string | null;
+  csosn: string | null;
   ean: string | null;
   unit: string | null;
   sku: string | null;
@@ -354,7 +399,7 @@ export async function fetchProductCatalogForStagingInterpret(
 }> {
   const { data: allProducts, error: listErr } = await admin
     .from("products")
-    .select("id,name,ncm,ean,unit,sku,is_active")
+    .select("id,name,ncm,cfop,csosn,ean,unit,sku,is_active")
     .eq("company_id", companyId)
     .limit(8000);
 
@@ -368,6 +413,8 @@ export async function fetchProductCatalogForStagingInterpret(
     id: String(r.id),
     name: String(r.name ?? ""),
     ncm: r.ncm != null ? String(r.ncm) : null,
+    cfop: r.cfop != null ? String(r.cfop) : null,
+    csosn: r.csosn != null ? String(r.csosn) : null,
     ean: r.ean != null ? String(r.ean) : null,
     unit: r.unit != null ? String(r.unit) : null,
     sku: r.sku != null ? String(r.sku) : null,
@@ -382,7 +429,7 @@ export async function fetchProductCatalogForStagingInterpret(
  * `productCatalog` vem de `fetchProductCatalogForStagingInterpret` (uma query por chunk) e é mutado
  * quando um produto novo é inserido. `chunkProductDedupeByKey` persiste entre notas do mesmo chunk.
  * Preenche `productIdByLineIndex` (índice da linha na NF → `products.id`) para vínculo nas `expense_items`.
- * Linhas repetidas na mesma nota (mesmo NCM/EAN/nome sanitizado/unidade) reutilizam o mesmo `product_id`
+ * Linhas repetidas (mesmo NCM/EAN/nome sanitizado) reutilizam o mesmo `product_id`
  * sem novo insert nem nova chamada LLM.
  */
 export async function resolveProductsForInterpretLog(
@@ -393,14 +440,7 @@ export async function resolveProductsForInterpretLog(
   productIdByLineIndex: Map<number, string>,
   chunkProductDedupeByKey: Map<string, string>,
 ): Promise<void> {
-  if (!interpret.parse_ok) {
-    console.log(
-      LOG,
-      "produtos_skip",
-      JSON.stringify({ motivo: "parse_ok_false" }),
-    );
-    return;
-  }
+  if (!interpret.parse_ok) return;
 
   const openaiKey = (Deno.env.get("OPENAI_API_KEY") ?? "").trim();
   const openaiModel =
@@ -419,21 +459,6 @@ export async function resolveProductsForInterpretLog(
     const dedupeKey = stagingLineProductDedupeKey(line);
     const chunkReuseId = chunkProductDedupeByKey.get(dedupeKey);
     if (chunkReuseId) {
-      console.log(
-        LOG,
-        "produto_reuso_chunk",
-        JSON.stringify({
-          chave_nfe: interpret.chave_nfe,
-          line_index: lineIndex,
-          product_id: chunkReuseId,
-        }),
-      );
-      logProdutoComparacao({
-        exist: true,
-        dadosExiste: { name: "chunk_item_ja_resolvido" },
-        dadosComparado: { name: nomeLinhaProduto(line) },
-        data: null,
-      });
       productIdByLineIndex.set(lineIndex, chunkReuseId);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, chunkReuseId);
       continue;
@@ -450,12 +475,6 @@ export async function resolveProductsForInterpretLog(
     }
 
     if (hit) {
-      logProdutoComparacao({
-        exist: true,
-        dadosExiste: { name: String(hit.name ?? "").trim() || "—" },
-        dadosComparado: { name: nomeLinhaProduto(line) },
-        data: null,
-      });
       productIdByLineIndex.set(lineIndex, hit.id);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
       chunkProductDedupeByKey.set(dedupeKey, hit.id);
@@ -476,50 +495,22 @@ export async function resolveProductsForInterpretLog(
 
   for (const { line, lineIndex } of semMatchDireto) {
     const n8 = normalizeNcm8(line.ncm);
-    const nomeComparado = nomeLinhaProduto(line);
     const dedupeKey = stagingLineProductDedupeKey(line);
     const reuseId = invoiceResolvedProductByDedupeKey.get(dedupeKey);
     if (reuseId) {
-      console.log(
-        LOG,
-        "produto_reuso_linha_duplicada_nota",
-        JSON.stringify({
-          chave_nfe: interpret.chave_nfe,
-          line_index: lineIndex,
-          product_id: reuseId,
-        }),
-      );
-      logProdutoComparacao({
-        exist: true,
-        dadosExiste: { name: "mesma_nota_item_ja_resolvido" },
-        dadosComparado: { name: nomeComparado },
-        data: null,
-      });
       productIdByLineIndex.set(lineIndex, reuseId);
       continue;
     }
 
     if (!n8) {
-      const data = productInsertPayload(companyId, line);
-      logProdutoComparacao({
-        exist: false,
-        dadosExiste: null,
-        dadosComparado: { name: nomeComparado },
-        data,
-      });
-      const newId = await stagingInterpretCreateProduct(
-        admin,
-        productCatalog,
-        ncmBuckets,
-        chunkProductDedupeByKey,
-        dedupeKey,
-        data,
-        "sem_ncm",
-      );
-      if (newId) {
-        productIdByLineIndex.set(lineIndex, newId);
-        invoiceResolvedProductByDedupeKey.set(dedupeKey, newId);
+      const catalogHit = findCatalogProductSemNcmByName(activeCatalog, line);
+      if (catalogHit) {
+        productIdByLineIndex.set(lineIndex, catalogHit.id);
+        invoiceResolvedProductByDedupeKey.set(dedupeKey, catalogHit.id);
+        chunkProductDedupeByKey.set(dedupeKey, catalogHit.id);
+        continue;
       }
+      logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
       continue;
     }
 
@@ -527,12 +518,10 @@ export async function resolveProductsForInterpretLog(
 
     if (candidatosNcm.length === 0) {
       const data = productInsertPayload(companyId, line);
-      logProdutoComparacao({
-        exist: false,
-        dadosExiste: null,
-        dadosComparado: { name: nomeComparado },
-        data,
-      });
+      if (!data) {
+        logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+        continue;
+      }
       const newId = await stagingInterpretCreateProduct(
         admin,
         productCatalog,
@@ -551,20 +540,10 @@ export async function resolveProductsForInterpretLog(
 
     if (!openaiKey) {
       const data = productInsertPayload(companyId, line);
-      logProdutoComparacao({
-        exist: false,
-        dadosExiste: null,
-        dadosComparado: { name: nomeComparado },
-        data,
-      });
-      console.log(
-        LOG,
-        "produto_llm_skip_sem_openai",
-        JSON.stringify({
-          candidatos: candidatosNcm.length,
-          model: openaiModel,
-        }),
-      );
+      if (!data) {
+        logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+        continue;
+      }
       const newId = await stagingInterpretCreateProduct(
         admin,
         productCatalog,
@@ -603,24 +582,8 @@ export async function resolveProductsForInterpretLog(
       },
     );
 
-    console.log(
-      LOG,
-      "produto_llm_resultado",
-      JSON.stringify({ chave_nfe: interpret.chave_nfe, arb }),
-    );
-
     if (arb.kind === "LINK") {
       const hit = candidatosNcm.find((c) => c.id === arb.product_id);
-      logProdutoComparacao({
-        exist: true,
-        dadosExiste: {
-          name: hit
-            ? String(hit.name ?? "").trim() || "—"
-            : `(id ${arb.product_id} não no pool NCM)`,
-        },
-        dadosComparado: { name: nomeComparado },
-        data: null,
-      });
       if (hit) {
         productIdByLineIndex.set(lineIndex, hit.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
@@ -636,12 +599,10 @@ export async function resolveProductsForInterpretLog(
           ? arb.normalized_product_name
           : arb.suggested_catalog_name;
       const data = productInsertPayload(companyId, line, nomeCadastro, preview);
-      logProdutoComparacao({
-        exist: false,
-        dadosExiste: null,
-        dadosComparado: { name: nomeComparado },
-        data,
-      });
+      if (!data) {
+        logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+        continue;
+      }
       const newId = await stagingInterpretCreateProduct(
         admin,
         productCatalog,
@@ -657,19 +618,6 @@ export async function resolveProductsForInterpretLog(
       }
       continue;
     }
-
-    const data = productInsertPayload(companyId, line);
-    logProdutoComparacao({
-      exist: false,
-      dadosExiste: null,
-      dadosComparado: { name: nomeComparado },
-      data,
-    });
-    console.log(
-      LOG,
-      "produto_sem_insert_automatico_llm",
-      JSON.stringify({ chave_nfe: interpret.chave_nfe, insert_preview: data }),
-    );
   }
 }
 
@@ -817,8 +765,6 @@ async function finalizeStagingRecebimentoEStock(
   );
   if (stockRpcErr) {
     console.error(LOG, "staging_apply_stock_rpc_err", stockRpcErr.message);
-  } else {
-    console.log(LOG, "staging_apply_stock_rpc", JSON.stringify(stockRpc));
   }
 
   const { data: eiRows, error: eiErr } = await admin
@@ -866,12 +812,6 @@ async function finalizeStagingRecebimentoEStock(
     .eq("id", recebimentoId);
   if (updRecErr) {
     console.error(LOG, "recebimento_finalize_err", updRecErr.message);
-  } else {
-    console.log(
-      LOG,
-      "recebimento_concluido_staging",
-      JSON.stringify({ expense_id: expenseId, recebimento_id: recebimentoId }),
-    );
   }
 }
 
@@ -888,37 +828,16 @@ export async function persistStagingInterpretExpenseAndBoletos(
   interpret: StagingNfeInterpretLog,
   productIdByLineIndex: ReadonlyMap<number, string>,
 ): Promise<void> {
-  if (!interpret.parse_ok) {
-    console.log(
-      LOG,
-      "despesa_boletos_skip",
-      JSON.stringify({ motivo: "parse_ok_false" }),
-    );
-    return;
-  }
+  if (!interpret.parse_ok) return;
 
   const produtos = interpret.produtos ?? [];
-  if (produtos.length === 0) {
-    console.log(
-      LOG,
-      "despesa_skip",
-      JSON.stringify({ motivo: "sem_itens", chave_nfe: interpret.chave_nfe }),
-    );
-    return;
-  }
+  if (produtos.length === 0) return;
 
   const numTrim =
     interpret.numero_nota != null ? String(interpret.numero_nota).trim() : "";
   const chaveLimpa = String(interpret.chave_nfe ?? "").replace(/\D/g, "");
   const invoiceNumber = numTrim || chaveLimpa;
-  if (!invoiceNumber) {
-    console.log(
-      LOG,
-      "despesa_skip",
-      JSON.stringify({ motivo: "sem_numero_nfe_e_sem_chave" }),
-    );
-    return;
-  }
+  if (!invoiceNumber) return;
 
   const invoiceSeries =
     interpret.serie != null ? String(interpret.serie).trim() : "";
@@ -953,14 +872,6 @@ export async function persistStagingInterpretExpenseAndBoletos(
   if (dupErr) {
     console.error(LOG, "despesa_dup_check_err", dupErr.message);
   } else if (dupRow != null && String(dupRow).length > 0) {
-    console.log(
-      LOG,
-      "despesa_duplicada_skip",
-      JSON.stringify({
-        chave_nfe: interpret.chave_nfe,
-        expense_id_existente: dupRow,
-      }),
-    );
     return;
   }
 
@@ -984,20 +895,6 @@ export async function persistStagingInterpretExpenseAndBoletos(
   };
   if (Object.keys(reconciliation_patch).length > 0) {
     Object.assign(financialReconciliation, reconciliation_patch);
-  }
-
-  if (reconciliation_patch.document_total_adjusted === true) {
-    console.log(
-      LOG,
-      "document_total_ajustado",
-      JSON.stringify({
-        chave_nfe: interpret.chave_nfe,
-        antes: reconciliation_patch.document_total_before,
-        depois: reconciliation_patch.document_total_after,
-        diff_check:
-          reconciliation_patch.reconcile_check_diff_sum_ipi_desc_minus_total,
-      }),
-    );
   }
 
   const expenseRow: Record<string, unknown> = {
@@ -1027,13 +924,7 @@ export async function persistStagingInterpretExpenseAndBoletos(
 
   if (expErr) {
     const msg = expErr.message ?? String(expErr);
-    if (msg.includes("duplicate") || msg.includes("idx_expenses_unique")) {
-      console.log(
-        LOG,
-        "despesa_duplicada_insert",
-        JSON.stringify({ chave_nfe: interpret.chave_nfe, erro: msg }),
-      );
-    } else {
+    if (!msg.includes("duplicate") && !msg.includes("idx_expenses_unique")) {
       console.error(LOG, "despesa_insert_err", msg);
     }
     return;
@@ -1107,32 +998,8 @@ export async function persistStagingInterpretExpenseAndBoletos(
         bolErr.message,
         JSON.stringify({ expense_id: expenseId }),
       );
-    } else {
-      console.log(
-        LOG,
-        "boleto_insert_ok",
-        JSON.stringify({ expense_id: expenseId, due_date: dup.vencimento }),
-      );
     }
   }
 
   await finalizeStagingRecebimentoEStock(admin, expenseId);
-
-  if (dups.length === 0) {
-    console.log(
-      LOG,
-      "despesa_ok_sem_boletos",
-      JSON.stringify({ expense_id: expenseId, chave_nfe: interpret.chave_nfe }),
-    );
-  } else {
-    console.log(
-      LOG,
-      "despesa_boletos_ok",
-      JSON.stringify({
-        expense_id: expenseId,
-        chave_nfe: interpret.chave_nfe,
-        boletos: dups.length,
-      }),
-    );
-  }
 }

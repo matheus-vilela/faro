@@ -24,6 +24,8 @@ export type StagingNfeInterpretLog = {
     nome: string;
     codigo: string | null;
     ncm: string | null;
+    cfop: string | null;
+    csosn: string | null;
     ean: string | null;
     quantidade: number;
     valor_unitario: number;
@@ -62,6 +64,8 @@ function buildFromExtracted(
       nome: it.productName,
       codigo: it.productCode ?? null,
       ncm: it.ncm ?? null,
+      cfop: it.cfop ?? null,
+      csosn: it.csosn ?? null,
       ean: it.ean ?? null,
       quantidade: it.quantity,
       valor_unitario: it.unitValue,

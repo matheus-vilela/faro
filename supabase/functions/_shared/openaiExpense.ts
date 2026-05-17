@@ -20,6 +20,10 @@ export type ExtractedExpenseItem = {
   unitTax?: string | null;
   /** NCM da linha, se houver. */
   ncm?: string | null;
+  /** CFOP da linha (NF-e: prod.CFOP), se houver. */
+  cfop?: string | null;
+  /** CSOSN (Simples) ou CST (regime normal) do bloco ICMS do item. */
+  csosn?: string | null;
   /** EAN / código de barras do item, se houver. */
   ean?: string | null;
 };

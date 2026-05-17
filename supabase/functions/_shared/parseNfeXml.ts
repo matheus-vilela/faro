@@ -91,6 +91,46 @@ function normalizeProd(raw: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+/** CFOP (4 dígitos) e CSOSN/CST do bloco ICMS do `det`. */
+function extractCfopAndCsosnFromDet(det: Record<string, unknown>): {
+  cfop: string | null;
+  csosn: string | null;
+} {
+  const prod = normalizeProd(det.prod);
+  const cfopDigits = String(prod?.CFOP ?? prod?.cfop ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
+  const cfop = cfopDigits.length === 4 ? cfopDigits : null;
+
+  const imposto = det.imposto as Record<string, unknown> | undefined;
+  const icmsRaw = imposto?.ICMS ?? imposto?.icms;
+  const icms = (
+    Array.isArray(icmsRaw) ? icmsRaw[0] : icmsRaw
+  ) as Record<string, unknown> | undefined;
+
+  let csosn: string | null = null;
+  if (icms && typeof icms === "object") {
+    for (const block of Object.values(icms)) {
+      if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+      const b = block as Record<string, unknown>;
+      const fromCsosn = str(b.CSOSN ?? b.csosn);
+      if (fromCsosn) {
+        csosn = fromCsosn.replace(/\D/g, "");
+        break;
+      }
+      const fromCst = str(b.CST ?? b.cst);
+      if (fromCst) {
+        csosn = fromCst.replace(/\D/g, "");
+        break;
+      }
+    }
+  }
+  const csosnNorm =
+    csosn && csosn.length >= 2 ? csosn.slice(0, 4) : null;
+
+  return { cfop, csosn: csosnNorm };
+}
+
 /** Aceita nfeProc, NFe sem wrapper, ou XML com namespace */
 export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult | null {
   const trimmed = stripBom(xmlText);
@@ -144,6 +184,7 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   for (const d of detList) {
     const prod = normalizeProd(d.prod);
     if (!prod) continue;
+    const { cfop, csosn } = extractCfopAndCsosnFromDet(d);
     const productName = str(prod.xProd) ?? "Item";
     const quantity = Math.max(0.0001, num(prod.qCom ?? prod.qTrib));
     const unitValue = num(prod.vUnCom ?? prod.vUnTrib);
@@ -164,6 +205,8 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
       unitCommercial: uCom,
       unitTax: uTrib && uCom && uTrib !== uCom ? uTrib : null,
       ncm,
+      cfop,
+      csosn,
       ean: ean && ean !== "SEM GTIN" ? ean : null,
     });
   }
