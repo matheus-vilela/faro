@@ -13,6 +13,10 @@ import {
   normalizeTaxIdForSupplierDocument,
 } from "./expenseSupplierEnsure.ts";
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
+import {
+  buildNewProductCatalogFromNfeLine,
+  insertProductUnitConversions,
+} from "./productImport/buildPackUnitConversionsFromLabel.ts";
 import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
 import {
   buildLlmCatalogForInvoiceLine,
@@ -122,14 +126,21 @@ function productInsertPayload(
   line: StagingNfeInterpretLog["produtos"][number],
   suggestedName?: string,
   estoquePreview?: Record<string, unknown> | null,
-): Record<string, unknown> | null {
+): {
+  payload: Record<string, unknown>;
+  conversions: ReturnType<typeof buildNewProductCatalogFromNfeLine>["conversions"];
+  registrationNote: string | null;
+} | null {
   const fiscal = normalizeLineFiscalForProduct(line);
   if (!fiscal) return null;
 
-  const nameRaw = (suggestedName ?? line.nome).trim();
-  const name =
-    sanitizeCatalogProductName(nameRaw).slice(0, 512) || "Produto (NF-e)";
-  const unit = (line.unidade_comercial ?? "un").trim().slice(0, 32) || "un";
+  const catalog = buildNewProductCatalogFromNfeLine({
+    productName: String(line.nome ?? "").trim() || "Item",
+    invoiceUnitRaw: line.unidade_comercial,
+    suggestedCatalogName: suggestedName,
+  });
+  const name = catalog.catalogName.slice(0, 512) || "Produto (NF-e)";
+  const unit = catalog.stockUnit.slice(0, 32) || "un";
   const eanDigits = line.ean != null ? String(line.ean).replace(/\D/g, "") : "";
   const base: Record<string, unknown> = {
     company_id: companyId,
@@ -145,7 +156,7 @@ function productInsertPayload(
   if (estoquePreview && Object.keys(estoquePreview).length > 0) {
     base.estoque_entrada_preview = estoquePreview;
   }
-  return base;
+  return { payload: base, conversions: catalog.conversions, registrationNote: catalog.registrationNote };
 }
 
 /** Colunas válidas em `products` (exclui preview JSON só para log). */
@@ -184,7 +195,9 @@ function productRowForDbInsert(
 
 async function insertProductFromStagingInterpret(
   admin: SupabaseAdmin,
+  companyId: string,
   payload: Record<string, unknown>,
+  conversions: ReturnType<typeof buildNewProductCatalogFromNfeLine>["conversions"],
   contexto: string,
 ): Promise<string | null> {
   const row = productRowForDbInsert(payload);
@@ -211,7 +224,17 @@ async function insertProductFromStagingInterpret(
     console.error(LOG, "produto_insert_err", contexto, error.message);
     return null;
   }
-  return data?.id != null ? String(data.id) : null;
+  const newId = data?.id != null ? String(data.id) : null;
+  if (newId && conversions.length > 0) {
+    await insertProductUnitConversions(
+      admin,
+      companyId,
+      newId,
+      conversions,
+      LOG,
+    );
+  }
+  return newId;
 }
 
 const CRITERIO_PRODUTO_CRIADO: Record<string, string> = {
@@ -295,18 +318,21 @@ function registerNewProductInStagingCatalog(
 
 async function stagingInterpretCreateProduct(
   admin: SupabaseAdmin,
+  companyId: string,
   catalog: StagingInterpretProductCatalogRow[],
   ncmBuckets: Map<string, StagingInterpretProductCatalogRow[]>,
   chunkProductDedupeByKey: Map<string, string>,
   dedupeKey: string,
-  payload: Record<string, unknown> | null,
+  built: ReturnType<typeof productInsertPayload>,
   contexto: string,
 ): Promise<string | null> {
-  if (!payload) return null;
-  const nomeProduto = String(payload.name ?? "").trim() || "—";
+  if (!built) return null;
+  const nomeProduto = String(built.payload.name ?? "").trim() || "—";
   const newId = await insertProductFromStagingInterpret(
     admin,
-    payload,
+    companyId,
+    built.payload,
+    built.conversions,
     contexto,
   );
   if (!newId) return null;
@@ -316,6 +342,9 @@ async function stagingInterpretCreateProduct(
     JSON.stringify({
       product_id: newId,
       nome: nomeProduto,
+      unidade: built.payload.unit ?? null,
+      conversoes: built.conversions.length,
+      pack_note: built.registrationNote,
       criterio: contexto,
       criterio_descricao: criterioProdutoCriadoLabel(contexto),
     }),
@@ -323,7 +352,7 @@ async function stagingInterpretCreateProduct(
   registerNewProductInStagingCatalog(
     catalog,
     ncmBuckets,
-    catalogRowFromStagingInsert(newId, payload),
+    catalogRowFromStagingInsert(newId, built.payload),
   );
   chunkProductDedupeByKey.set(dedupeKey, newId);
   return newId;
@@ -532,18 +561,19 @@ export async function resolveProductsForInterpretLog(
     const llmCatalog = buildLlmCatalogForInvoiceLine(activeCatalog, line.ncm);
 
     if (!openaiKey || llmCatalog.length === 0) {
-      const data = productInsertPayload(companyId, line);
-      if (!data) {
+      const built = productInsertPayload(companyId, line);
+      if (!built) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
         continue;
       }
       const newId = await stagingInterpretCreateProduct(
         admin,
+        companyId,
         productCatalog,
         ncmBuckets,
         chunkProductDedupeByKey,
         dedupeKey,
-        data,
+        built,
         !openaiKey ? "sem_openai" : llmCatalog.length === 0 ? "sem_candidatos_ncm" : "sem_openai",
       );
       if (newId) {
@@ -605,18 +635,19 @@ export async function resolveProductsForInterpretLog(
         continue;
       }
       const preview = stockEntradaPreviewFromLlm(line, arb);
-      const data = productInsertPayload(companyId, line, nomeCadastro, preview);
-      if (!data) {
+      const built = productInsertPayload(companyId, line, nomeCadastro, preview);
+      if (!built) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
         continue;
       }
       const newId = await stagingInterpretCreateProduct(
         admin,
+        companyId,
         productCatalog,
         ncmBuckets,
         chunkProductDedupeByKey,
         dedupeKey,
-        data,
+        built,
         "llm_new_product",
       );
       if (newId) {
@@ -626,18 +657,19 @@ export async function resolveProductsForInterpretLog(
       continue;
     }
 
-    const data = productInsertPayload(companyId, line);
-    if (!data) {
+    const built = productInsertPayload(companyId, line);
+    if (!built) {
       logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
       continue;
     }
     const newId = await stagingInterpretCreateProduct(
       admin,
+      companyId,
       productCatalog,
       ncmBuckets,
       chunkProductDedupeByKey,
       dedupeKey,
-      data,
+      built,
       "llm_skip_fallback",
     );
     if (newId) {

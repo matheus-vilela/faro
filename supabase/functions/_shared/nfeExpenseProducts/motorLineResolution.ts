@@ -5,6 +5,7 @@ import type { ExtractedExpenseItem } from "../openaiExpense.ts";
 import {
   autoCatalogStockUnitWithOptionalUnPack,
   catalogRegistrationNameFromNfeLine,
+  insertProductUnitConversions,
 } from "./newProductCatalogFromNfe.ts";
 import type { NfeCatalogLineResolution } from "./types.ts";
 
@@ -56,7 +57,10 @@ export async function ensureProductForLine(
   const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
-  const { stockUnit, pack } = autoCatalogStockUnitWithOptionalUnPack(item, pm);
+  const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
+    item,
+    pm,
+  );
   const cn = canonicalProductName(name);
   const insertRow: Record<string, unknown> = {
     company_id: companyId,
@@ -83,7 +87,15 @@ export async function ensureProductForLine(
     return { productId: null, created: false };
   }
   const pid = String(ins.id);
-  if (pack) {
+  if (conversions.length > 0) {
+    await insertProductUnitConversions(
+      supabase,
+      companyId,
+      pid,
+      conversions,
+      "[nfeExpenseMotor]",
+    );
+  } else if (pack) {
     const { error: cErr } = await supabase.from("product_unit_conversions").insert({
       company_id: companyId,
       product_id: pid,
@@ -108,7 +120,10 @@ export async function createProductAutoWhenNoReviewQueue(
   const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
-  const { stockUnit, pack } = autoCatalogStockUnitWithOptionalUnPack(item, pm);
+  const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
+    item,
+    pm,
+  );
   const cn = canonicalProductName(name);
   if (cn) {
     const { data: dup } = await supabase
@@ -149,7 +164,15 @@ export async function createProductAutoWhenNoReviewQueue(
     return { productId: null, created: false };
   }
   const pid = String(ins.id);
-  if (pack) {
+  if (conversions.length > 0) {
+    await insertProductUnitConversions(
+      supabase,
+      companyId,
+      pid,
+      conversions,
+      "[nfeExpenseMotor]",
+    );
+  } else if (pack) {
     const { error: cErr } = await supabase.from("product_unit_conversions").insert({
       company_id: companyId,
       product_id: pid,

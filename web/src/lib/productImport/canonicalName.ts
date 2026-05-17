@@ -76,6 +76,7 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(
     /\s+\d+[\.,]?\d*\s+(?:kg|g|mg|l|lt|ml|m2|m3|m²|m³)\s*$/iu,
     /\s+\d+\s*[xX]\s*\d+[\.,]?\d*\s*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
     /\s+\d+[xX]\d+[\.,]?\d*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
+    /\d+[xX]\d+[\.,]?\d*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
     /\s+\d+[\.,]?\d*\s+(?:kg|g|mg|l|lt|ml)\s+(?:pct|pcts?|pçs?|pc\b|cx|caixas?|fardos?|fds?|packs?|emb\.?)\s*$/iu,
     /\s+(?:pc|pct|pçs?)\s+\d+[\.,]?\d*\s*(?:kg|g|mg|l|lt|ml)\s*$/iu,
     /\s+(?:pct|pcts?|pçs?|cx|fds?|fardos?)\s*$/iu,

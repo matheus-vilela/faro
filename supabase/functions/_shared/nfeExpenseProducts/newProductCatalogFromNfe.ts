@@ -9,6 +9,11 @@ import {
   pickInvoiceUnitRaw,
   type ExtractedItemWithInvoiceMeta,
 } from "../productImport/consolidateItems.ts";
+import {
+  buildNewProductCatalogFromNfeLine,
+  insertProductUnitConversions,
+  type ProductUnitConversionInsert,
+} from "../productImport/buildPackUnitConversionsFromLabel.ts";
 import { sanitizeCatalogProductName } from "../productImport/canonicalName.ts";
 import { stripPackSizeFromLabel } from "../productImport/packSizeFromLabel.ts";
 import {
@@ -96,24 +101,42 @@ export function autoCatalogStockUnitWithOptionalUnPack(
 ): {
   stockUnit: string;
   pack: { secondary_unit_code: string; secondary_qty: number } | null;
+  conversions: ProductUnitConversionInsert[];
 } {
+  const raw = pickInvoiceUnitRaw(item as ExtractedItemWithInvoiceMeta);
+  const built = buildNewProductCatalogFromNfeLine({
+    productName: String(item.productName ?? "").trim() || "Item",
+    invoiceUnitRaw: raw,
+    suggestedCatalogName: pm.borderlineLlmSuggestedName ?? null,
+  });
+  if (built.conversions.length > 0) {
+    return {
+      stockUnit: built.stockUnit,
+      pack: null,
+      conversions: built.conversions,
+    };
+  }
   const base = catalogRegistrationUnitFromNfeLine(item, pm);
   const inv = String(pm.invoiceUnitNormalized ?? "").trim();
-  const raw = pickInvoiceUnitRaw(item as ExtractedItemWithInvoiceMeta)?.trim() ?? "";
-  const n = normalizeUnitLabel(inv || raw || base) as NormalizedUnitCode;
+  const rawTrim = raw?.trim() ?? "";
+  const n = normalizeUnitLabel(inv || rawTrim || base) as NormalizedUnitCode;
   if (n === "KG" || n === "G" || n === "MG") {
     return {
       stockUnit: "un",
       pack: { secondary_unit_code: "g", secondary_qty: PACK_G },
+      conversions: [],
     };
   }
   if (n === "L" || n === "ML") {
     return {
       stockUnit: "un",
       pack: { secondary_unit_code: "ml", secondary_qty: PACK_ML },
+      conversions: [],
     };
   }
   const lowRaw = base.trim().toLowerCase();
   const low = lowRaw === "und" ? "un" : lowRaw;
-  return { stockUnit: low || "un", pack: null };
+  return { stockUnit: low || "un", pack: null, conversions: [] };
 }
+
+export { insertProductUnitConversions };

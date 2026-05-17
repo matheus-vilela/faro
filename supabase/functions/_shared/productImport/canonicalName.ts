@@ -75,6 +75,7 @@ export function stripTrailingPackagingQtyAndUnitsForCatalogName(raw: string | nu
     // "6X950ML", "12x350ML" (sem espaços em volta do X)
     /\s+\d+\s*[xX]\s*\d+[\.,]?\d*\s*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
     /\s+\d+[xX]\d+[\.,]?\d*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
+    /\d+[xX]\d+[\.,]?\d*(?:ml|m[lL]|lt|l|kg|g|mg)\s*$/iu,
     // "1,002 KG PCT", "2 KG CX"
     /\s+\d+[\.,]?\d*\s+(?:kg|g|mg|l|lt|ml)\s+(?:pct|pcts?|pçs?|pc\b|cx|caixas?|fardos?|fds?|packs?|emb\.?)\s*$/iu,
     // "… PC 1KG", "… PCT 500G"
