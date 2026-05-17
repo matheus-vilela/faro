@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
 import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -229,7 +230,8 @@ export function Dashboard() {
       ) ? (
         <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
-      {currentCompany ? (
+      {currentCompany &&
+      isOnboardingPdvDashboardCardVisible(currentCompany.onboarding_pdv) ? (
         <DashboardIntegrationCsvRevenueCard company={currentCompany} />
       ) : null}
       {companyId ? (

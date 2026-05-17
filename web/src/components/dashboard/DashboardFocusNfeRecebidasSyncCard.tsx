@@ -17,8 +17,60 @@ import {
   FileBadge,
   Loader2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+
+type FiscalCardTheme = {
+  card: string;
+  iconBox: string;
+  eyebrow: string;
+  subtitle: string;
+  progressTrack: string;
+  progressFill: string;
+};
+
+/** Cores por fase (diferencia do card EPOC em sky). Layout igual ao PDV. */
+const FISCAL_CARD_THEMES = {
+  confirm: {
+    card: "border-2 border-emerald-500/40 bg-linear-to-r from-emerald-500/12 via-teal-500/10 to-sky-500/10 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/30 text-emerald-950 ring-1 ring-emerald-700/20 dark:text-emerald-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-emerald-950/85 dark:text-emerald-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-emerald-950/92 dark:text-emerald-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-emerald-950/15 dark:bg-emerald-100/20",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-emerald-500 to-teal-500 transition-all",
+  },
+  sefaz: {
+    card: "border-2 border-amber-500/45 bg-linear-to-r from-amber-500/14 via-orange-500/10 to-amber-500/8 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/35 text-amber-950 ring-1 ring-amber-700/25 dark:text-amber-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-amber-950/85 dark:text-amber-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-amber-950/92 dark:text-amber-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-amber-950/15 dark:bg-amber-100/20",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-amber-500 to-orange-500 transition-all",
+  },
+  sync: {
+    card: "border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/30 text-violet-950 ring-1 ring-violet-700/20 dark:text-violet-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-violet-950/85 dark:text-violet-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-violet-500 to-indigo-500 transition-all",
+  },
+} satisfies Record<string, FiscalCardTheme>;
 
 function parseOnboardingFiscalMetrics(raw: unknown): {
   sync: boolean;
@@ -80,9 +132,7 @@ function formatSefazRetryLabel(
 
 /**
  * Onboarding fiscal · NF-e recebidas (Focus / SEFAZ).
- * O Dashboard só monta este card com `onboarding_fiscal.completed` ≠ true.
- * Dentro: fase de progresso (`sync` ativo) ou confirmação manual (`sync` false).
- * `completed` só passa a true com o botão «Confirmar e fechar».
+ * Layout alinhado ao card EPOC; cores por fase (violeta / âmbar / verde).
  */
 export function DashboardFocusNfeRecebidasSyncCard({
   company,
@@ -116,6 +166,75 @@ export function DashboardFocusNfeRecebidasSyncCard({
     return () => window.clearInterval(id);
   }, []);
 
+  const ultimaSyncAt =
+    focusnfe && typeof focusnfe === "object" && !Array.isArray(focusnfe)
+      ? (focusnfe as Record<string, unknown>).nfes_recebidas_ultima_sync_at
+      : undefined;
+  const ultimaSyncLabel =
+    typeof ultimaSyncAt === "string" && ultimaSyncAt.trim()
+      ? formatRelativeCompact(ultimaSyncAt, nowMs)
+      : null;
+
+  const max = obFiscal.max;
+  const done = obFiscal.synced + obFiscal.ignored;
+  const barPct = progressPercent(max, obFiscal.synced, obFiscal.ignored);
+  const awaitingSefazEstimate = max === 0 && !sefazUnavailable;
+
+  const theme = useMemo((): FiscalCardTheme => {
+    if (interpretConfirmPhase) return FISCAL_CARD_THEMES.confirm;
+    if (sefazUnavailable) return FISCAL_CARD_THEMES.sefaz;
+    return FISCAL_CARD_THEMES.sync;
+  }, [interpretConfirmPhase, sefazUnavailable]);
+
+  const { title, subtitle, showSpinner, percent, icon } = useMemo(() => {
+    if (interpretConfirmPhase) {
+      return {
+        title: "Sincronização concluída",
+        subtitle:
+          "As notas deste lote foram processadas. Fornecedores, produtos, despesas e estoque foram criados automaticamente.",
+        showSpinner: false,
+        percent: 100,
+        icon: "success" as const,
+      };
+    }
+    if (sefazUnavailable) {
+      return {
+        title: "SEFAZ indisponível no momento",
+        subtitle: `Não foi possível obter resposta da SEFAZ para listar as NF-e recebidas desta unidade. Vamos tentar novamente ${sefazRetryLabel} de forma automática. Não é necessário fazer nada agora — o painel atualiza assim que a sincronização retomar.`,
+        showSpinner: false,
+        percent: 12,
+        icon: "warning" as const,
+      };
+    }
+    if (awaitingSefazEstimate) {
+      return {
+        title: "A obter dados na SEFAZ",
+        subtitle:
+          "Estamos a consultar a SEFAZ e a preparar as NF-e recebidas desta unidade. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.",
+        showSpinner: true,
+        percent: 12,
+        icon: "sync" as const,
+      };
+    }
+    return {
+      title: "Sincronização das NF-e recebidas",
+      subtitle: `${done} de ${max} notas processadas${ultimaSyncLabel ? ` · Última sincronização ${ultimaSyncLabel}` : ""}.`,
+      showSpinner: obFiscal.sync && done < max,
+      percent: barPct,
+      icon: "sync" as const,
+    };
+  }, [
+    interpretConfirmPhase,
+    sefazUnavailable,
+    sefazRetryLabel,
+    awaitingSefazEstimate,
+    done,
+    max,
+    ultimaSyncLabel,
+    obFiscal.sync,
+    barPct,
+  ]);
+
   if (!company || fiscalOnboardingDone) {
     return null;
   }
@@ -124,33 +243,51 @@ export function DashboardFocusNfeRecebidasSyncCard({
     return null;
   }
 
-  if (interpretConfirmPhase) {
-    return (
-      <Card className="border-2 border-emerald-500/40 bg-linear-to-r from-emerald-500/12 via-teal-500/10 to-sky-500/10 shadow-md">
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/30 text-emerald-950 ring-1 ring-emerald-700/20 dark:text-emerald-100">
-                <CheckCircle2 className="h-5 w-5 opacity-95" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wider text-emerald-950/85 dark:text-emerald-100/85">
-                  Onboarding fiscal · NF-e recebidas
-                </p>
-                <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
-                  Interpretação concluída
-                </h3>
-                <p className="mt-2 text-sm font-medium leading-relaxed text-emerald-950/92 dark:text-emerald-100/90">
-                  As notas deste lote foram processadas (fornecedores, produtos,
-                  despesas e stock). Confirme para fechar este aviso no painel.
-                </p>
-              </div>
+  const renderIcon = () => {
+    if (showSpinner) {
+      return <Loader2 className="h-5 w-5 animate-spin" />;
+    }
+    if (icon === "success") {
+      return <CheckCircle2 className="h-5 w-5 opacity-95" />;
+    }
+    if (icon === "warning") {
+      return <AlertTriangle className="h-5 w-5 opacity-95" />;
+    }
+    return <FileBadge className="h-5 w-5 opacity-95" />;
+  };
+
+  const barWidth = showSpinner
+    ? Math.max(12, percent)
+    : interpretConfirmPhase
+      ? 100
+      : sefazUnavailable
+        ? 12
+        : percent;
+
+  return (
+    <Card className={theme.card}>
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className={theme.iconBox}>{renderIcon()}</div>
+            <div className="min-w-0">
+              <p className={theme.eyebrow}>
+                Onboarding fiscal · NF-e recebidas
+              </p>
+              <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
+                {title}
+              </h3>
+              <p className={theme.subtitle}>{subtitle}</p>
             </div>
-            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
+            {interpretConfirmPhase ? (
               <Button
                 type="button"
                 size="sm"
                 className="shrink-0"
+                variant="default"
                 disabled={interpretClosing}
                 onClick={() => {
                   if (!companyId) return;
@@ -171,139 +308,13 @@ export function DashboardFocusNfeRecebidasSyncCard({
                 }}
               >
                 {interpretClosing ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />A
-                    guardar…
-                  </>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  "Confirmar e fechar"
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
+                Confirmar e fechar
               </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!progressPhase) {
-    return null;
-  }
-
-  const ultimaSyncAt =
-    focusnfe && typeof focusnfe === "object" && !Array.isArray(focusnfe)
-      ? (focusnfe as Record<string, unknown>).nfes_recebidas_ultima_sync_at
-      : undefined;
-  const ultimaSyncLabel =
-    typeof ultimaSyncAt === "string" && ultimaSyncAt.trim()
-      ? formatRelativeCompact(ultimaSyncAt, nowMs)
-      : null;
-
-  const max = obFiscal.max;
-  const done = obFiscal.synced + obFiscal.ignored;
-  const barPct = progressPercent(max, obFiscal.synced, obFiscal.ignored);
-  const awaitingSefazEstimate = max === 0 && !sefazUnavailable;
-
-  if (sefazUnavailable) {
-    return (
-      <Card className="border-2 border-amber-500/45 bg-linear-to-r from-amber-500/14 via-orange-500/10 to-amber-500/8 shadow-md">
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/35 text-amber-950 ring-1 ring-amber-700/25 dark:text-amber-100">
-                <AlertTriangle className="h-5 w-5 opacity-95" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wider text-amber-950/85 dark:text-amber-100/85">
-                  Onboarding fiscal · NF-e recebidas
-                </p>
-                <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
-                  SEFAZ indisponível no momento
-                </h3>
-                <p className="mt-2 text-sm font-medium leading-relaxed text-amber-950/92 dark:text-amber-100/90">
-                  Não foi possível obter resposta da SEFAZ para listar as NF-e
-                  recebidas desta unidade. Vamos tentar novamente{" "}
-                  <strong>{sefazRetryLabel}</strong> de forma automática.
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Não é necessário fazer nada agora — o painel atualiza assim
-                  que a sincronização retomar.
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-              <Button size="sm" className="shrink-0" variant="outline" asChild>
-                <Link to="/app/configuracoes/fiscal">
-                  Configurações fiscais
-                  <ArrowRight className="ml-1.5 h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md">
-      <CardContent className="p-4 sm:p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 flex-1 items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/30 text-violet-950 ring-1 ring-violet-700/20 dark:text-violet-100">
-              {awaitingSefazEstimate ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <FileBadge className="h-5 w-5 opacity-95" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-wider text-violet-950/85 dark:text-violet-100/85">
-                Onboarding fiscal · NF-e recebidas
-              </p>
-              <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
-                {awaitingSefazEstimate
-                  ? "A obter dados na SEFAZ"
-                  : "Sincronização das NF-e recebidas"}
-              </h3>
-
-              {awaitingSefazEstimate ? (
-                <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
-                  Estamos a consultar a SEFAZ e a preparar as{" "}
-                  <strong>NF-e recebidas</strong> desta unidade.
-                </p>
-              ) : (
-                <>
-                  <p className="mt-2 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
-                    <strong>{done}</strong> de <strong>{max}</strong> notas
-                    processadas...
-                  </p>
-                  <div
-                    className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={barPct}
-                    aria-label="Progresso da sincronização das NF-e na Focus"
-                  >
-                    <div
-                      className="h-full rounded-full bg-linear-to-r from-violet-500 to-indigo-500 transition-all"
-                      style={{ width: `${barPct}%` }}
-                    />
-                  </div>
-                </>
-              )}
-
-              {!company?.onboarding_fiscal?.max_nfes_sync && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Assim que a sincronização terminar, o processamento das notas
-                  será iniciado automaticamente.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+            ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
               <Link to="/app/configuracoes/fiscal">
                 Configurações fiscais
@@ -311,6 +322,18 @@ export function DashboardFocusNfeRecebidasSyncCard({
               </Link>
             </Button>
           </div>
+        </div>
+
+        <div className={theme.progressTrack}>
+          <div
+            className={theme.progressFill}
+            style={{ width: `${barWidth}%` }}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={barWidth}
+            aria-label="Progresso do onboarding fiscal"
+          />
         </div>
       </CardContent>
     </Card>

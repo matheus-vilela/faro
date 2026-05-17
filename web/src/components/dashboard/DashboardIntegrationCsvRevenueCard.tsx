@@ -52,13 +52,13 @@ type SyncRunRow = {
 function statusLabel(s: IntegrationCsvRevenueJobStatus): string {
   switch (s) {
     case "PENDING":
-      return "Na fila";
+      return "na fila";
     case "PROCESSING":
-      return "A processar";
+      return "em processamento";
     case "COMPLETED":
-      return "Concluído";
+      return "concluída";
     case "FAILED":
-      return "Erro";
+      return "falhou";
     default:
       return s;
   }
@@ -78,8 +78,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 /**
- * Receitas via CSV EPOC: onboarding até `onboarding_pdv.completed`; depois só quando
- * há sync/import em curso ou estado que precise de ação (erro, retry).
+ * Receitas via CSV EPOC no onboarding: visível só enquanto `onboarding_pdv.completed` ≠ true.
  */
 export function DashboardIntegrationCsvRevenueCard({
   company,
@@ -301,7 +300,9 @@ export function DashboardIntegrationCsvRevenueCard({
   }, [jobs]);
 
   /** Flags só a partir da prop `company` (igual ao cartão fiscal · NF-e): estável ao mudar de ecrã. */
-  const onboardingPdvDone = isOnboardingPdvJsonCompleted(company.onboarding_pdv);
+  const onboardingPdvDone = isOnboardingPdvJsonCompleted(
+    company.onboarding_pdv,
+  );
 
   /**
    * Mesma fonte que o resto do onboarding: `setup.epoc` no objeto `company` até
@@ -325,39 +326,6 @@ export function DashboardIntegrationCsvRevenueCard({
    * Com `primary === null`, `primary?.status !== "COMPLETED"` era verdadeiro e, junto a
    * `syncEndedWithIssue`, mantinha o cartão até os jobs carregarem — flash ao voltar ao dash.
    */
-  const importOutcomeStillLoading =
-    (bootLoading || jobsLoading) && jobs.length === 0 && primary == null;
-
-  const syncRunIssueBlocksIdle =
-    syncEndedWithIssue &&
-    !importOutcomeStillLoading &&
-    (primary == null || primary.status !== "COMPLETED");
-
-  /**
-   * Após onboarding PDV concluído, não ocupar o dash em estado idle.
-   * `syncEndedWithIssue` sozinho não deve manter o cartão se já há import COMPLETED —
-   * o EPOC pode registar dias sem eventos; o alerta diário trata rotinas posteriores.
-   */
-  const keepVisibleAfterPdvOnboarding = useMemo(
-    () =>
-      pdvSyncLocked ||
-      edgePendingEffective ||
-      hasActive ||
-      primary?.status === "FAILED" ||
-      syncRunIssueBlocksIdle ||
-      retryBusy ||
-      completeIntegrationBusy,
-    [
-      pdvSyncLocked,
-      edgePendingEffective,
-      hasActive,
-      primary?.status,
-      syncRunIssueBlocksIdle,
-      retryBusy,
-      completeIntegrationBusy,
-    ],
-  );
-
   const isTerminalFailure =
     primary?.status === "FAILED" ||
     (syncEndedWithIssue && !primary && !hasActive && !edgePendingEffective);
@@ -504,7 +472,7 @@ export function DashboardIntegrationCsvRevenueCard({
     const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
     const totalRows = Number(meta.csv_total_data_rows ?? 0) || null;
     if (primary.status === "COMPLETED") {
-      return `${created} receita(s) criadas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}${totalRows ? ` · ${totalRows} linhas no CSV` : ""}.`;
+      return `${created} vendas encontradas${skipped ? ` · ${skipped} linha(s) ignoradas` : ""}. Foram criadas despesas, cobranças e produtos automaticamente.`;
     }
     if (syncEndedWithIssue && !hasActive && !edgePendingEffective) {
       return (
@@ -534,15 +502,7 @@ export function DashboardIntegrationCsvRevenueCard({
     edgePendingEffective ||
     retryBusy;
 
-  const postPdvShow = onboardingPdvDone && keepVisibleAfterPdvOnboarding;
-
-  const shouldRenderCard = inPdvIntegrationOnboarding || postPdvShow;
-
-  if (!shouldRenderCard) {
-    return null;
-  }
-
-  if (inPdvIntegrationOnboarding) {
+  if (!inPdvIntegrationOnboarding) {
     return null;
   }
 
@@ -564,7 +524,7 @@ export function DashboardIntegrationCsvRevenueCard({
             </div>
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wider text-sky-900/85 dark:text-sky-100/85">
-                Onboarding EPOC · receitas
+                Onboarding EPOC · Vendas realizadas
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {hasActive
@@ -572,7 +532,7 @@ export function DashboardIntegrationCsvRevenueCard({
                   : edgePendingEffective
                     ? "Sincronização com o portal EPOC"
                     : primary
-                      ? `Import: ${statusLabel(primary.status)}`
+                      ? `Sincronização ${statusLabel(primary.status)}`
                       : syncEndedWithIssue
                         ? "Sincronização sem CSV utilizável"
                         : "À espera da sincronização EPOC"}
@@ -593,8 +553,7 @@ export function DashboardIntegrationCsvRevenueCard({
           </div>
 
           <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
-            {(primary?.status === "FAILED" ||
-              (syncEndedWithIssue && !hasActive && !edgePendingEffective)) && (
+            {primary?.status === "FAILED" && (
               <Button
                 size="sm"
                 type="button"

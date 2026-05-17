@@ -33,3 +33,8 @@ export function isOnboardingPdvSyncInProgress(raw: unknown): boolean {
   const o = onboardingPdvObject(raw);
   return o?.sync === true;
 }
+
+/** Card de onboarding EPOC no dashboard: só enquanto `onboarding_pdv.completed` ≠ true. */
+export function isOnboardingPdvDashboardCardVisible(raw: unknown): boolean {
+  return !isOnboardingPdvJsonCompleted(raw);
+}
