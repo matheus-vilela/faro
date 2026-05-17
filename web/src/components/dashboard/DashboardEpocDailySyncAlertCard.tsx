@@ -47,7 +47,14 @@ export function DashboardEpocDailySyncAlertCard({
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const epocSyncUiBusy =
-    !!companyId && isEpocCsvSyncUiBusy(companyId, { localSyncing: retrying });
+    !!companyId &&
+    isEpocCsvSyncUiBusy(companyId, {
+      localSyncing: retrying,
+      onboardingPdv:
+        currentCompany?.id === companyId
+          ? currentCompany.onboarding_pdv
+          : undefined,
+    });
   const [enabled, setEnabled] = useState(false);
   const [settingsRaw, setSettingsRaw] = useState<Record<string, unknown>>({});
   /** Alinhado ao localStorage após dismiss ou quando muda `epoc_daily_sync_last_attempt_at`. */

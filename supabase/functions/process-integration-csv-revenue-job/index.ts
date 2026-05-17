@@ -42,6 +42,10 @@ import {
   type RevenueOperationalLeaf,
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
+import {
+  isOnboardingEpocCsvJobMetadata,
+  patchOnboardingPdv,
+} from "../_shared/onboardingPdvPatch.ts";
 import { sanitizeCatalogProductName } from "../_shared/productImport/canonicalName.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -586,6 +590,24 @@ Deno.serve(async (req) => {
   };
 
   const fail = async (msg: string) => {
+    const priorForFail =
+      job.metadata &&
+      typeof job.metadata === "object" &&
+      !Array.isArray(job.metadata)
+        ? (job.metadata as Record<string, unknown>)
+        : {};
+    if (isOnboardingEpocCsvJobMetadata(priorForFail)) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          import_status: "failed",
+          import_error: msg.slice(0, 500),
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({
@@ -670,6 +692,26 @@ Deno.serve(async (req) => {
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
     if (startOffset > rows.length) {
       return await fail("Cursor de retomada inválido (fora do CSV).");
+    }
+
+    const priorMetaEarly =
+      job.metadata &&
+      typeof job.metadata === "object" &&
+      !Array.isArray(job.metadata)
+        ? (job.metadata as Record<string, unknown>)
+        : {};
+    const onboardingCsvJob = isOnboardingEpocCsvJobMetadata(priorMetaEarly);
+    if (onboardingCsvJob) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          sales_total: rows.length,
+          sales_sync: startOffset,
+          import_status: "processing",
+        },
+        "[process-integration-csv-revenue-job]",
+      );
     }
 
     const priorMeta =
@@ -1336,6 +1378,14 @@ Deno.serve(async (req) => {
     };
 
     if (!done) {
+      if (onboardingCsvJob) {
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          { sales_sync: nextOffset, import_status: "processing" },
+          "[process-integration-csv-revenue-job]",
+        );
+      }
       await admin
         .from("integration_csv_revenue_import_jobs")
         .update({
@@ -1389,6 +1439,20 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (onboardingCsvJob) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          sales_total: rows.length,
+          sales_sync: rows.length,
+          import_status: "completed",
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
+
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({
@@ -1419,6 +1483,24 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    const metaForCatch =
+      jobRow?.metadata &&
+      typeof jobRow.metadata === "object" &&
+      !Array.isArray(jobRow.metadata)
+        ? (jobRow.metadata as Record<string, unknown>)
+        : {};
+    if (isOnboardingEpocCsvJobMetadata(metaForCatch) && jobRow?.company_id) {
+      await patchOnboardingPdv(
+        admin,
+        String(jobRow.company_id),
+        {
+          import_status: "failed",
+          import_error: msg.slice(0, 500),
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({

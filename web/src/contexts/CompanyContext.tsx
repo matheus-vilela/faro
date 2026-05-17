@@ -49,7 +49,17 @@ export interface Company {
   /** Métricas do card NF-e recebidas (sync, completed, max_nfes_sync, nfes_sync, nfes_ignored). */
   onboarding_fiscal?: OnboardingFiscalMetrics | null;
   /** Onboarding PDV/EPOC: `completed`, `sync`. */
-  onboarding_pdv?: { completed?: boolean; sync?: boolean } | null;
+  onboarding_pdv?: {
+    completed?: boolean;
+    sync?: boolean;
+    sales_total?: number;
+    sales_sync?: number;
+    portal_busy?: boolean;
+    portal_outcome?: string | null;
+    portal_message?: string | null;
+    import_status?: string | null;
+    import_error?: string | null;
+  } | null;
 }
 
 export interface UserCompany {

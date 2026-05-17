@@ -1,7 +1,3 @@
-import {
-  clearEpocCsvSyncPending,
-  markEpocCsvSyncPending,
-} from "@/lib/epocCsvSyncProgress";
 import { supabase } from "@/lib/supabase";
 import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { toast } from "sonner";
@@ -78,32 +74,24 @@ export type InvokeEpocCsvSyncOptions = {
    * Se true: em sucesso mantém `onboarding_pdv.sync` até
    * `completeCompanyOnboardingIntegrationPdvStep`. Se false: em sucesso repõe `sync`
    * logo após a edge concluir (sync manual pós-onboarding).
-   * Qualquer invocação define `onboarding_pdv.sync` a true no arranque e repõe false em falha.
    */
   lockOnboardingPdv?: boolean;
-  /**
-   * Sync disparado explicitamente na UI: volta a marcar a etapa PDV como em aberto até
-   * «Concluir integração» (não usar em sync em segundo plano do assistente).
-   */
+  /** Volta a marcar a etapa PDV como em aberto até «Concluir integração». */
   resetPdvOnboardingCompleted?: boolean;
 };
 
 export type EpocSyncCsvResponse = {
   ok: boolean;
   error?: string;
-  /** Trace de cada etapa (login → index → validador/acoes 1/2 → tblExport). */
   steps?: EpocSyncStep[];
   steps_prefix?: string;
-  /** Falso quando a resposta fase2 não trouxe `id=tblExport`. */
   tblExport_found?: boolean;
-  /** CSV consolidado dos últimos 60 dias. */
   csv_uploaded?: boolean;
   storage_path?: string | null;
   file_name?: string | null;
   size_bytes?: number;
   download_url?: string | null;
   signed_url_expires_in?: number | null;
-  /** Fila criada para import de receitas (webhook → `process-integration-csv-revenue-job`). */
   csv_revenue_import_job_id?: string | null;
 };
 
@@ -115,10 +103,25 @@ export async function invokeEpocCsvSync(
   const lockOnboardingPdv = options?.lockOnboardingPdv === true;
   const resetPdvOnboarding =
     options?.resetPdvOnboardingCompleted === true;
+  const resetOnboardingMetrics =
+    lockOnboardingPdv ||
+    resetPdvOnboarding ||
+    options?.sync_mode === "onboarding_initial";
 
   const { error: syncStartErr } = await patchCompanyOnboardingPdv(companyId, {
     sync: true,
     ...(resetPdvOnboarding ? { completed: false } : {}),
+    ...(resetOnboardingMetrics
+      ? {
+          sales_total: 0,
+          sales_sync: 0,
+          portal_busy: true,
+          portal_outcome: null,
+          portal_message: null,
+          import_status: null,
+          import_error: null,
+        }
+      : { portal_busy: true }),
   });
   if (syncStartErr) {
     return {
@@ -127,7 +130,6 @@ export async function invokeEpocCsvSync(
     };
   }
 
-  markEpocCsvSyncPending(companyId);
   const body: Record<string, unknown> = { company_id: companyId };
   if (options?.sync_mode === "previous_day") {
     body.sync_mode = "previous_day";
@@ -145,54 +147,71 @@ export async function invokeEpocCsvSync(
         body,
       });
     if (error) {
-      clearEpocCsvSyncPending(companyId);
-      await patchCompanyOnboardingPdv(companyId, { sync: false });
+      await patchCompanyOnboardingPdv(companyId, {
+        sync: false,
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: (await messageFromInvokeFailure(error, response)).slice(
+          0,
+          500,
+        ),
+      });
       return {
         ok: false,
         error: await messageFromInvokeFailure(error, response),
       };
     }
     if (!data) {
-      clearEpocCsvSyncPending(companyId);
-      await patchCompanyOnboardingPdv(companyId, { sync: false });
+      await patchCompanyOnboardingPdv(companyId, {
+        sync: false,
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: "Resposta vazia da função",
+      });
       return { ok: false, error: "Resposta vazia da função" };
     }
     if (!data.ok) {
-      clearEpocCsvSyncPending(companyId);
-      await patchCompanyOnboardingPdv(companyId, { sync: false });
+      await patchCompanyOnboardingPdv(companyId, {
+        sync: false,
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: (data.error ?? "Falha na sincronização").slice(0, 500),
+      });
       return data;
     }
-    // Mantém o card do dashboard visível durante a janela de transição
-    // entre o fim da sync EPOC e a criação do job de importação CSV.
-    window.setTimeout(() => clearEpocCsvSyncPending(companyId), 120_000);
-    // Com onboarding PDV concluído, o lock já não aplica — repõe para o dash/UI refletirem o fim da sync.
     if (!lockOnboardingPdv) {
       await patchCompanyOnboardingPdv(companyId, { sync: false });
     }
     return data;
   } catch (e) {
-    clearEpocCsvSyncPending(companyId);
-    await patchCompanyOnboardingPdv(companyId, { sync: false });
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : "Falha ao executar sincronização.",
-    };
+    const msg = e instanceof Error ? e.message : "Falha ao executar sincronização.";
+    await patchCompanyOnboardingPdv(companyId, {
+      sync: false,
+      portal_busy: false,
+      portal_outcome: "failed",
+      portal_message: msg.slice(0, 500),
+    });
+    return { ok: false, error: msg };
   }
 }
 
-/** Repõe `onboarding_pdv.sync` quando a trava ficou órfã (sync já terminou, sem job ativo). */
+/** Repõe `onboarding_pdv.sync` quando não há portal nem import ativos. */
 export async function releaseStalePdvSyncLockIfIdle(
   companyId: string,
 ): Promise<boolean> {
-  if (readEpocCsvSyncPending(companyId)) return false;
-  const { data: activeJobs } = await supabase
-    .from("integration_csv_revenue_import_jobs")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("provider", "epoc")
-    .in("status", ["PENDING", "PROCESSING"])
-    .limit(1);
-  if (activeJobs?.length) return false;
+  const { data: row, error: readErr } = await supabase
+    .from("companies")
+    .select("onboarding_pdv")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (readErr || !row) return false;
+
+  const ob = row.onboarding_pdv as Record<string, unknown> | null;
+  if (!ob || ob.completed === true || ob.sync !== true) return false;
+  if (ob.portal_busy === true) return false;
+  const st = ob.import_status;
+  if (st === "pending" || st === "processing") return false;
+
   const { error } = await patchCompanyOnboardingPdv(companyId, { sync: false });
   return !error;
 }

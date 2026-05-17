@@ -10,6 +10,10 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  patchOnboardingPdv,
+  type OnboardingPdvPatch,
+} from "../_shared/onboardingPdvPatch.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -760,6 +764,23 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Integração inativa" }, 400);
   }
 
+  let patchOnboardingPdvEnabled = syncMode === "onboarding_initial";
+  if (!patchOnboardingPdvEnabled) {
+    const { data: coRow } = await admin
+      .from("companies")
+      .select("onboarding_pdv")
+      .eq("id", companyId)
+      .maybeSingle();
+    const ob = coRow?.onboarding_pdv as Record<string, unknown> | undefined;
+    patchOnboardingPdvEnabled =
+      ob?.completed !== true && ob?.sync === true;
+  }
+
+  async function patchOb(patch: OnboardingPdvPatch): Promise<void> {
+    if (!patchOnboardingPdvEnabled) return;
+    await patchOnboardingPdv(admin, companyId, patch, LOG);
+  }
+
   const raw = (integ.settings ?? {}) as Record<string, unknown>;
   const baseUrl = normalizeEpocBaseUrl(String(raw.base_url ?? "").trim());
   const username = String(raw.username ?? "");
@@ -906,11 +927,20 @@ Deno.serve(async (req) => {
     return step;
   }
 
-  function failJson(
+  async function failJson(
     httpStatus: number,
     error: string,
     extras: Record<string, unknown> = {},
-  ): Response {
+    opts?: { skipPortalPatch?: boolean },
+  ): Promise<Response> {
+    if (!opts?.skipPortalPatch) {
+      await patchOb({
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: error.slice(0, 500),
+        sync: false,
+      });
+    }
     return json(
       {
         ok: false,
@@ -923,6 +953,13 @@ Deno.serve(async (req) => {
       httpStatus,
     );
   }
+
+  await patchOb({
+    portal_busy: true,
+    portal_outcome: null,
+    portal_message: null,
+    import_error: null,
+  });
 
   log("inicio", {
     company_id: companyId,
@@ -954,7 +991,7 @@ Deno.serve(async (req) => {
   });
 
   if (!loginResult.ok) {
-    return failJson(502, loginResult.message, {
+    return await failJson(502, loginResult.message, {
       epoc_error_code: loginResult.errorCode,
     });
   }
@@ -1083,7 +1120,7 @@ Deno.serve(async (req) => {
   // --- Fase 1: validadorOz + acoes “vazia” → exige id=ConteudoTela ----------
   const v1 = await callValidador("fase1");
   if (v1.status === "fail") {
-    return failJson(502, v1.message ?? "validadorOz fase1 falhou.");
+    return await failJson(502, v1.message ?? "validadorOz fase1 falhou.");
   }
 
   const acoes1 = await callAcoes("fase1", {
@@ -1098,7 +1135,7 @@ Deno.serve(async (req) => {
     token: tokenForBody,
   });
   if (!acoes1.ok) {
-    return failJson(502, acoes1.step.message ?? "acoes.php (fase1) falhou.");
+    return await failJson(502, acoes1.step.message ?? "acoes.php (fase1) falhou.");
   }
   if (!hasConteudoTela(acoes1.text)) {
     acoes1.step.status = "fail";
@@ -1106,7 +1143,7 @@ Deno.serve(async (req) => {
     log("conteudo_tela_nao_encontrado", {
       previa: previewText(acoes1.text, 800),
     });
-    return failJson(
+    return await failJson(
       502,
       "Verifique credenciais, NaoMenu e o módulo configurado.",
     );
@@ -1375,7 +1412,13 @@ Deno.serve(async (req) => {
       epocCsvSyncRunId = String(histRow.id);
     }
 
-    return failJson(
+    await patchOb({
+      portal_busy: false,
+      portal_outcome: "no_tbl_export",
+      portal_message: summary.slice(0, 500),
+      sync: false,
+    });
+    return await failJson(
       502,
       `Nenhuma tabela #tblExport encontrada na janela (${diasConsultaLabel}).`,
       {
@@ -1383,6 +1426,7 @@ Deno.serve(async (req) => {
         dias_consultados: diasConsulta.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
       },
+      { skipPortalPatch: true },
     );
   }
 
@@ -1485,7 +1529,7 @@ Deno.serve(async (req) => {
     .eq("provider", "epoc");
   if (upIntegErr) {
     log("settings_falha", { message: upIntegErr.message });
-    return failJson(
+    return await failJson(
       500,
       `Conteúdo salvo no Storage, mas metadados não atualizados: ${upIntegErr.message}.`,
       {},
@@ -1527,6 +1571,13 @@ Deno.serve(async (req) => {
       log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
     }
   }
+
+  await patchOb({
+    portal_busy: false,
+    portal_outcome: "success",
+    portal_message: null,
+    import_status: csvRevenueImportJobId ? "pending" : null,
+  });
 
   log("concluido", {
     steps: steps.length,

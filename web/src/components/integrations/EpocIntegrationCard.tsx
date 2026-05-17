@@ -113,8 +113,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
   const epocSyncUiBusy = useMemo(
-    () => isEpocCsvSyncUiBusy(companyId, { localSyncing: syncingFull }),
-    [companyId, syncingFull],
+    () =>
+      isEpocCsvSyncUiBusy(companyId, {
+        localSyncing: syncingFull,
+        onboardingPdv: companyMeta?.onboarding_pdv,
+      }),
+    [companyId, syncingFull, companyMeta?.onboarding_pdv],
   );
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
