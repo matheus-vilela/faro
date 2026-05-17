@@ -661,7 +661,7 @@ export function Receitas() {
 
     if (error) {
       console.error(error);
-      toast.error("Não foi possível carregar as receitas.");
+      toast.error("Não foi possível carregar as vendas.");
       setRows([]);
       setTotalCount(0);
       return;
@@ -842,8 +842,8 @@ export function Receitas() {
       setSaving(false);
       toast.success(
         createdCount > 1
-          ? `${createdCount} receitas criadas.`
-          : "Receita criada.",
+          ? `${createdCount} vendas criadas.`
+          : "Venda criada.",
       );
     }
     setSheetOpen(false);
@@ -875,8 +875,8 @@ export function Receitas() {
   return (
     <PageShell className="space-y-8 pb-0" narrow>
       <PageHeader
-        title="Receitas"
-        description="Receitas manuais e vendas de produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria). O CMV segue o grupo cadastrado no produto."
+        title="Vendas"
+        description="Vendas manuais e por produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria). O CMV segue o grupo cadastrado no produto."
         icon={CircleDollarSign}
         action={
           <Button
@@ -885,7 +885,7 @@ export function Receitas() {
             className="h-10 w-full shrink-0 sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Nova receita
+            Nova venda
           </Button>
         }
       />
@@ -893,7 +893,7 @@ export function Receitas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pela data da receita (competência)"
+        description="Lista filtrada pela data da venda (competência)"
       />
 
       <Sheet open={sheetOpen} onOpenChange={handleOpenSheet}>
@@ -905,7 +905,7 @@ export function Receitas() {
               </div>
               <div className="min-w-0 flex-1 space-y-1 pr-6">
                 <SheetTitle className="text-xl font-semibold sm:text-2xl">
-                  Nova receita
+                  Nova venda
                 </SheetTitle>
                 <SheetDescription>
                   Lançamento por período ou venda pontual com estoque, impostos e
@@ -1355,7 +1355,7 @@ export function Receitas() {
                 className="w-full sm:w-auto"
                 disabled={!canSubmit || saving}
               >
-                {saving ? "Salvando..." : "Criar receita"}
+                {saving ? "Salvando..." : "Criar venda"}
               </Button>
             </SheetFooter>
           </form>
@@ -1367,10 +1367,10 @@ export function Receitas() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Receitas no período
+              Vendas no período
             </CardTitle>
             <CardDescription>
-              Data da receita, classificação, valores e origem do lançamento
+              Data da venda, classificação, valores e origem do lançamento
             </CardDescription>
           </div>
         </CardHeader>
@@ -1387,7 +1387,7 @@ export function Receitas() {
             <p className="text-muted-foreground">Carregando...</p>
           ) : rows.length === 0 ? (
             <p className="text-muted-foreground">
-              Nenhuma receita neste período.
+              Nenhuma venda neste período.
             </p>
           ) : (
             <div className="space-y-2">

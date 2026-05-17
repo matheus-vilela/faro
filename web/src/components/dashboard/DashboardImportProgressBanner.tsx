@@ -44,8 +44,8 @@ export function DashboardImportProgressBanner({
           </div>
 
           <Button size="sm" className="shrink-0" asChild>
-            <Link to="/app/importacoes">
-              Abrir central de importações
+            <Link to="/app/alertas">
+              Ver alertas de importação
               <ArrowRight className="ml-1.5 h-4 w-4" />
             </Link>
           </Button>

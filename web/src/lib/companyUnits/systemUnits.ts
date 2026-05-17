@@ -29,15 +29,13 @@ export const SYSTEM_PRODUCT_UNITS: readonly SystemProductUnit[] = [
   { code: "barrica", label: "Barrica", sortOrder: 16 },
   { code: "tambor", label: "Tambor", sortOrder: 17 },
   { code: "fardo", label: "Fardo", sortOrder: 18 },
-  { code: "fd", label: "Fardo (sigla)", sortOrder: 18 },
+  { code: "fd", label: "Fardo", sortOrder: 18 },
   { code: "bisnaga", label: "Bisnaga", sortOrder: 19 },
   { code: "maco", label: "Maço", sortOrder: 20 },
   { code: "bandeja", label: "Bandeja", sortOrder: 21 },
 ] as const;
 
-const CODE_SET = new Set(
-  SYSTEM_PRODUCT_UNITS.map((u) => u.code.toLowerCase()),
-);
+const CODE_SET = new Set(SYSTEM_PRODUCT_UNITS.map((u) => u.code.toLowerCase()));
 
 const LABEL_BY_CODE = new Map(
   SYSTEM_PRODUCT_UNITS.map((u) => [u.code.toLowerCase(), u.label] as const),
@@ -116,7 +114,8 @@ export function buildProductUnitSelectOptions(
   const baseWithoutLegacyForCustom = base.filter(
     (x) =>
       !(
-        customCodes.has(x.value.trim().toLowerCase()) && !isSystemUnitCode(x.value)
+        customCodes.has(x.value.trim().toLowerCase()) &&
+        !isSystemUnitCode(x.value)
       ),
   );
   const has = new Set(

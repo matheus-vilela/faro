@@ -38,6 +38,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import type { CompanyProductCategory } from '@/types/companyProductCategory'
 import type { Product } from '@/types/product'
+import { prepareProductUnitConversionsForPersist } from '@/lib/productUnitConversionsService'
 import type { ProductUnitConversionDraft } from '@/types/productUnitConversion'
 import { Package, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -254,10 +255,18 @@ export function CreateProductSheet({
       }
     }
     if (pendingConversions.length > 0) {
+      const toPersist = prepareProductUnitConversionsForPersist(
+        unit,
+        pendingConversions.map((r) => ({
+          ...r,
+          company_id: companyId,
+          product_id: product.id,
+        })),
+      )
       const { error: convErr } = await supabase
         .from('product_unit_conversions')
         .insert(
-          pendingConversions.map((r) => ({
+          toPersist.map((r) => ({
             company_id: companyId,
             product_id: product.id,
             primary_qty: r.primary_qty,

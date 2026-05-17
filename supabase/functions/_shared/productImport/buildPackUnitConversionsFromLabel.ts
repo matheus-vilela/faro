@@ -235,6 +235,18 @@ function conversionPackToInnerUnits(
   };
 }
 
+/** Massa/volume no rótulo é por unidade interna; na unidade de estoque (cx, fd…) multiplica. */
+function measureQtyPerStockUnit(
+  perUnitQty: number,
+  stockUnit: string,
+  innerUnits: number | null,
+): number {
+  if (innerUnits != null && stockUnit !== "un") {
+    return roundQty(perUnitQty * innerUnits);
+  }
+  return roundQty(perUnitQty);
+}
+
 function dedupeConversions(
   rows: ProductUnitConversionInsert[],
 ): ProductUnitConversionInsert[] {
@@ -305,14 +317,25 @@ export function buildNewProductCatalogFromNfeLine(input: {
     } else if (embedded) {
       const embCode = normalizedToCatalogCode(embedded.unit);
       if (embCode) {
+        const totalPerPack = measureQtyPerStockUnit(
+          embedded.value,
+          stockUnit,
+          innerUnits,
+        );
         conversions.push(
           ...expandMassVolumeConversionFamily(
             stockUnit,
-            embedded.value,
+            totalPerPack,
             embedded.unit,
           ),
         );
-        notes.push(`1 ${stockUnit} = ${embedded.value} ${embCode}`);
+        if (innerUnits != null && stockUnit !== "un") {
+          notes.push(
+            `${innerUnits} un × ${embedded.value} ${embCode} → 1 ${stockUnit} = ${totalPerPack} ${embCode}`,
+          );
+        } else {
+          notes.push(`1 ${stockUnit} = ${totalPerPack} ${embCode}`);
+        }
       }
     } else if (invoiceCountable === "mco") {
       conversions.push({

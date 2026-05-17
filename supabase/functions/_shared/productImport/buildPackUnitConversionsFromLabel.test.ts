@@ -63,3 +63,16 @@ Deno.test("buildNewProductCatalogFromNfeLine: nome limpo sem 10x1kg", () => {
   assertEquals(r.catalogName, "AÇUCAR CARAVELAS");
   assertEquals(r.stockUnit, "fd");
 });
+
+Deno.test("buildNewProductCatalogFromNfeLine: cx + 12un + 500ml → 12 un, 6 l e 6000 ml", () => {
+  const r = buildNewProductCatalogFromNfeLine({
+    productName: "AGUA MINERAL 500ML 12UN",
+    invoiceUnitRaw: "CX",
+  });
+  const un = r.conversions.find((c) => c.secondary_unit_code === "un");
+  assertEquals(un?.secondary_qty, 12);
+  const l = r.conversions.find((c) => c.secondary_unit_code === "l");
+  assertEquals(l?.secondary_qty, 6);
+  const ml = r.conversions.find((c) => c.secondary_unit_code === "ml");
+  assertEquals(ml?.secondary_qty, 6000);
+});

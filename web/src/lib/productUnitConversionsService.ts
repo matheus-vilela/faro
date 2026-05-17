@@ -1,5 +1,34 @@
+import { expandMassVolumeConversionSiblings } from "@/lib/companyUnits/convert";
 import { supabase } from "@/lib/supabase";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+
+/** Expande kg/g/mg e ml/l antes de gravar no banco. */
+export function prepareProductUnitConversionsForPersist(
+  hubUnitCode: string,
+  conversions: ProductUnitConversionDraft[],
+): ProductUnitConversionDraft[] {
+  if (conversions.length === 0) return [];
+  const hub = hubUnitCode.trim() || conversions[0]!.primary_unit_code.trim();
+  const expanded = expandMassVolumeConversionSiblings(
+    hub,
+    conversions.map((r) => ({
+      primary_qty: Number(r.primary_qty),
+      primary_unit_code: r.primary_unit_code,
+      secondary_qty: Number(r.secondary_qty),
+      secondary_unit_code: r.secondary_unit_code,
+    })),
+  );
+  const companyId = conversions[0]!.company_id;
+  const productId = conversions[0]!.product_id;
+  return expanded.map((r) => ({
+    company_id: companyId,
+    product_id: productId,
+    primary_qty: r.primary_qty,
+    primary_unit_code: r.primary_unit_code,
+    secondary_qty: r.secondary_qty,
+    secondary_unit_code: r.secondary_unit_code,
+  }));
+}
 
 export async function loadProductUnitConversions(
   companyId: string,
@@ -45,8 +74,13 @@ export async function persistProductUnitConversions(
 
   if (conversions.length === 0) return { ok: true };
 
+  const hub =
+    conversions[0]?.primary_unit_code?.trim() ??
+    "";
+  const toPersist = prepareProductUnitConversionsForPersist(hub, conversions);
+
   const { error: insErr } = await supabase.from("product_unit_conversions").insert(
-    conversions.map((r) => ({
+    toPersist.map((r) => ({
       company_id: companyId,
       product_id: productId,
       primary_qty: r.primary_qty,

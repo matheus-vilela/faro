@@ -18,8 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
@@ -136,7 +136,9 @@ export function Login() {
             )}
             {error && (
               <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                {error}
+                {error === "Failed to fetch"
+                  ? "Verifique sua conexão com a internet."
+                  : error}
               </p>
             )}
             <div className="space-y-2">

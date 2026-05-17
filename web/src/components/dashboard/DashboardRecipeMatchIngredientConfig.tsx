@@ -1,3 +1,4 @@
+import { ProductUnitConversionQuickAdd } from "@/components/products/ProductUnitConversionQuickAdd";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,12 +11,13 @@ import {
 } from "@/components/ui/select";
 import {
   convertQuantityForProduct,
-  getLockedSystemSecondaryQty,
   type UnitConversionCodeRow,
 } from "@/lib/companyUnits/convert";
+import { getAllowedUnitsForProductHub } from "@/lib/companyUnits/productAllowedUnits";
 import {
   loadProductUnitConversions,
   persistProductUnitConversions,
+  prepareProductUnitConversionsForPersist,
 } from "@/lib/productUnitConversionsService";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import type { ProductRecipeMatchRow } from "@/lib/onboardingProductRecipeMatch";
@@ -89,21 +91,10 @@ export function DashboardRecipeMatchIngredientConfig({
 
   const conversionRows = useMemo(() => toCodeRows(conversions), [conversions]);
 
-  const allowedUnits = useMemo(() => {
-    const allowed = new Set<string>([hubUnit]);
-    for (const c of conversionRows) {
-      if (c.primary_unit_code.trim().toLowerCase() === hubUnit) {
-        allowed.add(c.secondary_unit_code.trim().toLowerCase());
-      }
-    }
-    for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
-      if (candidate === hubUnit) continue;
-      if (getLockedSystemSecondaryQty(1, hubUnit, candidate) != null) {
-        allowed.add(candidate);
-      }
-    }
-    return [...allowed];
-  }, [conversionRows, hubUnit]);
+  const allowedUnits = useMemo(
+    () => getAllowedUnitsForProductHub(hubUnit, conversionRows),
+    [conversionRows, hubUnit],
+  );
 
   const usesAlternateUnit = inputUnitCode.trim().toLowerCase() !== hubUnit;
 
@@ -114,12 +105,13 @@ export function DashboardRecipeMatchIngredientConfig({
   }, [allowedUnits, inputUnitCode, usesAlternateUnit]);
 
   const handleConversionsChange = async (next: ProductUnitConversionDraft[]) => {
-    setConversions(next);
+    const prepared = prepareProductUnitConversionsForPersist(hubUnit, next);
+    setConversions(prepared);
     setSavingConversions(true);
     const res = await persistProductUnitConversions(
       companyId,
       ingredient.product_id,
-      next,
+      prepared,
     );
     setSavingConversions(false);
     if (!res.ok) {
@@ -127,7 +119,11 @@ export function DashboardRecipeMatchIngredientConfig({
       void load();
       return;
     }
-    toast.success("Conversão salva no cadastro do produto.");
+    toast.success(
+      prepared.length > next.length
+        ? "Conversão salva (incluindo equivalentes em massa/volume)."
+        : "Conversão salva no cadastro do produto.",
+    );
     const sec = inputUnitCode.trim().toLowerCase();
     if (
       sec !== hubUnit &&
@@ -193,8 +189,8 @@ export function DashboardRecipeMatchIngredientConfig({
         <strong className="font-medium text-foreground">
           {systemUnitLabel(hubUnit)}
         </strong>
-        . Cadastre conversões abaixo (mesmo fluxo da ficha do produto) e informe
-        quanto a receita consome por porção.
+        . Se a unidade desejada não aparecer na lista, cadastre uma conversão e
+        informe quanto a receita consome por porção.
       </p>
 
       <ProductUnitConversionsSection
@@ -233,6 +229,15 @@ export function DashboardRecipeMatchIngredientConfig({
               ))}
             </SelectContent>
           </Select>
+          <ProductUnitConversionQuickAdd
+            companyId={companyId}
+            stockUnitCode={hubUnit}
+            conversions={conversions}
+            onConversionsChange={(next) => void handleConversionsChange(next)}
+            disabled={savingConversions}
+            onSecondaryUnitAdded={(code) => setInputUnitCode(code)}
+            className="mt-2 w-full sm:w-auto"
+          />
         </div>
 
         <div className="grid gap-1.5">
@@ -251,8 +256,8 @@ export function DashboardRecipeMatchIngredientConfig({
 
       {usesAlternateUnit && !hasConversionForSelectedUnit ? (
         <p className="text-xs text-amber-800 dark:text-amber-200">
-          Cadastre uma conversão acima (ex.: 1 {systemUnitLabel(hubUnit)} = 1000{" "}
-          {systemUnitLabel(inputUnitCode)}) para usar esta unidade na ficha.
+          Use «Cadastrar conversão» (ex.: 1 {systemUnitLabel(hubUnit)} = 1000{" "}
+          {systemUnitLabel(inputUnitCode)}) para liberar esta unidade na ficha.
         </p>
       ) : null}
 

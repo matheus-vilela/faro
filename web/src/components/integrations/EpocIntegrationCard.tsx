@@ -1185,6 +1185,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                       const created =
                         Number(meta.revenue_entries_created_total ?? 0) || 0;
                       const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
+                      const productsCreated =
+                        Number(meta.products_auto_created_total ?? 0) || 0;
+                      const recipesCreated =
+                        Number(meta.recipes_auto_created_total ?? 0) || 0;
                       const totalRows =
                         Number(meta.csv_total_data_rows ?? 0) || 0;
                       const jobIdShort = item.id.slice(0, 8);
@@ -1260,6 +1264,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 ? ` · Linhas CSV: ${totalRows}`
                                 : ""}
                             </p>
+                            {productsCreated > 0 || recipesCreated > 0 ? (
+                              <p>
+                                Catálogo: {productsCreated} produto(s) novo(s)
+                                {recipesCreated > 0
+                                  ? ` · ${recipesCreated} ficha(s) técnica(s)`
+                                  : ""}
+                              </p>
+                            ) : null}
                             {item.csv_resume_row_index != null ? (
                               <p>Cursor: linha {item.csv_resume_row_index}</p>
                             ) : null}

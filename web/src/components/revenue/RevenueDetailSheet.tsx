@@ -333,7 +333,7 @@ export function RevenueDetailSheet({
 
     if (entryRes.error || !entryRes.data) {
       console.error(entryRes.error);
-      toast.error("Não foi possível carregar a receita.");
+      toast.error("Não foi possível carregar a venda.");
       setDetail(null);
       return;
     }
@@ -535,7 +535,7 @@ export function RevenueDetailSheet({
       return;
     }
 
-    toast.success("Receita atualizada.");
+    toast.success("Venda atualizada.");
     setDetailEditMode(false);
     await load();
     onRefresh?.();
@@ -554,7 +554,7 @@ export function RevenueDetailSheet({
       return;
     }
     setDeleteDialogOpen(false);
-    toast.success("Receita excluída.");
+    toast.success("Venda excluída.");
     onClose();
     onRefresh?.();
   };
@@ -619,7 +619,7 @@ export function RevenueDetailSheet({
               <SheetHeader>
                 <div className="flex items-center justify-between pr-8">
                   <SheetTitle>
-                    {detailEditMode ? "Editar receita" : "Dados da receita"}
+                    {detailEditMode ? "Editar venda" : "Dados da venda"}
                   </SheetTitle>
                   {!detailEditMode && (
                     <div className="flex items-center gap-2">
@@ -1243,9 +1243,9 @@ export function RevenueDetailSheet({
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Excluir receita</DialogTitle>
+            <DialogTitle>Excluir venda</DialogTitle>
             <DialogDescription>
-              Tem certeza que deseja excluir esta receita? Os boletos a receber
+              Tem certeza que deseja excluir esta venda? Os boletos a receber
               vinculados serão removidos. Em venda de produto, a quantidade
               voltará ao estoque; em venda por receita (ficha), os ingredientes
               são estornados.

@@ -11,6 +11,8 @@
  * da linha para uma folha existente (ex.: vendas de bebidas, taxa de serviço, delivery).
  * Produtos auto-criados: `stock_control_type`, `product_operational_config` (AUTO/CONFIGURADO) e
  * vínculo em `product_category_assignments` alinhados ao tipo inferido e ao catálogo da empresa.
+ * Rótulos novos passam por heurística + OpenAI (`OPENAI_API_KEY`, `OPENAI_EPOC_PRODUCT_KIND_MODEL`)
+ * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
  * Corpo inicial (webhook): `{ "job_id" }` ou `{ "record": { "id" } }`.
@@ -20,6 +22,13 @@
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  batchClassifyEpocProductKindWithOpenAi,
+  classifyEpocProductKindHeuristic,
+  needsEpocProductKindOpenAi,
+  type EpocProductKind,
+  type StoredEpocProductKind,
+} from "../_shared/epocCsvProductKindClassification.ts";
 import {
   batchClassifyRevenueLeavesWithOpenAi,
   classifyRevenueCategoryHeuristic,
@@ -340,6 +349,16 @@ async function loadProductCatalog(
  * Resolve produto por nome igual ao cadastro (case-insensitive, acentos, espaços),
  * uma linha por match exato após normalização — evita depender do ilike do PostgREST.
  */
+function catalogAmbiguousCount(
+  displayName: string,
+  catalog: Array<{ id: string; name: string; unit?: string | null }>,
+): number {
+  const normName = normalizeCatalogName(displayName);
+  if (!normName) return 0;
+  return catalog.filter((p) => normalizeCatalogName(p.name) === normName)
+    .length;
+}
+
 function resolveProductIdFromCatalog(
   displayName: string,
   catalog: Array<{ id: string; name: string; unit?: string | null }>,
@@ -683,6 +702,8 @@ Deno.serve(async (req) => {
       Number(priorMeta.rows_skipped_no_product_name ?? 0) || 0;
     const prevProductsAutoCreated =
       Number(priorMeta.products_auto_created_total ?? 0) || 0;
+    const prevRecipesAutoCreated =
+      Number(priorMeta.recipes_auto_created_total ?? 0) || 0;
     const prevDiagnosticsTruncated =
       priorMeta.ignored_rows_report_truncated === true;
     const maxDiagnostics = 2000;
@@ -692,6 +713,7 @@ Deno.serve(async (req) => {
     const diagnostics: IgnoredRowDiagnostic[] = [...priorDiagnostics];
     let diagnosticsTruncated = prevDiagnosticsTruncated;
     let productsAutoCreatedChunk = 0;
+    let recipesAutoCreatedChunk = 0;
 
     const productIdCache = new Map<string, string | null>();
 
@@ -706,9 +728,25 @@ Deno.serve(async (req) => {
         : {};
     const catByKey: Record<string, StoredRevenueCat> = { ...priorCatByProduct };
 
+    const priorKindByProduct =
+      priorMeta.epoc_product_kind_by_name &&
+      typeof priorMeta.epoc_product_kind_by_name === "object" &&
+      !Array.isArray(priorMeta.epoc_product_kind_by_name)
+        ? (priorMeta.epoc_product_kind_by_name as Record<
+            string,
+            StoredEpocProductKind
+          >)
+        : {};
+    const kindByKey: Record<string, StoredEpocProductKind> = {
+      ...priorKindByProduct,
+    };
+
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
     const openaiClassifyModel =
       Deno.env.get("OPENAI_REVENUE_CLASSIFY_MODEL")?.trim() || "gpt-4o-mini";
+    const openaiProductKindModel =
+      Deno.env.get("OPENAI_EPOC_PRODUCT_KIND_MODEL")?.trim() ||
+      openaiClassifyModel;
 
     const chunkEndExclusive = Math.min(
       rows.length,
@@ -797,6 +835,87 @@ Deno.serve(async (req) => {
       }
     }
 
+    const pendingProductKind = new Map<
+      string,
+      { raw: string; pick: ReturnType<typeof classifyEpocProductKindHeuristic> }
+    >();
+    const uncertainKindKeysOrder: string[] = [];
+    const uncertainKindLabels: string[] = [];
+
+    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
+      const row = rows[pi]!;
+      const totalCell = sanitizeCell(row[totalCol] ?? "");
+      if (parseBrMoney(totalCell) == null) continue;
+      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
+      if (!parseFlexibleDate(rawDate)) continue;
+      const rawP =
+        produtoCol >= 0
+          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+      if (!rawP) continue;
+      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
+
+      const k = normalizeCatalogName(rawP);
+      if (!k || kindByKey[k]) continue;
+      if (resolveProductIdFromCatalog(rawP, productCatalog, productIdCache)) {
+        continue;
+      }
+      if (catalogAmbiguousCount(rawP, productCatalog) > 1) continue;
+      if (pendingProductKind.has(k)) continue;
+
+      const hk = classifyEpocProductKindHeuristic(rawP);
+      if (!needsEpocProductKindOpenAi(hk)) {
+        kindByKey[k] = {
+          kind: hk.kind,
+          confidence: hk.confidence,
+          reason: hk.reason,
+          src: "heuristic",
+        };
+      } else {
+        pendingProductKind.set(k, { raw: rawP, pick: hk });
+        uncertainKindKeysOrder.push(k);
+        uncertainKindLabels.push(rawP);
+      }
+    }
+
+    if (uncertainKindLabels.length && openaiApiKey) {
+      const aiKindMap = await batchClassifyEpocProductKindWithOpenAi({
+        apiKey: openaiApiKey,
+        model: openaiProductKindModel,
+        labels: uncertainKindLabels,
+      });
+      for (let i = 0; i < uncertainKindKeysOrder.length; i++) {
+        const k = uncertainKindKeysOrder[i]!;
+        const aiKind = aiKindMap.get(i);
+        if (aiKind) {
+          kindByKey[k] = {
+            kind: aiKind,
+            confidence: 0.88,
+            reason: "openai_batch",
+            src: "openai",
+          };
+        } else {
+          const ph = pendingProductKind.get(k)!;
+          kindByKey[k] = {
+            kind: ph.pick.kind,
+            confidence: ph.pick.confidence,
+            reason: ph.pick.reason,
+            src: "default",
+          };
+        }
+      }
+    } else {
+      for (const k of uncertainKindKeysOrder) {
+        const ph = pendingProductKind.get(k)!;
+        kindByKey[k] = {
+          kind: ph.pick.kind,
+          confidence: ph.pick.confidence,
+          reason: ph.pick.reason,
+          src: "heuristic",
+        };
+      }
+    }
+
     const pushDiagnostic = (d: IgnoredRowDiagnostic) => {
       if (diagnostics.length >= maxDiagnostics) {
         diagnosticsTruncated = true;
@@ -812,6 +931,7 @@ Deno.serve(async (req) => {
       if (Date.now() - t0 >= TIME_BUDGET_MS) break;
 
       let createdNewProductThisIteration = false;
+      let createdNewRecipeThisIteration = false;
 
       const row = rows[idx]!;
       const totalCell = sanitizeCell(row[totalCol] ?? "");
@@ -932,11 +1052,24 @@ Deno.serve(async (req) => {
         );
         const leafForAutoCreate =
           leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const autoOpType = deriveOperationalTypeForAutoProduct(
-          leafForAutoCreate.name,
-          rawProdutoForMatch,
-        );
-        const autoStock = mapOperationalTypeToStockControl(autoOpType);
+        const kindPick =
+          kindByKey[lineCatKey] ??
+          ({
+            kind: "PRODUCT" as EpocProductKind,
+            confidence: 0.4,
+            reason: "missing_kind_cache",
+            src: "default",
+          } satisfies StoredEpocProductKind);
+        const asRecipe = kindPick.kind === "RECIPE";
+        const autoOpType = asRecipe
+          ? "RECEITA_FICHA"
+          : deriveOperationalTypeForAutoProduct(
+              leafForAutoCreate.name,
+              rawProdutoForMatch,
+            );
+        const autoStock = asRecipe
+          ? "RECIPE_CONTROLLED"
+          : mapOperationalTypeToStockControl(autoOpType);
         const catalogName =
           sanitizeCatalogProductName(rawProdutoForMatch) ||
           sanitizeCatalogProductName("Produto");
@@ -971,16 +1104,71 @@ Deno.serve(async (req) => {
           continue;
         }
         createdNewProductThisIteration = true;
+        productId = String(createdProduct.id);
+
+        if (asRecipe) {
+          const recipeTitle = `${catalogName}`.slice(0, 500);
+          const { data: createdRecipe, error: recipeErr } = await admin
+            .from("recipes")
+            .insert({
+              company_id: job.company_id,
+              name: recipeTitle,
+              output_product_id: productId,
+              batch_yield: 1,
+              active: true,
+              recipe_type: "PREP",
+            })
+            .select("id")
+            .single();
+          if (recipeErr || !createdRecipe?.id) {
+            skippedChunk += 1;
+            skipNoProductChunk += 1;
+            pushDiagnostic({
+              row_index: idx + 1,
+              entry_date_raw: rawDate,
+              product_name_raw: rawProdutoForMatch,
+              quantity_raw: qtyCell,
+              total_received_raw: totalCell,
+              reason: "product_create_failed",
+              details:
+                recipeErr?.message ??
+                "Produto criado, mas falha ao criar ficha técnica",
+              action: "linha ignorada",
+            });
+            idx += 1;
+            continue;
+          }
+          createdNewRecipeThisIteration = true;
+          recipesAutoCreatedChunk += 1;
+
+          const { error: reviewErr } = await admin
+            .from("product_import_dashboard_review")
+            .upsert(
+              {
+                company_id: job.company_id,
+                product_id: productId,
+                review_bucket: "RECIPE_NO_INGREDIENTS",
+                resolution: "OPEN",
+                notes:
+                  "Ficha criada automaticamente na importação EPOC; cadastre insumos.",
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "company_id,product_id,review_bucket" },
+            );
+          if (reviewErr) {
+            console.error(
+              "[process-integration-csv-revenue-job] product_import_dashboard_review",
+              reviewErr.message,
+            );
+          }
+        } else {
+          productsAutoCreatedChunk += 1;
+        }
 
         productCatalog.push(
           createdProduct as { id: string; name: string; unit?: string | null },
         );
-        productsAutoCreatedChunk += 1;
-        productIdCache.set(
-          normalizeCatalogName(rawProdutoForMatch),
-          createdProduct.id as string,
-        );
-        productId = String(createdProduct.id);
+        productIdCache.set(normalizeCatalogName(rawProdutoForMatch), productId);
       }
       if (!productId) {
         skippedChunk += 1;
@@ -1059,20 +1247,28 @@ Deno.serve(async (req) => {
       if (createdNewProductThisIteration && productId) {
         const leafForAutoCreate =
           leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const autoOpType = deriveOperationalTypeForAutoProduct(
-          leafForAutoCreate.name,
-          rawProdutoForMatch,
-        );
+        const kindPickPost =
+          kindByKey[lineCatKey]?.kind ??
+          (createdNewRecipeThisIteration ? "RECIPE" : "PRODUCT");
+        const autoOpType =
+          kindPickPost === "RECIPE"
+            ? "RECEITA_FICHA"
+            : deriveOperationalTypeForAutoProduct(
+                leafForAutoCreate.name,
+                rawProdutoForMatch,
+              );
         const { error: pocErr } = await admin
           .from("product_operational_config")
           .insert({
             company_id: job.company_id,
             product_id: productId,
             suggested_operational_type: autoOpType,
-            suggested_score: 0.82,
+            suggested_score: createdNewRecipeThisIteration ? 0.9 : 0.82,
             suggestion_reasons: {
               epoc_csv_revenue_import: true,
               revenue_category: scRowForLine?.reason ?? null,
+              epoc_product_kind: kindByKey[lineCatKey] ?? null,
+              auto_recipe: createdNewRecipeThisIteration,
             },
             final_operational_type: autoOpType,
             final_decision_source: "AUTO",
@@ -1123,6 +1319,7 @@ Deno.serve(async (req) => {
     const newMeta: Record<string, unknown> = {
       ...priorMeta,
       epoc_revenue_category_by_product: catByKey,
+      epoc_product_kind_by_name: kindByKey,
       batch_by_reference_date: batchMapObj,
       csv_total_data_rows: rows.length,
       revenue_entries_created_total: prevCreated + createdChunk,
@@ -1132,6 +1329,8 @@ Deno.serve(async (req) => {
       rows_skipped_no_product_name: prevSkipNoName + skipNoNameChunk,
       products_auto_created_total:
         prevProductsAutoCreated + productsAutoCreatedChunk,
+      recipes_auto_created_total:
+        prevRecipesAutoCreated + recipesAutoCreatedChunk,
       ignored_rows_diagnostics: diagnosticsForMeta,
       ignored_rows_report_truncated: diagnosticsTruncated || sliceDiagForMeta,
     };
@@ -1157,6 +1356,7 @@ Deno.serve(async (req) => {
         revenue_entries_created_this_chunk: createdChunk,
         rows_skipped_this_chunk: skippedChunk,
         products_auto_created_this_chunk: productsAutoCreatedChunk,
+        recipes_auto_created_this_chunk: recipesAutoCreatedChunk,
         revenue_entries_created_total: prevCreated + createdChunk,
         continuing: true,
       });
@@ -1211,6 +1411,8 @@ Deno.serve(async (req) => {
       rows_skipped_total: prevSkipped + skippedChunk,
       products_auto_created_total:
         prevProductsAutoCreated + productsAutoCreatedChunk,
+      recipes_auto_created_total:
+        prevRecipesAutoCreated + recipesAutoCreatedChunk,
       ignored_rows_report_storage_path: ignoredReportPath,
       ignored_rows_report_truncated: diagnosticsTruncated,
       batches: batchIdList.length,

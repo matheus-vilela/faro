@@ -26,7 +26,6 @@ import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
-import { Importacoes } from "@/pages/Importacoes";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { Produtos } from "@/pages/Produtos";
@@ -75,10 +74,14 @@ function AuthenticatedLayout() {
           <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="despesas" element={<Despesas />} />
-          <Route path="receitas" element={<Receitas />} />
+          <Route path="vendas" element={<Receitas />} />
+          <Route
+            path="receitas"
+            element={<Navigate to="/app/vendas" replace />}
+          />
           <Route
             path="lancamento-receitas"
-            element={<Navigate to="/app/receitas" replace />}
+            element={<Navigate to="/app/vendas" replace />}
           />
           <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
           <Route
@@ -88,7 +91,10 @@ function AuthenticatedLayout() {
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
-          <Route path="importacoes" element={<Importacoes />} />
+          <Route
+            path="importacoes"
+            element={<Navigate to="/app" replace />}
+          />
           <Route path="checklists" element={<Checklists />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="integracoes" element={<Integracoes />} />

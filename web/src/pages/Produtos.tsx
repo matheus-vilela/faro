@@ -1,4 +1,6 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
+import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
+import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
   PRODUCT_SHEET_INPUT,
@@ -69,6 +71,7 @@ import {
   convertQuantityForProduct,
   rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
+import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -449,6 +452,8 @@ export function Produtos() {
   >([]);
   const [initialStockProductConversions, setInitialStockProductConversions] =
     useState<ProductUnitConversionDraft[]>([]);
+  const [stockProductConversionsLoading, setStockProductConversionsLoading] =
+    useState(false);
   type EstoqueTab =
     | "catalogo"
     | "movimentos"
@@ -989,11 +994,7 @@ export function Produtos() {
   }, [fetchLowStockCount]);
 
   useEffect(() => {
-    if (
-      !stockProduct?.id ||
-      productSheetView !== "edit" ||
-      !currentCompany?.id
-    ) {
+    if (!stockProduct?.id || !currentCompany?.id) {
       return;
     }
     if (productConversionsLoadedIdRef.current === stockProduct.id) {
@@ -1001,6 +1002,7 @@ export function Produtos() {
     }
     const loadPid = stockProduct.id;
     let cancelled = false;
+    setStockProductConversionsLoading(true);
     void (async () => {
       const { data, error } = await supabase
         .from("product_unit_conversions")
@@ -1011,17 +1013,20 @@ export function Produtos() {
         console.error(error);
         setStockProductConversions([]);
         setInitialStockProductConversions([]);
+        setStockProductConversionsLoading(false);
         return;
       }
       const rows = (data ?? []) as ProductUnitConversionDraft[];
       setStockProductConversions(rows);
       setInitialStockProductConversions(rows);
       productConversionsLoadedIdRef.current = loadPid;
+      setStockProductConversionsLoading(false);
     })();
     return () => {
       cancelled = true;
+      setStockProductConversionsLoading(false);
     };
-  }, [stockProduct?.id, productSheetView, currentCompany?.id]);
+  }, [stockProduct?.id, currentCompany?.id]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
@@ -1098,10 +1103,20 @@ export function Produtos() {
   const openStockSheet = (p: Product) => {
     const gen = ++assignmentLoadGenRef.current;
     productSheetViewRef.current = "summary";
+    productConversionsLoadedIdRef.current = null;
     setStockProduct(p);
     syncStockFormFromProduct(p);
     setProductSheetView("summary");
     setProductDetailTab("resumo");
+    const cachedConversions = (productConversionMap[p.id] ?? []).map((r) => ({
+      company_id: currentCompany?.id ?? "",
+      primary_qty: r.primary_qty,
+      primary_unit_code: r.primary_unit_code,
+      secondary_qty: r.secondary_qty,
+      secondary_unit_code: r.secondary_unit_code,
+    }));
+    setStockProductConversions(cachedConversions);
+    setInitialStockProductConversions(cachedConversions);
     setStockProductCategoryIds([]);
     setInitialStockProductCategoryIds([]);
     stockProductCategoryIdsRef.current = [];
@@ -1134,6 +1149,7 @@ export function Produtos() {
     setStockOperationalType("REVISAO_PENDENTE");
     setStockProductConversions([]);
     setInitialStockProductConversions([]);
+    setStockProductConversionsLoading(false);
   };
 
   useEffect(() => {
@@ -1471,11 +1487,22 @@ export function Produtos() {
         setStockSaving(false);
         return;
       }
-      if (stockProductConversions.length > 0) {
+      const toPersist =
+        stockProductConversions.length > 0
+          ? prepareProductUnitConversionsForPersist(
+              stockUnit,
+              stockProductConversions.map((r) => ({
+                ...r,
+                company_id: currentCompany.id,
+                product_id: stockProduct.id,
+              })),
+            )
+          : [];
+      if (toPersist.length > 0) {
         const { error: convInsErr } = await supabase
           .from("product_unit_conversions")
           .insert(
-            stockProductConversions.map((r) => ({
+            toPersist.map((r) => ({
               company_id: currentCompany.id,
               product_id: stockProduct.id,
               primary_qty: r.primary_qty,
@@ -1490,7 +1517,8 @@ export function Produtos() {
           return;
         }
       }
-      setInitialStockProductConversions([...stockProductConversions]);
+      setStockProductConversions(toPersist);
+      setInitialStockProductConversions([...toPersist]);
     }
 
     setStockSaving(false);
@@ -2290,45 +2318,24 @@ export function Produtos() {
               <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
                 {productDetailTab === "resumo" ? (
                 <div className="space-y-4 p-6">
-                  <div className={SHEET_SECTION}>
-                    <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Identificação
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm">
-                        <span className="text-muted-foreground">SKU</span>
-                        <span className="font-mono font-medium text-right wrap-anywhere">
-                          {stockProduct.sku ?? "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm">
-                        <span className="text-muted-foreground">Unidade</span>
-                        <span className="font-medium">{stockProduct.unit}</span>
-                      </div>
-                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm sm:col-span-2">
-                        <span className="text-muted-foreground">Código barras</span>
-                        <span className="font-mono text-right wrap-anywhere">
-                          {stockProduct.barcode ?? "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm sm:col-span-2">
-                        <span className="text-muted-foreground shrink-0">
-                          Compõe CMV?
-                        </span>
-                        <span className="text-right font-medium leading-snug">
-                          {productComposesCmv(stockProduct) ? "Sim" : "Não"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm shadow-sm sm:col-span-2">
-                        <span className="text-muted-foreground shrink-0">
-                          Tipo final operacional
-                        </span>
-                        <span className="text-right font-medium leading-snug">
-                          {operationalTypeLabel(operationalTypeByProduct[stockProduct.id] ?? null)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                  <ProductIdentificationSummary
+                    product={stockProduct}
+                    composesCmv={productComposesCmv(stockProduct)}
+                    operationalTypeLabel={operationalTypeLabel(
+                      operationalTypeByProduct[stockProduct.id] ?? null,
+                    )}
+                    className={SHEET_SECTION}
+                  />
+
+                  {currentCompany?.id ? (
+                    <ProductUnitConversionsReadOnly
+                      companyId={currentCompany.id}
+                      stockUnitCode={stockProduct.unit}
+                      conversions={stockProductConversions}
+                      loading={stockProductConversionsLoading}
+                      className={SHEET_SECTION}
+                    />
+                  ) : null}
 
                   <div>
                     <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">

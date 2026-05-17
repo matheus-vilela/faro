@@ -15,6 +15,9 @@ const UNIT_DIMENSIONS = {
   l: { dimension: "volume", baseFactor: 1000 },
 } as const;
 
+const MASS_UNIT_CODES = ["mg", "g", "kg"] as const;
+const VOLUME_UNIT_CODES = ["ml", "l"] as const;
+
 function systemRatio(fromCode: string, toCode: string): number | null {
   const from = UNIT_DIMENSIONS[fromCode as keyof typeof UNIT_DIMENSIONS];
   const to = UNIT_DIMENSIONS[toCode as keyof typeof UNIT_DIMENSIONS];
@@ -30,6 +33,66 @@ export function isLockedSystemConversionPair(
   return (
     systemRatio(primaryUnitCode.trim().toLowerCase(), secondaryUnitCode.trim().toLowerCase()) !=
     null
+  );
+}
+
+/**
+ * Ao cadastrar conversão para kg/g/mg (ou ml/l), gera as equivalentes na mesma família.
+ * Não substitui regras já existentes nem pares travados pelo sistema (ex.: hub kg → g).
+ */
+export function expandMassVolumeConversionSiblings(
+  hubCode: string,
+  rows: UnitConversionCodeRow[],
+): UnitConversionCodeRow[] {
+  const hubNorm = hubCode.trim().toLowerCase();
+  if (!hubNorm) return rows;
+
+  const bySecondary = new Map<string, UnitConversionCodeRow>();
+  for (const r of rows) {
+    if (r.primary_unit_code.trim().toLowerCase() !== hubNorm) continue;
+    bySecondary.set(r.secondary_unit_code.trim().toLowerCase(), r);
+  }
+
+  const out = [...rows];
+
+  const deriveFamily = (
+    source: UnitConversionCodeRow,
+    family: readonly string[],
+  ) => {
+    const sec = source.secondary_unit_code.trim().toLowerCase();
+    if (!family.includes(sec)) return;
+
+    for (const target of family) {
+      if (target === sec) continue;
+      if (bySecondary.has(target)) continue;
+      if (isLockedSystemConversionPair(hubNorm, target)) continue;
+
+      const ratio = systemRatio(sec, target);
+      if (ratio == null || !Number.isFinite(ratio)) continue;
+
+      const derived: UnitConversionCodeRow = {
+        primary_unit_code: source.primary_unit_code,
+        primary_qty: source.primary_qty,
+        secondary_unit_code: target,
+        secondary_qty: source.secondary_qty * ratio,
+      };
+      out.push(derived);
+      bySecondary.set(target, derived);
+    }
+  };
+
+  const snapshot = rows.filter(
+    (r) => r.primary_unit_code.trim().toLowerCase() === hubNorm,
+  );
+  for (const r of snapshot) {
+    deriveFamily(r, MASS_UNIT_CODES);
+  }
+  for (const r of snapshot) {
+    deriveFamily(r, VOLUME_UNIT_CODES);
+  }
+
+  return out.sort((a, b) =>
+    a.secondary_unit_code.localeCompare(b.secondary_unit_code, "pt-BR"),
   );
 }
 

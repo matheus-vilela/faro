@@ -272,7 +272,6 @@ export function Dashboard() {
         {canSeeAlerts && companyId && !showProductRecipeMatch ? (
           <DashboardImportReviewHub
             companyId={companyId}
-            importPendingOpenCount={alertSummary.importPending}
             refreshSignal={importReviewSeq}
             onPipelineChange={bumpImportReviewPipeline}
           />

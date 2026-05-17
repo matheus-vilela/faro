@@ -20,10 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProductUnitConversionQuickAdd } from "@/components/products/ProductUnitConversionQuickAdd";
+import { convertQuantityForProduct } from "@/lib/companyUnits/convert";
+import { getAllowedUnitsForProductHub } from "@/lib/companyUnits/productAllowedUnits";
 import {
-  convertQuantityForProduct,
-  getLockedSystemSecondaryQty,
-} from "@/lib/companyUnits/convert";
+  persistProductUnitConversions,
+  prepareProductUnitConversionsForPersist,
+} from "@/lib/productUnitConversionsService";
+import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import {
   Sheet,
@@ -140,12 +144,281 @@ function ProductPicker({
   );
 }
 
+type IngredientEditorProps = {
+  companyId: string;
+  products: Product[];
+  productById: Map<string, Product>;
+  ings: IngRow[];
+  setIngs: React.Dispatch<React.SetStateAction<IngRow[]>>;
+  allowedUnitsForProduct: (productId: string) => string[];
+  conversionsByProduct: Map<string, ProductUnitConversionDraft[]>;
+  handleIngredientConversionsChange: (
+    productId: string,
+    next: ProductUnitConversionDraft[],
+  ) => Promise<void>;
+  toBaseQty: (productId: string, qty: number, fromUnit: string) => number | null;
+  fromBaseQty: (productId: string, qty: number, toUnit: string) => number | null;
+  formatQtyHint: (value: number) => string;
+};
+
+function RecipeIngredientsAddPanel({
+  companyId,
+  products,
+  productById,
+  ings,
+  setIngs,
+  allowedUnitsForProduct,
+  conversionsByProduct,
+  handleIngredientConversionsChange,
+  toBaseQty,
+  fromBaseQty,
+  formatQtyHint,
+}: IngredientEditorProps) {
+  const [draftProductId, setDraftProductId] = useState("");
+  const [draftUnitCode, setDraftUnitCode] = useState("");
+  const [draftQuantity, setDraftQuantity] = useState("1");
+
+  const draftProduct = draftProductId ? productById.get(draftProductId) : null;
+  const draftUnits = draftProductId
+    ? allowedUnitsForProduct(draftProductId)
+    : [];
+
+  useEffect(() => {
+    if (!draftProductId) {
+      setDraftUnitCode("");
+      return;
+    }
+    const p = productById.get(draftProductId);
+    if (p) {
+      setDraftUnitCode(p.unit.trim().toLowerCase());
+    }
+  }, [draftProductId, productById]);
+
+  const listedIngs = useMemo(
+    () => ings.filter((r) => r.product_id && r.unit_code.trim()),
+    [ings],
+  );
+
+  const addIngredient = () => {
+    const pid = draftProductId.trim();
+    if (!pid) {
+      toast.error("Selecione um produto.");
+      return;
+    }
+    const unit = draftUnitCode.trim().toLowerCase();
+    if (!unit) {
+      toast.error("Selecione a unidade.");
+      return;
+    }
+    const parsed = parseFloat(draftQuantity.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast.error("Informe a quantidade por porção.");
+      return;
+    }
+    const allowed = allowedUnitsForProduct(pid).map((u) => u.trim().toLowerCase());
+    if (!allowed.includes(unit)) {
+      toast.error("Selecione uma unidade válida para o produto.");
+      return;
+    }
+    const baseQty = toBaseQty(pid, parsed, unit);
+    if (baseQty == null || !Number.isFinite(baseQty) || baseQty <= 0) {
+      toast.error("Não foi possível converter a unidade. Cadastre uma conversão.");
+      return;
+    }
+    if (listedIngs.some((r) => r.product_id === pid)) {
+      toast.error("Este produto já está na ficha. Remova-o antes de adicionar de novo.");
+      return;
+    }
+
+    setIngs((prev) => [
+      ...prev,
+      {
+        product_id: pid,
+        quantity: String(parsed),
+        unit_code: unit,
+      },
+    ]);
+    setDraftQuantity("1");
+    toast.success("Ingrediente adicionado à ficha.");
+  };
+
+  const draftConversionHint = (() => {
+    if (!draftProduct || !draftUnitCode) return null;
+    const isBase =
+      draftUnitCode.trim().toLowerCase() ===
+      draftProduct.unit.trim().toLowerCase();
+    if (isBase) {
+      return (
+        <p className="text-[11px] text-muted-foreground">
+          Quantidade na unidade de estoque ({systemUnitLabel(draftProduct.unit)}).
+        </p>
+      );
+    }
+    const oneInSelected = fromBaseQty(draftProductId, 1, draftUnitCode);
+    if (oneInSelected == null) {
+      return (
+        <p className="text-[11px] text-amber-800 dark:text-amber-200">
+          Falta conversão para {systemUnitLabel(draftUnitCode)}. Use «Cadastrar
+          conversão» abaixo.
+        </p>
+      );
+    }
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        {formatQtyHint(oneInSelected)} {systemUnitLabel(draftUnitCode)} equivalem a 1{" "}
+        {systemUnitLabel(draftProduct.unit)}.
+      </p>
+    );
+  })();
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Adicionar produto</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Escolha o insumo, a unidade e quanto entra em cada porção vendida (1 unidade
+            da ficha).
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Produto</Label>
+          <ProductPicker
+            products={products}
+            value={draftProductId}
+            onChange={setDraftProductId}
+            placeholder="Selecionar produto"
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Unidade</Label>
+            <Select
+              value={draftUnitCode || "__"}
+              onValueChange={(v) => setDraftUnitCode(v === "__" ? "" : v)}
+              disabled={!draftProductId}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Unidade" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__">—</SelectItem>
+                {draftUnits.map((u) => (
+                  <SelectItem key={u} value={u}>
+                    {systemUnitLabel(u)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {draftProductId && draftProduct ? (
+              <ProductUnitConversionQuickAdd
+                companyId={companyId}
+                stockUnitCode={draftProduct.unit}
+                conversions={conversionsByProduct.get(draftProductId) ?? []}
+                onConversionsChange={(next) =>
+                  void handleIngredientConversionsChange(draftProductId, next)
+                }
+                onSecondaryUnitAdded={(code) => setDraftUnitCode(code)}
+                className="mt-1.5 h-8 w-full text-xs"
+              />
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Quantidade por porção</Label>
+            <Input
+              type="text"
+              inputMode="decimal"
+              placeholder="Ex.: 100"
+              value={draftQuantity}
+              onChange={(e) => setDraftQuantity(e.target.value)}
+              disabled={!draftProductId}
+            />
+          </div>
+        </div>
+
+        {draftConversionHint}
+
+        <Button
+          type="button"
+          className="w-full sm:w-auto"
+          onClick={addIngredient}
+          disabled={!draftProductId}
+        >
+          <Plus className="mr-1.5 h-4 w-4" />
+          Adicionar
+        </Button>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <p className="text-sm font-semibold text-foreground">
+          Resumo da ficha técnica
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Insumos por porção — o lote multiplica pelo rendimento ao baixar estoque.
+        </p>
+
+        {listedIngs.length === 0 ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Nenhum ingrediente adicionado ainda.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-2">
+            {ings.map((row, rowIndex) => {
+              if (!row.product_id || !row.unit_code.trim()) return null;
+              const product = productById.get(row.product_id);
+              return (
+                <li
+                  key={`${row.product_id}-${row.unit_code}-${rowIndex}`}
+                  className="flex items-center gap-3 rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {product?.name ?? "—"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      <span className="tabular-nums font-medium text-foreground">
+                        {Number(row.quantity).toLocaleString("pt-BR", {
+                          maximumFractionDigits: 6,
+                        })}
+                      </span>{" "}
+                      · {systemUnitLabel(row.unit_code)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 shrink-0 text-destructive hover:text-destructive"
+                    aria-label="Remover ingrediente"
+                    onClick={() =>
+                      setIngs((prev) => prev.filter((_, j) => j !== rowIndex))
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function EstoqueReceitasPanel({
   companyId,
   onStockChanged,
   prefillNewRecipeOutputProductId,
   prefillNewRecipeAutoOpen = true,
   onPrefillConsumed,
+  sheetOnly = false,
+  ingredientsOnly = false,
+  initialOpenRecipeId,
+  onSheetOpenChange,
 }: {
   companyId: string;
   onStockChanged?: () => void;
@@ -158,6 +431,13 @@ export function EstoqueReceitasPanel({
   prefillNewRecipeAutoOpen?: boolean;
   /** Chamado após aplicar o preenchimento para limpar query string na URL. */
   onPrefillConsumed?: () => void;
+  /** Só renderiza o sheet lateral (ex.: dashboard EPOC). */
+  sheetOnly?: boolean;
+  /** Sheet limitado a ingredientes; nome/rendimento/saída ficam ocultos. */
+  ingredientsOnly?: boolean;
+  /** Abre esta receita no sheet após carregar o catálogo. */
+  initialOpenRecipeId?: string | null;
+  onSheetOpenChange?: (open: boolean) => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
@@ -172,18 +452,18 @@ export function EstoqueReceitasPanel({
   const [name, setName] = useState("");
   const [batchYield, setBatchYield] = useState("1");
   const [outputId, setOutputId] = useState<string>("");
-  const [ings, setIngs] = useState<IngRow[]>([
-    { product_id: "", quantity: "1", unit_code: "" },
-  ]);
+  const [ings, setIngs] = useState<IngRow[]>([]);
   const [consumeRecipe, setConsumeRecipe] = useState<string>("");
   const [portions, setPortions] = useState("1");
   const [consuming, setConsuming] = useState(false);
   const [linkContextProductId, setLinkContextProductId] = useState<string | null>(null);
   const prefillHandledRef = useRef(false);
+  const initialRecipeOpenedRef = useRef<string | null>(null);
 
   useEffect(() => {
     prefillHandledRef.current = false;
-  }, [companyId, prefillNewRecipeOutputProductId]);
+    initialRecipeOpenedRef.current = null;
+  }, [companyId, prefillNewRecipeOutputProductId, initialOpenRecipeId]);
 
   useEffect(() => {
     const pid = prefillNewRecipeOutputProductId?.trim();
@@ -208,7 +488,7 @@ export function EstoqueReceitasPanel({
     setName(base ? `${base} — ficha` : "Nova ficha técnica");
     setBatchYield("1");
     setOutputId(pid);
-    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    setIngs([]);
     setSheetOpen(true);
     toast.message("Defina os insumos e salve a receita quando estiver pronto.");
     onPrefillConsumed?.();
@@ -249,6 +529,64 @@ export function EstoqueReceitasPanel({
     [products],
   );
 
+  const openEditRecipe = useCallback(
+    (r: RecipeRow, linkProductId?: string | null) => {
+      const pending = linkProductId?.trim() ?? "";
+      setEditingRecipeId(r.id);
+      setName(r.name);
+      setBatchYield(String(r.batch_yield));
+      let nextOutput = (r.output_product_id ?? "").trim();
+      let nextIngs: IngRow[] = (r.recipe_ingredients ?? []).map((i) => ({
+        product_id: i.product_id,
+        quantity: String(i.input_quantity ?? i.quantity),
+        unit_code:
+          i.input_unit_code ??
+          products.find((p) => p.id === i.product_id)?.unit ??
+          "",
+      }));
+
+      if (ingredientsOnly) {
+        setSheetMode("edit");
+      } else if (pending) {
+        if (!nextOutput) {
+          nextOutput = pending;
+        } else if (nextOutput !== pending) {
+          const alreadyIng = nextIngs.some((row) => row.product_id === pending);
+          if (!alreadyIng) {
+            const p = productById.get(pending);
+            nextIngs = [
+              ...nextIngs,
+              { product_id: pending, quantity: "1", unit_code: p?.unit ?? "" },
+            ];
+          }
+        }
+        setSheetMode("edit");
+      } else {
+        setSheetMode("summary");
+      }
+
+      setOutputId(nextOutput);
+      setIngs(nextIngs);
+      setSheetOpen(true);
+      onSheetOpenChange?.(true);
+    },
+    [ingredientsOnly, onSheetOpenChange, productById, products],
+  );
+
+  useEffect(() => {
+    const rid = initialOpenRecipeId?.trim();
+    if (!rid || loading) return;
+    if (initialRecipeOpenedRef.current === rid) return;
+    const r = recipes.find((x) => x.id === rid);
+    if (!r) {
+      toast.error("Ficha técnica não encontrada.");
+      onSheetOpenChange?.(false);
+      return;
+    }
+    initialRecipeOpenedRef.current = rid;
+    openEditRecipe(r, null);
+  }, [initialOpenRecipeId, loading, recipes, openEditRecipe, onSheetOpenChange]);
+
   const conversionsByProduct = useMemo(() => {
     const out = new Map<string, ProductUnitConversionDraft[]>();
     for (const row of productConversions) {
@@ -260,64 +598,95 @@ export function EstoqueReceitasPanel({
     return out;
   }, [productConversions]);
 
+  const conversionCodeRowsForProduct = useCallback(
+    (productId: string) => {
+      const product = productById.get(productId);
+      if (!product) return [];
+      return (conversionsByProduct.get(productId) ?? []).map((r) => ({
+        primary_unit_code: r.primary_unit_code,
+        secondary_unit_code: r.secondary_unit_code,
+        primary_qty: Number(r.primary_qty),
+        secondary_qty: Number(r.secondary_qty),
+      }));
+    },
+    [conversionsByProduct, productById],
+  );
+
   const allowedUnitsForProduct = useCallback(
     (productId: string): string[] => {
       const product = productById.get(productId);
       if (!product) return [];
-      const base = product.unit;
-      const allowed = new Set<string>([base]);
-      const convs = conversionsByProduct.get(productId) ?? [];
-      for (const c of convs) {
-        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
-          allowed.add(c.secondary_unit_code);
-        }
-      }
-      // Inclui conversões travadas do sistema (kg/g/mg e l/ml), quando compatível.
-      for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
-        if (candidate.toLowerCase() === base.trim().toLowerCase()) continue;
-        const q = getLockedSystemSecondaryQty(1, base, candidate);
-        if (q != null) allowed.add(candidate);
-      }
-      return [...allowed];
+      return getAllowedUnitsForProductHub(
+        product.unit,
+        conversionCodeRowsForProduct(productId),
+      );
     },
-    [conversionsByProduct, productById],
+    [conversionCodeRowsForProduct, productById],
+  );
+
+  const handleIngredientConversionsChange = useCallback(
+    async (productId: string, next: ProductUnitConversionDraft[]) => {
+      const product = productById.get(productId);
+      const hub = product?.unit?.trim() ?? next[0]?.primary_unit_code?.trim() ?? "";
+      const prepared = prepareProductUnitConversionsForPersist(
+        hub,
+        next.map((r) => ({
+          ...r,
+          company_id: companyId,
+          product_id: productId,
+        })),
+      );
+      const res = await persistProductUnitConversions(
+        companyId,
+        productId,
+        prepared,
+      );
+      if (!res.ok) {
+        toast.error(res.error ?? "Não foi possível salvar a conversão.");
+        return;
+      }
+      setProductConversions((prev) => {
+        const others = prev.filter((r) => r.product_id !== productId);
+        return [...others, ...prepared];
+      });
+      toast.success(
+        prepared.length > next.length
+          ? "Conversão salva (incluindo equivalentes em massa/volume)."
+          : "Conversão salva no cadastro do produto.",
+      );
+    },
+    [companyId, productById],
   );
 
   const toBaseQty = useCallback(
     (productId: string, qty: number, fromUnit: string): number | null => {
       const product = productById.get(productId);
       if (!product) return null;
-      const convs = (conversionsByProduct.get(productId) ?? []).map((r) => ({
-        primary_unit_code: r.primary_unit_code,
-        secondary_unit_code: r.secondary_unit_code,
-        primary_qty: Number(r.primary_qty),
-        secondary_qty: Number(r.secondary_qty),
-      }));
       const raw = convertQuantityForProduct(
         qty,
         fromUnit,
         product.unit,
         product.unit,
-        convs,
+        conversionCodeRowsForProduct(productId),
       );
       return raw == null ? null : roundHubQuantityForStock(raw);
     },
-    [conversionsByProduct, productById],
+    [conversionCodeRowsForProduct, productById],
   );
 
   const fromBaseQty = useCallback(
     (productId: string, qty: number, toUnit: string): number | null => {
       const product = productById.get(productId);
       if (!product) return null;
-      const convs = (conversionsByProduct.get(productId) ?? []).map((r) => ({
-        primary_unit_code: r.primary_unit_code,
-        secondary_unit_code: r.secondary_unit_code,
-        primary_qty: Number(r.primary_qty),
-        secondary_qty: Number(r.secondary_qty),
-      }));
-      return convertQuantityForProduct(qty, product.unit, toUnit, product.unit, convs);
+      return convertQuantityForProduct(
+        qty,
+        product.unit,
+        toUnit,
+        product.unit,
+        conversionCodeRowsForProduct(productId),
+      );
     },
-    [conversionsByProduct, productById],
+    [conversionCodeRowsForProduct, productById],
   );
 
   const formatQtyHint = (value: number) =>
@@ -451,56 +820,22 @@ export function EstoqueReceitasPanel({
       toast.error("Falha ao salvar ingredientes.");
       return;
     }
-    toast.success(editingRecipeId ? "Receita atualizada." : "Receita criada.");
+    toast.success(
+      ingredientsOnly
+        ? "Insumos cadastrados."
+        : editingRecipeId
+          ? "Receita atualizada."
+          : "Receita criada.",
+    );
     setSheetOpen(false);
+    onSheetOpenChange?.(false);
     setEditingRecipeId(null);
     setName("");
     setBatchYield("1");
     setOutputId("");
-    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    setIngs([]);
     onStockChanged?.();
     void load();
-  };
-
-  const openEditRecipe = (r: RecipeRow, linkProductId?: string | null) => {
-    const pending = linkProductId?.trim() ?? "";
-    setEditingRecipeId(r.id);
-    setName(r.name);
-    setBatchYield(String(r.batch_yield));
-    let nextOutput = (r.output_product_id ?? "").trim();
-    let nextIngs: IngRow[] = (r.recipe_ingredients ?? []).map((i) => ({
-      product_id: i.product_id,
-      quantity: String(i.input_quantity ?? i.quantity),
-      unit_code:
-        i.input_unit_code ??
-        products.find((p) => p.id === i.product_id)?.unit ??
-        "",
-    }));
-
-    if (pending) {
-      if (!nextOutput) {
-        nextOutput = pending;
-      } else if (nextOutput !== pending) {
-        const alreadyIng = nextIngs.some((row) => row.product_id === pending);
-        if (!alreadyIng) {
-          const p = productById.get(pending);
-          nextIngs = [
-            ...nextIngs,
-            { product_id: pending, quantity: "1", unit_code: p?.unit ?? "" },
-          ];
-        }
-      }
-      setSheetMode("edit");
-    } else {
-      setSheetMode("summary");
-    }
-
-    if (nextIngs.length === 0) {
-      nextIngs = [{ product_id: "", quantity: "1", unit_code: "" }];
-    }
-    setOutputId(nextOutput);
-    setIngs(nextIngs);
-    setSheetOpen(true);
   };
 
   const deleteRecipe = async () => {
@@ -519,7 +854,7 @@ export function EstoqueReceitasPanel({
     setName("");
     setBatchYield("1");
     setOutputId("");
-    setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+    setIngs([]);
     onStockChanged?.();
     void load();
   };
@@ -576,8 +911,20 @@ export function EstoqueReceitasPanel({
     void load();
   };
 
+  const handleSheetOpenChange = (open: boolean) => {
+    setSheetOpen(open);
+    if (!open) {
+      setEditingRecipeId(null);
+      onSheetOpenChange?.(false);
+    } else {
+      onSheetOpenChange?.(true);
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className={sheetOnly ? undefined : "space-y-6"}>
+      {!sheetOnly ? (
+      <>
       <Card>
         <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -603,12 +950,12 @@ export function EstoqueReceitasPanel({
                 setName(base ? `${base} — ficha` : "Nova ficha técnica");
                 setBatchYield("1");
                 setOutputId(pid!);
-                setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+                setIngs([]);
               } else {
                 setName("");
                 setBatchYield("1");
                 setOutputId("");
-                setIngs([{ product_id: "", quantity: "1", unit_code: "" }]);
+                setIngs([]);
               }
               setSheetOpen(true);
             }}
@@ -733,8 +1080,10 @@ export function EstoqueReceitasPanel({
           </Button>
         </CardContent>
       </Card>
+      </>
+      ) : null}
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Sheet open={sheetOpen} onOpenChange={handleSheetOpenChange}>
         <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-lg lg:max-w-xl">
           <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
             <div className="flex items-start gap-3">
@@ -743,14 +1092,19 @@ export function EstoqueReceitasPanel({
               </div>
               <div className="min-w-0 flex-1 space-y-1 pr-6">
                 <SheetTitle className="text-xl font-semibold sm:text-2xl">
-                  {editingRecipeId
-                    ? sheetMode === "summary"
-                      ? "Resumo da ficha técnica"
-                      : "Editar ficha técnica"
-                    : "Nova ficha técnica"}
+                  {ingredientsOnly
+                    ? "Cadastrar insumos"
+                    : editingRecipeId
+                      ? sheetMode === "summary"
+                        ? "Resumo da ficha técnica"
+                        : "Editar ficha técnica"
+                      : "Nova ficha técnica"}
                 </SheetTitle>
+                {ingredientsOnly && name.trim() ? (
+                  <p className="text-sm text-muted-foreground">{name}</p>
+                ) : null}
               </div>
-              {editingRecipeId ? (
+              {editingRecipeId && !ingredientsOnly ? (
                 <div className="flex shrink-0 gap-2">
                   {sheetMode === "summary" ? (
                     <Button
@@ -786,7 +1140,7 @@ export function EstoqueReceitasPanel({
               ) : null}
             </div>
           </SheetHeader>
-          {editingRecipeId && sheetMode === "summary" ? (
+          {editingRecipeId && sheetMode === "summary" && !ingredientsOnly ? (
             <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
               <div className="space-y-4 p-6">
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -800,24 +1154,26 @@ export function EstoqueReceitasPanel({
                 </div>
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Ingredientes por lote
+                    Ingredientes por porção
                   </p>
                   <ul className="mt-3 space-y-2 text-sm">
-                    {ings.map((row, idx) => {
-                      const p = products.find((x) => x.id === row.product_id);
-                      return (
-                        <li
-                          key={`${row.product_id}-${idx}`}
-                          className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
-                        >
-                          <p className="font-medium">{p?.name ?? "—"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {Number(row.quantity || 0).toLocaleString("pt-BR")}{" "}
-                            {row.unit_code || p?.unit || ""}
-                          </p>
-                        </li>
-                      );
-                    })}
+                    {ings
+                      .filter((row) => row.product_id && row.unit_code.trim())
+                      .map((row, idx) => {
+                        const p = products.find((x) => x.id === row.product_id);
+                        return (
+                          <li
+                            key={`${row.product_id}-${idx}`}
+                            className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
+                          >
+                            <p className="font-medium">{p?.name ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {Number(row.quantity || 0).toLocaleString("pt-BR")}{" "}
+                              · {systemUnitLabel(row.unit_code || p?.unit || "")}
+                            </p>
+                          </li>
+                        );
+                      })}
                   </ul>
                 </div>
               </div>
@@ -825,6 +1181,8 @@ export function EstoqueReceitasPanel({
           ) : (
           <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
             <div className="space-y-4 p-6">
+            {!ingredientsOnly ? (
+              <>
             <div className="space-y-2">
               <Label>Nome</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -859,115 +1217,22 @@ export function EstoqueReceitasPanel({
                 </Button>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Ingredientes (por lote)</Label>
-              {ings.map((row, i) => (
-                <div key={i} className="space-y-1.5">
-                  <div className="flex gap-2">
-                    <div className="w-full space-y-1">
-                    <Label className="text-xs text-muted-foreground">Produto</Label>
-                    <ProductPicker
-                      products={products}
-                      value={row.product_id}
-                      onChange={(pid) => {
-                        const n = [...ings];
-                        const product = productById.get(pid) ?? null;
-                        n[i] = {
-                          ...n[i]!,
-                          product_id: pid,
-                          quantity: "1",
-                          unit_code: product?.unit ?? "",
-                        };
-                        setIngs(n);
-                      }}
-                    />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="w-36 space-y-1">
-                      <Label className="text-xs text-muted-foreground">Unidade</Label>
-                      <Select
-                        value={row.unit_code || "__"}
-                        onValueChange={(v) => {
-                          const n = [...ings];
-                          n[i] = { ...n[i]!, unit_code: v === "__" ? "" : v };
-                          setIngs(n);
-                        }}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Unid." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__">—</SelectItem>
-                          {allowedUnitsForProduct(row.product_id).map((u) => (
-                            <SelectItem key={`${row.product_id}-${u}`} value={u}>
-                              {u}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="w-32 space-y-1">
-                      <Label className="text-xs text-muted-foreground">Quantidade</Label>
-                      <Input
-                        className="w-32"
-                        type="number"
-                        step="0.001"
-                        min="0"
-                        placeholder="Qtd"
-                        value={row.quantity}
-                        onChange={(e) => {
-                          const n = [...ings];
-                          n[i] = { ...n[i]!, quantity: e.target.value };
-                          setIngs(n);
-                        }}
-                      />
-                    </div>
-                    <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setIngs((p) => p.filter((_, j) => j !== i))}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                  </div>
-                  {(() => {
-                    const product = productById.get(row.product_id);
-                    if (!product || !row.unit_code) return null;
-                    const isBase =
-                      row.unit_code.trim().toLowerCase() ===
-                      product.unit.trim().toLowerCase();
-                    if (isBase) {
-                      return (
-                        <p className="text-[11px] text-muted-foreground">
-                          Quantidade na unidade de estoque do produto ({product.unit}).
-                        </p>
-                      );
-                    }
-                    const oneInSelected = fromBaseQty(row.product_id, 1, row.unit_code);
-                    if (oneInSelected == null) return null;
-                    return (
-                      <p className="text-[11px] text-muted-foreground">
-                        {formatQtyHint(oneInSelected)} {row.unit_code} equivalem a 1{" "}
-                        {product.unit}.
-                      </p>
-                    );
-                  })()}
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setIngs((p) => [...p, { product_id: "", quantity: "1", unit_code: "" }])
-                }
-              >
-                <Plus className="mr-1 h-4 w-4" />
-                Ingrediente
-              </Button>
-            </div>
+              </>
+            ) : null}
+            <RecipeIngredientsAddPanel
+              key={editingRecipeId ?? "new-recipe"}
+              companyId={companyId}
+              products={products}
+              productById={productById}
+              ings={ings}
+              setIngs={setIngs}
+              allowedUnitsForProduct={allowedUnitsForProduct}
+              conversionsByProduct={conversionsByProduct}
+              handleIngredientConversionsChange={handleIngredientConversionsChange}
+              toBaseQty={toBaseQty}
+              fromBaseQty={fromBaseQty}
+              formatQtyHint={formatQtyHint}
+            />
             </div>
           </div>
           )}
@@ -975,14 +1240,11 @@ export function EstoqueReceitasPanel({
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                setSheetOpen(false);
-                setEditingRecipeId(null);
-              }}
+              onClick={() => handleSheetOpenChange(false)}
             >
               Cancelar
             </Button>
-            {editingRecipeId && sheetMode === "summary" ? null : (
+            {editingRecipeId && sheetMode === "summary" && !ingredientsOnly ? null : (
             <Button
               type="button"
               disabled={saving}
@@ -991,7 +1253,11 @@ export function EstoqueReceitasPanel({
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                editingRecipeId ? "Salvar alterações" : "Salvar"
+                ingredientsOnly
+                  ? "Salvar"
+                  : editingRecipeId
+                    ? "Salvar alterações"
+                    : "Salvar"
               )}
             </Button>
             )}
