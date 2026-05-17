@@ -233,6 +233,32 @@ function normalizeOnboardingFiscal(raw: unknown): OnboardingFiscalState {
   };
 }
 
+function defaultOnboardingFiscalState(): OnboardingFiscalState {
+  return {
+    sync: true,
+    max_nfes_sync: 0,
+    nfes_sync: 0,
+    nfes_ignored: 0,
+    completed: false,
+  };
+}
+
+async function applyOnboardingFiscalDefaults(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<{ error?: string }> {
+  const next = defaultOnboardingFiscalState();
+  const { error: uErr } = await admin
+    .from("companies")
+    .update({
+      onboarding_fiscal: next as unknown as Record<string, unknown>,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", companyId);
+  if (uErr) return { error: uErr.message };
+  return {};
+}
+
 async function mergeOnboardingFiscalMaxNfes(
   admin: ReturnType<typeof createClient>,
   companyId: string,
@@ -460,6 +486,19 @@ Deno.serve(async (req) => {
     let onboardingFirstListMaxWritten = false;
 
     if (onboardingFlow) {
+      const { error: obResetErr } = await applyOnboardingFiscalDefaults(
+        admin,
+        companyId,
+      );
+      if (obResetErr) {
+        console.warn(LOG, "onboarding_fiscal_reset", companyId, obResetErr);
+        detail.push({
+          company_id: companyId,
+          ok: false,
+          error: `onboarding_fiscal reset: ${obResetErr}`,
+        });
+        continue;
+      }
       console.log(
         LOG,
         JSON.stringify({

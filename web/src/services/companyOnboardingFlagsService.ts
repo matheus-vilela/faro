@@ -1,14 +1,17 @@
 import { supabase } from "@/lib/supabase";
 
-function mergeOnboardingFiscalCompleted(
+function mergeOnboardingFiscalFinalize(
   raw: unknown,
-  completed: boolean,
 ): Record<string, unknown> {
   const prev =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? { ...(raw as Record<string, unknown>) }
       : {};
-  return { ...prev, completed };
+  return {
+    ...prev,
+    completed: true,
+    sync: false,
+  };
 }
 
 export async function completeCompanyOnboardingFiscalStep(
@@ -25,39 +28,17 @@ export async function completeCompanyOnboardingFiscalStep(
   const { error } = await supabase
     .from("companies")
     .update({
-      onboarding_fiscal_completed: true,
-      syncing_fiscal: false,
-      onboarding_fiscal: mergeOnboardingFiscalCompleted(row.onboarding_fiscal, true),
+      onboarding_fiscal: mergeOnboardingFiscalFinalize(row.onboarding_fiscal),
     })
     .eq("id", companyId);
   return { error: error?.message };
 }
 
+/** Única via de produto para `onboarding_fiscal.completed = true` (confirmação manual no dashboard). */
 export async function confirmOnboardingFiscalInterpretPhase(
   companyId: string,
 ): Promise<{ error?: string }> {
-  const { data: row, error: fErr } = await supabase
-    .from("companies")
-    .select("onboarding_fiscal")
-    .eq("id", companyId)
-    .maybeSingle();
-  if (fErr) return { error: fErr.message };
-  if (!row) return { error: "Empresa não encontrada." };
-
-  const prev =
-    row.onboarding_fiscal &&
-    typeof row.onboarding_fiscal === "object" &&
-    !Array.isArray(row.onboarding_fiscal)
-      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
-      : {};
-
-  const { error } = await supabase
-    .from("companies")
-    .update({
-      onboarding_fiscal: { ...prev, interpret_confirmed: true },
-    })
-    .eq("id", companyId);
-  return { error: error?.message };
+  return completeCompanyOnboardingFiscalStep(companyId);
 }
 
 export async function completeCompanyOnboardingIntegrationPdvStep(

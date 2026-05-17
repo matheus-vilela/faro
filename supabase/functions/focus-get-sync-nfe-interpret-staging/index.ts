@@ -154,7 +154,7 @@ async function applyOnboardingInterpretProgress(
   next.nfes_sync = numOnboardingMetric(prev.nfes_sync) + add;
   if (finalizeInterpretSync) {
     next.sync = false;
-    next.interpret_confirmed = false;
+    next.completed = false;
   }
   const { error: upErr } = await admin
     .from("companies")
@@ -229,6 +229,8 @@ async function runInterpretStagingChunk(
   if (catalogFetchErr) {
     console.error(LOG, "produtos_catalogo_fetch", catalogFetchErr);
   }
+  /** Mesmo item em notas diferentes do chunk: reutiliza `product_id` sem novo insert. */
+  const chunkProductDedupeByKey = new Map<string, string>();
 
   for (const st of list) {
     const payload = interpretStagingNfeXmlForLog(
@@ -248,6 +250,7 @@ async function runInterpretStagingChunk(
         payload,
         productCatalog,
         productIdByLineIndex,
+        chunkProductDedupeByKey,
       ),
     ]);
     await persistStagingInterpretExpenseAndBoletos(

@@ -80,6 +80,7 @@ import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
   CheckCircle2,
+  ChevronRight,
   Copy,
   FileText,
   Loader2,
@@ -1506,7 +1507,7 @@ export function Despesas() {
             <CardDescription>
               {onlyPendingApproval
                 ? "Somente importações pelo WhatsApp pendentes de aprovação do proprietário."
-                : "Clique no ícone de boleto para vincular"}
+                : "Use o botão de boleto na linha para vincular ou ver o resumo"}
             </CardDescription>
           </div>
         </CardHeader>
@@ -1541,7 +1542,7 @@ export function Despesas() {
                 : "Nenhuma despesa cadastrada"}
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {expenses.map((exp) => {
                 const isHighlight = highlightExpenseId === exp.id;
                 const boleto = getBoletoForExpense(exp.id);
@@ -1565,6 +1566,12 @@ export function Despesas() {
                 const valueRisk = nfeVal.needsAttention;
                 const unlinkedProducts =
                   exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
+                const typeLabel =
+                  exp.type === "nota_fiscal"
+                    ? "Nota fiscal"
+                    : TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS];
+                const displayTitle =
+                  exp.supplier_name?.trim() || typeLabel || "Sem fornecedor";
                 return (
                   <div
                     key={exp.id}
@@ -1575,125 +1582,148 @@ export function Despesas() {
                     onKeyDown={(e) =>
                       e.key === "Enter" && setDetailExpenseId(exp.id)
                     }
-                    className={`flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors cursor-pointer ${"hover:bg-muted/50"} ${isHighlight ? "" : ""}`}
+                    className={cn(
+                      "group flex cursor-pointer flex-col gap-4 rounded-xl border bg-card p-4 transition-all sm:flex-row sm:items-stretch",
+                      "hover:border-border/90 hover:bg-muted/25 hover:shadow-sm",
+                      isHighlight && "border-primary/45 bg-primary/5 ring-2 ring-primary/15",
+                      linked
+                        ? "border-l-[3px] border-l-green-600/80 pl-[calc(1rem-3px)]"
+                        : "border-l-[3px] border-l-amber-500/50 pl-[calc(1rem-3px)]",
+                    )}
                   >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium flex flex-wrap items-center gap-2">
-                        <span>
-                          {exp.supplier_name ||
-                            TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS] ||
-                            "Sem fornecedor"}
-                        </span>
-                      </p>
-                      {pendingOwnerApproval && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-md border border-amber-600/25 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100 mt-1"
-                          title="Importação pelo WhatsApp — aguardando aprovação do proprietário "
-                        >
-                          <MessageCircle
-                            className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300"
-                            aria-hidden
-                          />
-                          Pendente de aprovação
-                        </span>
-                      )}
-                      {(valueRisk || unlinkedProducts > 0) && (
-                        <span className="mt-1 flex flex-wrap gap-1.5">
-                          {valueRisk && (
-                            <span
-                              className="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
-                              title={
-                                nfeVal.hasIcmsBreakdown
-                                  ? "Há ICMSTot no registro — totais do XML são a referência."
-                                  : "Total do documento difere da soma das linhas (sem ICMSTot para conferir)"
-                              }
-                            >
-                              Ajuste: valores
-                            </span>
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate text-base font-semibold leading-snug tracking-tight">
+                            {displayTitle}
+                          </p>
+                          {exp.supplier_document && (
+                            <p className="text-sm text-muted-foreground">
+                              {formatDocForDisplay(exp.supplier_document)}
+                            </p>
                           )}
-                          {unlinkedProducts > 0 && (
-                            <span
-                              className="inline-flex items-center rounded-md border border-violet-500/35 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-900 dark:text-violet-100"
-                              title="Linhas sem produto vinculado ao estoque"
-                            >
-                              Revisar produto
-                              {unlinkedProducts > 1
-                                ? ` (${unlinkedProducts})`
-                                : ""}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      {exp.supplier_document && (
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                          {formatDocForDisplay(exp.supplier_document)}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        <span className="font-medium text-muted-foreground">
-                          Competência:{" "}
-                        </span>
-                        {exp.reference_date
-                          ? formatDate(`${exp.reference_date}T12:00:00`)
-                          : "—"}
-                        <span className="text-muted-foreground/70 mx-1">·</span>
-                        <span className="font-medium text-muted-foreground">
-                          Quem lançou:{" "}
-                        </span>
-                        <ExpenseLauncherInfo
-                          expenseId={exp.id}
-                          compact
-                          fallbackLine={compactLauncherFallback(exp)}
-                          className="inline"
+                        </div>
+                        <ChevronRight
+                          className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
+                          aria-hidden
                         />
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        <span className="font-medium text-muted-foreground">
-                          Categoria:
-                        </span>{" "}
-                        {boleto
-                          ? formatBoletoCategoryLabel(boleto, categoriesById)
-                          : "—"}{" "}
-                        <span className="text-muted-foreground/70 mx-1">·</span>{" "}
-                        <span className="font-medium text-muted-foreground">
-                          Venc.:
-                        </span>{" "}
-                        {boleto ? formatDate(boleto.due_date) : "—"}
-                      </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[11px] font-normal">
+                          {typeLabel}
+                        </Badge>
+                        <Badge
+                          variant={
+                            exp.status === "approved"
+                              ? "default"
+                              : exp.status === "rejected"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                          className="text-[11px]"
+                        >
+                          {STATUS_LABELS[exp.status]}
+                        </Badge>
+                        {pendingOwnerApproval && (
+                          <Badge
+                            variant="outline"
+                            className="gap-1 border-amber-600/30 bg-amber-500/10 text-[11px] text-amber-950 dark:text-amber-100"
+                            title="Importação pelo WhatsApp — aguardando aprovação do proprietário"
+                          >
+                            <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
+                            Pendente de aprovação
+                          </Badge>
+                        )}
+                        {valueRisk && (
+                          <Badge
+                            variant="outline"
+                            className="border-destructive/35 bg-destructive/10 text-[11px] text-destructive"
+                            title={
+                              nfeVal.hasIcmsBreakdown
+                                ? "Há ICMSTot no registro — totais do XML são a referência."
+                                : "Total do documento difere da soma das linhas"
+                            }
+                          >
+                            Ajuste: valores
+                          </Badge>
+                        )}
+                        {unlinkedProducts > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="border-violet-500/35 bg-violet-500/10 text-[11px] text-violet-900 dark:text-violet-100"
+                            title="Linhas sem produto vinculado ao estoque"
+                          >
+                            Revisar produto
+                            {unlinkedProducts > 1 ? ` (${unlinkedProducts})` : ""}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">Competência</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {exp.reference_date
+                              ? formatDate(`${exp.reference_date}T12:00:00`)
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">Vencimento</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {boleto ? formatDate(boleto.due_date) : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2">
+                          <dt className="text-muted-foreground">Categoria</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {boleto
+                              ? formatBoletoCategoryLabel(boleto, categoriesById)
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2">
+                          <dt className="text-muted-foreground">Quem lançou</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            <ExpenseLauncherInfo
+                              expenseId={exp.id}
+                              compact
+                              fallbackLine={compactLauncherFallback(exp)}
+                              className="inline"
+                            />
+                          </dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">
-                        {formatCurrency(expenseListDisplayTotal(exp))}
-                      </span>
-                      <Badge
-                        variant={
-                          exp.status === "approved"
-                            ? "default"
-                            : exp.status === "rejected"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {STATUS_LABELS[exp.status]}
-                      </Badge>
-                      <button
+
+                    <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-border/60 pt-3 sm:w-[11.5rem] sm:flex-col sm:items-stretch sm:justify-between sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                      <div className="sm:text-right">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Total
+                        </p>
+                        <p className="text-lg font-semibold tabular-nums tracking-tight">
+                          {formatCurrency(expenseListDisplayTotal(exp))}
+                        </p>
+                      </div>
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (linked) setBoletoResumo(boleto!);
                           else openLinkDialog(exp.id);
                         }}
-                        className="p-2 rounded-md hover:bg-muted transition-colors shrink-0"
-                        title={
-                          linked ? "Ver resumo do boleto" : "Vincular boleto"
-                        }
+                        className={cn(
+                          "h-9 w-full px-3 text-xs font-medium sm:w-auto",
+                          linked
+                            ? "border-green-600/35 bg-green-500/10 text-green-800 hover:bg-green-500/15 dark:text-green-200"
+                            : "border-destructive/35 bg-destructive/5 text-destructive hover:bg-destructive/10",
+                        )}
                       >
-                        <FileText
-                          className={`h-5 w-5 ${
-                            linked ? "text-green-600" : "text-red-600"
-                          }`}
-                        />
-                      </button>
+                        {linked ? "Boleto vinculado" : "Sem boleto vinculado"}
+                      </Button>
                     </div>
                   </div>
                 );

@@ -8,15 +8,30 @@ function syncFlagIsOn(v: unknown): boolean {
   return typeof v === "string" ? v.trim().toLowerCase() === "true" : false;
 }
 
+function onboardingFiscalObject(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null;
+}
+
+/** `onboarding_fiscal.completed === true`. */
+export function isOnboardingFiscalJsonCompleted(raw: unknown): boolean {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return false;
+  return o.completed === true;
+}
+
+/** Etapa fiscal concluída (`onboarding_fiscal.completed`). */
+export function isOnboardingFiscalFlowCompleted(raw: unknown): boolean {
+  return isOnboardingFiscalJsonCompleted(raw);
+}
+
 /**
  * Card de NF-e / onboarding fiscal: fase de progresso com `sync` ativo (ou chave ausente).
- * Com `sync` explicitamente falso, usar `isOnboardingFiscalInterpretConfirmPhase` para o passo de confirmação.
+ * Com `sync` explicitamente falso, usar `isOnboardingFiscalInterpretConfirmPhase` para confirmação.
  */
 export function isOnboardingFiscalNfeRecebidasDashboardEnabled(raw: unknown): boolean {
-  const o =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : null;
+  const o = onboardingFiscalObject(raw);
   if (!o) return true;
   if (!("sync" in o)) return true;
   const s = o.sync;
@@ -25,16 +40,27 @@ export function isOnboardingFiscalNfeRecebidasDashboardEnabled(raw: unknown): bo
 }
 
 /**
- * Fase pós-interpretação: `sync` foi posto a false pelo job de interpretação (onboarding) e o
- * utilizador ainda não confirmou no dashboard (`interpret_confirmed` ≠ true).
+ * Fase pós-interpretação: `sync` false (interpretação terminou) e `completed` ainda não true.
  */
 export function isOnboardingFiscalInterpretConfirmPhase(raw: unknown): boolean {
-  const o =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : null;
+  const o = onboardingFiscalObject(raw);
   if (!o) return false;
   if (!syncFlagIsExplicitOff(o.sync)) return false;
-  if (o.interpret_confirmed === true) return false;
+  if (isOnboardingFiscalJsonCompleted(raw)) return false;
   return true;
+}
+
+/** Sincronização fiscal em curso (`sync` ativo e etapa ainda não concluída). */
+export function isFiscalOnboardingSyncInProgress(raw: unknown): boolean {
+  return (
+    isOnboardingFiscalNfeRecebidasDashboardEnabled(raw) &&
+    !isOnboardingFiscalJsonCompleted(raw)
+  );
+}
+
+/**
+ * Card de onboarding fiscal no dashboard: só enquanto `onboarding_fiscal.completed` ≠ true.
+ */
+export function isOnboardingFiscalDashboardCardVisible(raw: unknown): boolean {
+  return !isOnboardingFiscalJsonCompleted(raw);
 }

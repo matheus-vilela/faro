@@ -17,8 +17,8 @@ interface OnboardingFiscalMetrics {
   max_nfes_sync: number;
   nfes_sync: number;
   nfes_ignored: number;
-  /** Após interpretação XML (onboarding): utilizador confirma no dashboard para fechar o card. */
-  interpret_confirmed?: boolean;
+  /** Etapa fiscal concluída (confirmação manual no dashboard). */
+  completed?: boolean;
 }
 
 export interface Company {
@@ -43,12 +43,9 @@ export interface Company {
   representante_legal?: Record<string, unknown> | null;
   /** Onboarding: ver migration `company_onboarding_flags`; `onboarding_completed` é derivado no Postgres. */
   onboarding_completed?: boolean;
-  /** Métricas do card NF-e recebidas (sync, max_nfes_sync, nfes_sync, nfes_ignored). */
+  /** Métricas do card NF-e recebidas (sync, completed, max_nfes_sync, nfes_sync, nfes_ignored). */
   onboarding_fiscal?: OnboardingFiscalMetrics | null;
-  onboarding_fiscal_completed?: boolean;
   onboarding_integration_pdv_completed?: boolean;
-  /** Onboarding fiscal: sincronização manual em curso — desativa outros disparos na UI. */
-  syncing_fiscal?: boolean;
   /** Onboarding PDV: sincronização EPOC em curso — desativa disparos manuais na UI. */
   syncing_pdv?: boolean;
 }
@@ -105,6 +102,14 @@ function normalizeGroupEmbed(
 ): CompanyGroup | null {
   if (!raw) return null;
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+function mergeCompanyFromRealtimeRow(
+  prev: Company,
+  raw: Record<string, unknown>,
+): Company {
+  const { company_groups: _g, ...rest } = raw;
+  return { ...prev, ...(rest as Partial<Company>) };
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
@@ -214,6 +219,80 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchCompanies();
   }, [fetchCompanies]);
+
+  const applyActiveCompanyRealtime = useCallback(
+    (raw: Record<string, unknown>) => {
+      const id =
+        typeof raw.id === "string"
+          ? raw.id
+          : raw.id != null
+            ? String(raw.id)
+            : "";
+      if (!id) return;
+
+      setCompanies((list) =>
+        list.map((c) =>
+          c.id === id ? mergeCompanyFromRealtimeRow(c, raw) : c,
+        ),
+      );
+      setUserCompanies((ucs) =>
+        ucs.map((uc) =>
+          uc.company.id === id
+            ? {
+                ...uc,
+                company: mergeCompanyFromRealtimeRow(uc.company, raw),
+              }
+            : uc,
+        ),
+      );
+      setCurrentCompanyState((cur) =>
+        cur?.id === id ? mergeCompanyFromRealtimeRow(cur, raw) : cur,
+      );
+    },
+    [],
+  );
+
+  /** Postgres changes na empresa selecionada (ex.: onboarding_fiscal, focusnfe). */
+  useEffect(() => {
+    const companyId = currentCompany?.id;
+    if (!companyId || !user) return;
+
+    const channel = supabase
+      .channel(`companies:active:${companyId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "companies",
+          filter: `id=eq.${companyId}`,
+        },
+        (payload) => {
+          if (payload.new && typeof payload.new === "object") {
+            applyActiveCompanyRealtime(
+              payload.new as Record<string, unknown>,
+            );
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "companies",
+          filter: `id=eq.${companyId}`,
+        },
+        () => {
+          void fetchCompanies();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [currentCompany?.id, user, applyActiveCompanyRealtime, fetchCompanies]);
 
   const setCurrentCompany = useCallback(
     (company: Company | null) => {

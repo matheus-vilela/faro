@@ -4,6 +4,7 @@ import {
   calculateSetupProgress,
   mergeSetupPatch,
 } from "@/lib/setup/setupProgress";
+import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
 import { supabase } from "@/lib/supabase";
 import type {
   CompanySetupMap,
@@ -250,6 +251,7 @@ export async function createCompanyFromSetupStep1(
       unknown
     >,
     setup: setup as unknown as Record<string, unknown>,
+    onboarding_fiscal: defaultOnboardingFiscalRecord(),
   });
   if (cErr) return { error: cErr.message };
 
@@ -304,9 +306,7 @@ export async function patchCompanyMaps(
     document?: string | null;
     email?: string | null;
     phone?: string | null;
-    onboarding_fiscal_completed?: boolean;
     onboarding_integration_pdv_completed?: boolean;
-    syncing_fiscal?: boolean;
     syncing_pdv?: boolean;
     onboarding_fiscal?: Record<string, unknown>;
   },
@@ -338,18 +338,12 @@ export async function patchCompanyMaps(
   if (patch.document !== undefined) row.document = patch.document;
   if (patch.email !== undefined) row.email = patch.email;
   if (patch.phone !== undefined) row.phone = patch.phone;
-  if (patch.onboarding_fiscal_completed !== undefined) {
-    row.onboarding_fiscal_completed = patch.onboarding_fiscal_completed;
-  }
   if (patch.onboarding_fiscal !== undefined) {
     row.onboarding_fiscal = patch.onboarding_fiscal;
   }
   if (patch.onboarding_integration_pdv_completed !== undefined) {
     row.onboarding_integration_pdv_completed =
       patch.onboarding_integration_pdv_completed;
-  }
-  if (patch.syncing_fiscal !== undefined) {
-    row.syncing_fiscal = patch.syncing_fiscal;
   }
   if (patch.syncing_pdv !== undefined) {
     row.syncing_pdv = patch.syncing_pdv;

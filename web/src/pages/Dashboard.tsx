@@ -10,10 +10,7 @@ import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhats
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
-import {
-  isOnboardingFiscalInterpretConfirmPhase,
-  isOnboardingFiscalNfeRecebidasDashboardEnabled,
-} from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -59,6 +56,12 @@ export function Dashboard() {
   const companyId = currentCompany?.id;
   const canSeeAlerts = currentRole === "gestor" || currentRole === "owner";
   const isOwner = currentRole === "owner";
+
+  useEffect(() => {
+    if (currentCompany) {
+      console.log("currentCompany", currentCompany.onboarding_fiscal);
+    }
+  }, [currentCompany]);
 
   const [loadingBoletos, setLoadingBoletos] = useState(true);
   const [todayBoletos, setTodayBoletos] = useState<Boleto[]>([]);
@@ -311,13 +314,9 @@ export function Dashboard() {
         />
       ) : null}
       {currentCompany &&
-      !currentCompany.onboarding_fiscal_completed &&
-      (isOnboardingFiscalNfeRecebidasDashboardEnabled(
+      isOnboardingFiscalDashboardCardVisible(
         currentCompany.onboarding_fiscal,
-      ) ||
-        isOnboardingFiscalInterpretConfirmPhase(
-          currentCompany.onboarding_fiscal,
-        )) ? (
+      ) ? (
         <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
       {currentCompany ? (

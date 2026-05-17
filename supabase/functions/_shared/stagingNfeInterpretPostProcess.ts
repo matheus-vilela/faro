@@ -3,9 +3,10 @@
  * persistência de despesa + boletos (NF-e staging).
  * Inserções reais: `suppliers` (quando ausente), `products` (quando o match não encontra cadastro),
  * `expenses` / `expense_items` / `boletos` (duplicatas vinculadas à despesa).
- * O catálogo de produtos (`fetchProductCatalogForStagingInterpret`) deve ser obtido **uma vez por batch**
- * na Edge; por nota: `resolveProductsForInterpretLog` (preenche mapa linha→`product_id`) e em seguida
- * `persistStagingInterpretExpenseAndBoletos` (despesa, boletos, recebimento + stock).
+ * O catálogo de produtos (`fetchProductCatalogForStagingInterpret`) deve ser obtido **uma vez por chunk**
+ * na Edge e **mutado in-place** quando um produto é criado (`registerNewProductInStagingCatalog`), para que
+ * notas seguintes no mesmo chunk reutilizem o cadastro. Por nota: `resolveProductsForInterpretLog`
+ * (preenche mapa linha→`product_id`) e em seguida `persistStagingInterpretExpenseAndBoletos`.
  */
 import {
   ensureSupplierFromExtracted,
@@ -184,6 +185,57 @@ function stagingLineProductDedupeKey(
   return `${n8}\x1f${ean}\x1f${nome}\x1f${unit}`;
 }
 
+function catalogRowFromStagingInsert(
+  id: string,
+  payload: Record<string, unknown>,
+): StagingInterpretProductCatalogRow {
+  const eanDigits =
+    payload.ean != null ? String(payload.ean).replace(/\D/g, "") : "";
+  return {
+    id,
+    name: String(payload.name ?? ""),
+    ncm: payload.ncm != null ? String(payload.ncm).trim() || null : null,
+    ean: eanDigits.length > 0 ? eanDigits : null,
+    unit: payload.unit != null ? String(payload.unit).trim() || null : null,
+    sku: null,
+    is_active: true,
+  };
+}
+
+/** Atualiza catálogo em memória e buckets NCM após insert (mesmo chunk / notas seguintes). */
+function registerNewProductInStagingCatalog(
+  catalog: StagingInterpretProductCatalogRow[],
+  ncmBuckets: Map<string, StagingInterpretProductCatalogRow[]>,
+  row: StagingInterpretProductCatalogRow,
+): void {
+  catalog.push(row);
+  const n8 = normalizeNcm8(row.ncm);
+  if (!n8) return;
+  const arr = ncmBuckets.get(n8) ?? [];
+  arr.push(row);
+  ncmBuckets.set(n8, arr);
+}
+
+async function stagingInterpretCreateProduct(
+  admin: SupabaseAdmin,
+  catalog: StagingInterpretProductCatalogRow[],
+  ncmBuckets: Map<string, StagingInterpretProductCatalogRow[]>,
+  chunkProductDedupeByKey: Map<string, string>,
+  dedupeKey: string,
+  payload: Record<string, unknown>,
+  contexto: string,
+): Promise<string | null> {
+  const newId = await insertProductFromStagingInterpret(admin, payload, contexto);
+  if (!newId) return null;
+  registerNewProductInStagingCatalog(
+    catalog,
+    ncmBuckets,
+    catalogRowFromStagingInsert(newId, payload),
+  );
+  chunkProductDedupeByKey.set(dedupeKey, newId);
+  return newId;
+}
+
 /**
  * 1) Fornecedor: localiza por CPF/CNPJ (só dígitos); se não existir, insere em `suppliers`.
  */
@@ -327,7 +379,8 @@ export async function fetchProductCatalogForStagingInterpret(
 
 /**
  * 2) Produtos: EAN → match direto; senão lista por NCM + árbitro OpenAI (se `OPENAI_API_KEY`).
- * `productCatalog` vem de `fetchProductCatalogForStagingInterpret` (uma query por batch/chunk).
+ * `productCatalog` vem de `fetchProductCatalogForStagingInterpret` (uma query por chunk) e é mutado
+ * quando um produto novo é inserido. `chunkProductDedupeByKey` persiste entre notas do mesmo chunk.
  * Preenche `productIdByLineIndex` (índice da linha na NF → `products.id`) para vínculo nas `expense_items`.
  * Linhas repetidas na mesma nota (mesmo NCM/EAN/nome sanitizado/unidade) reutilizam o mesmo `product_id`
  * sem novo insert nem nova chamada LLM.
@@ -336,8 +389,9 @@ export async function resolveProductsForInterpretLog(
   admin: SupabaseAdmin,
   companyId: string,
   interpret: StagingNfeInterpretLog,
-  productCatalog: readonly StagingInterpretProductCatalogRow[],
+  productCatalog: StagingInterpretProductCatalogRow[],
   productIdByLineIndex: Map<number, string>,
+  chunkProductDedupeByKey: Map<string, string>,
 ): Promise<void> {
   if (!interpret.parse_ok) {
     console.log(
@@ -362,6 +416,29 @@ export async function resolveProductsForInterpretLog(
 
   for (let lineIndex = 0; lineIndex < interpret.produtos.length; lineIndex++) {
     const line = interpret.produtos[lineIndex]!;
+    const dedupeKey = stagingLineProductDedupeKey(line);
+    const chunkReuseId = chunkProductDedupeByKey.get(dedupeKey);
+    if (chunkReuseId) {
+      console.log(
+        LOG,
+        "produto_reuso_chunk",
+        JSON.stringify({
+          chave_nfe: interpret.chave_nfe,
+          line_index: lineIndex,
+          product_id: chunkReuseId,
+        }),
+      );
+      logProdutoComparacao({
+        exist: true,
+        dadosExiste: { name: "chunk_item_ja_resolvido" },
+        dadosComparado: { name: nomeLinhaProduto(line) },
+        data: null,
+      });
+      productIdByLineIndex.set(lineIndex, chunkReuseId);
+      invoiceResolvedProductByDedupeKey.set(dedupeKey, chunkReuseId);
+      continue;
+    }
+
     const keys = eanLookupKeys(line.ean);
     let hit: StagingInterpretProductCatalogRow | undefined;
     if (keys.length > 0) {
@@ -380,10 +457,8 @@ export async function resolveProductsForInterpretLog(
         data: null,
       });
       productIdByLineIndex.set(lineIndex, hit.id);
-      invoiceResolvedProductByDedupeKey.set(
-        stagingLineProductDedupeKey(line),
-        hit.id,
-      );
+      invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
+      chunkProductDedupeByKey.set(dedupeKey, hit.id);
       continue;
     }
 
@@ -432,8 +507,12 @@ export async function resolveProductsForInterpretLog(
         dadosComparado: { name: nomeComparado },
         data,
       });
-      const newId = await insertProductFromStagingInterpret(
+      const newId = await stagingInterpretCreateProduct(
         admin,
+        productCatalog,
+        ncmBuckets,
+        chunkProductDedupeByKey,
+        dedupeKey,
         data,
         "sem_ncm",
       );
@@ -454,8 +533,12 @@ export async function resolveProductsForInterpretLog(
         dadosComparado: { name: nomeComparado },
         data,
       });
-      const newId = await insertProductFromStagingInterpret(
+      const newId = await stagingInterpretCreateProduct(
         admin,
+        productCatalog,
+        ncmBuckets,
+        chunkProductDedupeByKey,
+        dedupeKey,
         data,
         "sem_candidatos_ncm",
       );
@@ -482,8 +565,12 @@ export async function resolveProductsForInterpretLog(
           model: openaiModel,
         }),
       );
-      const newId = await insertProductFromStagingInterpret(
+      const newId = await stagingInterpretCreateProduct(
         admin,
+        productCatalog,
+        ncmBuckets,
+        chunkProductDedupeByKey,
+        dedupeKey,
         data,
         "sem_openai",
       );
@@ -537,6 +624,7 @@ export async function resolveProductsForInterpretLog(
       if (hit) {
         productIdByLineIndex.set(lineIndex, hit.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
+        chunkProductDedupeByKey.set(dedupeKey, hit.id);
       }
       continue;
     }
@@ -554,8 +642,12 @@ export async function resolveProductsForInterpretLog(
         dadosComparado: { name: nomeComparado },
         data,
       });
-      const newId = await insertProductFromStagingInterpret(
+      const newId = await stagingInterpretCreateProduct(
         admin,
+        productCatalog,
+        ncmBuckets,
+        chunkProductDedupeByKey,
+        dedupeKey,
         data,
         "llm_new_product",
       );

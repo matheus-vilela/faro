@@ -3,16 +3,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import type { Company } from "@/contexts/CompanyContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
+  isOnboardingFiscalFlowCompleted,
   isOnboardingFiscalInterpretConfirmPhase,
   isOnboardingFiscalNfeRecebidasDashboardEnabled,
 } from "@/lib/onboardingFiscalDashboard";
-import { supabase } from "@/lib/supabase";
-import {
-  completeCompanyOnboardingFiscalStep,
-  confirmOnboardingFiscalInterpretPhase,
-} from "@/services/companyOnboardingFlagsService";
+import { confirmOnboardingFiscalInterpretPhase } from "@/services/companyOnboardingFlagsService";
 import { ArrowRight, CheckCircle2, FileBadge, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 function parseOnboardingFiscalMetrics(raw: unknown): {
@@ -60,7 +57,9 @@ function progressPercent(max: number, synced: number, ignored: number): number {
 
 /**
  * Onboarding fiscal · NF-e recebidas (Focus / SEFAZ).
- * Visível com `onboarding_fiscal.sync` ativo; cópia e barra seguem `max_nfes_sync`.
+ * O Dashboard só monta este card com `onboarding_fiscal.completed` ≠ true.
+ * Dentro: fase de progresso (`sync` ativo) ou confirmação manual (`sync` false).
+ * `completed` só passa a true com o botão «Confirmar e fechar».
  */
 export function DashboardFocusNfeRecebidasSyncCard({
   company,
@@ -69,15 +68,13 @@ export function DashboardFocusNfeRecebidasSyncCard({
 }) {
   const { refetchCompanies } = useCompany();
   const companyId = company?.id;
-  const [loading, setLoading] = useState(true);
-  const [nfeLogCount, setNfeLogCount] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [fiscalAutoMarkFailed, setFiscalAutoMarkFailed] = useState(false);
   const [interpretClosing, setInterpretClosing] = useState(false);
-  const autoFiscalSyncedRef = useRef(false);
 
   const obFiscal = parseOnboardingFiscalMetrics(company?.onboarding_fiscal);
-  const fiscalOnboardingDone = company?.onboarding_fiscal_completed === true;
+  const fiscalOnboardingDone = isOnboardingFiscalFlowCompleted(
+    company?.onboarding_fiscal,
+  );
   const focusnfe = company?.focusnfe;
   const interpretConfirmPhase = isOnboardingFiscalInterpretConfirmPhase(
     company?.onboarding_fiscal,
@@ -87,91 +84,15 @@ export function DashboardFocusNfeRecebidasSyncCard({
   );
 
   useEffect(() => {
-    if (interpretConfirmPhase && companyId) {
-      setLoading(false);
-    }
-  }, [interpretConfirmPhase, companyId]);
-
-  const loadCount = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      if (!companyId) {
-        setNfeLogCount(null);
-        if (!opts?.silent) setLoading(false);
-        return;
-      }
-      if (!opts?.silent) setLoading(true);
-      const { count, error } = await supabase
-        .from("company_nfe_import_logs")
-        .select("id", { count: "exact", head: true })
-        .eq("company_id", companyId);
-      if (error) {
-        console.error("DashboardFocusNfeRecebidasSyncCard", error);
-        if (!opts?.silent) setNfeLogCount(0);
-      } else {
-        setNfeLogCount(count ?? 0);
-      }
-      if (!opts?.silent) setLoading(false);
-    },
-    [companyId],
-  );
-
-  useEffect(() => {
-    autoFiscalSyncedRef.current = false;
-    queueMicrotask(() => setFiscalAutoMarkFailed(false));
-  }, [companyId]);
-
-  useEffect(() => {
-    if (!progressPhase) {
-      return;
-    }
-    queueMicrotask(() => void loadCount());
-  }, [loadCount, progressPhase]);
-
-  useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    if (!progressPhase || fiscalOnboardingDone) {
-      return;
-    }
-    const id = window.setInterval(() => {
-      void loadCount({ silent: true });
-    }, 45_000);
-    return () => window.clearInterval(id);
-  }, [progressPhase, fiscalOnboardingDone, loadCount]);
+  if (!company || fiscalOnboardingDone) {
+    return null;
+  }
 
-  /** Primeira NF-e na base: persistir conclusão fiscal sem obrigar clique extra. */
-  useEffect(() => {
-    if (!progressPhase) {
-      return;
-    }
-    if (
-      !companyId ||
-      nfeLogCount === null ||
-      nfeLogCount === 0 ||
-      autoFiscalSyncedRef.current
-    ) {
-      return;
-    }
-    autoFiscalSyncedRef.current = true;
-    void (async () => {
-      const res = await completeCompanyOnboardingFiscalStep(companyId);
-      if (res.error) {
-        autoFiscalSyncedRef.current = false;
-        setFiscalAutoMarkFailed(true);
-        console.error(
-          "DashboardFocusNfeRecebidasSyncCard fiscal sync",
-          res.error,
-        );
-        return;
-      }
-      await refetchCompanies();
-    })();
-  }, [companyId, progressPhase, nfeLogCount, refetchCompanies]);
-
-  if (!company || (!progressPhase && !interpretConfirmPhase)) {
+  if (!progressPhase && !interpretConfirmPhase) {
     return null;
   }
 
@@ -242,23 +163,6 @@ export function DashboardFocusNfeRecebidasSyncCard({
     return null;
   }
 
-  const needsAutoCompleteFiscal =
-    !loading &&
-    nfeLogCount !== null &&
-    nfeLogCount > 0 &&
-    !fiscalOnboardingDone &&
-    !fiscalAutoMarkFailed;
-
-  if (
-    !loading &&
-    nfeLogCount !== null &&
-    nfeLogCount > 0 &&
-    !fiscalOnboardingDone &&
-    fiscalAutoMarkFailed
-  ) {
-    return null;
-  }
-
   const ultimaSyncAt =
     focusnfe && typeof focusnfe === "object" && !Array.isArray(focusnfe)
       ? (focusnfe as Record<string, unknown>).nfes_recebidas_ultima_sync_at
@@ -279,7 +183,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/30 text-violet-950 ring-1 ring-violet-700/20 dark:text-violet-100">
-              {awaitingSefazEstimate || needsAutoCompleteFiscal ? (
+              {awaitingSefazEstimate ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
                 <FileBadge className="h-5 w-5 opacity-95" />
@@ -335,11 +239,6 @@ export function DashboardFocusNfeRecebidasSyncCard({
                   </p>
                 )}
 
-              {needsAutoCompleteFiscal ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  A atualizar o estado do onboarding na conta…
-                </p>
-              ) : null}
             </div>
           </div>
 

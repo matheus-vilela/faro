@@ -1,9 +1,11 @@
-/** Colunas `companies.syncing_fiscal` / `syncing_pdv` (onboarding + UI). */
+/** Travas de sync: fiscal via `onboarding_fiscal`; PDV via `companies.syncing_pdv`. */
 
-export function isFiscalSyncInProgress(
-  syncingFiscal: boolean | null | undefined,
-): boolean {
-  return syncingFiscal === true;
+import {
+  isFiscalOnboardingSyncInProgress,
+} from "@/lib/onboardingFiscalDashboard";
+
+export function isFiscalSyncInProgress(onboardingFiscal: unknown): boolean {
+  return isFiscalOnboardingSyncInProgress(onboardingFiscal);
 }
 
 export function isPdvSyncInProgress(

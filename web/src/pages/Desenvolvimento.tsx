@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCompany } from "@/contexts/CompanyContext";
+import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
 import { consolidationKey } from "@/lib/productImport/consolidateItems";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import {
@@ -146,16 +147,6 @@ function catalogCardTitleClean(
   return out || raw.trim();
 }
 
-/** Alinhado ao default jsonb em `companies.onboarding_fiscal` (migrations). */
-const DEFAULT_ONBOARDING_FISCAL = {
-  sync: true,
-  max_nfes_sync: 0,
-  nfes_sync: 0,
-  nfes_ignored: 0,
-  completed: false,
-  interpret_confirmed: false,
-} as const;
-
 export function Desenvolvimento() {
   const { currentCompany, refetchCompanies } = useCompany();
   const companyId = currentCompany?.id ?? "";
@@ -215,19 +206,21 @@ export function Desenvolvimento() {
     setGetSyncLastJson(null);
     setGetSyncResponse(null);
     try {
-      const { error: fiscalResetErr } = await supabase
-        .from("companies")
-        .update({ onboarding_fiscal: { ...DEFAULT_ONBOARDING_FISCAL } })
-        .eq("id", companyId);
-      if (fiscalResetErr) {
-        const msg =
-          fiscalResetErr.message ??
-          "Não foi possível repor onboarding_fiscal aos valores iniciais.";
-        setGetSyncError(msg);
-        toast.error(msg);
-        return;
+      if (getSyncOnboarding) {
+        const { error: fiscalResetErr } = await supabase
+          .from("companies")
+          .update({ onboarding_fiscal: defaultOnboardingFiscalRecord() })
+          .eq("id", companyId);
+        if (fiscalResetErr) {
+          const msg =
+            fiscalResetErr.message ??
+            "Não foi possível repor onboarding_fiscal aos valores iniciais.";
+          setGetSyncError(msg);
+          toast.error(msg);
+          return;
+        }
+        await refetchCompanies();
       }
-      await refetchCompanies();
 
       const body: Record<string, unknown> = {
         manual: true,
@@ -508,11 +501,15 @@ export function Desenvolvimento() {
                   <code className="rounded bg-muted px-1 text-xs">
                     onboarding: true
                   </code>
-                  {" — "}atualiza{" "}
+                  {" — "}redefine{" "}
                   <code className="rounded bg-muted px-1 text-xs">
                     onboarding_fiscal
                   </code>{" "}
-                  na empresa após a primeira lista Focus)
+                  (sync, completed, contadores) antes do sync e atualiza{" "}
+                  <code className="rounded bg-muted px-1 text-xs">
+                    max_nfes_sync
+                  </code>{" "}
+                  após a primeira lista Focus)
                 </Label>
               </div>
 
