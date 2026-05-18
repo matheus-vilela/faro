@@ -1,4 +1,3 @@
-import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
@@ -274,19 +273,6 @@ export function Dashboard() {
             companyId={companyId}
             refreshSignal={importReviewSeq}
             onPipelineChange={bumpImportReviewPipeline}
-          />
-        ) : null}
-        {canSeeAlerts ? (
-          <DashboardAlertsCard
-            loading={loadingAlerts}
-            totalAlerts={totalAlerts}
-            lowStock={alertSummary.lowStock}
-            withoutBoleto={alertSummary.withoutBoleto}
-            notReceived={alertSummary.notReceived}
-            boletoD3={alertSummary.boletoD3}
-            boletoD1={alertSummary.boletoD1}
-            importPending={alertSummary.importPending}
-            onAfterImportSheetClose={() => void loadAlertSummary()}
           />
         ) : null}
       </div>

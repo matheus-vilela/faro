@@ -1,15 +1,4 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
-import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
-import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
-import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
-import {
-  PRODUCT_SHEET_INPUT,
-  PRODUCT_SHEET_SECTION,
-  PRODUCT_SHEET_SELECT,
-  PRODUCT_SHEET_TILE,
-} from "@/components/products/productSheetStyles";
-import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { EstoqueCmvPanel } from "@/components/estoque/EstoqueCmvPanel";
 import { EstoqueComprasPanel } from "@/components/estoque/EstoqueComprasPanel";
 import { EstoqueContagemPanel } from "@/components/estoque/EstoqueContagemPanel";
@@ -21,8 +10,26 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
+import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
+import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
+import {
+  PRODUCT_SHEET_INPUT,
+  PRODUCT_SHEET_SECTION,
+  PRODUCT_SHEET_SELECT,
+  PRODUCT_SHEET_TILE,
+} from "@/components/products/productSheetStyles";
+import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
+import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
+import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -37,13 +44,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -64,37 +64,34 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
-  getLockedSystemSecondaryQty,
-  convertUnitPriceForProduct,
   convertQuantityForProduct,
+  convertUnitPriceForProduct,
+  getLockedSystemSecondaryQty,
   rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
-import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
   isSystemUnitCode,
 } from "@/lib/companyUnits/productUnitOptions";
-import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
-import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
   AlertTriangle,
   ChefHat,
   ChevronDown,
   ChevronRight,
   ClipboardList,
-  Loader2,
   Coins,
   Download,
   FileSpreadsheet,
@@ -263,16 +260,36 @@ async function fetchProductCatalogMap(
 async function fetchProductConversionMap(
   companyId: string,
   productIds: string[],
-): Promise<Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>>> {
+): Promise<
+  Record<
+    string,
+    Array<{
+      primary_qty: number;
+      primary_unit_code: string;
+      secondary_qty: number;
+      secondary_unit_code: string;
+    }>
+  >
+> {
   if (productIds.length === 0) return {};
   const { data, error } = await supabase
     .from("product_unit_conversions")
-    .select("product_id, primary_qty, primary_unit_code, secondary_qty, secondary_unit_code")
+    .select(
+      "product_id, primary_qty, primary_unit_code, secondary_qty, secondary_unit_code",
+    )
     .eq("company_id", companyId)
     .in("product_id", productIds)
     .order("secondary_unit_code", { ascending: true });
   if (error) return {};
-  const out: Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>> = {};
+  const out: Record<
+    string,
+    Array<{
+      primary_qty: number;
+      primary_unit_code: string;
+      secondary_qty: number;
+      secondary_unit_code: string;
+    }>
+  > = {};
   for (const row of data ?? []) {
     const r = row as {
       product_id: string;
@@ -388,9 +405,9 @@ export function Produtos() {
     "summary",
   );
   /** Abas dentro do detalhe do produto (vista resumo). */
-  const [productDetailTab, setProductDetailTab] = useState<"resumo" | "historico">(
-    "resumo",
-  );
+  const [productDetailTab, setProductDetailTab] = useState<
+    "resumo" | "historico"
+  >("resumo");
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
   const [stockUnit, setStockUnit] = useState("un");
@@ -411,7 +428,8 @@ export function Produtos() {
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockLastUnitValue, setStockLastUnitValue] = useState("");
-  const [stockLastUnitValueUnitCode, setStockLastUnitValueUnitCode] = useState("un");
+  const [stockLastUnitValueUnitCode, setStockLastUnitValueUnitCode] =
+    useState("un");
   const [stockIsActive, setStockIsActive] = useState(true);
   const [stockComposesCmv, setStockComposesCmv] = useState(true);
   const [companyProductCategories, setCompanyProductCategories] = useState<
@@ -434,7 +452,9 @@ export function Produtos() {
   const [productCatalogMap, setProductCatalogMap] = useState<
     Record<string, { id: string; name: string }[]>
   >({});
-  const [operationalTypeByProduct, setOperationalTypeByProduct] = useState<Record<string, string | null>>({});
+  const [operationalTypeByProduct, setOperationalTypeByProduct] = useState<
+    Record<string, string | null>
+  >({});
   const [operationalConfigByProduct, setOperationalConfigByProduct] = useState<
     Record<string, OperationalConfigSnapshot>
   >({});
@@ -444,7 +464,15 @@ export function Produtos() {
     Record<string, number>
   >({});
   const [productConversionMap, setProductConversionMap] = useState<
-    Record<string, Array<{ primary_qty: number; primary_unit_code: string; secondary_qty: number; secondary_unit_code: string }>>
+    Record<
+      string,
+      Array<{
+        primary_qty: number;
+        primary_unit_code: string;
+        secondary_qty: number;
+        secondary_unit_code: string;
+      }>
+    >
   >({});
   const [stockSaving, setStockSaving] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
@@ -478,7 +506,8 @@ export function Produtos() {
     const allowed = new Set<string>([stockUnit]);
     for (const r of stockProductConversions) {
       if (
-        r.primary_unit_code.trim().toLowerCase() === stockUnit.trim().toLowerCase()
+        r.primary_unit_code.trim().toLowerCase() ===
+        stockUnit.trim().toLowerCase()
       ) {
         allowed.add(r.secondary_unit_code);
       }
@@ -567,14 +596,19 @@ export function Produtos() {
       toast.error("Empresa não encontrada para registrar unidade.");
       return;
     }
-    const sourceHint = String(stockProduct?.import_unit_raw ?? stockCustomUnitInput).trim();
-    const { data, error } = await supabase.rpc("register_company_custom_unit_alias", {
-      p_company_id: currentCompany.id,
-      p_unit_label: label,
-      p_unit_code: code,
-      p_source_hint: sourceHint || code,
-      p_apply_to_existing: true,
-    });
+    const sourceHint = String(
+      stockProduct?.import_unit_raw ?? stockCustomUnitInput,
+    ).trim();
+    const { data, error } = await supabase.rpc(
+      "register_company_custom_unit_alias",
+      {
+        p_company_id: currentCompany.id,
+        p_unit_label: label,
+        p_unit_code: code,
+        p_source_hint: sourceHint || code,
+        p_apply_to_existing: true,
+      },
+    );
     let updatedProducts = 0;
     if (error) {
       const msg = String(error.message ?? "");
@@ -607,10 +641,14 @@ export function Produtos() {
         .eq("import_unit_needs_review", true)
         .eq("import_unit_raw", sourceHint || code);
       if (pendingError) {
-        toast.error(`Falha ao localizar produtos pendentes: ${pendingError.message}`);
+        toast.error(
+          `Falha ao localizar produtos pendentes: ${pendingError.message}`,
+        );
         return;
       }
-      const ids = (pendingRows ?? []).map((r) => String((r as { id: string }).id));
+      const ids = (pendingRows ?? []).map((r) =>
+        String((r as { id: string }).id),
+      );
       if (ids.length > 0) {
         const { error: bulkError } = await supabase
           .from("products")
@@ -627,7 +665,11 @@ export function Produtos() {
       }
       updatedProducts = ids.length;
     } else {
-      const payload = data as { ok?: boolean; error?: string; updated_products?: number };
+      const payload = data as {
+        ok?: boolean;
+        error?: string;
+        updated_products?: number;
+      };
       if (!payload?.ok) {
         toast.error(payload?.error ?? "Não foi possível registrar unidade.");
         return;
@@ -667,7 +709,8 @@ export function Produtos() {
     await fetchProducts();
   };
 
-  const customUnitCodeNormalized = normalizeCustomUnitCode(stockCustomUnitInput);
+  const customUnitCodeNormalized =
+    normalizeCustomUnitCode(stockCustomUnitInput);
   const customUnitIsValid = customUnitCodeNormalized.length >= 1;
   const customUnitIsSystem = isSystemUnitCode(customUnitCodeNormalized);
 
@@ -837,7 +880,10 @@ export function Produtos() {
                 "product_id, final_operational_type, suggested_operational_type, suggested_score, suggestion_reasons, configuration_status, configuration_completeness, linked_entry_breakdown_recipe_id",
               )
               .eq("company_id", currentCompany.id)
-              .in("product_id", rows.map((p) => p.id))
+              .in(
+                "product_id",
+                rows.map((p) => p.id),
+              )
           : Promise.resolve({ data: [], error: null }),
       ]);
       setProductCatalogMap(catalogMap);
@@ -865,14 +911,18 @@ export function Produtos() {
             configuration_completeness: Record<string, unknown> | null;
             linked_entry_breakdown_recipe_id: string | null;
           };
-          byId[row.product_id] = row.final_operational_type ?? row.suggested_operational_type ?? null;
+          byId[row.product_id] =
+            row.final_operational_type ??
+            row.suggested_operational_type ??
+            null;
           cfgById[row.product_id] = {
             suggested_operational_type: row.suggested_operational_type,
             suggested_score: row.suggested_score,
             suggestion_reasons: row.suggestion_reasons ?? null,
             configuration_status: row.configuration_status,
             configuration_completeness: row.configuration_completeness ?? null,
-            linked_entry_breakdown_recipe_id: row.linked_entry_breakdown_recipe_id ?? null,
+            linked_entry_breakdown_recipe_id:
+              row.linked_entry_breakdown_recipe_id ?? null,
           };
         }
         setOperationalTypeByProduct(byId);
@@ -1049,7 +1099,12 @@ export function Produtos() {
         ? Number(p.last_unit_value_stock)
         : last;
     const unit = cmv ?? lastStock ?? null;
-    return { cmv, last, unit, lastUnitCode: p.last_unit_value_unit_code ?? p.unit };
+    return {
+      cmv,
+      last,
+      unit,
+      lastUnitCode: p.last_unit_value_unit_code ?? p.unit,
+    };
   };
 
   const stockPricePresentation = useMemo(
@@ -1063,42 +1118,47 @@ export function Produtos() {
     return Number(stockProduct.current_quantity) * u;
   }, [stockProduct, stockPricePresentation.lineUnit]);
 
-  const syncStockFormFromProduct = useCallback((p: Product) => {
-    const normalizedUnit = (p.unit || "un").trim().toLowerCase();
-    const normalizedLastUnit = (
-      p.last_unit_value_unit_code?.trim() ||
-      p.unit ||
-      "un"
-    )
-      .trim()
-      .toLowerCase();
-    setStockName(p.name);
-    setStockSku(p.sku ?? "");
-    setStockUnit(normalizedUnit);
-    setStockBarcode(p.barcode ?? "");
-    setStockQuantity(String(p.current_quantity));
-    setStockMinQuantity(String(p.min_quantity ?? 0));
-    setStockLastUnitValue(
-      p.last_unit_value != null && !Number.isNaN(Number(p.last_unit_value))
-        ? new Intl.NumberFormat("pt-BR", {
-            style: "currency",
-            currency: "BRL",
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          }).format(Number(p.last_unit_value))
-        : "",
-    );
-    setStockLastUnitValueUnitCode(normalizedLastUnit);
-    setStockIsActive(p.is_active !== false);
-    setStockComposesCmv(productComposesCmv(p));
-    const importRaw = (p.import_unit_raw ?? "").trim();
-    setStockCustomUnitInput(importRaw);
-    setStockCustomUnitLabel("");
-    setStockOperationalType(
-      (operationalTypeByProduct[p.id] as OperationalTypeValue | null | undefined) ??
-        "REVISAO_PENDENTE",
-    );
-  }, [operationalTypeByProduct]);
+  const syncStockFormFromProduct = useCallback(
+    (p: Product) => {
+      const normalizedUnit = (p.unit || "un").trim().toLowerCase();
+      const normalizedLastUnit = (
+        p.last_unit_value_unit_code?.trim() ||
+        p.unit ||
+        "un"
+      )
+        .trim()
+        .toLowerCase();
+      setStockName(p.name);
+      setStockSku(p.sku ?? "");
+      setStockUnit(normalizedUnit);
+      setStockBarcode(p.barcode ?? "");
+      setStockQuantity(String(p.current_quantity));
+      setStockMinQuantity(String(p.min_quantity ?? 0));
+      setStockLastUnitValue(
+        p.last_unit_value != null && !Number.isNaN(Number(p.last_unit_value))
+          ? new Intl.NumberFormat("pt-BR", {
+              style: "currency",
+              currency: "BRL",
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            }).format(Number(p.last_unit_value))
+          : "",
+      );
+      setStockLastUnitValueUnitCode(normalizedLastUnit);
+      setStockIsActive(p.is_active !== false);
+      setStockComposesCmv(productComposesCmv(p));
+      const importRaw = (p.import_unit_raw ?? "").trim();
+      setStockCustomUnitInput(importRaw);
+      setStockCustomUnitLabel("");
+      setStockOperationalType(
+        (operationalTypeByProduct[p.id] as
+          | OperationalTypeValue
+          | null
+          | undefined) ?? "REVISAO_PENDENTE",
+      );
+    },
+    [operationalTypeByProduct],
+  );
 
   const openStockSheet = (p: Product) => {
     const gen = ++assignmentLoadGenRef.current;
@@ -1178,13 +1238,7 @@ export function Produtos() {
     const next = new URLSearchParams(searchParams);
     next.delete("highlight");
     setSearchParams(next, { replace: true });
-  }, [
-    productHighlightId,
-    loading,
-    products,
-    searchParams,
-    setSearchParams,
-  ]);
+  }, [productHighlightId, loading, products, searchParams, setSearchParams]);
 
   const handleStockSave = async () => {
     if (!stockProduct) return;
@@ -1212,9 +1266,12 @@ export function Produtos() {
     const composesCmvChanged =
       productComposesCmv(stockProduct) !== stockComposesCmv;
     const currentOperationalType =
-      (operationalTypeByProduct[stockProduct.id] as OperationalTypeValue | null | undefined) ??
-      "REVISAO_PENDENTE";
-    const operationalTypeChanged = stockOperationalType !== currentOperationalType;
+      (operationalTypeByProduct[stockProduct.id] as
+        | OperationalTypeValue
+        | null
+        | undefined) ?? "REVISAO_PENDENTE";
+    const operationalTypeChanged =
+      stockOperationalType !== currentOperationalType;
 
     const parsedLast = parseCurrencyInput(stockLastUnitValue);
     const resolvedLastUnit =
@@ -1233,7 +1290,9 @@ export function Produtos() {
           ? true
           : Math.abs(resolvedLastUnit - currentLastUnit) > 1e-6;
     const currentLastUnitCode =
-      stockProduct.last_unit_value_unit_code?.trim() || stockProduct.unit || "un";
+      stockProduct.last_unit_value_unit_code?.trim() ||
+      stockProduct.unit ||
+      "un";
     const lastUnitValueUnitChanged =
       (stockLastUnitValueUnitCode || stockUnit) !== currentLastUnitCode;
 
@@ -1319,7 +1378,8 @@ export function Produtos() {
     }
     if (lastUnitValueChanged || lastUnitValueUnitChanged) {
       updates.last_unit_value = resolvedLastUnit;
-      updates.last_unit_value_unit_code = stockLastUnitValueUnitCode || stockUnit;
+      updates.last_unit_value_unit_code =
+        stockLastUnitValueUnitCode || stockUnit;
       if (resolvedLastUnit == null) {
         updates.last_unit_value_stock = null;
         updates.average_cost = null;
@@ -1395,23 +1455,26 @@ export function Produtos() {
     }
     if (operationalTypeChanged) {
       const cfg = operationalConfigByProduct[stockProduct.id];
-      const { data, error } = await supabase.rpc("upsert_product_operational_config", {
-        p_product_id: stockProduct.id,
-        p_suggested_operational_type:
-          (cfg?.suggested_operational_type as OperationalItemType | null) ??
-          stockOperationalType,
-        p_suggested_score: cfg?.suggested_score ?? 0,
-        p_suggestion_reasons: (cfg?.suggestion_reasons ?? {}) as never,
-        p_final_operational_type: stockOperationalType,
-        p_final_decision_source: "USER_EDITED",
-        p_configuration_status: cfg?.configuration_status ?? "PENDENTE",
-        p_configuration_completeness:
-          (cfg?.configuration_completeness ?? {}) as never,
-        p_linked_entry_breakdown_recipe_id:
-          cfg?.linked_entry_breakdown_recipe_id ?? null,
-        p_notes: null,
-        p_ui_filter_json: null,
-      });
+      const { data, error } = await supabase.rpc(
+        "upsert_product_operational_config",
+        {
+          p_product_id: stockProduct.id,
+          p_suggested_operational_type:
+            (cfg?.suggested_operational_type as OperationalItemType | null) ??
+            stockOperationalType,
+          p_suggested_score: cfg?.suggested_score ?? 0,
+          p_suggestion_reasons: (cfg?.suggestion_reasons ?? {}) as never,
+          p_final_operational_type: stockOperationalType,
+          p_final_decision_source: "USER_EDITED",
+          p_configuration_status: cfg?.configuration_status ?? "PENDENTE",
+          p_configuration_completeness: (cfg?.configuration_completeness ??
+            {}) as never,
+          p_linked_entry_breakdown_recipe_id:
+            cfg?.linked_entry_breakdown_recipe_id ?? null,
+          p_notes: null,
+          p_ui_filter_json: null,
+        },
+      );
       if (error) {
         console.error(error);
         setStockSaving(false);
@@ -1603,7 +1666,7 @@ export function Produtos() {
         {(
           [
             ["catalogo", "Catálogo", LayoutGrid],
-            ["movimentos", "Movimentos", SlidersHorizontal],
+            ["movimentos", "Movimentações", SlidersHorizontal],
             ["cmv", "CMV", Coins],
             ["contagem", "Contagem", ClipboardList],
             ["compras", "Compras", ShoppingCart],
@@ -1655,493 +1718,861 @@ export function Produtos() {
 
       {estoqueTab === "catalogo" && (
         <>
-      <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-          <div className="min-w-0 space-y-1.5">
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              Produtos cadastrados
-            </CardTitle>
-            <CardDescription>
-              Vincule itens das despesas aos produtos para atualizar o estoque
-            </CardDescription>
-          </div>
-          {currentCompany?.id ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={stockExportLoading}
-                  className="shrink-0 gap-1.5"
-                >
-                  <Download className="h-4 w-4" />
-                  {stockExportLoading ? "Exportando…" : "Exportar Excel"}
-                  <ChevronDown className="h-4 w-4 opacity-70" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem
-                  onClick={() => void handleStockExport("filtered")}
-                  disabled={stockExportLoading}
-                >
-                  Com filtros atuais
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => void handleStockExport("all")}
-                  disabled={stockExportLoading}
-                >
-                  Todos os produtos
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </CardHeader>
-        <CardContent>
-          {lowStockOnly && (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-              <span>
-                Mostrando apenas produtos com estoque na ou abaixo do mínimo
-                cadastrado.
-              </span>
-              <Button variant="ghost" size="sm" className="shrink-0" asChild>
-                <Link to="/app/produtos">Ver todos os produtos</Link>
-              </Button>
-            </div>
-          )}
-          <div className="mb-4 space-y-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[min(100%,220px)] max-w-md flex-1 space-y-1.5">
-                <Label htmlFor="prod-search" className="text-xs text-muted-foreground">
-                  Produto
-                </Label>
-                <Input
-                  id="prod-search"
-                  placeholder="Nome ou SKU..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full"
-                />
+          <Card>
+            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+              <div className="min-w-0 space-y-1.5">
+                <CardTitle className="flex items-center gap-2">
+                  <Package className="h-5 w-5" />
+                  Produtos cadastrados
+                </CardTitle>
+                <CardDescription>
+                  Vincule itens das despesas aos produtos para atualizar o
+                  estoque
+                </CardDescription>
               </div>
-              <div className="w-full min-w-[140px] max-w-[200px] space-y-1.5 sm:w-auto">
-                <Label className="text-xs text-muted-foreground">Situação</Label>
-                <Select
-                  value={filterActive}
-                  onValueChange={(v) =>
-                    setFilterActive(v as "all" | "active" | "inactive")
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Ativos</SelectItem>
-                    <SelectItem value="inactive">Inativos</SelectItem>
-                    <SelectItem value="all">Todos</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-full min-w-[160px] max-w-[240px] space-y-1.5 sm:w-auto">
-                <Label className="text-xs text-muted-foreground">Categoria</Label>
-                <Select
-                  value={filterCategoryId}
-                  onValueChange={setFilterCategoryId}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Todas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    {companyProductCategories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-full min-w-[180px] max-w-[260px] space-y-1.5 sm:w-auto">
-                <Label className="text-xs text-muted-foreground">Alerta de estoque</Label>
-                {lowStockOnly ? (
-                  <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                    Apenas ≤ mínimo (link estoque baixo)
-                  </p>
-                ) : (
-                  <Select
-                    value={filterStockAlert}
-                    onValueChange={(v) =>
-                      setFilterStockAlert(
-                        v as "all" | "zero" | "below_min" | "any",
-                      )
-                    }
+              {currentCompany?.id ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={stockExportLoading}
+                      className="shrink-0 gap-1.5"
+                    >
+                      <Download className="h-4 w-4" />
+                      {stockExportLoading ? "Exportando…" : "Exportar Excel"}
+                      <ChevronDown className="h-4 w-4 opacity-70" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onClick={() => void handleStockExport("filtered")}
+                      disabled={stockExportLoading}
+                    >
+                      Com filtros atuais
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => void handleStockExport("all")}
+                      disabled={stockExportLoading}
+                    >
+                      Todos os produtos
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </CardHeader>
+            <CardContent>
+              {lowStockOnly && (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+                  <span>
+                    Mostrando apenas produtos com estoque na ou abaixo do mínimo
+                    cadastrado.
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    asChild
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="any">Com alerta</SelectItem>
-                      <SelectItem value="zero">Estoque zerado</SelectItem>
-                      <SelectItem value="below_min">
-                        Abaixo do mínimo (com saldo)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-              <div className="w-full min-w-[150px] max-w-[200px] space-y-1.5 sm:w-auto">
-                <Label className="text-xs text-muted-foreground">Compõe CMV</Label>
-                <Select
-                  value={filterComposesCmv}
-                  onValueChange={(v) =>
-                    setFilterComposesCmv(v as "all" | "yes" | "no")
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="yes">Sim</SelectItem>
-                    <SelectItem value="no">Não</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-full min-w-[160px] max-w-[200px] space-y-1.5 sm:w-auto">
-                <Label className="text-xs text-muted-foreground">
-                  Atualizado em
-                </Label>
-                <Select
-                  value={filterUpdatedPreset}
-                  onValueChange={(v) =>
-                    setFilterUpdatedPreset(
-                      v as "all" | "today" | "7d" | "30d" | "custom",
-                    )
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Qualquer data</SelectItem>
-                    <SelectItem value="today">Hoje</SelectItem>
-                    <SelectItem value="7d">Últimos 7 dias</SelectItem>
-                    <SelectItem value="30d">Últimos 30 dias</SelectItem>
-                    <SelectItem value="custom">Entre datas</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {filterUpdatedPreset === "custom" ? (
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="upd-from" className="text-xs text-muted-foreground">
-                      De
+                    <Link to="/app/produtos">Ver todos os produtos</Link>
+                  </Button>
+                </div>
+              )}
+              <div className="mb-4 space-y-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-[min(100%,220px)] max-w-md flex-1 space-y-1.5">
+                    <Label
+                      htmlFor="prod-search"
+                      className="text-xs text-muted-foreground"
+                    >
+                      Produto
                     </Label>
                     <Input
-                      id="upd-from"
-                      type="date"
-                      value={filterUpdatedFrom}
-                      onChange={(e) => setFilterUpdatedFrom(e.target.value)}
-                      className="w-[160px]"
+                      id="prod-search"
+                      placeholder="Nome ou SKU..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="upd-to" className="text-xs text-muted-foreground">
-                      Até
+                  <div className="w-full min-w-[140px] max-w-[200px] space-y-1.5 sm:w-auto">
+                    <Label className="text-xs text-muted-foreground">
+                      Situação
                     </Label>
-                    <Input
-                      id="upd-to"
-                      type="date"
-                      value={filterUpdatedTo}
-                      onChange={(e) => setFilterUpdatedTo(e.target.value)}
-                      className="w-[160px]"
-                    />
+                    <Select
+                      value={filterActive}
+                      onValueChange={(v) =>
+                        setFilterActive(v as "all" | "active" | "inactive")
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Ativos</SelectItem>
+                        <SelectItem value="inactive">Inativos</SelectItem>
+                        <SelectItem value="all">Todos</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-              ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => {
-                  setSearch("");
-                  setFilterCategoryId("all");
-                  setFilterStockAlert("all");
-                  setFilterComposesCmv("all");
-                  setFilterUpdatedPreset("all");
-                  setFilterUpdatedFrom("");
-                  setFilterUpdatedTo("");
-                }}
-              >
-                Limpar filtros
-              </Button>
-            </div>
-          </div>
-          {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : products.length === 0 ? (
-            <p className="text-muted-foreground">
-              {lowStockOnly
-                ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
-                : "Nenhum produto cadastrado"}
-            </p>
-          ) : (
-            <ul className="list-none space-y-4 p-0">
-              {products.map((p) => {
-                const qNum = Number(p.current_quantity);
-                const minNum = Number(p.min_quantity ?? 0);
-                const stockIsZero = p.stock_is_zero ?? qNum <= 0;
-                const stockBelowMinPositive =
-                  p.stock_below_min_positive ??
-                  (minNum > 0 && qNum > 0 && qNum <= minNum);
-                const needsStockHighlight =
-                  p.stock_has_alert ??
-                  (stockIsZero || (minNum > 0 && qNum <= minNum));
-                const qtyStr = Number(p.current_quantity).toLocaleString("pt-BR");
-                const minStr =
-                  p.min_quantity > 0
-                    ? Number(p.min_quantity).toLocaleString("pt-BR")
-                    : "—";
-                const { cmv, last, unit: unitCost, lastUnitCode } = unitCostParts(p);
-                const stockLineValue =
-                  unitCost != null
-                    ? Number(p.current_quantity) * unitCost
-                    : null;
-                const operationalType = operationalTypeByProduct[p.id] ?? null;
-                const catalogTags = productCatalogMap[p.id];
-                const composesLabel = productComposesCmv(p)
-                  ? "Compõe CMV: Sim"
-                  : "Compõe CMV: Não";
-                const catSegments =
-                  catalogTags && catalogTags.length > 0
-                    ? [...catalogTags.map((c) => c.name), composesLabel]
-                    : [composesLabel];
-                const pendingPurchaseQty =
-                  pendingPurchaseByProduct[p.id] ?? 0;
-                const convRows = productConversionMap[p.id] ?? [];
-                const conversionStatus =
-                  p.import_unit_needs_review
-                    ? "conflitante"
-                    : convRows.length > 0
-                      ? "configurada"
-                      : "pendente";
-                const conversionExample =
-                  convRows.length > 0
-                    ? `${convRows[0]!.secondary_qty} ${convRows[0]!.secondary_unit_code.toUpperCase()} = ${convRows[0]!.primary_qty} ${convRows[0]!.primary_unit_code.toUpperCase()}`
-                    : "Sem conversão cadastrada";
-                return (
-                  <li key={p.id}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openStockSheet(p)}
-                      onKeyDown={(e) => e.key === "Enter" && openStockSheet(p)}
-                      className={cn(
-                        "group relative w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/25 text-left shadow-sm transition-all",
-                        "hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        "p-4 sm:p-5 md:p-6",
-                        p.is_active === false && "opacity-[0.82]",
-                        needsStockHighlight
-                          ? "border-destructive/35 bg-destructive/[0.04] ring-1 ring-inset ring-destructive/15"
-                          : "border-border/80",
-                      )}
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="w-full min-w-[160px] max-w-[240px] space-y-1.5 sm:w-auto">
+                    <Label className="text-xs text-muted-foreground">
+                      Categoria
+                    </Label>
+                    <Select
+                      value={filterCategoryId}
+                      onValueChange={setFilterCategoryId}
                     >
-                      <div className="flex gap-3 sm:gap-4">
-                        <div
-                          className={cn(
-                            "mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border shadow-sm sm:h-12 sm:w-12",
-                            needsStockHighlight
-                              ? "border-destructive/30 bg-destructive/10 text-destructive"
-                              : "border-border/70 bg-muted/50 text-muted-foreground group-hover:border-primary/25 group-hover:bg-primary/5 group-hover:text-primary",
-                          )}
-                          aria-hidden
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Todas" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas</SelectItem>
+                        {companyProductCategories.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-full min-w-[180px] max-w-[260px] space-y-1.5 sm:w-auto">
+                    <Label className="text-xs text-muted-foreground">
+                      Alerta de estoque
+                    </Label>
+                    {lowStockOnly ? (
+                      <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                        Apenas ≤ mínimo (link estoque baixo)
+                      </p>
+                    ) : (
+                      <Select
+                        value={filterStockAlert}
+                        onValueChange={(v) =>
+                          setFilterStockAlert(
+                            v as "all" | "zero" | "below_min" | "any",
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          <SelectItem value="any">Com alerta</SelectItem>
+                          <SelectItem value="zero">Estoque zerado</SelectItem>
+                          <SelectItem value="below_min">
+                            Abaixo do mínimo (com saldo)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <div className="w-full min-w-[150px] max-w-[200px] space-y-1.5 sm:w-auto">
+                    <Label className="text-xs text-muted-foreground">
+                      Compõe CMV
+                    </Label>
+                    <Select
+                      value={filterComposesCmv}
+                      onValueChange={(v) =>
+                        setFilterComposesCmv(v as "all" | "yes" | "no")
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="yes">Sim</SelectItem>
+                        <SelectItem value="no">Não</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-full min-w-[160px] max-w-[200px] space-y-1.5 sm:w-auto">
+                    <Label className="text-xs text-muted-foreground">
+                      Atualizado em
+                    </Label>
+                    <Select
+                      value={filterUpdatedPreset}
+                      onValueChange={(v) =>
+                        setFilterUpdatedPreset(
+                          v as "all" | "today" | "7d" | "30d" | "custom",
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Qualquer data</SelectItem>
+                        <SelectItem value="today">Hoje</SelectItem>
+                        <SelectItem value="7d">Últimos 7 dias</SelectItem>
+                        <SelectItem value="30d">Últimos 30 dias</SelectItem>
+                        <SelectItem value="custom">Entre datas</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {filterUpdatedPreset === "custom" ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="upd-from"
+                          className="text-xs text-muted-foreground"
                         >
-                          <Package className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.6} />
-                        </div>
-
-                        <div className="min-w-0 flex-1 space-y-3 sm:space-y-3.5">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                                <h3 className="text-lg font-semibold leading-snug tracking-tight text-foreground sm:text-xl">
-                                  {p.name}
-                                </h3>
-                                {p.is_active === false && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
-                                  >
-                                    <PowerOff className="h-3 w-3" />
-                                    Inativo
-                                  </Badge>
-                                )}
-                                {stockIsZero && (
-                                  <Badge
-                                    variant="destructive"
-                                    className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
-                                  >
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Estoque zerado
-                                  </Badge>
-                                )}
-                                {stockBelowMinPositive && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="h-6 gap-1 border-amber-500/40 bg-amber-500/10 px-2 text-[0.7rem] font-normal text-amber-950 dark:text-amber-50"
-                                  >
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Abaixo do mínimo
-                                  </Badge>
-                                )}
-                                {pendingPurchaseQty > 0 && (
-                                  <Badge
-                                    variant="outline"
-                                    className="h-6 gap-1 border-blue-500/35 bg-blue-500/[0.08] px-2 text-[0.7rem] font-normal text-blue-950 dark:border-blue-400/35 dark:bg-blue-500/15 dark:text-blue-50"
-                                  >
-                                    <ShoppingCart className="h-3 w-3" />
-                                    Compra em andamento
-                                  </Badge>
-                                )}
-                                {(p.import_unit_needs_review === true ||
-                                  !isSystemUnitCode(p.unit)) && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="h-6 gap-1 border-rose-500/40 bg-rose-500/10 px-2 text-[0.7rem] font-normal text-rose-950 dark:text-rose-100"
-                                  >
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Revisar unidade
-                                  </Badge>
-                                )}
-                              </div>
-
-                              {catSegments.length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {operationalType ? (
-                                    <span
-                                      className={cn(
-                                        "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
-                                        "border-indigo-300/70 bg-indigo-500/10 text-indigo-950 dark:border-indigo-600/50 dark:bg-indigo-500/[0.14] dark:text-indigo-50",
-                                      )}
-                                    >
-                                      <span className="truncate">
-                                        Tipo final: {operationalTypeLabel(operationalType)}
-                                      </span>
-                                    </span>
-                                  ) : null}
-                                  {catSegments.map((seg, idx) => (
-                                    <span
-                                      key={`${p.id}-${idx}-${seg}`}
-                                      className={cn(
-                                        "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
-                                        cmvCategoryTagClass(idx),
-                                      )}
-                                    >
-                                      <span className="truncate">{seg}</span>
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : null}
-
-                              <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
-                                <span className="font-mono text-[0.8rem] sm:text-sm">
-                                  {p.sku ? p.sku : "—"}
-                                </span>
-                                <span className="mx-2 text-border">·</span>
-                                <span>Unidade: {p.unit}</span>
-                                <span className="mx-2 text-border">·</span>
-                                <span>Compra: {p.last_unit_value_unit_code ?? p.unit}</span>
-                                {p.import_unit_needs_review && p.import_unit_raw ? (
-                                  <>
-                                    <span className="mx-2 text-border">·</span>
-                                    <span>XML: {p.import_unit_raw}</span>
-                                  </>
-                                ) : null}
-                              </p>
-                              <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
-                                Conversões: {convRows.length} · Exemplo: {conversionExample} · Situação: {conversionStatus}
-                              </p>
-                            </div>
-
-                            <span
-                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary sm:h-10 sm:w-10"
+                          De
+                        </Label>
+                        <Input
+                          id="upd-from"
+                          type="date"
+                          value={filterUpdatedFrom}
+                          onChange={(e) => setFilterUpdatedFrom(e.target.value)}
+                          className="w-[160px]"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="upd-to"
+                          className="text-xs text-muted-foreground"
+                        >
+                          Até
+                        </Label>
+                        <Input
+                          id="upd-to"
+                          type="date"
+                          value={filterUpdatedTo}
+                          onChange={(e) => setFilterUpdatedTo(e.target.value)}
+                          className="w-[160px]"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => {
+                      setSearch("");
+                      setFilterCategoryId("all");
+                      setFilterStockAlert("all");
+                      setFilterComposesCmv("all");
+                      setFilterUpdatedPreset("all");
+                      setFilterUpdatedFrom("");
+                      setFilterUpdatedTo("");
+                    }}
+                  >
+                    Limpar filtros
+                  </Button>
+                </div>
+              </div>
+              {loading ? (
+                <p className="text-muted-foreground">Carregando...</p>
+              ) : products.length === 0 ? (
+                <p className="text-muted-foreground">
+                  {lowStockOnly
+                    ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
+                    : "Nenhum produto cadastrado"}
+                </p>
+              ) : (
+                <ul className="list-none space-y-4 p-0">
+                  {products.map((p) => {
+                    const qNum = Number(p.current_quantity);
+                    const minNum = Number(p.min_quantity ?? 0);
+                    const stockIsZero = p.stock_is_zero ?? qNum <= 0;
+                    const stockBelowMinPositive =
+                      p.stock_below_min_positive ??
+                      (minNum > 0 && qNum > 0 && qNum <= minNum);
+                    const needsStockHighlight =
+                      p.stock_has_alert ??
+                      (stockIsZero || (minNum > 0 && qNum <= minNum));
+                    const qtyStr = Number(p.current_quantity).toLocaleString(
+                      "pt-BR",
+                    );
+                    const minStr =
+                      p.min_quantity > 0
+                        ? Number(p.min_quantity).toLocaleString("pt-BR")
+                        : "—";
+                    const {
+                      cmv,
+                      last,
+                      unit: unitCost,
+                      lastUnitCode,
+                    } = unitCostParts(p);
+                    const stockLineValue =
+                      unitCost != null
+                        ? Number(p.current_quantity) * unitCost
+                        : null;
+                    const operationalType =
+                      operationalTypeByProduct[p.id] ?? null;
+                    const catalogTags = productCatalogMap[p.id];
+                    const composesLabel = productComposesCmv(p)
+                      ? "Compõe CMV: Sim"
+                      : "Compõe CMV: Não";
+                    const catSegments =
+                      catalogTags && catalogTags.length > 0
+                        ? [...catalogTags.map((c) => c.name), composesLabel]
+                        : [composesLabel];
+                    const pendingPurchaseQty =
+                      pendingPurchaseByProduct[p.id] ?? 0;
+                    const convRows = productConversionMap[p.id] ?? [];
+                    const conversionStatus = p.import_unit_needs_review
+                      ? "conflitante"
+                      : convRows.length > 0
+                        ? "configurada"
+                        : "pendente";
+                    const conversionExample =
+                      convRows.length > 0
+                        ? `${convRows[0]!.secondary_qty} ${convRows[0]!.secondary_unit_code.toUpperCase()} = ${convRows[0]!.primary_qty} ${convRows[0]!.primary_unit_code.toUpperCase()}`
+                        : "Sem conversão cadastrada";
+                    return (
+                      <li key={p.id}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openStockSheet(p)}
+                          onKeyDown={(e) =>
+                            e.key === "Enter" && openStockSheet(p)
+                          }
+                          className={cn(
+                            "group relative w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/25 text-left shadow-sm transition-all",
+                            "hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            "p-4 sm:p-5 md:p-6",
+                            p.is_active === false && "opacity-[0.82]",
+                            needsStockHighlight
+                              ? "border-destructive/35 bg-destructive/[0.04] ring-1 ring-inset ring-destructive/15"
+                              : "border-border/80",
+                          )}
+                        >
+                          <div className="flex gap-3 sm:gap-4">
+                            <div
+                              className={cn(
+                                "mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border shadow-sm sm:h-12 sm:w-12",
+                                needsStockHighlight
+                                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                  : "border-border/70 bg-muted/50 text-muted-foreground group-hover:border-primary/25 group-hover:bg-primary/5 group-hover:text-primary",
+                              )}
                               aria-hidden
                             >
-                              <ChevronRight className="h-5 w-5" />
-                            </span>
-                          </div>
+                              <Package
+                                className="h-5 w-5 sm:h-6 sm:w-6"
+                                strokeWidth={1.6}
+                              />
+                            </div>
 
-                          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
-                            <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
+                            <div className="min-w-0 flex-1 space-y-3 sm:space-y-3.5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1 space-y-2">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                    <h3 className="text-lg font-semibold leading-snug tracking-tight text-foreground sm:text-xl">
+                                      {p.name}
+                                    </h3>
+                                    {p.is_active === false && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
+                                      >
+                                        <PowerOff className="h-3 w-3" />
+                                        Inativo
+                                      </Badge>
+                                    )}
+                                    {stockIsZero && (
+                                      <Badge
+                                        variant="destructive"
+                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
+                                      >
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Estoque zerado
+                                      </Badge>
+                                    )}
+                                    {stockBelowMinPositive && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="h-6 gap-1 border-amber-500/40 bg-amber-500/10 px-2 text-[0.7rem] font-normal text-amber-950 dark:text-amber-50"
+                                      >
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Abaixo do mínimo
+                                      </Badge>
+                                    )}
+                                    {pendingPurchaseQty > 0 && (
+                                      <Badge
+                                        variant="outline"
+                                        className="h-6 gap-1 border-blue-500/35 bg-blue-500/[0.08] px-2 text-[0.7rem] font-normal text-blue-950 dark:border-blue-400/35 dark:bg-blue-500/15 dark:text-blue-50"
+                                      >
+                                        <ShoppingCart className="h-3 w-3" />
+                                        Compra em andamento
+                                      </Badge>
+                                    )}
+                                    {(p.import_unit_needs_review === true ||
+                                      !isSystemUnitCode(p.unit)) && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="h-6 gap-1 border-rose-500/40 bg-rose-500/10 px-2 text-[0.7rem] font-normal text-rose-950 dark:text-rose-100"
+                                      >
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Revisar unidade
+                                      </Badge>
+                                    )}
+                                  </div>
+
+                                  {catSegments.length > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                      {operationalType ? (
+                                        <span
+                                          className={cn(
+                                            "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
+                                            "border-indigo-300/70 bg-indigo-500/10 text-indigo-950 dark:border-indigo-600/50 dark:bg-indigo-500/[0.14] dark:text-indigo-50",
+                                          )}
+                                        >
+                                          <span className="truncate">
+                                            Tipo final:{" "}
+                                            {operationalTypeLabel(
+                                              operationalType,
+                                            )}
+                                          </span>
+                                        </span>
+                                      ) : null}
+                                      {catSegments.map((seg, idx) => (
+                                        <span
+                                          key={`${p.id}-${idx}-${seg}`}
+                                          className={cn(
+                                            "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
+                                            cmvCategoryTagClass(idx),
+                                          )}
+                                        >
+                                          <span className="truncate">
+                                            {seg}
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+
+                                  <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
+                                    <span className="font-mono text-[0.8rem] sm:text-sm">
+                                      {p.sku ? p.sku : "—"}
+                                    </span>
+                                    <span className="mx-2 text-border">·</span>
+                                    <span>Unidade: {p.unit}</span>
+                                    <span className="mx-2 text-border">·</span>
+                                    <span>
+                                      Compra:{" "}
+                                      {p.last_unit_value_unit_code ?? p.unit}
+                                    </span>
+                                    {p.import_unit_needs_review &&
+                                    p.import_unit_raw ? (
+                                      <>
+                                        <span className="mx-2 text-border">
+                                          ·
+                                        </span>
+                                        <span>XML: {p.import_unit_raw}</span>
+                                      </>
+                                    ) : null}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
+                                    Conversões: {convRows.length} · Exemplo:{" "}
+                                    {conversionExample} · Situação:{" "}
+                                    {conversionStatus}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary sm:h-10 sm:w-10"
+                                  aria-hidden
+                                >
+                                  <ChevronRight className="h-5 w-5" />
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
+                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Quantidade
+                                  </p>
+                                  <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
+                                    <span className="inline-flex flex-wrap items-baseline gap-x-1">
+                                      <span>{qtyStr}</span>
+                                      <span className="text-xs font-medium text-muted-foreground sm:text-sm">
+                                        {p.unit}
+                                      </span>
+                                    </span>
+                                    {pendingPurchaseQty > 0 ? (
+                                      <span className="mt-1.5 block text-xs font-normal tabular-nums leading-snug text-blue-700 dark:text-blue-300">
+                                        +
+                                        {pendingPurchaseQty.toLocaleString(
+                                          "pt-BR",
+                                        )}{" "}
+                                        {p.unit} em pedido de compra
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                </div>
+                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
+                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Estoque mínimo
+                                  </p>
+                                  <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
+                                    {minStr}
+                                    {p.min_quantity > 0 ? (
+                                      <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
+                                        {p.unit}
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                </div>
+                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
+                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Preço unitário
+                                  </p>
+                                  <p className="mt-2 text-sm font-semibold tabular-nums leading-tight text-foreground sm:text-base">
+                                    {cmv != null ? (
+                                      <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+                                        <span className="whitespace-nowrap">
+                                          {formatCurrency(cmv)}
+                                        </span>
+                                        <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
+                                          /{p.unit} · médio
+                                        </span>
+                                      </span>
+                                    ) : last != null ? (
+                                      <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+                                        <span className="whitespace-nowrap">
+                                          {formatCurrency(last)}
+                                        </span>
+                                        <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
+                                          /{lastUnitCode ?? p.unit} · último
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">
+                                        —
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                                <div
+                                  className={cn(
+                                    "rounded-xl border px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5",
+                                    stockLineValue != null && unitCost != null
+                                      ? "border-primary/25 bg-primary/[0.06]"
+                                      : "border-border/70 bg-background/70",
+                                  )}
+                                >
+                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Valor em estoque
+                                  </p>
+                                  <p
+                                    className={cn(
+                                      "mt-2 text-base font-bold tabular-nums leading-snug sm:text-lg",
+                                      stockLineValue != null && unitCost != null
+                                        ? "text-foreground"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {stockLineValue != null && unitCost != null
+                                      ? formatCurrency(stockLineValue)
+                                      : "—"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {!loading && (
+                <Pagination
+                  page={productsPage}
+                  totalCount={productsCount}
+                  onPageChange={setProductsPage}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Sheet
+            open={!!stockProduct}
+            onOpenChange={(o) => {
+              if (!o) closeStockSheet();
+            }}
+          >
+            <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-2xl lg:max-w-3xl">
+              {stockProduct && productSheetView === "summary" && (
+                <>
+                  <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+                    <div className="mb-4 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          productSheetViewRef.current = "edit";
+                          syncStockFormFromProduct(stockProduct);
+                          setProductSheetView("edit");
+                        }}
+                      >
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Editar
+                      </Button>
+                    </div>
+                    <div className="flex items-start gap-4">
+                      <div
+                        className={cn(
+                          "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border shadow-sm",
+                          stockProduct.min_quantity > 0 &&
+                            stockProduct.current_quantity <=
+                              stockProduct.min_quantity
+                            ? "border-destructive/40 bg-destructive/15 text-destructive"
+                            : "border-border bg-muted text-muted-foreground",
+                        )}
+                      >
+                        <Package className="h-7 w-7" strokeWidth={1.5} />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-3 pr-6">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
+                            {stockProduct.name}
+                          </SheetTitle>
+                          {stockProduct.is_active === false ? (
+                            <Badge variant="secondary" className="gap-1">
+                              <PowerOff className="h-3 w-3" />
+                              Inativo
+                            </Badge>
+                          ) : null}
+                          {stockProduct.min_quantity > 0 &&
+                          stockProduct.current_quantity <=
+                            stockProduct.min_quantity ? (
+                            <Badge variant="destructive" className="gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Estoque baixo
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <SheetDescription>
+                          Resumo do cadastro — toque em{" "}
+                          <span className="font-medium text-foreground">
+                            Editar
+                          </span>{" "}
+                          para alterar dados, categorias e estoque.
+                        </SheetDescription>
+                        <div>
+                          <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Categorias de produto
+                          </p>
+                          {stockProductCategoryIds.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {stockProductCategoryIds
+                                .map((id) =>
+                                  companyProductCategories.find(
+                                    (c) => c.id === id,
+                                  ),
+                                )
+                                .filter(
+                                  (c): c is CompanyProductCategory => c != null,
+                                )
+                                .sort((a, b) =>
+                                  a.name.localeCompare(b.name, "pt-BR"),
+                                )
+                                .map((c, idx) => (
+                                  <span
+                                    key={c.id}
+                                    className={cn(
+                                      "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium shadow-sm",
+                                      cmvCategoryTagClass(idx),
+                                    )}
+                                  >
+                                    <span className="truncate">{c.name}</span>
+                                  </span>
+                                ))}
+                            </div>
+                          ) : (
+                            <p className="mt-1.5 text-sm text-muted-foreground">
+                              Nenhuma categoria — adicione em Editar.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </SheetHeader>
+
+                  <div
+                    className="flex shrink-0 gap-1 border-b border-border bg-card px-6"
+                    role="tablist"
+                    aria-label="Secções do produto"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={productDetailTab === "resumo"}
+                      onClick={() => setProductDetailTab("resumo")}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                        productDetailTab === "resumo"
+                          ? "border-primary text-foreground"
+                          : "border-transparent text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Package className="h-4 w-4 shrink-0" />
+                      Resumo
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={productDetailTab === "historico"}
+                      onClick={() => setProductDetailTab("historico")}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                        productDetailTab === "historico"
+                          ? "border-primary text-foreground"
+                          : "border-transparent text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <History className="h-4 w-4 shrink-0" />
+                      Histórico
+                    </button>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+                    {productDetailTab === "resumo" ? (
+                      <div className="space-y-4 p-6">
+                        <ProductIdentificationSummary
+                          product={stockProduct}
+                          composesCmv={productComposesCmv(stockProduct)}
+                          operationalTypeLabel={operationalTypeLabel(
+                            operationalTypeByProduct[stockProduct.id] ?? null,
+                          )}
+                          className={SHEET_SECTION}
+                        />
+
+                        {currentCompany?.id ? (
+                          <ProductUnitConversionsReadOnly
+                            companyId={currentCompany.id}
+                            stockUnitCode={stockProduct.unit}
+                            conversions={stockProductConversions}
+                            loading={stockProductConversionsLoading}
+                            className={SHEET_SECTION}
+                          />
+                        ) : null}
+
+                        <div>
+                          <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Estoque e valor
+                          </p>
+                          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            <div className={SHEET_TILE}>
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Quantidade
                               </p>
-                              <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
-                                <span className="inline-flex flex-wrap items-baseline gap-x-1">
-                                  <span>{qtyStr}</span>
-                                  <span className="text-xs font-medium text-muted-foreground sm:text-sm">
-                                    {p.unit}
-                                  </span>
+                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
+                                {Number(
+                                  stockProduct.current_quantity,
+                                ).toLocaleString("pt-BR")}
+                                <span className="ml-1 text-sm font-medium text-muted-foreground">
+                                  {stockProduct.unit}
                                 </span>
-                                {pendingPurchaseQty > 0 ? (
-                                  <span className="mt-1.5 block text-xs font-normal tabular-nums leading-snug text-blue-700 dark:text-blue-300">
-                                    +
-                                    {pendingPurchaseQty.toLocaleString("pt-BR")}{" "}
-                                    {p.unit} em pedido de compra
+                              </p>
+                            </div>
+                            <div className={SHEET_TILE}>
+                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Mínimo
+                              </p>
+                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
+                                {Number(stockProduct.min_quantity) > 0
+                                  ? Number(
+                                      stockProduct.min_quantity,
+                                    ).toLocaleString("pt-BR")
+                                  : "—"}
+                                {Number(stockProduct.min_quantity) > 0 ? (
+                                  <span className="ml-1 text-sm font-medium text-muted-foreground">
+                                    {stockProduct.unit}
                                   </span>
                                 ) : null}
                               </p>
                             </div>
-                            <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
+                            <div className={SHEET_TILE}>
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Estoque mínimo
+                                {stockPricePresentation.average != null &&
+                                stockPricePresentation.last != null
+                                  ? "Custos"
+                                  : stockPricePresentation.average != null
+                                    ? "Preço médio"
+                                    : stockPricePresentation.last != null
+                                      ? "Último preço"
+                                      : "Preço"}
                               </p>
-                              <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
-                                {minStr}
-                                {p.min_quantity > 0 ? (
-                                  <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
-                                    {p.unit}
-                                  </span>
-                                ) : null}
-                              </p>
-                            </div>
-                            <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
-                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Preço unitário
-                              </p>
-                              <p className="mt-2 text-sm font-semibold tabular-nums leading-tight text-foreground sm:text-base">
-                                {cmv != null ? (
-                                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
-                                    <span className="whitespace-nowrap">
-                                      {formatCurrency(cmv)}
+                              <div className="mt-2 space-y-2.5 text-base font-semibold tabular-nums leading-snug text-foreground sm:text-lg">
+                                {stockPricePresentation.average != null &&
+                                stockPricePresentation.last != null ? (
+                                  <>
+                                    <div>
+                                      <p className="text-xs font-normal text-muted-foreground">
+                                        Preço médio
+                                      </p>
+                                      <p>
+                                        {formatCurrency(
+                                          stockPricePresentation.average,
+                                        )}
+                                        <span className="text-xs font-normal text-muted-foreground">
+                                          {" "}
+                                          por {stockProduct.unit}
+                                        </span>
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-normal text-muted-foreground">
+                                        Último preço
+                                      </p>
+                                      <p>
+                                        {formatCurrency(
+                                          stockPricePresentation.last,
+                                        )}
+                                        <span className="text-xs font-normal text-muted-foreground">
+                                          {" "}
+                                          por{" "}
+                                          {stockPricePresentation.lastUnitCode ??
+                                            stockProduct.unit}
+                                        </span>
+                                      </p>
+                                    </div>
+                                  </>
+                                ) : stockPricePresentation.average != null ? (
+                                  <p>
+                                    {formatCurrency(
+                                      stockPricePresentation.average,
+                                    )}
+                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
+                                      por {stockProduct.unit}
                                     </span>
-                                    <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
-                                      /{p.unit} · médio
+                                  </p>
+                                ) : stockPricePresentation.last != null ? (
+                                  <p>
+                                    {formatCurrency(
+                                      stockPricePresentation.last,
+                                    )}
+                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
+                                      por{" "}
+                                      {stockPricePresentation.lastUnitCode ??
+                                        stockProduct.unit}
                                     </span>
-                                  </span>
-                                ) : last != null ? (
-                                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
-                                    <span className="whitespace-nowrap">
-                                      {formatCurrency(last)}
-                                    </span>
-                                    <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
-                                      /{lastUnitCode ?? p.unit} · último
-                                    </span>
-                                  </span>
+                                  </p>
                                 ) : (
-                                  <span className="text-muted-foreground">—</span>
+                                  <span className="text-muted-foreground">
+                                    —
+                                  </span>
                                 )}
-                              </p>
+                              </div>
                             </div>
                             <div
                               className={cn(
-                                "rounded-xl border px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5",
-                                stockLineValue != null && unitCost != null
-                                  ? "border-primary/25 bg-primary/[0.06]"
-                                  : "border-border/70 bg-background/70",
+                                SHEET_TILE,
+                                stockSummaryLineValue != null &&
+                                  stockPricePresentation.lineUnit != null
+                                  ? "border-primary/30 bg-card ring-1 ring-primary/20"
+                                  : "",
                               )}
                             >
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -2149,789 +2580,534 @@ export function Produtos() {
                               </p>
                               <p
                                 className={cn(
-                                  "mt-2 text-base font-bold tabular-nums leading-snug sm:text-lg",
-                                  stockLineValue != null && unitCost != null
+                                  "mt-2 text-lg font-bold tabular-nums sm:text-xl",
+                                  stockSummaryLineValue != null &&
+                                    stockPricePresentation.lineUnit != null
                                     ? "text-foreground"
                                     : "text-muted-foreground",
                                 )}
                               >
-                                {stockLineValue != null && unitCost != null
-                                  ? formatCurrency(stockLineValue)
+                                {stockSummaryLineValue != null &&
+                                stockPricePresentation.lineUnit != null
+                                  ? formatCurrency(stockSummaryLineValue)
                                   : "—"}
                               </p>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {!loading && (
-            <Pagination
-              page={productsPage}
-              totalCount={productsCount}
-              onPageChange={setProductsPage}
-            />
-          )}
-        </CardContent>
-      </Card>
 
-      <Sheet
-        open={!!stockProduct}
-        onOpenChange={(o) => {
-          if (!o) closeStockSheet();
-        }}
-      >
-        <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-2xl lg:max-w-3xl">
-          {stockProduct && productSheetView === "summary" && (
-            <>
-              <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
-                <div className="mb-4 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      productSheetViewRef.current = "edit";
-                      syncStockFormFromProduct(stockProduct);
-                      setProductSheetView("edit");
-                    }}
-                  >
-                    <Pencil className="h-4 w-4 mr-2" />
-                    Editar
-                  </Button>
-                </div>
-                <div className="flex items-start gap-4">
-                  <div
-                    className={cn(
-                      "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border shadow-sm",
-                      stockProduct.min_quantity > 0 &&
-                        stockProduct.current_quantity <= stockProduct.min_quantity
-                        ? "border-destructive/40 bg-destructive/15 text-destructive"
-                        : "border-border bg-muted text-muted-foreground",
-                    )}
-                  >
-                    <Package className="h-7 w-7" strokeWidth={1.5} />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-3 pr-6">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
-                        {stockProduct.name}
-                      </SheetTitle>
-                      {stockProduct.is_active === false ? (
-                        <Badge variant="secondary" className="gap-1">
-                          <PowerOff className="h-3 w-3" />
-                          Inativo
-                        </Badge>
-                      ) : null}
-                      {stockProduct.min_quantity > 0 &&
-                      stockProduct.current_quantity <= stockProduct.min_quantity ? (
-                        <Badge variant="destructive" className="gap-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          Estoque baixo
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <SheetDescription>
-                      Resumo do cadastro — toque em{" "}
-                      <span className="font-medium text-foreground">Editar</span>{" "}
-                      para alterar dados, categorias e estoque.
-                    </SheetDescription>
-                    <div>
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Categorias de produto
-                      </p>
-                      {stockProductCategoryIds.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {stockProductCategoryIds
-                            .map((id) =>
-                              companyProductCategories.find((c) => c.id === id),
-                            )
-                            .filter(
-                              (c): c is CompanyProductCategory => c != null,
-                            )
-                            .sort((a, b) =>
-                              a.name.localeCompare(b.name, "pt-BR"),
-                            )
-                            .map((c, idx) => (
-                              <span
-                                key={c.id}
-                                className={cn(
-                                  "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium shadow-sm",
-                                  cmvCategoryTagClass(idx),
-                                )}
-                              >
-                                <span className="truncate">{c.name}</span>
-                              </span>
-                            ))}
-                        </div>
-                      ) : (
-                        <p className="mt-1.5 text-sm text-muted-foreground">
-                          Nenhuma categoria — adicione em Editar.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </SheetHeader>
-
-              <div
-                className="flex shrink-0 gap-1 border-b border-border bg-card px-6"
-                role="tablist"
-                aria-label="Secções do produto"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={productDetailTab === "resumo"}
-                  onClick={() => setProductDetailTab("resumo")}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
-                    productDetailTab === "resumo"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Package className="h-4 w-4 shrink-0" />
-                  Resumo
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={productDetailTab === "historico"}
-                  onClick={() => setProductDetailTab("historico")}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
-                    productDetailTab === "historico"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <History className="h-4 w-4 shrink-0" />
-                  Histórico
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
-                {productDetailTab === "resumo" ? (
-                <div className="space-y-4 p-6">
-                  <ProductIdentificationSummary
-                    product={stockProduct}
-                    composesCmv={productComposesCmv(stockProduct)}
-                    operationalTypeLabel={operationalTypeLabel(
-                      operationalTypeByProduct[stockProduct.id] ?? null,
-                    )}
-                    className={SHEET_SECTION}
-                  />
-
-                  {currentCompany?.id ? (
-                    <ProductUnitConversionsReadOnly
-                      companyId={currentCompany.id}
-                      stockUnitCode={stockProduct.unit}
-                      conversions={stockProductConversions}
-                      loading={stockProductConversionsLoading}
-                      className={SHEET_SECTION}
-                    />
-                  ) : null}
-
-                  <div>
-                    <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Estoque e valor
-                    </p>
-                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                      <div className={SHEET_TILE}>
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Quantidade
-                        </p>
-                        <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
-                          {Number(stockProduct.current_quantity).toLocaleString(
-                            "pt-BR",
-                          )}
-                          <span className="ml-1 text-sm font-medium text-muted-foreground">
-                            {stockProduct.unit}
-                          </span>
-                        </p>
-                      </div>
-                      <div className={SHEET_TILE}>
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Mínimo
-                        </p>
-                        <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
-                          {Number(stockProduct.min_quantity) > 0
-                            ? Number(stockProduct.min_quantity).toLocaleString(
-                                "pt-BR",
-                              )
-                            : "—"}
-                          {Number(stockProduct.min_quantity) > 0 ? (
-                            <span className="ml-1 text-sm font-medium text-muted-foreground">
-                              {stockProduct.unit}
-                            </span>
-                          ) : null}
-                        </p>
-                      </div>
-                      <div className={SHEET_TILE}>
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {stockPricePresentation.average != null &&
-                          stockPricePresentation.last != null
-                            ? "Custos"
-                            : stockPricePresentation.average != null
-                              ? "Preço médio"
-                              : stockPricePresentation.last != null
-                                ? "Último preço"
-                                : "Preço"}
-                        </p>
-                        <div className="mt-2 space-y-2.5 text-base font-semibold tabular-nums leading-snug text-foreground sm:text-lg">
-                          {stockPricePresentation.average != null &&
-                          stockPricePresentation.last != null ? (
-                            <>
-                              <div>
-                                <p className="text-xs font-normal text-muted-foreground">
-                                  Preço médio
-                                </p>
-                                <p>
-                                  {formatCurrency(stockPricePresentation.average)}
-                                  <span className="text-xs font-normal text-muted-foreground">
-                                    {" "}
-                                    por {stockProduct.unit}
-                                  </span>
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs font-normal text-muted-foreground">
-                                  Último preço
-                                </p>
-                                <p>
-                                  {formatCurrency(stockPricePresentation.last)}
-                                  <span className="text-xs font-normal text-muted-foreground">
-                                    {" "}
-                                    por{" "}
-                                    {stockPricePresentation.lastUnitCode ??
-                                      stockProduct.unit}
-                                  </span>
-                                </p>
-                              </div>
-                            </>
-                          ) : stockPricePresentation.average != null ? (
-                            <p>
-                              {formatCurrency(stockPricePresentation.average)}
-                              <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
-                                por {stockProduct.unit}
-                              </span>
-                            </p>
-                          ) : stockPricePresentation.last != null ? (
-                            <p>
-                              {formatCurrency(stockPricePresentation.last)}
-                              <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
-                                por{" "}
-                                {stockPricePresentation.lastUnitCode ??
-                                  stockProduct.unit}
-                              </span>
-                            </p>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </div>
-                      </div>
-                      <div
-                        className={cn(
-                          SHEET_TILE,
-                          stockSummaryLineValue != null &&
-                            stockPricePresentation.lineUnit != null
-                            ? "border-primary/30 bg-card ring-1 ring-primary/20"
-                            : "",
-                        )}
-                      >
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Valor em estoque
-                        </p>
-                        <p
+                        <div
                           className={cn(
-                            "mt-2 text-lg font-bold tabular-nums sm:text-xl",
-                            stockSummaryLineValue != null &&
-                              stockPricePresentation.lineUnit != null
-                              ? "text-foreground"
-                              : "text-muted-foreground",
+                            SHEET_SECTION,
+                            "flex flex-wrap items-center justify-between gap-3",
                           )}
                         >
-                          {stockSummaryLineValue != null &&
-                          stockPricePresentation.lineUnit != null
-                            ? formatCurrency(stockSummaryLineValue)
-                            : "—"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                          <div>
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Status
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Visível ao vincular em despesas e notas
+                            </p>
+                          </div>
+                          {stockProduct.is_active !== false ? (
+                            <Badge variant="secondary" className="h-8 px-3">
+                              Ativo
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="secondary"
+                              className="h-8 gap-1 px-3"
+                            >
+                              <PowerOff className="h-3.5 w-3.5" />
+                              Inativo
+                            </Badge>
+                          )}
+                        </div>
 
-                  <div className={cn(SHEET_SECTION, "flex flex-wrap items-center justify-between gap-3")}>
-                    <div>
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Status
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Visível ao vincular em despesas e notas
-                      </p>
-                    </div>
-                    {stockProduct.is_active !== false ? (
-                      <Badge variant="secondary" className="h-8 px-3">
-                        Ativo
-                      </Badge>
+                        {stockProduct.min_quantity > 0 &&
+                          stockProduct.current_quantity <=
+                            stockProduct.min_quantity && (
+                            <div className="flex items-center gap-3 rounded-2xl border border-destructive/50 bg-card px-4 py-3 text-destructive shadow-sm">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/40 bg-background">
+                                <AlertTriangle className="h-5 w-5" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">
+                                  Estoque no ou abaixo do mínimo
+                                </p>
+                                <p className="text-xs text-destructive/90">
+                                  Verifique compras ou ajuste o mínimo
+                                  cadastrado.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                      </div>
                     ) : (
-                      <Badge variant="secondary" className="h-8 gap-1 px-3">
-                        <PowerOff className="h-3.5 w-3.5" />
-                        Inativo
-                      </Badge>
-                    )}
-                  </div>
-
-                  {stockProduct.min_quantity > 0 &&
-                    stockProduct.current_quantity <= stockProduct.min_quantity && (
-                      <div className="flex items-center gap-3 rounded-2xl border border-destructive/50 bg-card px-4 py-3 text-destructive shadow-sm">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/40 bg-background">
-                          <AlertTriangle className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold">Estoque no ou abaixo do mínimo</p>
-                          <p className="text-xs text-destructive/90">
-                            Verifique compras ou ajuste o mínimo cadastrado.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                </div>
-                ) : (
-                <div className="space-y-4 p-6">
-                  <ProductStockMovementHistorySection
-                    productId={stockProduct.id}
-                    unit={stockProduct.unit}
-                    active={productDetailTab === "historico"}
-                    className={SHEET_SECTION}
-                  />
-                </div>
-                )}
-              </div>
-
-              <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  onClick={closeStockSheet}
-                >
-                  Fechar
-                </Button>
-              </SheetFooter>
-            </>
-          )}
-          {stockProduct && productSheetView === "edit" && (
-            <>
-              <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
-                    <Pencil className="h-6 w-6 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1 pr-6">
-                    <SheetTitle className="text-xl font-semibold sm:text-2xl">
-                      Editar produto
-                    </SheetTitle>
-                    <SheetDescription>
-                      {stockProduct.name}
-                    </SheetDescription>
-                    <p className="text-sm text-muted-foreground">
-                      Alterações entram em vigor ao salvar.
-                    </p>
-                  </div>
-                </div>
-              </SheetHeader>
-
-              <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
-                <div className="space-y-4 p-6">
-                  <div className={SHEET_SECTION}>
-                    <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Identificação
-                    </p>
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="stock-name">Nome</Label>
-                        <Input
-                          id="stock-name"
-                          value={stockName}
-                          onChange={(e) => setStockName(e.target.value)}
-                          placeholder="Nome do produto"
-                          className={SHEET_INPUT}
+                      <div className="space-y-4 p-6">
+                        <ProductStockMovementHistorySection
+                          productId={stockProduct.id}
+                          unit={stockProduct.unit}
+                          active={productDetailTab === "historico"}
+                          className={SHEET_SECTION}
                         />
                       </div>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div>
-                          <Label htmlFor="stock-sku">Código (SKU)</Label>
-                          <Input
-                            id="stock-sku"
-                            value={stockSku}
-                            onChange={(e) => setStockSku(e.target.value)}
-                            placeholder="Opcional"
-                            className={cn(SHEET_INPUT, "font-mono")}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="stock-barcode">Código de barras</Label>
-                          <Input
-                            id="stock-barcode"
-                            value={stockBarcode}
-                            onChange={(e) => setStockBarcode(e.target.value)}
-                            placeholder="Opcional — EAN ou alfanumérico"
-                            className={cn(SHEET_INPUT, "font-mono")}
-                          />
-                        </div>
+                    )}
+                  </div>
+
+                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      onClick={closeStockSheet}
+                    >
+                      Fechar
+                    </Button>
+                  </SheetFooter>
+                </>
+              )}
+              {stockProduct && productSheetView === "edit" && (
+                <>
+                  <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
+                        <Pencil className="h-6 w-6 text-primary" />
                       </div>
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Tipo final operacional
+                      <div className="min-w-0 flex-1 space-y-1 pr-6">
+                        <SheetTitle className="text-xl font-semibold sm:text-2xl">
+                          Editar produto
+                        </SheetTitle>
+                        <SheetDescription>{stockProduct.name}</SheetDescription>
+                        <p className="text-sm text-muted-foreground">
+                          Alterações entram em vigor ao salvar.
                         </p>
-                        <div className="mt-2">
-                          <Select
-                            value={stockOperationalType}
-                            onValueChange={(v) =>
-                              setStockOperationalType(v as OperationalTypeValue)
-                            }
-                          >
-                            <SelectTrigger className={SHEET_SELECT}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {OPERATIONAL_TYPE_OPTIONS.map((t) => (
-                                <SelectItem key={t} value={t}>
-                                  {operationalTypeLabel(t)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
                       </div>
-                      <div>
-                        <Label>Unidade</Label>
-                        <Select
-                          value={stockUnit}
-                          onValueChange={handleStockUnitChange}
-                        >
-                          <SelectTrigger className={SHEET_SELECT}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {unitSelectOptions.map((u) => (
-                              <SelectItem key={u.value} value={u.value}>
-                                {u.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {!isSystemUnitCode(stockUnit) && (
-                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                            Unidade legada/custom. Revise para uma unidade padrão quando possível.
-                          </p>
-                        )}
-                        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    </div>
+                  </SheetHeader>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+                    <div className="space-y-4 p-6">
+                      <div className={SHEET_SECTION}>
+                        <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Identificação
+                        </p>
+                        <div className="space-y-4">
                           <div>
-                            <Label htmlFor="stock-custom-unit-label" className="text-xs">
-                              Nome da unidade
-                            </Label>
+                            <Label htmlFor="stock-name">Nome</Label>
                             <Input
-                              id="stock-custom-unit-label"
-                              value={stockCustomUnitLabel}
-                              onChange={(e) => setStockCustomUnitLabel(e.target.value)}
-                              placeholder="Ex.: Vidro"
+                              id="stock-name"
+                              value={stockName}
+                              onChange={(e) => setStockName(e.target.value)}
+                              placeholder="Nome do produto"
                               className={SHEET_INPUT}
                             />
                           </div>
-                          <div>
-                            <Label htmlFor="stock-custom-unit" className="text-xs">
-                              Abreviação da unidade
-                            </Label>
-                            <Input
-                              id="stock-custom-unit"
-                              value={stockCustomUnitInput}
-                              onChange={(e) => setStockCustomUnitInput(e.target.value)}
-                              placeholder={
-                                stockProduct?.import_unit_raw
-                                  ? `Sugestão XML: ${stockProduct.import_unit_raw}`
-                                  : "Ex.: fd"
-                              }
-                              className={SHEET_INPUT}
-                            />
-                            {stockCustomUnitInput.trim().length > 0 && (
-                              <p
-                                className={cn(
-                                  "mt-1 text-xs",
-                                  customUnitIsValid
-                                    ? customUnitIsSystem
-                                      ? "text-emerald-700 dark:text-emerald-300"
-                                      : "text-amber-700 dark:text-amber-300"
-                                    : "text-destructive",
-                                )}
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                              <Label htmlFor="stock-sku">Código (SKU)</Label>
+                              <Input
+                                id="stock-sku"
+                                value={stockSku}
+                                onChange={(e) => setStockSku(e.target.value)}
+                                placeholder="Opcional"
+                                className={cn(SHEET_INPUT, "font-mono")}
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="stock-barcode">
+                                Código de barras
+                              </Label>
+                              <Input
+                                id="stock-barcode"
+                                value={stockBarcode}
+                                onChange={(e) =>
+                                  setStockBarcode(e.target.value)
+                                }
+                                placeholder="Opcional — EAN ou alfanumérico"
+                                className={cn(SHEET_INPUT, "font-mono")}
+                              />
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-border bg-background px-4 py-3">
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Tipo final operacional
+                            </p>
+                            <div className="mt-2">
+                              <Select
+                                value={stockOperationalType}
+                                onValueChange={(v) =>
+                                  setStockOperationalType(
+                                    v as OperationalTypeValue,
+                                  )
+                                }
                               >
-                                {customUnitIsValid
-                                  ? customUnitIsSystem
-                                    ? `Código válido (unidade padrão): ${customUnitCodeNormalized}`
-                                    : `Código válido custom: ${customUnitCodeNormalized}`
-                                  : "Código inválido. Use letras e números (sem espaços/símbolos)."}
+                                <SelectTrigger className={SHEET_SELECT}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {OPERATIONAL_TYPE_OPTIONS.map((t) => (
+                                    <SelectItem key={t} value={t}>
+                                      {operationalTypeLabel(t)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div>
+                            <Label>Unidade</Label>
+                            <Select
+                              value={stockUnit}
+                              onValueChange={handleStockUnitChange}
+                            >
+                              <SelectTrigger className={SHEET_SELECT}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {unitSelectOptions.map((u) => (
+                                  <SelectItem key={u.value} value={u.value}>
+                                    {u.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {!isSystemUnitCode(stockUnit) && (
+                              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                                Unidade legada/custom. Revise para uma unidade
+                                padrão quando possível.
                               </p>
                             )}
-                          </div>
-                          <div className="md:col-span-2 flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => void applyCustomUnit()}
-                              disabled={!customUnitIsValid || !stockCustomUnitLabel.trim()}
-                            >
-                              Criar e aplicar unidade
-                            </Button>
-                            {stockProduct?.import_unit_raw && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  const raw = String(stockProduct.import_unit_raw ?? "").trim();
-                                  const code = normalizeCustomUnitCode(raw);
-                                  setStockCustomUnitInput(code || raw);
-                                  if (!stockCustomUnitLabel.trim()) {
-                                    setStockCustomUnitLabel(raw);
+                            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                              <div>
+                                <Label
+                                  htmlFor="stock-custom-unit-label"
+                                  className="text-xs"
+                                >
+                                  Nome da unidade
+                                </Label>
+                                <Input
+                                  id="stock-custom-unit-label"
+                                  value={stockCustomUnitLabel}
+                                  onChange={(e) =>
+                                    setStockCustomUnitLabel(e.target.value)
                                   }
-                                }}
-                              >
-                                Usar unidade do XML ({stockProduct.import_unit_raw})
-                              </Button>
-                            )}
+                                  placeholder="Ex.: Vidro"
+                                  className={SHEET_INPUT}
+                                />
+                              </div>
+                              <div>
+                                <Label
+                                  htmlFor="stock-custom-unit"
+                                  className="text-xs"
+                                >
+                                  Abreviação da unidade
+                                </Label>
+                                <Input
+                                  id="stock-custom-unit"
+                                  value={stockCustomUnitInput}
+                                  onChange={(e) =>
+                                    setStockCustomUnitInput(e.target.value)
+                                  }
+                                  placeholder={
+                                    stockProduct?.import_unit_raw
+                                      ? `Sugestão XML: ${stockProduct.import_unit_raw}`
+                                      : "Ex.: fd"
+                                  }
+                                  className={SHEET_INPUT}
+                                />
+                                {stockCustomUnitInput.trim().length > 0 && (
+                                  <p
+                                    className={cn(
+                                      "mt-1 text-xs",
+                                      customUnitIsValid
+                                        ? customUnitIsSystem
+                                          ? "text-emerald-700 dark:text-emerald-300"
+                                          : "text-amber-700 dark:text-amber-300"
+                                        : "text-destructive",
+                                    )}
+                                  >
+                                    {customUnitIsValid
+                                      ? customUnitIsSystem
+                                        ? `Código válido (unidade padrão): ${customUnitCodeNormalized}`
+                                        : `Código válido custom: ${customUnitCodeNormalized}`
+                                      : "Código inválido. Use letras e números (sem espaços/símbolos)."}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => void applyCustomUnit()}
+                                  disabled={
+                                    !customUnitIsValid ||
+                                    !stockCustomUnitLabel.trim()
+                                  }
+                                >
+                                  Criar e aplicar unidade
+                                </Button>
+                                {stockProduct?.import_unit_raw && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                      const raw = String(
+                                        stockProduct.import_unit_raw ?? "",
+                                      ).trim();
+                                      const code = normalizeCustomUnitCode(raw);
+                                      setStockCustomUnitInput(code || raw);
+                                      if (!stockCustomUnitLabel.trim()) {
+                                        setStockCustomUnitLabel(raw);
+                                      }
+                                    }}
+                                  >
+                                    Usar unidade do XML (
+                                    {stockProduct.import_unit_raw})
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
 
-                  {currentCompany?.id ? (
-                    <div className={SHEET_SECTION}>
-                      <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Categorias de produto
-                      </p>
-                      <p className="mb-3 text-xs text-muted-foreground">
-                        Várias categorias; crie novas pelo campo abaixo se precisar.
-                      </p>
-                      <ProductCategoryTagsField
-                        companyId={currentCompany.id}
-                        categories={companyProductCategories}
-                        selectedIds={stockProductCategoryIds}
-                        onChange={(ids) => {
-                          stockProductCategoryIdsRef.current = ids;
-                          setStockProductCategoryIds(ids);
-                        }}
-                        onCategoriesChange={() =>
-                          void loadCompanyProductCategories()
-                        }
-                        disabled={stockSaving}
-                        label=""
-                        hint=""
-                      />
-                    </div>
-                  ) : null}
+                      {currentCompany?.id ? (
+                        <div className={SHEET_SECTION}>
+                          <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Categorias de produto
+                          </p>
+                          <p className="mb-3 text-xs text-muted-foreground">
+                            Várias categorias; crie novas pelo campo abaixo se
+                            precisar.
+                          </p>
+                          <ProductCategoryTagsField
+                            companyId={currentCompany.id}
+                            categories={companyProductCategories}
+                            selectedIds={stockProductCategoryIds}
+                            onChange={(ids) => {
+                              stockProductCategoryIdsRef.current = ids;
+                              setStockProductCategoryIds(ids);
+                            }}
+                            onCategoriesChange={() =>
+                              void loadCompanyProductCategories()
+                            }
+                            disabled={stockSaving}
+                            label=""
+                            hint=""
+                          />
+                        </div>
+                      ) : null}
 
-                  <div className={SHEET_SECTION}>
-                    <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      CMV e preço de referência
-                    </p>
-                    <div className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="stock-composes-cmv" className="text-base">
-                          Este produto compõe CMV?
-                        </Label>
-                        <p className="text-xs text-muted-foreground">
-                          Se sim, vendas geram CMV na folha de despesa CMV da
-                          empresa. A classificação da receita da venda fica em
-                          Receitas.
+                      <div className={SHEET_SECTION}>
+                        <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          CMV e preço de referência
                         </p>
+                        <div className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
+                          <div className="space-y-0.5">
+                            <Label
+                              htmlFor="stock-composes-cmv"
+                              className="text-base"
+                            >
+                              Este produto compõe CMV?
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              Se sim, vendas geram CMV na folha de despesa CMV
+                              da empresa. A classificação da receita da venda
+                              fica em Receitas.
+                            </p>
+                          </div>
+                          <Switch
+                            id="stock-composes-cmv"
+                            checked={stockComposesCmv}
+                            onCheckedChange={setStockComposesCmv}
+                            disabled={stockSaving}
+                          />
+                        </div>
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <Label htmlFor="stock-last-unit">
+                              Último valor pago (opcional)
+                            </Label>
+                            <Input
+                              id="stock-last-unit"
+                              type="text"
+                              inputMode="numeric"
+                              value={stockLastUnitValue}
+                              onChange={(e) =>
+                                setStockLastUnitValue(
+                                  formatCurrencyInput(e.target.value),
+                                )
+                              }
+                              placeholder="Ex.: R$ 25,00"
+                              className={SHEET_INPUT}
+                            />
+                          </div>
+                          <div>
+                            <Label>Unidade do valor</Label>
+                            <Select
+                              value={stockLastUnitValueUnitCode}
+                              onValueChange={setStockLastUnitValueUnitCode}
+                            >
+                              <SelectTrigger className={SHEET_SELECT}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {lastUnitValueUnitOptions.map((u) => (
+                                  <SelectItem key={u.value} value={u.value}>
+                                    {u.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <p className="mt-1.5 text-xs text-muted-foreground">
+                            Referência manual por {stockLastUnitValueUnitCode}.
+                            Esse valor de referência não muda ao trocar a
+                            unidade principal do produto; o sistema converte
+                            internamente só para manter o total correto.
+                          </p>
+                        </div>
                       </div>
-                      <Switch
-                        id="stock-composes-cmv"
-                        checked={stockComposesCmv}
-                        onCheckedChange={setStockComposesCmv}
-                        disabled={stockSaving}
-                      />
-                    </div>
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <Label htmlFor="stock-last-unit">Último valor pago (opcional)</Label>
-                      <Input
-                        id="stock-last-unit"
-                        type="text"
-                        inputMode="numeric"
-                        value={stockLastUnitValue}
-                        onChange={(e) =>
-                          setStockLastUnitValue(formatCurrencyInput(e.target.value))
-                        }
-                        placeholder="Ex.: R$ 25,00"
-                        className={SHEET_INPUT}
-                      />
-                      </div>
-                      <div>
-                        <Label>Unidade do valor</Label>
-                        <Select
-                          value={stockLastUnitValueUnitCode}
-                          onValueChange={setStockLastUnitValueUnitCode}
-                        >
-                          <SelectTrigger className={SHEET_SELECT}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {lastUnitValueUnitOptions.map((u) => (
-                              <SelectItem key={u.value} value={u.value}>
-                                {u.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        Referência manual por {stockLastUnitValueUnitCode}. Esse valor
-                        de referência não muda ao trocar a unidade principal do produto;
-                        o sistema converte internamente só para manter o total correto.
-                      </p>
-                    </div>
-                  </div>
 
-                  <div className={SHEET_SECTION}>
-                    <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Quantidades
-                    </p>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <Label htmlFor="stock-qty">Em estoque</Label>
-                        <Input
-                          id="stock-qty"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={stockQuantity}
-                          onChange={(e) => setStockQuantity(e.target.value)}
-                          className={SHEET_INPUT}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="stock-min">Mínimo (alerta)</Label>
-                        <Input
-                          id="stock-min"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={stockMinQuantity}
-                          onChange={(e) => setStockMinQuantity(e.target.value)}
-                          placeholder="0 = sem alerta"
-                          className={SHEET_INPUT}
-                        />
-                        <p className="mt-1.5 text-xs text-muted-foreground">
-                          0 desativa o alerta de estoque baixo.
+                      <div className={SHEET_SECTION}>
+                        <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Quantidades
                         </p>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <Label htmlFor="stock-qty">Em estoque</Label>
+                            <Input
+                              id="stock-qty"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={stockQuantity}
+                              onChange={(e) => setStockQuantity(e.target.value)}
+                              className={SHEET_INPUT}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="stock-min">Mínimo (alerta)</Label>
+                            <Input
+                              id="stock-min"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={stockMinQuantity}
+                              onChange={(e) =>
+                                setStockMinQuantity(e.target.value)
+                              }
+                              placeholder="0 = sem alerta"
+                              className={SHEET_INPUT}
+                            />
+                            <p className="mt-1.5 text-xs text-muted-foreground">
+                              0 desativa o alerta de estoque baixo.
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
 
-                  {currentCompany?.id ? (
-                    <ProductUnitConversionsSection
-                      companyId={currentCompany.id}
-                      stockUnitCode={stockUnit}
-                      value={stockProductConversions}
-                      onChange={setStockProductConversions}
-                      disabled={stockSaving}
-                      sectionClassName={SHEET_SECTION}
-                    />
-                  ) : null}
+                      {currentCompany?.id ? (
+                        <ProductUnitConversionsSection
+                          companyId={currentCompany.id}
+                          stockUnitCode={stockUnit}
+                          value={stockProductConversions}
+                          onChange={setStockProductConversions}
+                          disabled={stockSaving}
+                          sectionClassName={SHEET_SECTION}
+                        />
+                      ) : null}
 
-                  <div
-                    className={cn(
-                      SHEET_SECTION,
-                      "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
-                    )}
-                  >
-                    <div>
-                      <Label className="text-base" htmlFor="stock-active">
-                        Status do item
-                      </Label>
-                      <p
-                        id="stock-active"
-                        className="mt-1 text-sm text-muted-foreground"
+                      <div
+                        className={cn(
+                          SHEET_SECTION,
+                          "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
+                        )}
                       >
-                        Inativos não aparecem ao vincular em despesas.
-                      </p>
+                        <div>
+                          <Label className="text-base" htmlFor="stock-active">
+                            Status do item
+                          </Label>
+                          <p
+                            id="stock-active"
+                            className="mt-1 text-sm text-muted-foreground"
+                          >
+                            Inativos não aparecem ao vincular em despesas.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={stockIsActive}
+                          onCheckedChange={setStockIsActive}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
                     </div>
-                    <Switch
-                      checked={stockIsActive}
-                      onCheckedChange={setStockIsActive}
-                      className="data-[state=checked]:bg-primary"
-                    />
                   </div>
-                </div>
-              </div>
 
-              <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="w-full sm:w-auto"
-                  onClick={() => {
-                    productSheetViewRef.current = "summary";
-                    syncStockFormFromProduct(stockProduct);
-                    void (async () => {
-                      const ids = await loadAssignmentsForProduct(
-                        stockProduct.id,
-                      );
-                      setStockProductCategoryIds(ids);
-                      setInitialStockProductCategoryIds(ids);
-                      stockProductCategoryIdsRef.current = ids;
-                    })();
-                    setProductSheetView("summary");
-                    setProductDetailTab("resumo");
-                  }}
-                  disabled={stockSaving}
-                >
-                  Voltar ao resumo
-                </Button>
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    onClick={closeStockSheet}
-                    disabled={stockSaving}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="button"
-                    className="w-full sm:w-auto"
-                    onClick={handleStockSave}
-                    disabled={stockSaving}
-                  >
-                    {stockSaving ? "Salvando..." : "Salvar"}
-                  </Button>
-                </div>
-              </SheetFooter>
-            </>
+                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full sm:w-auto"
+                      onClick={() => {
+                        productSheetViewRef.current = "summary";
+                        syncStockFormFromProduct(stockProduct);
+                        void (async () => {
+                          const ids = await loadAssignmentsForProduct(
+                            stockProduct.id,
+                          );
+                          setStockProductCategoryIds(ids);
+                          setInitialStockProductCategoryIds(ids);
+                          stockProductCategoryIdsRef.current = ids;
+                        })();
+                        setProductSheetView("summary");
+                        setProductDetailTab("resumo");
+                      }}
+                      disabled={stockSaving}
+                    >
+                      Voltar ao resumo
+                    </Button>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        onClick={closeStockSheet}
+                        disabled={stockSaving}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        className="w-full sm:w-auto"
+                        onClick={handleStockSave}
+                        disabled={stockSaving}
+                      >
+                        {stockSaving ? "Salvando..." : "Salvar"}
+                      </Button>
+                    </div>
+                  </SheetFooter>
+                </>
+              )}
+            </SheetContent>
+          </Sheet>
+
+          {lowStockCount > 0 && (
+            <Card className="border-destructive/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="h-5 w-5" />
+                  {lowStockCount} produto(s) com estoque abaixo do mínimo
+                </CardTitle>
+                <CardDescription>
+                  Verifique o recebimento de notas ou ajuste as quantidades
+                  mínimas
+                </CardDescription>
+              </CardHeader>
+            </Card>
           )}
-        </SheetContent>
-      </Sheet>
-
-      {lowStockCount > 0 && (
-        <Card className="border-destructive/50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              {lowStockCount} produto(s) com estoque abaixo do mínimo
-            </CardTitle>
-            <CardDescription>
-              Verifique o recebimento de notas ou ajuste as quantidades mínimas
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
         </>
       )}
 

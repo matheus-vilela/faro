@@ -3,7 +3,8 @@
  * quando há linhas em `focus_get_sync_nfe_staging` com XML).
  *
  * **Disparo:** pg_cron → `cron_invoke_focus_get_sync_nfe_interpret()` → `net.http_post` (Vault) com Bearer secret.
- * O SQL **não** agenda HTTP se existir algum job em `processing` (evita corrida com o encadeamento interno).
+ * O cron invoca a Edge periodicamente; em `claim_vazio` a função finaliza jobs órfãos em `processing`
+ * (staging vazio ou offset já completo) e `pending` sem linhas em staging.
  *
  * **Timeout / volume:** fatias (`FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK`, default 5). O job permanece em
  * **`processing`**: após cada fatia atualiza `staging_process_offset` e agenda **nova invocação** desta
@@ -51,6 +52,28 @@ function json(body: unknown, status = 200): Response {
       "Content-Type": "application/json; charset=utf-8",
     },
   });
+}
+
+function logPhase(
+  phase: string,
+  payload: Record<string, unknown>,
+): void {
+  console.log(LOG, JSON.stringify({ fase: phase, ...payload }));
+}
+
+function interpretLogSummary(payload: StagingNfeInterpretLog): Record<string, unknown> {
+  return {
+    chave_nfe: payload.chave_nfe,
+    staging_id: payload.staging_id ?? null,
+    parse_ok: payload.parse_ok,
+    parse_erro: payload.parse_erro ?? null,
+    fornecedor_nome: payload.fornecedor.nome,
+    fornecedor_documento: payload.fornecedor.documento,
+    valor_total_nota: payload.valor_total_nota,
+    numero_nota: payload.numero_nota,
+    produtos_count: payload.produtos.length,
+    boletos_count: payload.cobranca_boletos.length,
+  };
 }
 
 function intFromEnv(
@@ -164,16 +187,12 @@ async function applyOnboardingInterpretProgress(
     console.warn(LOG, "onboarding_fiscal_update", companyId, upErr.message);
     return;
   }
-  console.log(
-    LOG,
-    "onboarding_fiscal_interpret",
-    JSON.stringify({
-      company_id: companyId,
-      nfes_sync: next.nfes_sync,
-      delta: add,
-      finalize: finalizeInterpretSync,
-    }),
-  );
+  logPhase("onboarding_fiscal_interpret", {
+    company_id: companyId,
+    nfes_sync: next.nfes_sync,
+    delta: add,
+    finalize: finalizeInterpretSync,
+  });
 }
 
 async function runInterpretStagingChunk(
@@ -186,6 +205,15 @@ async function runInterpretStagingChunk(
     Math.floor(Number(row.staging_process_offset ?? 0) || 0),
   );
 
+  logPhase("chunk_inicio", {
+    job_id: row.id,
+    exec_id: row.exec_id,
+    company_id: row.company_id,
+    offset,
+    staging_chunk: stagingChunk,
+    onboarding: row.onboarding === true,
+  });
+
   const { count: totalStaging, error: countErr } = await admin
     .from("focus_get_sync_nfe_staging")
     .select("id", { count: "exact", head: true })
@@ -193,20 +221,38 @@ async function runInterpretStagingChunk(
     .eq("company_id", row.company_id);
 
   if (countErr) {
+    logPhase("chunk_count_erro", {
+      job_id: row.id,
+      error: countErr.message,
+    });
     return { kind: "fail", message: countErr.message };
   }
 
   const total = totalStaging ?? 0;
 
   if (total === 0) {
+    logPhase("chunk_vazio", { job_id: row.id, exec_id: row.exec_id });
     return { kind: "empty_done" };
   }
 
   if (offset >= total) {
+    logPhase("chunk_offset_ja_completo", {
+      job_id: row.id,
+      offset,
+      staging_total: total,
+    });
     return { kind: "offset_done" };
   }
 
   const rangeEnd = Math.min(offset + stagingChunk - 1, total - 1);
+
+  logPhase("chunk_staging_query", {
+    job_id: row.id,
+    staging_total: total,
+    offset,
+    range_end: rangeEnd,
+    rows_esperadas: rangeEnd - offset + 1,
+  });
 
   const { data: stagingRows, error: stagingErr } = await admin
     .from("focus_get_sync_nfe_staging")
@@ -218,6 +264,10 @@ async function runInterpretStagingChunk(
     .range(offset, rangeEnd);
 
   if (stagingErr) {
+    logPhase("chunk_staging_query_erro", {
+      job_id: row.id,
+      error: stagingErr.message,
+    });
     return { kind: "fail", message: stagingErr.message };
   }
 
@@ -227,21 +277,42 @@ async function runInterpretStagingChunk(
   const { catalog: productCatalog, error: catalogFetchErr } =
     await fetchProductCatalogForStagingInterpret(admin, row.company_id);
   if (catalogFetchErr) {
-    console.error(LOG, "produtos_catalogo_fetch", catalogFetchErr);
+    logPhase("produtos_catalogo_fetch_erro", {
+      company_id: row.company_id,
+      error: catalogFetchErr,
+    });
+  } else {
+    logPhase("produtos_catalogo_carregado", {
+      company_id: row.company_id,
+      catalog_size: productCatalog.length,
+    });
   }
   /** Mesmo item em notas diferentes do chunk: reutiliza `product_id` sem novo insert. */
   const chunkProductDedupeByKey = new Map<string, string>();
 
   for (const st of list) {
+    const stagingId = String(st.id ?? "");
+    const chaveNfe = String(st.chave_nfe ?? "");
+    const xmlLen =
+      typeof st.xml_content === "string" ? st.xml_content.length : 0;
+
+    logPhase("staging_row_inicio", {
+      job_id: row.id,
+      staging_id: stagingId,
+      chave_nfe: chaveNfe,
+      xml_chars: xmlLen,
+    });
+
     const payload = interpretStagingNfeXmlForLog(
-      String(st.chave_nfe ?? ""),
+      chaveNfe,
       st.xml_content as string | null | undefined,
-      String(st.id ?? ""),
+      stagingId,
     );
     interpretacoes.push(payload);
-    console.log(LOG, "interpretacao_xml", JSON.stringify(payload, null, 2));
+    logPhase("staging_row_interpret", interpretLogSummary(payload));
 
     const productIdByLineIndex = new Map<number, string>();
+    const t0 = Date.now();
     await Promise.all([
       ensureSupplierForInterpretLog(admin, row.company_id, payload),
       resolveProductsForInterpretLog(
@@ -253,38 +324,44 @@ async function runInterpretStagingChunk(
         chunkProductDedupeByKey,
       ),
     ]);
+    logPhase("staging_row_produtos_fornecedor", {
+      staging_id: stagingId,
+      chave_nfe: chaveNfe,
+      produtos_resolvidos: productIdByLineIndex.size,
+      ms: Date.now() - t0,
+    });
+
+    const t1 = Date.now();
     await persistStagingInterpretExpenseAndBoletos(
       admin,
       row.company_id,
       payload,
       productIdByLineIndex,
     );
+    logPhase("staging_row_persistido", {
+      staging_id: stagingId,
+      chave_nfe: chaveNfe,
+      ms: Date.now() - t1,
+    });
   }
 
   const nextOffset = offset + list.length;
   const hasMore = nextOffset < total;
 
-  console.log(
-    LOG,
-    "job_resumo",
-    JSON.stringify(
-      {
-        job_id: row.id,
-        exec_id: row.exec_id,
-        company_id: row.company_id,
-        staging_chunk_rows: list.length,
-        staging_total: total,
-        chunk_offset_start: offset,
-        chunk_offset_next: nextOffset,
-        continua: hasMore,
-        interpretacoes: interpretacoes.length,
-        chaves: interpretacoes.map((p) => p.chave_nfe),
-        parse_ok_count: interpretacoes.filter((p) => p.parse_ok).length,
-      },
-      null,
-      2,
-    ),
-  );
+  logPhase("chunk_fim", {
+    job_id: row.id,
+    exec_id: row.exec_id,
+    company_id: row.company_id,
+    staging_chunk_rows: list.length,
+    staging_total: total,
+    chunk_offset_start: offset,
+    chunk_offset_next: nextOffset,
+    continua: hasMore,
+    interpretacoes: interpretacoes.length,
+    parse_ok_count: interpretacoes.filter((p) => p.parse_ok).length,
+    parse_fail_count: interpretacoes.filter((p) => !p.parse_ok).length,
+    chaves: interpretacoes.map((p) => p.chave_nfe),
+  });
 
   return {
     kind: "chunk_ok",
@@ -317,14 +394,15 @@ function scheduleContinueChain(
       continue_job_id: jobId,
       chain_depth: chainDepth,
     }),
-  }).catch((e) => console.warn(LOG, "chain_fetch", String(e)));
+  }).catch((e) =>
+    logPhase("chain_fetch_erro", { job_id: jobId, error: String(e) })
+  );
 
   scheduleWaitUntil(p);
-  console.log(
-    LOG,
-    "continuacao_agendada",
-    JSON.stringify({ job_id: jobId, chain_depth_next: chainDepth }),
-  );
+  logPhase("continuacao_agendada", {
+    job_id: jobId,
+    chain_depth_next: chainDepth,
+  });
 }
 
 async function finalizeJobDone(
@@ -348,6 +426,7 @@ async function finalizeJobFailed(
   jobId: string,
   message: string,
 ): Promise<void> {
+  logPhase("job_marcado_failed", { job_id: jobId, error: message });
   await admin
     .from("focus_get_sync_nfe_interpret_jobs")
     .update({
@@ -376,18 +455,154 @@ async function requeueProcessingInterpretJob(
     .eq("id", jobId)
     .eq("status", "processing");
   if (error) {
-    console.warn(
-      LOG,
-      "requeue_job_falhou",
-      JSON.stringify({ job_id: jobId, error: error.message }),
-    );
+    logPhase("requeue_job_falhou", { job_id: jobId, error: error.message });
   } else {
-    console.warn(
-      LOG,
-      "job_reposto_pending",
-      JSON.stringify({ job_id: jobId }),
-    );
+    logPhase("job_reposto_pending_excecao", { job_id: jobId, reason });
   }
+}
+
+type RecoverSummary = {
+  finalized: string[];
+  reposted: string[];
+  continued: string[];
+};
+
+/** Jobs em `processing` ou `pending` sem staging: finaliza ou retoma (evita fila presa). */
+async function recoverOrphanInterpretJobs(
+  admin: Admin,
+  stagingChunk: number,
+  supabaseUrl: string,
+  anonKey: string,
+  bearerSecret: string,
+  maxChainDepth: number,
+): Promise<RecoverSummary> {
+  const result: RecoverSummary = {
+    finalized: [],
+    reposted: [],
+    continued: [],
+  };
+
+  const { data: processingRows, error: procErr } = await admin
+    .from("focus_get_sync_nfe_interpret_jobs")
+    .select(
+      "id,exec_id,company_id,status,attempts,staging_process_offset,onboarding",
+    )
+    .eq("status", "processing")
+    .order("started_at", { ascending: true })
+    .limit(3);
+
+  if (procErr) {
+    logPhase("recover_processing_list_erro", { error: procErr.message });
+  } else if (processingRows?.length) {
+    logPhase("recover_processing_inicio", { count: processingRows.length });
+    for (const jobRow of processingRows) {
+      const row = jobRow as InterpretJobRow;
+      logPhase("recover_processing_job", {
+        job_id: row.id,
+        offset: row.staging_process_offset ?? 0,
+      });
+
+      const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
+
+      if (chunk.kind === "fail") {
+        await finalizeJobFailed(admin, row.id, chunk.message);
+        continue;
+      }
+
+      if (chunk.kind === "empty_done" || chunk.kind === "offset_done") {
+        await applyOnboardingInterpretProgress(
+          admin,
+          row.company_id,
+          row.onboarding === true,
+          0,
+          true,
+        );
+        const err = await finalizeJobDone(admin, row.id);
+        if (!err) {
+          result.finalized.push(row.id);
+          logPhase("recover_job_finalizado", {
+            job_id: row.id,
+            reason:
+              chunk.kind === "empty_done"
+                ? "staging_vazio"
+                : "offset_ja_completo",
+          });
+        } else {
+          await finalizeJobFailed(admin, row.id, err);
+        }
+        continue;
+      }
+
+      const out = await applyChunkOutcome(
+        admin,
+        row,
+        chunk,
+        0,
+        supabaseUrl,
+        anonKey,
+        bearerSecret,
+        maxChainDepth,
+      );
+      if (out.done && !out.err) result.finalized.push(row.id);
+      else if (out.fell_back_to_pending) result.reposted.push(row.id);
+      else result.continued.push(row.id);
+    }
+    logPhase("recover_processing_fim", { ...result });
+  }
+
+  const { data: pendingRows, error: pendErr } = await admin
+    .from("focus_get_sync_nfe_interpret_jobs")
+    .select("id,exec_id,company_id,onboarding")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(5);
+
+  if (pendErr) {
+    logPhase("recover_pending_list_erro", { error: pendErr.message });
+    return result;
+  }
+
+  for (const jobRow of pendingRows ?? []) {
+    const row = jobRow as Pick<
+      InterpretJobRow,
+      "id" | "exec_id" | "company_id" | "onboarding"
+    >;
+    const { count, error: countErr } = await admin
+      .from("focus_get_sync_nfe_staging")
+      .select("id", { count: "exact", head: true })
+      .eq("exec_id", row.exec_id)
+      .eq("company_id", row.company_id);
+
+    if (countErr) {
+      logPhase("recover_pending_count_erro", {
+        job_id: row.id,
+        error: countErr.message,
+      });
+      continue;
+    }
+    if ((count ?? 0) > 0) continue;
+
+    logPhase("recover_pending_sem_staging", { job_id: row.id });
+    await applyOnboardingInterpretProgress(
+      admin,
+      row.company_id,
+      row.onboarding === true,
+      0,
+      true,
+    );
+    const err = await finalizeJobDone(admin, row.id);
+    if (!err) {
+      result.finalized.push(row.id);
+      logPhase("recover_job_finalizado", {
+        job_id: row.id,
+        reason: "pending_sem_staging",
+      });
+    } else {
+      await finalizeJobFailed(admin, row.id, err);
+    }
+  }
+
+  return result;
 }
 
 async function applyChunkOutcome(
@@ -406,17 +621,22 @@ async function applyChunkOutcome(
 }> {
   const isOnboardingJob = row.onboarding === true;
 
+  logPhase("chunk_outcome_inicio", {
+    job_id: row.id,
+    has_more: chunk.hasMore,
+    chain_depth: chainDepth,
+    next_offset: chunk.nextOffset,
+    onboarding: isOnboardingJob,
+  });
+
   if (chunk.hasMore) {
     if (chainDepth >= maxChainDepth) {
-      console.warn(
-        LOG,
-        "chain_cap",
-        JSON.stringify({
-          job_id: row.id,
-          chain_depth: chainDepth,
-          next_offset: chunk.nextOffset,
-        }),
-      );
+      logPhase("chain_cap", {
+        job_id: row.id,
+        chain_depth: chainDepth,
+        max_chain_depth: maxChainDepth,
+        next_offset: chunk.nextOffset,
+      });
       const { error: pendErr } = await admin
         .from("focus_get_sync_nfe_interpret_jobs")
         .update({
@@ -437,6 +657,7 @@ async function applyChunkOutcome(
         chunk.listLen,
         false,
       );
+      logPhase("job_reposto_pending_chain_cap", { job_id: row.id });
       return { done: false, fell_back_to_pending: true };
     }
 
@@ -463,14 +684,10 @@ async function applyChunkOutcome(
     );
 
     if (!anonKey.trim()) {
-      console.warn(
-        LOG,
-        "chain_skip_sem_anon",
-        JSON.stringify({
-          job_id: row.id,
-          hint: "defina SUPABASE_ANON_KEY na função",
-        }),
-      );
+      logPhase("chain_skip_sem_anon", {
+        job_id: row.id,
+        hint: "defina SUPABASE_ANON_KEY na função",
+      });
       const { error: pend2 } = await admin
         .from("focus_get_sync_nfe_interpret_jobs")
         .update({
@@ -484,6 +701,7 @@ async function applyChunkOutcome(
         await finalizeJobFailed(admin, row.id, pend2.message);
         return { done: false, err: pend2.message };
       }
+      logPhase("job_reposto_pending_sem_anon", { job_id: row.id });
       return { done: false, fell_back_to_pending: true };
     }
 
@@ -494,6 +712,11 @@ async function applyChunkOutcome(
       row.id,
       chainDepth + 1,
     );
+    logPhase("chunk_parcial_continua", {
+      job_id: row.id,
+      next_offset: chunk.nextOffset,
+      chain_depth_next: chainDepth + 1,
+    });
     return { done: false };
   }
 
@@ -508,8 +731,10 @@ async function applyChunkOutcome(
   const doneErr = await finalizeJobDone(admin, row.id);
   if (doneErr) {
     await finalizeJobFailed(admin, row.id, doneErr);
+    logPhase("job_finalizar_erro", { job_id: row.id, error: doneErr });
     return { done: true, err: doneErr };
   }
+  logPhase("job_concluido", { job_id: row.id, company_id: row.company_id });
   return { done: true };
 }
 
@@ -576,12 +801,27 @@ Deno.serve(async (req) => {
     ? Math.max(0, Math.floor(Number(chainDepthRaw)))
     : 0;
 
+  logPhase("exec_inicio", {
+    mode: continueJobId ? "continue" : "claim",
+    continue_job_id: continueJobId || null,
+    chain_depth: chainDepth,
+    max_jobs: maxJobs,
+    staging_chunk: stagingChunk,
+    max_chain_depth: maxChainDepth,
+  });
+
   /** Modo continuação: mesmo job em `processing`, sem claim. */
   if (continueJobId) {
     if (!UUID_RE.test(continueJobId)) {
+      logPhase("continue_rejeitado", { reason: "continue_job_id_invalido" });
       return json({ ok: false, error: "continue_job_id inválido." }, 400);
     }
     if (chainDepth > maxChainDepth) {
+      logPhase("continue_rejeitado", {
+        reason: "chain_depth_excedido",
+        chain_depth: chainDepth,
+        max_chain_depth: maxChainDepth,
+      });
       return json(
         {
           ok: false,
@@ -599,9 +839,17 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (loadErr) {
+      logPhase("continue_job_load_erro", {
+        job_id: continueJobId,
+        error: loadErr.message,
+      });
       return json({ ok: false, error: loadErr.message }, 500);
     }
     if (!jobRow) {
+      logPhase("continue_skip", {
+        job_id: continueJobId,
+        reason: "job_nao_encontrado",
+      });
       return json({
         ok: true,
         mode: "continue",
@@ -612,6 +860,10 @@ Deno.serve(async (req) => {
 
     const st = String((jobRow as InterpretJobRow).status ?? "");
     if (st !== "processing") {
+      logPhase("continue_skip", {
+        job_id: continueJobId,
+        reason: `status_${st}`,
+      });
       return json({
         ok: true,
         mode: "continue",
@@ -623,9 +875,21 @@ Deno.serve(async (req) => {
 
     const row = jobRow as InterpretJobRow;
     activeJobId = row.id;
+    logPhase("continue_job_carregado", {
+      job_id: row.id,
+      exec_id: row.exec_id,
+      company_id: row.company_id,
+      offset: row.staging_process_offset ?? 0,
+      attempts: row.attempts,
+      onboarding: row.onboarding === true,
+    });
     const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
 
     if (chunk.kind === "fail") {
+      logPhase("continue_chunk_falhou", {
+        job_id: row.id,
+        error: chunk.message,
+      });
       await finalizeJobFailed(admin, row.id, chunk.message);
       return json(
         { ok: false, mode: "continue", error: chunk.message, job_id: row.id },
@@ -680,6 +944,16 @@ Deno.serve(async (req) => {
       maxChainDepth,
     );
 
+    logPhase("exec_fim", {
+      mode: "continue",
+      job_id: row.id,
+      chain_depth: chainDepth,
+      staging_rows: chunk.listLen,
+      continua: chunk.hasMore,
+      job_finished: out.done,
+      warn: out.err ?? null,
+    });
+
     return json({
       ok: true,
       mode: "continue",
@@ -702,27 +976,69 @@ Deno.serve(async (req) => {
 
   const processed: string[] = [];
   const summaries: JobSummary[] = [];
+  let recoveredOnEmptyClaim: RecoverSummary | null = null;
 
   for (let i = 0; i < maxJobs; i++) {
+    let row: InterpretJobRow | null = null;
     const { data: rows, error: claimErr } = await admin.rpc(
       "focus_get_sync_nfe_interpret_claim_job",
     );
     if (claimErr) {
-      console.error(LOG, "claim", claimErr.message);
+      logPhase("claim_erro", { error: claimErr.message, slot: i });
       return json({ ok: false, error: claimErr.message, processed }, 500);
     }
-    const row = (
-      Array.isArray(rows) ? rows[0] : null
-    ) as InterpretJobRow | null;
+    row = (Array.isArray(rows) ? rows[0] : null) as InterpretJobRow | null;
+
     if (!row?.id) {
-      activeJobId = null;
-      break;
+      logPhase("claim_vazio", { slot: i });
+      if (i === 0 && !recoveredOnEmptyClaim) {
+        recoveredOnEmptyClaim = await recoverOrphanInterpretJobs(
+          admin,
+          stagingChunk,
+          supabaseUrl,
+          anonKey,
+          expected,
+          maxChainDepth,
+        );
+        if (
+          recoveredOnEmptyClaim.finalized.length > 0 ||
+          recoveredOnEmptyClaim.reposted.length > 0
+        ) {
+          const { data: retryRows, error: retryErr } = await admin.rpc(
+            "focus_get_sync_nfe_interpret_claim_job",
+          );
+          if (retryErr) {
+            logPhase("claim_retry_erro", { error: retryErr.message });
+          } else {
+            row = (
+              Array.isArray(retryRows) ? retryRows[0] : null
+            ) as InterpretJobRow | null;
+            if (row?.id) {
+              logPhase("claim_retry_ok", { job_id: row.id });
+            }
+          }
+        }
+      }
+      if (!row?.id) {
+        activeJobId = null;
+        break;
+      }
     }
 
     activeJobId = row.id;
+    logPhase("job_reclamado", {
+      job_id: row.id,
+      exec_id: row.exec_id,
+      company_id: row.company_id,
+      attempts: row.attempts,
+      offset: row.staging_process_offset ?? 0,
+      onboarding: row.onboarding === true,
+      slot: i,
+    });
     const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
 
     if (chunk.kind === "fail") {
+      logPhase("job_falhou", { job_id: row.id, error: chunk.message });
       await finalizeJobFailed(admin, row.id, chunk.message);
       continue;
     }
@@ -813,23 +1129,28 @@ Deno.serve(async (req) => {
     }
   }
 
+  logPhase("exec_fim", {
+    mode: "claim",
+    jobs_processed: processed.length,
+    job_ids: processed,
+    summaries_count: summaries.length,
+    recovered: recoveredOnEmptyClaim,
+  });
+
   return json({
     ok: true,
     jobs_processed: processed.length,
     job_ids: processed,
     summaries,
+    recovered: recoveredOnEmptyClaim,
   });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(
-      LOG,
-      "fatal_catch",
-      JSON.stringify({
-        message: msg,
-        active_job_id: activeJobId,
-        stack: e instanceof Error ? e.stack : undefined,
-      }),
-    );
+    logPhase("fatal_catch", {
+      message: msg,
+      active_job_id: activeJobId,
+      stack: e instanceof Error ? e.stack : undefined,
+    });
     try {
       await requeueProcessingInterpretJob(admin, activeJobId, msg);
     } catch (e2) {

@@ -15,8 +15,9 @@
  * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
  * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
  * Com `onboarding` / `onboarding_retry`, ignora unidades com `onboarding_fiscal.completed` ou fora da fase de listagem (`sync: false`).
- * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) entram
- * automaticamente com prioridade; demais elegíveis rodam em rodízio por `focusnfe.nfes_recebidas_ultima_sync_at`.
+ * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) com
+ * **primeira** sync (`nfes_recebidas_ultima_sync_at` ausente) entram com prioridade (tier 0);
+ * onboarding pendente que já sincronizou ao menos uma vez entra no rodízio (tier 2), como as demais.
  * Após sync OK, persiste `nfes_recebidas_ultima_versao` e `nfes_recebidas_ultima_sync_at` no JSON `focusnfe`.
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
@@ -265,6 +266,14 @@ function nfesRecebidasUltimaSyncAtMs(row: CoRow): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Onboarding pendente na fase de listagem que ainda nunca concluiu um sync na Focus. */
+function isOnboardingPrimeiraListagemSync(row: CoRow): boolean {
+  return (
+    isOnboardingFiscalListSyncPhase(row.onboarding_fiscal) &&
+    nfesRecebidasUltimaSyncAtMs(row) === 0
+  );
+}
+
 function isSefazRetryDue(retryAtRaw: unknown): boolean {
   if (retryAtRaw == null || String(retryAtRaw).trim() === "") return true;
   const t = Date.parse(String(retryAtRaw));
@@ -355,9 +364,10 @@ function classifyCompanyForSync(
   }
 
   if (pending && listPhase) {
+    const primeiraSync = isOnboardingPrimeiraListagemSync(row);
     return {
       include: true,
-      tier: 0,
+      tier: primeiraSync ? 0 : 2,
       effectiveOnboarding: true,
       resetOnboardingMetrics: false,
       clearSefazRetry: false,
@@ -892,6 +902,7 @@ Deno.serve(async (req) => {
           company_id: row.id,
           tier: cls.tier,
           ultima_sync_ms: nfesRecebidasUltimaSyncAtMs(row),
+          onboarding_primeira_sync: isOnboardingPrimeiraListagemSync(row),
         });
         detail.push({
           company_id: row.id,
@@ -915,6 +926,7 @@ Deno.serve(async (req) => {
         tier: s.tier,
         ultima_sync_ms: s.last_sync_ms,
         onboarding: s.effective_onboarding,
+        onboarding_primeira_sync: isOnboardingPrimeiraListagemSync(s.row),
       })),
     });
 
