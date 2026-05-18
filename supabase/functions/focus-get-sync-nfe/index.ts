@@ -14,6 +14,8 @@
  * `companies.onboarding_fiscal.max_nfes_sync` = notas efetivamente gravadas em staging (total exato a interpretar).
  * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
  * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
+ * Com `onboarding` / `onboarding_retry`, ignora unidades com `onboarding_fiscal.completed` ou fora da fase de listagem (`sync: false`).
+ * Sem `onboarding`, ignora unidades com onboarding fiscal ainda pendente.
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
@@ -204,7 +206,26 @@ type CoRow = {
   id: string;
   document?: string | null;
   focusnfe?: Record<string, unknown>;
+  onboarding_fiscal?: unknown;
 };
+
+/** Onboarding fiscal ainda não concluído (`completed` ≠ true). */
+function isOnboardingFiscalPending(raw: unknown): boolean {
+  return !normalizeOnboardingFiscal(raw).completed;
+}
+
+/**
+ * Fase de listagem/sync na SEFAZ (`sync` ativo ou ausente).
+ * Com `sync: false`, a listagem já terminou e aguarda interpretação/confirmação.
+ */
+function isOnboardingFiscalListSyncPhase(raw: unknown): boolean {
+  if (!isOnboardingFiscalPending(raw)) return false;
+  const o =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return o["sync"] !== false;
+}
 
 type NfeCabLike = Record<string, unknown>;
 
@@ -477,7 +498,7 @@ Deno.serve(async (req) => {
     if (isCron) {
       const { data: companies, error: listErr } = await admin
         .from("companies")
-        .select("id, document, focusnfe");
+        .select("id, document, focusnfe, onboarding_fiscal");
 
       if (listErr) {
         console.error(LOG, "list_companies", listErr.message);
@@ -540,7 +561,7 @@ Deno.serve(async (req) => {
       }
       const { data: oneRow, error: coErr } = await admin
         .from("companies")
-        .select("id, document, focusnfe")
+        .select("id, document, focusnfe, onboarding_fiscal")
         .eq("id", companyIdManual)
         .maybeSingle();
       if (coErr || !oneRow) {
@@ -591,6 +612,32 @@ Deno.serve(async (req) => {
       const cnpjDigits = String(row.document ?? "")
         .replace(/\D/g, "")
         .slice(0, 14);
+      const obRaw = row.onboarding_fiscal;
+
+      if (onboardingFlow || onboardingRetry) {
+        if (!isOnboardingFiscalPending(obRaw)) {
+          detail.push({
+            company_id: companyId,
+            skipped: "onboarding_fiscal já concluído",
+          });
+          continue;
+        }
+        if (!onboardingRetry && !isOnboardingFiscalListSyncPhase(obRaw)) {
+          detail.push({
+            company_id: companyId,
+            skipped:
+              "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
+          });
+          continue;
+        }
+      } else if (isOnboardingFiscalPending(obRaw)) {
+        detail.push({
+          company_id: companyId,
+          skipped:
+            "onboarding_fiscal pendente — use sincronização com onboarding: true",
+        });
+        continue;
+      }
 
       const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
       const cursorPersistido =

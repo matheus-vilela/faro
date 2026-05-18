@@ -1,5 +1,15 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
 import { ProductUnitPickerWithConversion } from "@/components/products/ProductUnitPickerWithConversion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -51,10 +61,55 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 type IngRow = { product_id: string; quantity: string; unit_code: string };
+
+type NormalizedIngRow = {
+  product_id: string;
+  quantity: string;
+  unit_code: string;
+};
+
+function normalizeIngsForCompare(ings: IngRow[]): NormalizedIngRow[] {
+  return ings
+    .filter(
+      (x) => x.product_id && x.unit_code.trim() && x.quantity.trim() !== "",
+    )
+    .map((x) => ({
+      product_id: x.product_id,
+      quantity: x.quantity.replace(",", ".").trim(),
+      unit_code: x.unit_code.trim().toLowerCase(),
+    }))
+    .sort((a, b) => a.product_id.localeCompare(b.product_id, "pt-BR"));
+}
+
+function ingsSnapshotsEqual(
+  a: NormalizedIngRow[],
+  b: NormalizedIngRow[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (row, i) =>
+      row.product_id === b[i]!.product_id &&
+      row.quantity === b[i]!.quantity &&
+      row.unit_code === b[i]!.unit_code,
+  );
+}
+
+export type EstoqueReceitasPanelHandle = {
+  /** Pergunta ao utilizador se deseja salvar insumos não guardados antes de sair da ficha. */
+  confirmLeaveIfDirty: () => Promise<"proceed" | "cancel">;
+};
 
 type RecipeRow = {
   id: string;
@@ -486,18 +541,9 @@ function RecipeIngredientsAddPanel({
   );
 }
 
-export function EstoqueReceitasPanel({
-  companyId,
-  onStockChanged,
-  prefillNewRecipeOutputProductId,
-  prefillNewRecipeAutoOpen = true,
-  onPrefillConsumed,
-  sheetOnly = false,
-  ingredientsOnly = false,
-  embedInline = false,
-  initialOpenRecipeId,
-  onSheetOpenChange,
-}: {
+export const EstoqueReceitasPanel = forwardRef<
+  EstoqueReceitasPanelHandle,
+  {
   companyId: string;
   onStockChanged?: () => void;
   /** Produto-alvo para vincular à ficha (saída em ficha nova ou saída/ingrediente em ficha existente). */
@@ -518,7 +564,22 @@ export function EstoqueReceitasPanel({
   /** Abre esta receita no sheet após carregar o catálogo. */
   initialOpenRecipeId?: string | null;
   onSheetOpenChange?: (open: boolean) => void;
-}) {
+}
+>(function EstoqueReceitasPanel(
+  {
+  companyId,
+  onStockChanged,
+  prefillNewRecipeOutputProductId,
+  prefillNewRecipeAutoOpen = true,
+  onPrefillConsumed,
+  sheetOnly = false,
+  ingredientsOnly = false,
+  embedInline = false,
+  initialOpenRecipeId,
+  onSheetOpenChange,
+},
+  ref,
+) {
   const [products, setProducts] = useState<Product[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [productConversions, setProductConversions] = useState<
@@ -539,12 +600,26 @@ export function EstoqueReceitasPanel({
   const [linkContextProductId, setLinkContextProductId] = useState<
     string | null
   >(null);
+  const [savedIngsSnapshot, setSavedIngsSnapshot] = useState<NormalizedIngRow[]>(
+    [],
+  );
+  const [unsavedLeaveOpen, setUnsavedLeaveOpen] = useState(false);
+  const unsavedLeaveProceedRef = useRef<(() => void) | null>(null);
+  const unsavedLeaveResolveRef = useRef<
+    ((result: "proceed" | "cancel") => void) | null
+  >(null);
   const prefillHandledRef = useRef(false);
-  const initialRecipeOpenedRef = useRef<string | null>(null);
+
+  const isIngredientsDirty = useMemo(() => {
+    if (!ingredientsOnly || !editingRecipeId) return false;
+    return !ingsSnapshotsEqual(
+      normalizeIngsForCompare(ings),
+      savedIngsSnapshot,
+    );
+  }, [ingredientsOnly, editingRecipeId, ings, savedIngsSnapshot]);
 
   useEffect(() => {
     prefillHandledRef.current = false;
-    initialRecipeOpenedRef.current = null;
   }, [companyId, prefillNewRecipeOutputProductId, initialOpenRecipeId]);
 
   useEffect(() => {
@@ -652,29 +727,81 @@ export function EstoqueReceitasPanel({
 
       setOutputId(nextOutput);
       setIngs(nextIngs);
+      setSavedIngsSnapshot(normalizeIngsForCompare(nextIngs));
       setSheetOpen(true);
       onSheetOpenChange?.(true);
     },
     [ingredientsOnly, onSheetOpenChange, productById, products],
   );
 
+  const proceedUnsavedLeave = useCallback(() => {
+    setUnsavedLeaveOpen(false);
+    unsavedLeaveResolveRef.current?.("proceed");
+    unsavedLeaveResolveRef.current = null;
+    const fn = unsavedLeaveProceedRef.current;
+    unsavedLeaveProceedRef.current = null;
+    fn?.();
+  }, []);
+
+  const cancelUnsavedLeave = useCallback(() => {
+    setUnsavedLeaveOpen(false);
+    unsavedLeaveResolveRef.current?.("cancel");
+    unsavedLeaveResolveRef.current = null;
+    unsavedLeaveProceedRef.current = null;
+  }, []);
+
+  const promptUnsavedLeave = useCallback(
+    (proceed: () => void): boolean => {
+      if (!isIngredientsDirty) {
+        proceed();
+        return true;
+      }
+      unsavedLeaveProceedRef.current = proceed;
+      unsavedLeaveResolveRef.current = null;
+      setUnsavedLeaveOpen(true);
+      return false;
+    },
+    [isIngredientsDirty],
+  );
+
+  const confirmLeaveIfDirty = useCallback((): Promise<"proceed" | "cancel"> => {
+    if (!isIngredientsDirty) return Promise.resolve("proceed");
+    return new Promise((resolve) => {
+      unsavedLeaveResolveRef.current = resolve;
+      unsavedLeaveProceedRef.current = null;
+      setUnsavedLeaveOpen(true);
+    });
+  }, [isIngredientsDirty]);
+
+  useImperativeHandle(ref, () => ({ confirmLeaveIfDirty }), [
+    confirmLeaveIfDirty,
+  ]);
+
+  const requestOpenEditRecipe = useCallback(
+    (r: RecipeRow, linkProductId?: string | null) => {
+      if (r.id === editingRecipeId) return;
+      promptUnsavedLeave(() => openEditRecipe(r, linkProductId));
+    },
+    [editingRecipeId, openEditRecipe, promptUnsavedLeave],
+  );
+
   useEffect(() => {
     const rid = initialOpenRecipeId?.trim();
     if (!rid || loading) return;
-    if (initialRecipeOpenedRef.current === rid) return;
+    if (rid === editingRecipeId) return;
     const r = recipes.find((x) => x.id === rid);
     if (!r) {
       toast.error("Ficha técnica não encontrada.");
       onSheetOpenChange?.(false);
       return;
     }
-    initialRecipeOpenedRef.current = rid;
-    openEditRecipe(r, null);
+    requestOpenEditRecipe(r, null);
   }, [
     initialOpenRecipeId,
     loading,
     recipes,
-    openEditRecipe,
+    editingRecipeId,
+    requestOpenEditRecipe,
     onSheetOpenChange,
   ]);
 
@@ -806,23 +933,23 @@ export function EstoqueReceitasPanel({
     queueMicrotask(() => void load());
   }, [load]);
 
-  const saveRecipe = async () => {
+  const saveRecipe = async (): Promise<boolean> => {
     const t = name.trim();
     if (!t) {
       toast.error("Informe o nome da receita.");
-      return;
+      return false;
     }
     const y = parseFloat(batchYield);
     if (Number.isNaN(y) || y <= 0) {
       toast.error("Rendimento da receita inválido.");
-      return;
+      return false;
     }
     const validIngs = ings.filter(
       (x) => x.product_id && x.unit_code && x.quantity.trim() !== "",
     );
     if (validIngs.length === 0) {
       toast.error("Adicione ao menos um ingrediente.");
-      return;
+      return false;
     }
 
     const preparedRows: {
@@ -837,19 +964,19 @@ export function EstoqueReceitasPanel({
       const parsed = parseFloat(x.quantity.replace(",", "."));
       if (!Number.isFinite(parsed) || parsed <= 0) {
         toast.error("Quantidade do ingrediente inválida.");
-        return;
+        return false;
       }
       const allowedUnits = allowedUnitsForProduct(x.product_id).map((u) =>
         u.trim().toLowerCase(),
       );
       if (!allowedUnits.includes(x.unit_code.trim().toLowerCase())) {
         toast.error("Selecione uma unidade válida para o ingrediente.");
-        return;
+        return false;
       }
       const baseQty = toBaseQty(x.product_id, parsed, x.unit_code);
       if (baseQty == null || !Number.isFinite(baseQty) || baseQty <= 0) {
         toast.error("Não foi possível converter a unidade do ingrediente.");
-        return;
+        return false;
       }
       preparedRows.push({
         recipe_id: "",
@@ -876,7 +1003,7 @@ export function EstoqueReceitasPanel({
         console.error(upErr);
         toast.error("Não foi possível atualizar a receita.");
         setSaving(false);
-        return;
+        return false;
       }
       const { error: delIngErr } = await supabase
         .from("recipe_ingredients")
@@ -886,7 +1013,7 @@ export function EstoqueReceitasPanel({
         console.error(delIngErr);
         toast.error("Não foi possível atualizar os ingredientes.");
         setSaving(false);
-        return;
+        return false;
       }
     } else {
       const { data: rec, error: re } = await supabase
@@ -905,14 +1032,14 @@ export function EstoqueReceitasPanel({
         console.error(re);
         toast.error("Não foi possível salvar a receita.");
         setSaving(false);
-        return;
+        return false;
       }
       rid = rec.id as string;
     }
     if (!rid) {
       toast.error("Receita inválida.");
       setSaving(false);
-      return;
+      return false;
     }
     const rows = preparedRows.map((x) => ({
       ...x,
@@ -929,7 +1056,7 @@ export function EstoqueReceitasPanel({
         await supabase.from("recipes").delete().eq("id", rid);
       }
       toast.error("Falha ao salvar ingredientes.");
-      return;
+      return false;
     }
     toast.success(
       ingredientsOnly
@@ -938,15 +1065,25 @@ export function EstoqueReceitasPanel({
           ? "Receita atualizada."
           : "Receita criada.",
     );
-    setSheetOpen(false);
-    onSheetOpenChange?.(false);
-    setEditingRecipeId(null);
-    setName("");
-    setBatchYield("1");
-    setOutputId("");
-    setIngs([]);
+    setSavedIngsSnapshot(normalizeIngsForCompare(validIngs));
+    const keepEditorOpen = ingredientsOnly && embedInline;
+    if (!keepEditorOpen) {
+      setSheetOpen(false);
+      onSheetOpenChange?.(false);
+      setEditingRecipeId(null);
+      setName("");
+      setBatchYield("1");
+      setOutputId("");
+      setIngs([]);
+    }
     onStockChanged?.();
     void load();
+    return true;
+  };
+
+  const saveRecipeFromUnsavedDialog = async () => {
+    const ok = await saveRecipe();
+    if (ok) proceedUnsavedLeave();
   };
 
   const deleteRecipe = async () => {
@@ -1028,13 +1165,21 @@ export function EstoqueReceitasPanel({
   };
 
   const handleSheetOpenChange = (open: boolean) => {
-    if (!embedInline) setSheetOpen(open);
     if (!open) {
-      setEditingRecipeId(null);
-      onSheetOpenChange?.(false);
-    } else {
-      onSheetOpenChange?.(true);
+      const close = () => {
+        if (!embedInline) setSheetOpen(false);
+        setEditingRecipeId(null);
+        onSheetOpenChange?.(false);
+      };
+      if (ingredientsOnly && editingRecipeId && isIngredientsDirty) {
+        promptUnsavedLeave(close);
+        return;
+      }
+      close();
+      return;
     }
+    if (!embedInline) setSheetOpen(open);
+    onSheetOpenChange?.(true);
   };
 
   return (
@@ -1122,10 +1267,12 @@ export function EstoqueReceitasPanel({
                       key={r.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => openEditRecipe(r, linkContextProductId)}
+                      onClick={() =>
+                        requestOpenEditRecipe(r, linkContextProductId)
+                      }
                       onKeyDown={(e) =>
                         e.key === "Enter" &&
-                        openEditRecipe(r, linkContextProductId)
+                        requestOpenEditRecipe(r, linkContextProductId)
                       }
                       className="cursor-pointer rounded-2xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-4 text-sm shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
                     >
@@ -1519,6 +1666,50 @@ export function EstoqueReceitasPanel({
           </SheetContent>
         </Sheet>
       )}
+
+      <AlertDialog
+        open={unsavedLeaveOpen}
+        onOpenChange={(open) => {
+          if (!open) cancelUnsavedLeave();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Salvar insumos desta ficha?</AlertDialogTitle>
+            <AlertDialogDescription className="text-pretty">
+              Você adicionou ou alterou insumos em{" "}
+              <strong className="text-foreground">
+                {name.trim() || "esta ficha"}
+              </strong>{" "}
+              e ainda não salvou. Deseja salvar antes de continuar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={saving}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                void saveRecipeFromUnsavedDialog();
+              }}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando…
+                </>
+              ) : (
+                "Salvar insumos"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
-}
+});
+
+EstoqueReceitasPanel.displayName = "EstoqueReceitasPanel";

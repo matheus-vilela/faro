@@ -58,7 +58,7 @@ export function DashboardIntegrationCsvRevenueCard({
     if (confirmPhase) {
       return {
         title: "Sincronização concluída",
-        subtitle: `${ob.sales_total > 0 ? ob.sales_total : ob.sales_sync} vendas processadas. Foram cadastradas as movimentações de vendas e o estoque respectivo.`,
+        subtitle: `${ob.sales_total > 0 ? ob.sales_total : ob.sales_sync} vendas processadas. Foram cadastradas as movimentações de vendas, fichas técnicas, produtos e o estoque respectivo.`,
         showSpinner: false,
         icon: "success" as const,
       };
@@ -98,12 +98,12 @@ export function DashboardIntegrationCsvRevenueCard({
         title: "Processando vendas do EPOC",
         subtitle:
           ob.sales_total > 0
-            ? `${pct}% das linhas do CSV foram processadas (${ob.sales_sync}/${ob.sales_total})`
+            ? `${pct}% foram processadas (${ob.sales_sync}/${ob.sales_total})`
             : ob.sales_sync > 0
-              ? "A importar vendas do CSV…"
+              ? "A importar vendas..."
               : ob.import_status === "pending"
-                ? "A processar o CSV das receitas na integração. Pode demorar alguns segundos."
-                : "A importar vendas do CSV…",
+                ? "A processar as receitas na integração. Pode demorar alguns segundos."
+                : "A importar vendas...",
         showSpinner: true,
         icon: "sync" as const,
       };
@@ -198,7 +198,9 @@ export function DashboardIntegrationCsvRevenueCard({
       return <Loader2 className="h-5 w-5 animate-spin" />;
     }
     if (icon === "success") {
-      return <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />;
+      return (
+        <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
+      );
     }
     if (icon === "error") {
       return <AlertCircle className="h-5 w-5 text-destructive" />;

@@ -209,8 +209,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
     if (awaitingSefazEstimate) {
       return {
         title: "A obter dados na SEFAZ",
-        subtitle:
-          "Estamos a consultar a SEFAZ e a preparar as NF-e recebidas desta unidade. Este processo pode demorar um pouco. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.",
+        subtitle: `Este processo pode demorar um pouco. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.
+            <br /> 
+          <strong>Fornecedores, produtos, despesas e estoque serão criados automaticamente.</strong>`,
         showSpinner: true,
         percent: 0,
         icon: "sync" as const,
@@ -277,7 +278,10 @@ export function DashboardFocusNfeRecebidasSyncCard({
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {title}
               </h3>
-              <p className={theme.subtitle}>{subtitle}</p>
+              <p
+                className={theme.subtitle}
+                dangerouslySetInnerHTML={{ __html: subtitle as string }}
+              />
             </div>
           </div>
 

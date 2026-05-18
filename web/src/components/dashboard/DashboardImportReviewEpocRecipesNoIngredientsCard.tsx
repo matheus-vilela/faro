@@ -1,4 +1,7 @@
-import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
+import {
+  EstoqueReceitasPanel,
+  type EstoqueReceitasPanelHandle,
+} from "@/components/estoque/EstoqueReceitasPanel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,7 +19,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { ChefHat, Loader2, Package } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** Altura máxima do card; lista e editor crescem juntos até esse teto. */
@@ -106,6 +109,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   const [rows, setRows] = useState<DashboardEpocRecipeNoIngredientsRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+  const recipePanelRef = useRef<EstoqueReceitasPanelHandle>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -158,13 +162,19 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
     return null;
   }
 
-  const selectRecipe = (recipeId: string) => {
+  const selectRecipe = async (recipeId: string) => {
+    if (recipeId === selectedRecipeId) return;
+    if (selectedRecipeId) {
+      const leave =
+        (await recipePanelRef.current?.confirmLeaveIfDirty()) ?? "proceed";
+      if (leave === "cancel") return;
+    }
     setSelectedRecipeId(recipeId);
   };
 
   const recipeEditor = selectedRecipeId ? (
     <EstoqueReceitasPanel
-      key={`${selectedRecipeId}-${isMobile ? "sheet" : "inline"}`}
+      ref={recipePanelRef}
       companyId={companyId}
       sheetOnly
       embedInline={!isMobile}
