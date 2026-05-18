@@ -12,7 +12,8 @@
  * `EdgeRuntime.waitUntil` (sem esperar o próximo cron). `attempts` só sobe na primeira fatia (RPC claim).
  *
  * **Continuação:** POST com o mesmo Bearer + JSON acima; não usa `claim` — carrega o job por id e segue
- * a partir de `staging_process_offset`. `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` limita encadeamentos.
+ * a partir de `staging_process_offset` (progresso) até `staging_xml_total` (XMLs com conteúdo em staging).
+ * `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` limita encadeamentos.
  *
  * Env: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` (para o POST encadeado no gateway),
  * `FOCUS_NFE_RECEBIDAS_CRON_SECRET`.
@@ -110,6 +111,7 @@ type InterpretJobRow = {
   status: string;
   attempts: number;
   staging_process_offset?: number | null;
+  staging_xml_total?: number | null;
   onboarding?: boolean | null;
 };
 
@@ -120,10 +122,16 @@ type JobSummary = {
   staging_rows: number;
   interpretacoes: number;
   staging_total?: number;
+  staging_xml_total?: number;
   chunk_offset_start?: number;
   continua?: boolean;
   chain_depth?: number;
 };
+
+// deno-lint-ignore no-explicit-any
+function applyStagingXmlContentFilters(query: any): any {
+  return query.not("xml_content", "is", null).neq("xml_content", "");
+}
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -205,20 +213,28 @@ async function runInterpretStagingChunk(
     Math.floor(Number(row.staging_process_offset ?? 0) || 0),
   );
 
+  const stagingXmlTotal = Math.max(
+    0,
+    Math.floor(Number(row.staging_xml_total ?? 0) || 0),
+  );
+
   logPhase("chunk_inicio", {
     job_id: row.id,
     exec_id: row.exec_id,
     company_id: row.company_id,
     offset,
     staging_chunk: stagingChunk,
+    staging_xml_total: stagingXmlTotal,
     onboarding: row.onboarding === true,
   });
 
-  const { count: totalStaging, error: countErr } = await admin
-    .from("focus_get_sync_nfe_staging")
-    .select("id", { count: "exact", head: true })
-    .eq("exec_id", row.exec_id)
-    .eq("company_id", row.company_id);
+  const { count: totalStaging, error: countErr } = await applyStagingXmlContentFilters(
+    admin
+      .from("focus_get_sync_nfe_staging")
+      .select("id", { count: "exact", head: true })
+      .eq("exec_id", row.exec_id)
+      .eq("company_id", row.company_id),
+  );
 
   if (countErr) {
     logPhase("chunk_count_erro", {
@@ -254,14 +270,16 @@ async function runInterpretStagingChunk(
     rows_esperadas: rangeEnd - offset + 1,
   });
 
-  const { data: stagingRows, error: stagingErr } = await admin
-    .from("focus_get_sync_nfe_staging")
-    .select("id,chave_nfe,xml_content")
-    .eq("exec_id", row.exec_id)
-    .eq("company_id", row.company_id)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .range(offset, rangeEnd);
+  const { data: stagingRows, error: stagingErr } = await applyStagingXmlContentFilters(
+    admin
+      .from("focus_get_sync_nfe_staging")
+      .select("id,chave_nfe,xml_content")
+      .eq("exec_id", row.exec_id)
+      .eq("company_id", row.company_id)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, rangeEnd),
+  );
 
   if (stagingErr) {
     logPhase("chunk_staging_query_erro", {
@@ -354,6 +372,7 @@ async function runInterpretStagingChunk(
     company_id: row.company_id,
     staging_chunk_rows: list.length,
     staging_total: total,
+    staging_xml_total: stagingXmlTotal || total,
     chunk_offset_start: offset,
     chunk_offset_next: nextOffset,
     continua: hasMore,
@@ -485,7 +504,7 @@ async function recoverOrphanInterpretJobs(
   const { data: processingRows, error: procErr } = await admin
     .from("focus_get_sync_nfe_interpret_jobs")
     .select(
-      "id,exec_id,company_id,status,attempts,staging_process_offset,onboarding",
+      "id,exec_id,company_id,status,attempts,staging_process_offset,staging_xml_total,onboarding",
     )
     .eq("status", "processing")
     .order("started_at", { ascending: true })
@@ -567,11 +586,13 @@ async function recoverOrphanInterpretJobs(
       InterpretJobRow,
       "id" | "exec_id" | "company_id" | "onboarding"
     >;
-    const { count, error: countErr } = await admin
-      .from("focus_get_sync_nfe_staging")
-      .select("id", { count: "exact", head: true })
-      .eq("exec_id", row.exec_id)
-      .eq("company_id", row.company_id);
+    const { count, error: countErr } = await applyStagingXmlContentFilters(
+      admin
+        .from("focus_get_sync_nfe_staging")
+        .select("id", { count: "exact", head: true })
+        .eq("exec_id", row.exec_id)
+        .eq("company_id", row.company_id),
+    );
 
     if (countErr) {
       logPhase("recover_pending_count_erro", {
@@ -834,7 +855,9 @@ Deno.serve(async (req) => {
 
     const { data: jobRow, error: loadErr } = await admin
       .from("focus_get_sync_nfe_interpret_jobs")
-      .select("id,exec_id,company_id,status,attempts,staging_process_offset,onboarding")
+      .select(
+        "id,exec_id,company_id,status,attempts,staging_process_offset,staging_xml_total,onboarding",
+      )
       .eq("id", continueJobId)
       .maybeSingle();
 
@@ -880,6 +903,7 @@ Deno.serve(async (req) => {
       exec_id: row.exec_id,
       company_id: row.company_id,
       offset: row.staging_process_offset ?? 0,
+      staging_xml_total: row.staging_xml_total ?? 0,
       attempts: row.attempts,
       onboarding: row.onboarding === true,
     });
@@ -1032,6 +1056,7 @@ Deno.serve(async (req) => {
       company_id: row.company_id,
       attempts: row.attempts,
       offset: row.staging_process_offset ?? 0,
+      staging_xml_total: row.staging_xml_total ?? 0,
       onboarding: row.onboarding === true,
       slot: i,
     });
@@ -1061,6 +1086,7 @@ Deno.serve(async (req) => {
           staging_rows: 0,
           interpretacoes: 0,
           staging_total: 0,
+          staging_xml_total: row.staging_xml_total ?? 0,
           chunk_offset_start: 0,
           continua: false,
           chain_depth: 0,
@@ -1089,6 +1115,7 @@ Deno.serve(async (req) => {
           staging_rows: 0,
           interpretacoes: 0,
           staging_total: 0,
+          staging_xml_total: row.staging_xml_total ?? 0,
           chunk_offset_start: Math.floor(
             Number(row.staging_process_offset ?? 0) || 0,
           ),
@@ -1108,6 +1135,7 @@ Deno.serve(async (req) => {
       staging_rows: chunk.listLen,
       interpretacoes: chunk.interpretacoes.length,
       staging_total: chunk.total,
+      staging_xml_total: row.staging_xml_total ?? chunk.total,
       chunk_offset_start: chunk.offset,
       continua: chunk.hasMore,
       chain_depth: 0,

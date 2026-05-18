@@ -18,13 +18,17 @@
  * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) com
  * **primeira** sync (`nfes_recebidas_ultima_sync_at` ausente) entram com prioridade (tier 0);
  * onboarding pendente que já sincronizou ao menos uma vez entra no rodízio (tier 2), como as demais.
+ * Rodízio cron (fora onboarding/retry/manual): só empresas sem `nfes_recebidas_ultima_sync_at` ou com
+ * última sync há ≥ 12 h. Ao reservar a unidade no run, grava `nfes_recebidas_ultima_sync_at` de imediato
+ * (antes do GET na Focus) para o próximo disparo não repetir a mesma empresa.
  * Após sync OK, persiste `nfes_recebidas_ultima_versao` e `nfes_recebidas_ultima_sync_at` no JSON `focusnfe`.
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
  * Para cada nota gravada, faz download do XML em **blocos paralelos de 10** (`GET .../{chave}.xml`);
  * entre blocos aplica `FOCUS_NFE_XML_THROTTLE_MS` (default 450 ms).
- * Com pelo menos uma linha em `focus_get_sync_nfe_staging`, enfileira `focus_get_sync_nfe_interpret_jobs`
+ * Com pelo menos uma linha em `focus_get_sync_nfe_staging` com XML, enfileira `focus_get_sync_nfe_interpret_jobs`
+ * (`staging_xml_total` = total de XMLs; `staging_process_offset` = progresso).
  * (com `onboarding` quando o body pediu `onboarding: true`).
  * (processamento assíncrono via pg_cron → `focus-get-sync-nfe-interpret-staging`).
  */
@@ -266,12 +270,65 @@ function nfesRecebidasUltimaSyncAtMs(row: CoRow): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Intervalo mínimo entre syncs no rodízio cron (empresas fora onboarding/retry/manual). */
+const NFES_RECEBIDAS_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+function isNfesRecebidasSyncIntervalDue(row: CoRow): boolean {
+  const lastMs = nfesRecebidasUltimaSyncAtMs(row);
+  if (lastMs === 0) return true;
+  return Date.now() - lastMs >= NFES_RECEBIDAS_SYNC_INTERVAL_MS;
+}
+
+function shouldGateNfesRecebidasSyncInterval(
+  bodyOnboarding: boolean,
+  bodyOnboardingRetry: boolean,
+  pending: boolean,
+  bypassSyncInterval: boolean,
+): boolean {
+  if (bypassSyncInterval || bodyOnboarding || bodyOnboardingRetry || pending) {
+    return false;
+  }
+  return true;
+}
+
+type ClassifyCompanyResult = {
+  include: boolean;
+  skip?: string;
+  tier: number;
+  effectiveOnboarding: boolean;
+  resetOnboardingMetrics: boolean;
+  clearSefazRetry: boolean;
+};
+
+function applyNfesRecebidasSyncIntervalGate(
+  row: CoRow,
+  gate: boolean,
+  result: ClassifyCompanyResult,
+): ClassifyCompanyResult {
+  if (!result.include || !gate || isNfesRecebidasSyncIntervalDue(row)) {
+    return result;
+  }
+  return {
+    include: false,
+    skip: "última sync NF-e recebidas há menos de 12 horas",
+    tier: 99,
+    effectiveOnboarding: false,
+    resetOnboardingMetrics: false,
+    clearSefazRetry: false,
+  };
+}
+
 /** Onboarding pendente na fase de listagem que ainda nunca concluiu um sync na Focus. */
 function isOnboardingPrimeiraListagemSync(row: CoRow): boolean {
   return (
     isOnboardingFiscalListSyncPhase(row.onboarding_fiscal) &&
     nfesRecebidasUltimaSyncAtMs(row) === 0
   );
+}
+
+/** Rodízio: sem `nfes_recebidas_ultima_sync_at` = prioridade máxima; com data = mais antiga primeiro. */
+function syncCursorTier(row: CoRow): number {
+  return nfesRecebidasUltimaSyncAtMs(row) === 0 ? 0 : 2;
 }
 
 function isSefazRetryDue(retryAtRaw: unknown): boolean {
@@ -294,17 +351,20 @@ function classifyCompanyForSync(
   row: CoRow,
   bodyOnboarding: boolean,
   bodyOnboardingRetry: boolean,
-): {
-  include: boolean;
-  skip?: string;
-  tier: number;
-  effectiveOnboarding: boolean;
-  resetOnboardingMetrics: boolean;
-  clearSefazRetry: boolean;
-} {
+  bypassSyncInterval = false,
+): ClassifyCompanyResult {
   const obRaw = row.onboarding_fiscal;
   const pending = isOnboardingFiscalPending(obRaw);
   const listPhase = isOnboardingFiscalListSyncPhase(obRaw);
+  const syncIntervalGate = shouldGateNfesRecebidasSyncInterval(
+    bodyOnboarding,
+    bodyOnboardingRetry,
+    pending,
+    bypassSyncInterval,
+  );
+  const finish = (result: ClassifyCompanyResult): ClassifyCompanyResult =>
+    applyNfesRecebidasSyncIntervalGate(row, syncIntervalGate, result);
+
   const o =
     obRaw && typeof obRaw === "object" && !Array.isArray(obRaw)
       ? (obRaw as Record<string, unknown>)
@@ -364,10 +424,9 @@ function classifyCompanyForSync(
   }
 
   if (pending && listPhase) {
-    const primeiraSync = isOnboardingPrimeiraListagemSync(row);
     return {
       include: true,
-      tier: primeiraSync ? 0 : 2,
+      tier: syncCursorTier(row),
       effectiveOnboarding: true,
       resetOnboardingMetrics: false,
       clearSefazRetry: false,
@@ -394,13 +453,13 @@ function classifyCompanyForSync(
     };
   }
 
-  return {
+  return finish({
     include: true,
-    tier: 2,
+    tier: syncCursorTier(row),
     effectiveOnboarding: false,
     resetOnboardingMetrics: false,
     clearSefazRetry: false,
-  };
+  });
 }
 
 function scheduleCompaniesForRun(
@@ -409,6 +468,7 @@ function scheduleCompaniesForRun(
   bodyOnboarding: boolean,
   bodyOnboardingRetry: boolean,
   skipRotation: boolean,
+  bypassSyncInterval = false,
 ): { scheduled: ScheduledCompany[]; waitlisted: CoRow[] } {
   const candidates: ScheduledCompany[] = [];
   const waitlisted: CoRow[] = [];
@@ -421,7 +481,12 @@ function scheduleCompaniesForRun(
       .slice(0, 14);
     if (!focusIdEmpresa(focusnfe) || cnpjDigits.length !== 14) continue;
 
-    const cls = classifyCompanyForSync(row, bodyOnboarding, bodyOnboardingRetry);
+    const cls = classifyCompanyForSync(
+      row,
+      bodyOnboarding,
+      bodyOnboardingRetry,
+      bypassSyncInterval,
+    );
     if (!cls.include) {
       waitlisted.push(row);
       continue;
@@ -451,22 +516,62 @@ function scheduleCompaniesForRun(
   };
 }
 
+async function touchNfesRecebidasUltimaSyncAt(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<{ error?: string; sync_at?: string }> {
+  const syncAt = new Date().toISOString();
+  const { data: row, error: readErr } = await admin
+    .from("companies")
+    .select("focusnfe")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+
+  const current =
+    row?.focusnfe && typeof row.focusnfe === "object" && !Array.isArray(row.focusnfe)
+      ? (row.focusnfe as Record<string, unknown>)
+      : {};
+
+  const { error } = await admin
+    .from("companies")
+    .update({
+      focusnfe: { ...current, nfes_recebidas_ultima_sync_at: syncAt },
+      updated_at: syncAt,
+    })
+    .eq("id", companyId);
+  if (error) return { error: error.message };
+  return { sync_at: syncAt };
+}
+
 async function persistFocusNfeSyncCursor(
   admin: ReturnType<typeof createClient>,
   companyId: string,
-  focusnfe: Record<string, unknown>,
   versaoFinal: number,
 ): Promise<{ error?: string }> {
+  const syncAt = new Date().toISOString();
+  const { data: row, error: readErr } = await admin
+    .from("companies")
+    .select("focusnfe")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+
+  const current =
+    row?.focusnfe && typeof row.focusnfe === "object" && !Array.isArray(row.focusnfe)
+      ? (row.focusnfe as Record<string, unknown>)
+      : {};
+
   const next = {
-    ...focusnfe,
+    ...current,
     nfes_recebidas_ultima_versao: Math.max(0, Math.floor(versaoFinal)),
-    nfes_recebidas_ultima_sync_at: new Date().toISOString(),
+    nfes_recebidas_ultima_sync_at: syncAt,
   };
   const { error } = await admin
     .from("companies")
     .update({
       focusnfe: next,
-      updated_at: new Date().toISOString(),
+      updated_at: syncAt,
     })
     .eq("id", companyId);
   if (error) return { error: error.message };
@@ -636,7 +741,8 @@ async function applyOnboardingFiscalDefaults(
   return {};
 }
 
-async function mergeOnboardingFiscalMaxNfes(
+/** Encerra fase de listagem (`sync: false`) e grava total em staging para a interpretação. */
+async function finalizeOnboardingFiscalListagem(
   admin: ReturnType<typeof createClient>,
   companyId: string,
   maxNfesSync: number,
@@ -647,6 +753,7 @@ async function mergeOnboardingFiscalMaxNfes(
     .eq("id", companyId)
     .maybeSingle();
   if (rErr) return { error: rErr.message };
+  if (!isOnboardingFiscalPending(row?.onboarding_fiscal)) return {};
   const base =
     row?.onboarding_fiscal &&
     typeof row.onboarding_fiscal === "object" &&
@@ -658,6 +765,7 @@ async function mergeOnboardingFiscalMaxNfes(
     ...base,
     ...prev,
     max_nfes_sync: maxNfesSync,
+    sync: false,
   });
   const { error: uErr } = await admin
     .from("companies")
@@ -668,6 +776,49 @@ async function mergeOnboardingFiscalMaxNfes(
     .eq("id", companyId);
   if (uErr) return { error: uErr.message };
   return {};
+}
+
+type ActiveInterpretJob = {
+  id: string;
+  exec_id: string;
+  status: string;
+  onboarding: boolean | null;
+};
+
+async function countStagingXmlsForInterpretJob(
+  admin: ReturnType<typeof createClient>,
+  execId: string,
+  companyId: string,
+): Promise<{ count: number; error?: string }> {
+  const { count, error } = await admin
+    .from("focus_get_sync_nfe_staging")
+    .select("id", { count: "exact", head: true })
+    .eq("exec_id", execId)
+    .eq("company_id", companyId)
+    .not("xml_content", "is", null)
+    .neq("xml_content", "");
+  if (error) return { count: 0, error: error.message };
+  return { count: count ?? 0 };
+}
+
+async function findActiveInterpretJob(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<ActiveInterpretJob | null> {
+  const { data, error } = await admin
+    .from("focus_get_sync_nfe_interpret_jobs")
+    .select("id, exec_id, status, onboarding")
+    .eq("company_id", companyId)
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn(LOG, "interpret_job_active_select", companyId, error.message);
+    return null;
+  }
+  if (!data?.id) return null;
+  return data as ActiveInterpretJob;
 }
 
 Deno.serve(async (req) => {
@@ -869,7 +1020,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+      const cls = classifyCompanyForSync(
+        row,
+        onboardingFlow,
+        onboardingRetry,
+        isManualSingle,
+      );
       if (!cls.include) {
         logPhase("onboarding_fiscal_skip", {
           exec_id: execId,
@@ -887,6 +1043,7 @@ Deno.serve(async (req) => {
       onboardingFlow,
       onboardingRetry,
       skipRotation,
+      isManualSingle,
     );
 
     for (const row of waitlisted) {
@@ -895,7 +1052,12 @@ Deno.serve(async (req) => {
         .replace(/\D/g, "")
         .slice(0, 14);
       if (!focusIdEmpresa(focusnfe) || cnpjDigits.length !== 14) continue;
-      const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+      const cls = classifyCompanyForSync(
+        row,
+        onboardingFlow,
+        onboardingRetry,
+        isManualSingle,
+      );
       if (cls.include) {
         logPhase("rodizio_aguardando", {
           exec_id: execId,
@@ -916,7 +1078,12 @@ Deno.serve(async (req) => {
       candidatas: companiesToProcess.length,
       agendadas: scheduled.length,
       aguardando_rodizio: waitlisted.filter((row) => {
-        const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+        const cls = classifyCompanyForSync(
+          row,
+          onboardingFlow,
+          onboardingRetry,
+          isManualSingle,
+        );
         return cls.include;
       }).length,
       skip_rotation: skipRotation,
@@ -939,17 +1106,76 @@ Deno.serve(async (req) => {
         .replace(/\D/g, "")
         .slice(0, 14);
       const obRaw = row.onboarding_fiscal;
-      const companyOnboardingFlow = item.effective_onboarding;
 
-      const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
-      const cursorPersistido =
+      const reserveSyncAt = await touchNfesRecebidasUltimaSyncAt(admin, companyId);
+      if (reserveSyncAt.error) {
+        console.warn(
+          LOG,
+          "nfes_recebidas_ultima_sync_at_reserva",
+          companyId,
+          reserveSyncAt.error,
+        );
+        detail.push({
+          company_id: companyId,
+          skipped: "falha ao reservar nfes_recebidas_ultima_sync_at",
+        });
+        continue;
+      }
+      logPhase("rodizio_reserva_sync_at", {
+        exec_id: execId,
+        company_id: companyId,
+        nfes_recebidas_ultima_sync_at: reserveSyncAt.sync_at,
+      });
+
+      const { data: coFreshRow, error: coFreshErr } = await admin
+        .from("companies")
+        .select("onboarding_fiscal, focusnfe")
+        .eq("id", companyId)
+        .maybeSingle();
+      if (coFreshErr) {
+        console.warn(LOG, "company_fresh_read", companyId, coFreshErr.message);
+      }
+      const obFresh = coFreshRow?.onboarding_fiscal ?? obRaw;
+
+      if (
+        isOnboardingFiscalPending(obFresh) &&
+        !isOnboardingFiscalListSyncPhase(obFresh) &&
+        !onboardingFlow &&
+        !onboardingRetry
+      ) {
+        logPhase("empresa_ignorada", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: "onboarding_aguardando_interpretacao",
+          onboarding_fiscal: summarizeOnboardingFiscal(obFresh),
+        });
+        detail.push({
+          company_id: companyId,
+          skipped: "onboarding aguardando interpretação de NF-e",
+        });
+        continue;
+      }
+
+      const companyOnboardingFlow =
+        item.effective_onboarding &&
+        isOnboardingFiscalPending(obFresh) &&
+        isOnboardingFiscalListSyncPhase(obFresh);
+
+      const activeInterpretJob = await findActiveInterpretJob(admin, companyId);
+      const stagingExecId = activeInterpretJob?.exec_id ?? execId;
+
+      const storedRaw = Number(
+        (coFreshRow?.focusnfe as Record<string, unknown> | undefined)
+          ?.nfes_recebidas_ultima_versao ?? focusnfe.nfes_recebidas_ultima_versao,
+      );
+      const versaoCursorArmazenada =
         Number.isFinite(storedRaw) && storedRaw >= 0
           ? Math.floor(storedRaw)
           : 0;
       let versao =
         isManualSingle && bodyVersaoInicial !== null
           ? bodyVersaoInicial
-          : cursorPersistido;
+          : versaoCursorArmazenada;
 
       let quantasBuscas = 0;
       let notasEncontradas = 0;
@@ -957,21 +1183,33 @@ Deno.serve(async (req) => {
       const tCompany0 = performance.now();
       const xmlGapMs = throttleMsBetweenXmlDownloads();
       let companySyncOk = true;
+      /** Pelo menos uma página da lista Focus respondeu HTTP OK (parse OK). */
+      let hadSuccessfulListFetch = false;
+      /** Listagem encerrou por regra Focus (sem mais páginas neste ciclo). */
+      let listagemConcluida = false;
       let versaoFinal = versao;
 
       logPhase("empresa_inicio", {
         exec_id: execId,
+        staging_exec_id: stagingExecId,
         company_id: companyId,
         cnpj: cnpjDigits,
         id_empresa_focus: focusIdEmpresa(focusnfe),
         versao_inicial: versao,
-        versao_persistida: cursorPersistido,
+        versao_persistida: versaoCursorArmazenada,
         versao_override_manual:
           isManualSingle && bodyVersaoInicial !== null
             ? bodyVersaoInicial
             : null,
-        onboarding_fiscal: summarizeOnboardingFiscal(obRaw),
+        onboarding_fiscal: summarizeOnboardingFiscal(obFresh),
         onboarding_flow: companyOnboardingFlow,
+        interpret_job_ativo: activeInterpretJob
+          ? {
+              id: activeInterpretJob.id,
+              exec_id: activeInterpretJob.exec_id,
+              status: activeInterpretJob.status,
+            }
+          : null,
         onboarding_retry: item.clear_sefaz_retry,
         rodizio_tier: item.tier,
         ultima_sync_ms: item.last_sync_ms,
@@ -1118,6 +1356,8 @@ Deno.serve(async (req) => {
           break;
         }
 
+        hadSuccessfulListFetch = true;
+
         if (!Array.isArray(lista)) {
           const errMsg = `Formato de lista inesperado (HTTP ${listRes.status})`;
           companySyncOk = false;
@@ -1215,6 +1455,24 @@ Deno.serve(async (req) => {
           );
 
           for (const { cab, chave, xmlContent } of chunkWithXml) {
+            const { data: stagingExisting, error: stagingSelErr } = await admin
+              .from("focus_get_sync_nfe_staging")
+              .select("id")
+              .eq("company_id", companyId)
+              .eq("chave_nfe", chave)
+              .limit(1)
+              .maybeSingle();
+            if (stagingSelErr) {
+              console.warn(
+                LOG,
+                "staging_select",
+                companyId,
+                chave,
+                stagingSelErr.message,
+              );
+              continue;
+            }
+
             const vnf = cab["versao"];
             const versaoNf =
               vnf !== undefined && vnf !== null && Number.isFinite(Number(vnf))
@@ -1225,33 +1483,59 @@ Deno.serve(async (req) => {
                 ? String(cab["situacao"])
                 : null;
 
-            const { error: insErr } = await admin
-              .from("focus_get_sync_nfe_staging")
-              .insert({
-                exec_id: execId,
-                company_id: companyId,
-                cnpj: cnpjDigits,
-                chave_nfe: chave,
-                versao_nf: versaoNf,
-                situacao,
-                nfe_completa: true,
-                payload: cab,
-                page_index: page,
-                versao_query_used: versao,
-                x_total_count_snapshot: xTotalCount,
-                x_max_version_snapshot: xMaxVersion,
-                xml_content: xmlContent,
-              });
-            if (insErr) {
-              console.warn(LOG, "staging_insert", companyId, insErr.message);
+            const stagingRow = {
+              exec_id: stagingExecId,
+              cnpj: cnpjDigits,
+              versao_nf: versaoNf,
+              situacao,
+              nfe_completa: true,
+              payload: cab,
+              page_index: page,
+              versao_query_used: versao,
+              x_total_count_snapshot: xTotalCount,
+              x_max_version_snapshot: xMaxVersion,
+              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                .toISOString(),
+              ...(xmlContent != null ? { xml_content: xmlContent } : {}),
+            };
+
+            if (stagingExisting?.id) {
+              const { error: updErr } = await admin
+                .from("focus_get_sync_nfe_staging")
+                .update(stagingRow)
+                .eq("id", stagingExisting.id);
+              if (updErr) {
+                console.warn(
+                  LOG,
+                  "staging_update",
+                  companyId,
+                  chave,
+                  updErr.message,
+                );
+              } else {
+                notasEncontradas += 1;
+              }
             } else {
-              notasEncontradas += 1;
+              const { error: insErr } = await admin
+                .from("focus_get_sync_nfe_staging")
+                .insert({
+                  ...stagingRow,
+                  company_id: companyId,
+                  chave_nfe: chave,
+                  xml_content: xmlContent,
+                });
+              if (insErr) {
+                console.warn(LOG, "staging_insert", companyId, insErr.message);
+              } else {
+                notasEncontradas += 1;
+              }
             }
           }
         }
 
         // x-total-count == 0 → não há mais notas a consultar (regra Focus / pedido de produto).
         if (xTotalCount === 0) {
+          listagemConcluida = true;
           logPhase("paginacao_fim", {
             exec_id: execId,
             company_id: companyId,
@@ -1279,6 +1563,7 @@ Deno.serve(async (req) => {
             versaoFinal = versao;
             continue;
           }
+          listagemConcluida = true;
           logPhase("paginacao_fim", {
             exec_id: execId,
             company_id: companyId,
@@ -1300,6 +1585,7 @@ Deno.serve(async (req) => {
           break;
         }
         if (xMaxVersion === versao) {
+          listagemConcluida = true;
           logPhase("paginacao_fim", {
             exec_id: execId,
             company_id: companyId,
@@ -1327,106 +1613,172 @@ Deno.serve(async (req) => {
         wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
       };
 
-      if (companyOnboardingFlow && companySyncOk) {
-        const { error: obErr } = await mergeOnboardingFiscalMaxNfes(
+      if (
+        companyOnboardingFlow &&
+        hadSuccessfulListFetch &&
+        listagemConcluida
+      ) {
+        const { error: obErr } = await finalizeOnboardingFiscalListagem(
           admin,
           companyId,
           notasEncontradas,
         );
         if (obErr) {
-          console.warn(LOG, "onboarding_fiscal_max_nfes", companyId, obErr);
+          console.warn(LOG, "onboarding_fiscal_listagem_fim", companyId, obErr);
         } else {
-          logPhase("onboarding_fiscal_max_nfes_final", {
+          logPhase("onboarding_fiscal_listagem_finalizada", {
             exec_id: execId,
             company_id: companyId,
             max_nfes_sync: notasEncontradas,
+            sync: false,
           });
         }
       }
 
-      if (notasEncontradas > 0) {
-        const { data: existingJob, error: selJobErr } = await admin
-          .from("focus_get_sync_nfe_interpret_jobs")
-          .select("id,status")
-          .eq("exec_id", execId)
-          .eq("company_id", companyId)
-          .maybeSingle();
-        if (selJobErr) {
-          console.warn(
-            LOG,
-            "interpret_job_select",
-            companyId,
-            selJobErr.message,
-          );
-        } else if (!existingJob?.id) {
-          const { error: insJobErr } = await admin
-            .from("focus_get_sync_nfe_interpret_jobs")
-            .insert({
-              exec_id: execId,
-              company_id: companyId,
-              status: "pending",
-              onboarding: companyOnboardingFlow,
-            });
-          if (insJobErr) {
-            console.warn(
-              LOG,
-              "interpret_job_insert",
-              companyId,
-              insJobErr.message,
-            );
-          } else {
-            logPhase("interpret_job_enfileirado", {
-              exec_id: execId,
-              company_id: companyId,
-              onboarding: companyOnboardingFlow,
-              notas_staging: notasEncontradas,
-            });
+      const { count: stagingXmlTotal, error: xmlCountErr } =
+        await countStagingXmlsForInterpretJob(
+          admin,
+          stagingExecId,
+          companyId,
+        );
+      if (xmlCountErr) {
+        console.warn(
+          LOG,
+          "interpret_staging_xml_count",
+          companyId,
+          xmlCountErr,
+        );
+      }
+
+      if (stagingXmlTotal > 0) {
+        if (activeInterpretJob?.id) {
+          const jobPatch: Record<string, unknown> = {
+            staging_xml_total: stagingXmlTotal,
+          };
+          if (activeInterpretJob.onboarding !== companyOnboardingFlow) {
+            jobPatch.onboarding = companyOnboardingFlow;
           }
-        } else {
-          const { error: updOnbErr } = await admin
+          const { error: updJobErr } = await admin
             .from("focus_get_sync_nfe_interpret_jobs")
-            .update({ onboarding: companyOnboardingFlow })
-            .eq("id", existingJob.id);
-          if (updOnbErr) {
+            .update(jobPatch)
+            .eq("id", activeInterpretJob.id);
+          if (updJobErr) {
             console.warn(
               LOG,
-              "interpret_job_onboarding",
+              "interpret_job_update",
               companyId,
-              updOnbErr.message,
+              updJobErr.message,
             );
+          }
+          logPhase("interpret_job_ja_ativo", {
+            exec_id: execId,
+            staging_exec_id: stagingExecId,
+            company_id: companyId,
+            job_id: activeInterpretJob.id,
+            job_status: activeInterpretJob.status,
+            notas_staging_novas: notasEncontradas,
+            staging_xml_total: stagingXmlTotal,
+          });
+        } else {
+          const { data: existingJob, error: selJobErr } = await admin
+            .from("focus_get_sync_nfe_interpret_jobs")
+            .select("id,status")
+            .eq("exec_id", stagingExecId)
+            .eq("company_id", companyId)
+            .maybeSingle();
+          if (selJobErr) {
+            console.warn(
+              LOG,
+              "interpret_job_select",
+              companyId,
+              selJobErr.message,
+            );
+          } else if (!existingJob?.id) {
+            const { error: insJobErr } = await admin
+              .from("focus_get_sync_nfe_interpret_jobs")
+              .insert({
+                exec_id: stagingExecId,
+                company_id: companyId,
+                status: "pending",
+                onboarding: companyOnboardingFlow,
+                staging_process_offset: 0,
+                staging_xml_total: stagingXmlTotal,
+              });
+            if (insJobErr) {
+              console.warn(
+                LOG,
+                "interpret_job_insert",
+                companyId,
+                insJobErr.message,
+              );
+            } else {
+              logPhase("interpret_job_enfileirado", {
+                exec_id: stagingExecId,
+                company_id: companyId,
+                onboarding: companyOnboardingFlow,
+                notas_staging: notasEncontradas,
+                staging_xml_total: stagingXmlTotal,
+              });
+            }
           }
         }
+      } else if (notasEncontradas > 0) {
+        logPhase("interpret_job_omitido_sem_xml", {
+          exec_id: stagingExecId,
+          company_id: companyId,
+          notas_staging_sem_xml: notasEncontradas,
+        });
       }
+
+      const shouldPersistCursor = hadSuccessfulListFetch;
 
       logPhase("empresa_fim", {
         exec_id: execId,
         company_id: companyId,
         cnpj: cnpjDigits,
         ok: companySyncOk,
+        cursor_sera_persistido: shouldPersistCursor,
+        had_successful_list_fetch: hadSuccessfulListFetch,
         notas_staging: notasEncontradas,
         buscas_focus: quantasBuscas,
         onboarding_flow: companyOnboardingFlow,
-        onboarding_fiscal: summarizeOnboardingFiscal(obRaw),
+        onboarding_fiscal: summarizeOnboardingFiscal(obFresh),
+        listagem_concluida: listagemConcluida,
+        staging_exec_id: stagingExecId,
         versao_final: versaoFinal,
         ...temposDeProcessamento,
       });
 
-      if (companySyncOk) {
+      let cursorFoiPersistido = false;
+      if (shouldPersistCursor) {
         const { error: cursorErr } = await persistFocusNfeSyncCursor(
           admin,
           companyId,
-          focusnfe,
           versaoFinal,
         );
         if (cursorErr) {
           console.warn(LOG, "focusnfe_cursor_persist", companyId, cursorErr);
         } else {
+          cursorFoiPersistido = true;
           logPhase("focusnfe_cursor_persistido", {
             exec_id: execId,
             company_id: companyId,
             versao_final: versaoFinal,
+            parcial: !companySyncOk,
           });
         }
+      } else {
+        logPhase("focusnfe_cursor_nao_persistido", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: "sem_consulta_focus_ok",
+          company_sync_ok: companySyncOk,
+          had_successful_list_fetch: hadSuccessfulListFetch,
+          buscas_focus: quantasBuscas,
+        });
+      }
+
+      if (companySyncOk) {
         detail.push({
           company_id: companyId,
           cnpj: cnpjDigits,
@@ -1436,6 +1788,7 @@ Deno.serve(async (req) => {
           quantasBuscasForamExecutadas: quantasBuscas,
           versao_final: versaoFinal,
           rodizio_tier: item.tier,
+          cursor_persistido: cursorFoiPersistido,
           temposDeProcessamento,
         });
       }
