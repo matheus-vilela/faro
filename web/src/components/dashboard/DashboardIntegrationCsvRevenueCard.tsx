@@ -112,7 +112,7 @@ export function DashboardIntegrationCsvRevenueCard({
       return {
         title: "À espera da sincronização EPOC",
         subtitle:
-          "Quando a sincronização EPOC correr, o progresso aparece aqui até à primeira importação estar concluída.",
+          "Quando a sincronização EPOC iniciar, todas as vendas serão processadas e o progresso aparecerá aqui.<br/><strong>Vendas, fichas técnicas, produtos e o estoque serão identificados e cadastrados automaticamente.</strong>",
         showSpinner: true,
         icon: "sync" as const,
       };
@@ -224,7 +224,9 @@ export function DashboardIntegrationCsvRevenueCard({
                 {title}
               </h3>
               <p className="mt-1 text-sm font-medium text-sky-950/90 dark:text-sky-100/90">
-                {subtitle}
+                <span
+                  dangerouslySetInnerHTML={{ __html: subtitle as string }}
+                />
               </p>
             </div>
           </div>
@@ -271,17 +273,19 @@ export function DashboardIntegrationCsvRevenueCard({
           </div>
         </div>
 
-        <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-sky-950/15 dark:bg-sky-100/20">
-          <div
-            className="h-full rounded-full bg-linear-to-r from-sky-500 to-cyan-500 transition-all"
-            style={{ width: `${barWidth}%` }}
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={barWidth}
-            aria-label="Progresso do onboarding EPOC"
-          />
-        </div>
+        {processingSales && (
+          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-sky-950/15 dark:bg-sky-100/20">
+            <div
+              className="h-full rounded-full bg-linear-to-r from-sky-500 to-cyan-500 transition-all"
+              style={{ width: `${barWidth}%` }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={barWidth}
+              aria-label="Progresso do onboarding EPOC"
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -338,13 +338,8 @@ export function buildNewProductCatalogFromNfeLine(input: {
         }
       }
     } else if (invoiceCountable === "mco") {
-      conversions.push({
-        primary_qty: 1,
-        primary_unit_code: stockUnit,
-        secondary_qty: 1,
-        secondary_unit_code: "mco",
-      });
-      notes.push("1 unidade de estoque = 1 mco");
+      // Estoque já é mco; conversão mco→mco viola o trigger (secundária = estoque).
+      notes.push("Unidade de estoque: maço (mco)");
     }
 
     if (notes.length > 0) {
@@ -367,7 +362,8 @@ export function buildNewProductCatalogFromNfeLine(input: {
       catalogName,
       stockUnit: "un",
       conversions: dedupeConversions(
-        expandMassVolumeConversionFamily(invNorm, 100, "G"),
+        // primary_unit_code deve ser a unidade de estoque ("un"), não a unidade da NF-e.
+        expandMassVolumeConversionFamily("un", 100, "G"),
       ),
       registrationNote: "Nota em massa: estoque em un com ponte 1 un = 100 g",
     };
@@ -377,7 +373,7 @@ export function buildNewProductCatalogFromNfeLine(input: {
       catalogName,
       stockUnit: "un",
       conversions: dedupeConversions(
-        expandMassVolumeConversionFamily(invNorm, 100, "ML"),
+        expandMassVolumeConversionFamily("un", 100, "ML"),
       ),
       registrationNote: "Nota em volume: estoque em un com ponte 1 un = 100 ml",
     };
@@ -404,20 +400,52 @@ export async function insertProductUnitConversions(
   logPrefix: string,
 ): Promise<void> {
   if (!conversions.length) return;
+
+  const { data: productRow, error: productErr } = await supabase
+    .from("products")
+    .select("unit")
+    .eq("id", productId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (productErr || !productRow?.unit) {
+    console.error(
+      logPrefix,
+      "product_unit_conversions",
+      "produto_nao_encontrado",
+      productErr?.message ?? productId,
+    );
+    return;
+  }
+  const stockUnit = String(productRow.unit).trim().toLowerCase();
+
   for (const c of conversions) {
+    const secondary = String(c.secondary_unit_code).trim().toLowerCase();
+    if (!secondary || secondary === stockUnit) {
+      console.warn(
+        logPrefix,
+        "product_unit_conversions_skip",
+        JSON.stringify({
+          product_id: productId,
+          motivo: "secundaria_igual_estoque_ou_vazia",
+          secondary,
+          stock_unit: stockUnit,
+        }),
+      );
+      continue;
+    }
     const { error } = await supabase.from("product_unit_conversions").insert({
       company_id: companyId,
       product_id: productId,
       primary_qty: c.primary_qty,
-      primary_unit_code: c.primary_unit_code,
+      primary_unit_code: stockUnit,
       secondary_qty: c.secondary_qty,
-      secondary_unit_code: c.secondary_unit_code,
+      secondary_unit_code: secondary,
     });
     if (error) {
       console.error(
         logPrefix,
         "product_unit_conversions",
-        c.secondary_unit_code,
+        secondary,
         error.message,
       );
     }

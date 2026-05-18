@@ -55,6 +55,20 @@ Deno.test("buildNewProductCatalogFromNfeLine: 24un no nome → 1 cx = 24 un", ()
   assertEquals(un?.secondary_qty, 24);
 });
 
+Deno.test("buildNewProductCatalogFromNfeLine: nota em kg → estoque un, primary da conversão é un", () => {
+  const r = buildNewProductCatalogFromNfeLine({
+    productName: "AÇÚCAR CRISTAL",
+    invoiceUnitRaw: "KG",
+  });
+  assertEquals(r.stockUnit, "un");
+  assert(r.conversions.length > 0);
+  for (const c of r.conversions) {
+    assertEquals(c.primary_unit_code, "un");
+  }
+  const g = r.conversions.find((c) => c.secondary_unit_code === "g");
+  assert(g != null);
+});
+
 Deno.test("buildNewProductCatalogFromNfeLine: nome limpo sem 10x1kg", () => {
   const r = buildNewProductCatalogFromNfeLine({
     productName: "AÇUCAR CARAVELAS 10X1KG",

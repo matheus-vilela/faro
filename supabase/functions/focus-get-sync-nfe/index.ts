@@ -15,7 +15,9 @@
  * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
  * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
  * Com `onboarding` / `onboarding_retry`, ignora unidades com `onboarding_fiscal.completed` ou fora da fase de listagem (`sync: false`).
- * Sem `onboarding`, ignora unidades com onboarding fiscal ainda pendente.
+ * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) entram
+ * automaticamente com prioridade; demais elegíveis rodam em rodízio por `focusnfe.nfes_recebidas_ultima_sync_at`.
+ * Após sync OK, persiste `nfes_recebidas_ultima_versao` e `nfes_recebidas_ultima_sync_at` no JSON `focusnfe`.
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
@@ -225,6 +227,240 @@ function isOnboardingFiscalListSyncPhase(raw: unknown): boolean {
       ? (raw as Record<string, unknown>)
       : {};
   return o["sync"] !== false;
+}
+
+/** Resumo compacto de `onboarding_fiscal` para logs. */
+function summarizeOnboardingFiscal(raw: unknown): Record<string, unknown> {
+  const norm = normalizeOnboardingFiscal(raw);
+  const o =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    completed: norm.completed,
+    sync: norm.sync,
+    pending: isOnboardingFiscalPending(raw),
+    list_sync_phase: isOnboardingFiscalListSyncPhase(raw),
+    max_nfes_sync: norm.max_nfes_sync,
+    nfes_sync: norm.nfes_sync,
+    nfes_ignored: norm.nfes_ignored,
+    sefaz_unavailable: o["sefaz_unavailable"] === true,
+    sefaz_retry_at:
+      typeof o["sefaz_retry_at"] === "string" ? o["sefaz_retry_at"] : null,
+  };
+}
+
+function logPhase(
+  phase: string,
+  payload: Record<string, unknown>,
+): void {
+  console.log(LOG, JSON.stringify({ fase: phase, ...payload }));
+}
+
+function nfesRecebidasUltimaSyncAtMs(row: CoRow): number {
+  const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
+  const raw = focusnfe.nfes_recebidas_ultima_sync_at;
+  if (typeof raw !== "string" || !raw.trim()) return 0;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isSefazRetryDue(retryAtRaw: unknown): boolean {
+  if (retryAtRaw == null || String(retryAtRaw).trim() === "") return true;
+  const t = Date.parse(String(retryAtRaw));
+  if (!Number.isFinite(t)) return true;
+  return t <= Date.now();
+}
+
+type ScheduledCompany = {
+  row: CoRow;
+  tier: number;
+  last_sync_ms: number;
+  effective_onboarding: boolean;
+  reset_onboarding_metrics: boolean;
+  clear_sefaz_retry: boolean;
+};
+
+function classifyCompanyForSync(
+  row: CoRow,
+  bodyOnboarding: boolean,
+  bodyOnboardingRetry: boolean,
+): {
+  include: boolean;
+  skip?: string;
+  tier: number;
+  effectiveOnboarding: boolean;
+  resetOnboardingMetrics: boolean;
+  clearSefazRetry: boolean;
+} {
+  const obRaw = row.onboarding_fiscal;
+  const pending = isOnboardingFiscalPending(obRaw);
+  const listPhase = isOnboardingFiscalListSyncPhase(obRaw);
+  const o =
+    obRaw && typeof obRaw === "object" && !Array.isArray(obRaw)
+      ? (obRaw as Record<string, unknown>)
+      : {};
+  const sefazUnavailable = o["sefaz_unavailable"] === true;
+  const sefazRetryDue = sefazUnavailable && isSefazRetryDue(o["sefaz_retry_at"]);
+
+  if (bodyOnboardingRetry) {
+    if (!pending) {
+      return {
+        include: false,
+        skip: "onboarding_fiscal já concluído",
+        tier: 99,
+        effectiveOnboarding: false,
+        resetOnboardingMetrics: false,
+        clearSefazRetry: false,
+      };
+    }
+    return {
+      include: true,
+      tier: 0,
+      effectiveOnboarding: true,
+      resetOnboardingMetrics: false,
+      clearSefazRetry: true,
+    };
+  }
+
+  if (bodyOnboarding) {
+    if (!pending) {
+      return {
+        include: false,
+        skip: "onboarding_fiscal já concluído",
+        tier: 99,
+        effectiveOnboarding: false,
+        resetOnboardingMetrics: false,
+        clearSefazRetry: false,
+      };
+    }
+    if (!listPhase) {
+      return {
+        include: false,
+        skip:
+          "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
+        tier: 99,
+        effectiveOnboarding: false,
+        resetOnboardingMetrics: false,
+        clearSefazRetry: false,
+      };
+    }
+    return {
+      include: true,
+      tier: 0,
+      effectiveOnboarding: true,
+      resetOnboardingMetrics: true,
+      clearSefazRetry: false,
+    };
+  }
+
+  if (pending && listPhase) {
+    return {
+      include: true,
+      tier: 0,
+      effectiveOnboarding: true,
+      resetOnboardingMetrics: false,
+      clearSefazRetry: false,
+    };
+  }
+  if (pending && sefazRetryDue) {
+    return {
+      include: true,
+      tier: 1,
+      effectiveOnboarding: true,
+      resetOnboardingMetrics: false,
+      clearSefazRetry: true,
+    };
+  }
+  if (pending) {
+    return {
+      include: false,
+      skip:
+        "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
+      tier: 99,
+      effectiveOnboarding: false,
+      resetOnboardingMetrics: false,
+      clearSefazRetry: false,
+    };
+  }
+
+  return {
+    include: true,
+    tier: 2,
+    effectiveOnboarding: false,
+    resetOnboardingMetrics: false,
+    clearSefazRetry: false,
+  };
+}
+
+function scheduleCompaniesForRun(
+  rows: CoRow[],
+  maxCompanies: number,
+  bodyOnboarding: boolean,
+  bodyOnboardingRetry: boolean,
+  skipRotation: boolean,
+): { scheduled: ScheduledCompany[]; waitlisted: CoRow[] } {
+  const candidates: ScheduledCompany[] = [];
+  const waitlisted: CoRow[] = [];
+
+  for (const row of rows) {
+    const companyId = String(row.id);
+    const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
+    const cnpjDigits = String(row.document ?? "")
+      .replace(/\D/g, "")
+      .slice(0, 14);
+    if (!focusIdEmpresa(focusnfe) || cnpjDigits.length !== 14) continue;
+
+    const cls = classifyCompanyForSync(row, bodyOnboarding, bodyOnboardingRetry);
+    if (!cls.include) {
+      waitlisted.push(row);
+      continue;
+    }
+
+    candidates.push({
+      row,
+      tier: cls.tier,
+      last_sync_ms: nfesRecebidasUltimaSyncAtMs(row),
+      effective_onboarding: cls.effectiveOnboarding,
+      reset_onboarding_metrics: cls.resetOnboardingMetrics,
+      clear_sefaz_retry: cls.clearSefazRetry,
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    return a.last_sync_ms - b.last_sync_ms;
+  });
+
+  const limit = skipRotation ? candidates.length : maxCompanies;
+  return {
+    scheduled: candidates.slice(0, limit),
+    waitlisted: skipRotation
+      ? waitlisted
+      : [...waitlisted, ...candidates.slice(limit).map((c) => c.row)],
+  };
+}
+
+async function persistFocusNfeSyncCursor(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  focusnfe: Record<string, unknown>,
+  versaoFinal: number,
+): Promise<{ error?: string }> {
+  const next = {
+    ...focusnfe,
+    nfes_recebidas_ultima_versao: Math.max(0, Math.floor(versaoFinal)),
+    nfes_recebidas_ultima_sync_at: new Date().toISOString(),
+  };
+  const { error } = await admin
+    .from("companies")
+    .update({
+      focusnfe: next,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", companyId);
+  if (error) return { error: error.message };
+  return {};
 }
 
 type NfeCabLike = Record<string, unknown>;
@@ -578,10 +814,21 @@ Deno.serve(async (req) => {
 
     const execId = crypto.randomUUID();
 
-    // Elegíveis: id_empresa Focus + CNPJ 14 dígitos + cap empresas
+    logPhase("exec_inicio", {
+      exec_id: execId,
+      modo: isCron ? "cron" : "manual",
+      onboarding: onboardingFlow,
+      onboarding_retry: onboardingRetry,
+      company_id_filtro: cronFilterCompanyId || null,
+      empresas_candidatas: companiesToProcess.length,
+      max_empresas_por_run: maxCompanies,
+      max_paginas_por_empresa: maxPages,
+      versao_manual: bodyVersaoInicial,
+    });
+
     const detail: Array<Record<string, unknown>> = [];
-    let eligibleSlots = 0;
-    const eligible: CoRow[] = [];
+    const skipRotation =
+      isManualSingle || Boolean(cronFilterCompanyId) || companiesToProcess.length <= 1;
 
     for (const row of companiesToProcess) {
       const companyId = String(row.id);
@@ -590,54 +837,97 @@ Deno.serve(async (req) => {
         .replace(/\D/g, "")
         .slice(0, 14);
       if (!focusIdEmpresa(focusnfe)) {
+        logPhase("elegibilidade_skip", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: "sem id_empresa Focus",
+        });
         detail.push({ company_id: companyId, skipped: "sem id_empresa Focus" });
         continue;
       }
       if (cnpjDigits.length !== 14) {
+        logPhase("elegibilidade_skip", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: "document sem CNPJ 14 dígitos",
+          cnpj_len: cnpjDigits.length,
+        });
         detail.push({
           company_id: companyId,
           skipped: "document sem CNPJ 14 dígitos",
         });
         continue;
       }
-      if (eligibleSlots >= maxCompanies) continue;
-      eligibleSlots += 1;
-      eligible.push(row);
+
+      const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+      if (!cls.include) {
+        logPhase("onboarding_fiscal_skip", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: cls.skip,
+          onboarding_fiscal: summarizeOnboardingFiscal(row.onboarding_fiscal),
+        });
+        detail.push({ company_id: companyId, skipped: cls.skip });
+      }
     }
 
+    const { scheduled, waitlisted } = scheduleCompaniesForRun(
+      companiesToProcess,
+      maxCompanies,
+      onboardingFlow,
+      onboardingRetry,
+      skipRotation,
+    );
+
+    for (const row of waitlisted) {
+      const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
+      const cnpjDigits = String(row.document ?? "")
+        .replace(/\D/g, "")
+        .slice(0, 14);
+      if (!focusIdEmpresa(focusnfe) || cnpjDigits.length !== 14) continue;
+      const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+      if (cls.include) {
+        logPhase("rodizio_aguardando", {
+          exec_id: execId,
+          company_id: row.id,
+          tier: cls.tier,
+          ultima_sync_ms: nfesRecebidasUltimaSyncAtMs(row),
+        });
+        detail.push({
+          company_id: row.id,
+          skipped: "aguardando rodízio (outra unidade com prioridade neste run)",
+        });
+      }
+    }
+
+    logPhase("rodizio_selecao", {
+      exec_id: execId,
+      candidatas: companiesToProcess.length,
+      agendadas: scheduled.length,
+      aguardando_rodizio: waitlisted.filter((row) => {
+        const cls = classifyCompanyForSync(row, onboardingFlow, onboardingRetry);
+        return cls.include;
+      }).length,
+      skip_rotation: skipRotation,
+      fila: scheduled.map((s, i) => ({
+        posicao: i + 1,
+        company_id: s.row.id,
+        tier: s.tier,
+        ultima_sync_ms: s.last_sync_ms,
+        onboarding: s.effective_onboarding,
+      })),
+    });
+
     // --- Passo 2: para cada unidade, GET na Focus (headers + versão) e staging só nfe_completa true ---
-    for (const row of eligible) {
+    for (const item of scheduled) {
+      const row = item.row;
       const companyId = String(row.id);
       const focusnfe = (row.focusnfe ?? {}) as Record<string, unknown>;
       const cnpjDigits = String(row.document ?? "")
         .replace(/\D/g, "")
         .slice(0, 14);
       const obRaw = row.onboarding_fiscal;
-
-      if (onboardingFlow || onboardingRetry) {
-        if (!isOnboardingFiscalPending(obRaw)) {
-          detail.push({
-            company_id: companyId,
-            skipped: "onboarding_fiscal já concluído",
-          });
-          continue;
-        }
-        if (!onboardingRetry && !isOnboardingFiscalListSyncPhase(obRaw)) {
-          detail.push({
-            company_id: companyId,
-            skipped:
-              "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
-          });
-          continue;
-        }
-      } else if (isOnboardingFiscalPending(obRaw)) {
-        detail.push({
-          company_id: companyId,
-          skipped:
-            "onboarding_fiscal pendente — use sincronização com onboarding: true",
-        });
-        continue;
-      }
+      const companyOnboardingFlow = item.effective_onboarding;
 
       const storedRaw = Number(focusnfe.nfes_recebidas_ultima_versao);
       const cursorPersistido =
@@ -655,8 +945,27 @@ Deno.serve(async (req) => {
       const tCompany0 = performance.now();
       const xmlGapMs = throttleMsBetweenXmlDownloads();
       let companySyncOk = true;
+      let versaoFinal = versao;
 
-      if (onboardingFlow && !onboardingRetry) {
+      logPhase("empresa_inicio", {
+        exec_id: execId,
+        company_id: companyId,
+        cnpj: cnpjDigits,
+        id_empresa_focus: focusIdEmpresa(focusnfe),
+        versao_inicial: versao,
+        versao_persistida: cursorPersistido,
+        versao_override_manual:
+          isManualSingle && bodyVersaoInicial !== null
+            ? bodyVersaoInicial
+            : null,
+        onboarding_fiscal: summarizeOnboardingFiscal(obRaw),
+        onboarding_flow: companyOnboardingFlow,
+        onboarding_retry: item.clear_sefaz_retry,
+        rodizio_tier: item.tier,
+        ultima_sync_ms: item.last_sync_ms,
+      });
+
+      if (item.reset_onboarding_metrics) {
         const { error: obResetErr } = await applyOnboardingFiscalDefaults(
           admin,
           companyId,
@@ -670,15 +979,11 @@ Deno.serve(async (req) => {
           });
           continue;
         }
-        console.log(
-          LOG,
-          JSON.stringify({
-            fase: "onboarding_processamento",
-            company_id: companyId,
-            exec_id: execId,
-          }),
-        );
-      } else if (onboardingFlow && onboardingRetry) {
+        logPhase("onboarding_processamento", {
+          exec_id: execId,
+          company_id: companyId,
+        });
+      } else if (item.clear_sefaz_retry) {
         const { error: clrErr } = await clearOnboardingFiscalSefazForRetry(
           admin,
           companyId,
@@ -686,14 +991,11 @@ Deno.serve(async (req) => {
         if (clrErr) {
           console.warn(LOG, "onboarding_fiscal_retry_clear", companyId, clrErr);
         }
-        console.log(
-          LOG,
-          JSON.stringify({
-            fase: "onboarding_retry",
-            company_id: companyId,
-            exec_id: execId,
-          }),
-        );
+        logPhase("onboarding_retry", {
+          exec_id: execId,
+          company_id: companyId,
+          onboarding_fiscal: summarizeOnboardingFiscal(obRaw),
+        });
       }
 
       for (let page = 0; page < maxPages; page++) {
@@ -710,10 +1012,16 @@ Deno.serve(async (req) => {
             },
           });
         } catch (e) {
-          console.error(LOG, "fetch lista", companyId, e);
+          logPhase("focus_lista_erro", {
+            exec_id: execId,
+            company_id: companyId,
+            pagina: page + 1,
+            versao_query: versao,
+            erro: e instanceof Error ? e.message : String(e),
+          });
           companySyncOk = false;
           const errMsg = "falha de rede na lista Focus";
-          if (onboardingFlow) {
+          if (companyOnboardingFlow) {
             await applyOnboardingFiscalSefazUnavailable(
               admin,
               companyId,
@@ -725,7 +1033,7 @@ Deno.serve(async (req) => {
             cnpj: cnpjDigits,
             ok: false,
             error: errMsg,
-            sefaz_unavailable: onboardingFlow,
+            sefaz_unavailable: companyOnboardingFlow,
             quantasBuscasForamExecutadas: quantasBuscas,
             notasEncontradas: 0,
           });
@@ -740,9 +1048,17 @@ Deno.serve(async (req) => {
         const listText = await listRes.text();
         if (!listRes.ok) {
           const errMsg = `Focus lista HTTP ${listRes.status}: ${listText.slice(0, 200)}`;
+          logPhase("focus_lista_erro", {
+            exec_id: execId,
+            company_id: companyId,
+            pagina: page + 1,
+            versao_query: versao,
+            http_status: listRes.status,
+            erro: errMsg.slice(0, 300),
+          });
           companySyncOk = false;
           if (
-            onboardingFlow &&
+            companyOnboardingFlow &&
             isSefazUnavailableListError(listRes.status, false)
           ) {
             await applyOnboardingFiscalSefazUnavailable(
@@ -757,7 +1073,7 @@ Deno.serve(async (req) => {
             ok: false,
             error: errMsg,
             sefaz_unavailable:
-              onboardingFlow &&
+              companyOnboardingFlow &&
               isSefazUnavailableListError(listRes.status, false),
             quantasBuscasForamExecutadas: quantasBuscas,
             notasEncontradas: notasEncontradas,
@@ -771,7 +1087,7 @@ Deno.serve(async (req) => {
         } catch {
           const errMsg = `Resposta lista inválida (HTTP ${listRes.status})`;
           companySyncOk = false;
-          if (onboardingFlow) {
+          if (companyOnboardingFlow) {
             await applyOnboardingFiscalSefazUnavailable(
               admin,
               companyId,
@@ -783,7 +1099,7 @@ Deno.serve(async (req) => {
             cnpj: cnpjDigits,
             ok: false,
             error: errMsg,
-            sefaz_unavailable: onboardingFlow,
+            sefaz_unavailable: companyOnboardingFlow,
             quantasBuscasForamExecutadas: quantasBuscas,
             notasEncontradas: notasEncontradas,
           });
@@ -793,7 +1109,7 @@ Deno.serve(async (req) => {
         if (!Array.isArray(lista)) {
           const errMsg = `Formato de lista inesperado (HTTP ${listRes.status})`;
           companySyncOk = false;
-          if (onboardingFlow) {
+          if (companyOnboardingFlow) {
             await applyOnboardingFiscalSefazUnavailable(
               admin,
               companyId,
@@ -805,7 +1121,7 @@ Deno.serve(async (req) => {
             cnpj: cnpjDigits,
             ok: false,
             error: errMsg,
-            sefaz_unavailable: onboardingFlow,
+            sefaz_unavailable: companyOnboardingFlow,
             quantasBuscasForamExecutadas: quantasBuscas,
             notasEncontradas: notasEncontradas,
           });
@@ -826,6 +1142,21 @@ Deno.serve(async (req) => {
             chave: String(cab["chave_nfe"] ?? "").replace(/\D/g, ""),
           }))
           .filter((x) => x.chave.length === 44);
+
+        logPhase("focus_lista_pagina", {
+          exec_id: execId,
+          company_id: companyId,
+          pagina: page + 1,
+          versao_query: versao,
+          http_status: listRes.status,
+          http_ms: focusHttpMs[focusHttpMs.length - 1],
+          x_total_count: xTotalCount,
+          x_max_version: xMaxVersion,
+          itens_lista: cabList.length,
+          nfe_completa_autorizada: completas.length,
+          com_chave_44: completasComChave.length,
+          notas_staging_acumuladas: notasEncontradas,
+        });
 
         for (
           let chunkStart = 0;
@@ -909,6 +1240,13 @@ Deno.serve(async (req) => {
 
         // x-total-count == 0 → não há mais notas a consultar (regra Focus / pedido de produto).
         if (xTotalCount === 0) {
+          logPhase("paginacao_fim", {
+            exec_id: execId,
+            company_id: companyId,
+            motivo: "x_total_count_zero",
+            pagina: page + 1,
+            versao_final: versao,
+          });
           break;
         }
 
@@ -918,19 +1256,56 @@ Deno.serve(async (req) => {
             Number.isFinite(xMaxVersion) &&
             xMaxVersion > versao
           ) {
+            logPhase("paginacao_avanco", {
+              exec_id: execId,
+              company_id: companyId,
+              motivo: "lista_vazia_avanca_versao",
+              versao_anterior: versao,
+              versao_nova: xMaxVersion,
+            });
             versao = xMaxVersion;
+            versaoFinal = versao;
             continue;
           }
+          logPhase("paginacao_fim", {
+            exec_id: execId,
+            company_id: companyId,
+            motivo: "lista_vazia_sem_avanco",
+            pagina: page + 1,
+            versao_final: versao,
+          });
           break;
         }
 
         if (xMaxVersion === null || !Number.isFinite(xMaxVersion)) {
+          logPhase("paginacao_fim", {
+            exec_id: execId,
+            company_id: companyId,
+            motivo: "x_max_version_invalido",
+            pagina: page + 1,
+            x_max_version: xMaxVersion,
+          });
           break;
         }
         if (xMaxVersion === versao) {
+          logPhase("paginacao_fim", {
+            exec_id: execId,
+            company_id: companyId,
+            motivo: "versao_estavel",
+            pagina: page + 1,
+            versao_final: versao,
+          });
           break;
         }
+        logPhase("paginacao_avanco", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: "x_max_version",
+          versao_anterior: versao,
+          versao_nova: xMaxVersion,
+        });
         versao = xMaxVersion;
+        versaoFinal = versao;
       }
 
       const temposDeProcessamento = {
@@ -940,7 +1315,7 @@ Deno.serve(async (req) => {
         wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
       };
 
-      if (onboardingFlow && companySyncOk) {
+      if (companyOnboardingFlow && companySyncOk) {
         const { error: obErr } = await mergeOnboardingFiscalMaxNfes(
           admin,
           companyId,
@@ -949,15 +1324,11 @@ Deno.serve(async (req) => {
         if (obErr) {
           console.warn(LOG, "onboarding_fiscal_max_nfes", companyId, obErr);
         } else {
-          console.log(
-            LOG,
-            "onboarding_fiscal_max_nfes_final",
-            JSON.stringify({
-              company_id: companyId,
-              exec_id: execId,
-              max_nfes_sync: notasEncontradas,
-            }),
-          );
+          logPhase("onboarding_fiscal_max_nfes_final", {
+            exec_id: execId,
+            company_id: companyId,
+            max_nfes_sync: notasEncontradas,
+          });
         }
       }
 
@@ -982,7 +1353,7 @@ Deno.serve(async (req) => {
               exec_id: execId,
               company_id: companyId,
               status: "pending",
-              onboarding: onboardingFlow,
+              onboarding: companyOnboardingFlow,
             });
           if (insJobErr) {
             console.warn(
@@ -991,11 +1362,18 @@ Deno.serve(async (req) => {
               companyId,
               insJobErr.message,
             );
+          } else {
+            logPhase("interpret_job_enfileirado", {
+              exec_id: execId,
+              company_id: companyId,
+              onboarding: companyOnboardingFlow,
+              notas_staging: notasEncontradas,
+            });
           }
         } else {
           const { error: updOnbErr } = await admin
             .from("focus_get_sync_nfe_interpret_jobs")
-            .update({ onboarding: onboardingFlow })
+            .update({ onboarding: companyOnboardingFlow })
             .eq("id", existingJob.id);
           if (updOnbErr) {
             console.warn(
@@ -1008,17 +1386,35 @@ Deno.serve(async (req) => {
         }
       }
 
-      const linhaLog = {
-        cnpj: cnpjDigits,
-        notasEncontradas,
-        quantasBuscasForamExecutadas: quantasBuscas,
-        temposDeProcessamento,
-        company_id: companyId,
+      logPhase("empresa_fim", {
         exec_id: execId,
-      };
-      console.log(LOG, JSON.stringify(linhaLog));
+        company_id: companyId,
+        cnpj: cnpjDigits,
+        ok: companySyncOk,
+        notas_staging: notasEncontradas,
+        buscas_focus: quantasBuscas,
+        onboarding_flow: companyOnboardingFlow,
+        onboarding_fiscal: summarizeOnboardingFiscal(obRaw),
+        versao_final: versaoFinal,
+        ...temposDeProcessamento,
+      });
 
       if (companySyncOk) {
+        const { error: cursorErr } = await persistFocusNfeSyncCursor(
+          admin,
+          companyId,
+          focusnfe,
+          versaoFinal,
+        );
+        if (cursorErr) {
+          console.warn(LOG, "focusnfe_cursor_persist", companyId, cursorErr);
+        } else {
+          logPhase("focusnfe_cursor_persistido", {
+            exec_id: execId,
+            company_id: companyId,
+            versao_final: versaoFinal,
+          });
+        }
         detail.push({
           company_id: companyId,
           cnpj: cnpjDigits,
@@ -1026,18 +1422,40 @@ Deno.serve(async (req) => {
           exec_id: execId,
           notasEncontradas,
           quantasBuscasForamExecutadas: quantasBuscas,
+          versao_final: versaoFinal,
+          rodizio_tier: item.tier,
           temposDeProcessamento,
         });
       }
     }
+
+    const wallTotalMs = Math.round(performance.now() - tWall0);
+    const processadasOk = detail.filter((d) => d.ok === true).length;
+    const ignoradas = detail.filter((d) => typeof d.skipped === "string").length;
+    const comErro = detail.filter((d) => d.ok === false).length;
+
+    logPhase("exec_fim", {
+      exec_id: execId,
+      wall_total_ms: wallTotalMs,
+      agendadas: scheduled.length,
+      processadas_ok: processadasOk,
+      ignoradas,
+      com_erro: comErro,
+      onboarding: onboardingFlow,
+      onboarding_retry: onboardingRetry,
+    });
 
     return json({
       ok: true,
       exec_id: execId,
       detail,
       metrics: {
-        empresas_processadas: eligible.length,
-        wall_total_ms: Math.round(performance.now() - tWall0),
+        empresas_processadas: scheduled.length,
+        empresas_agendadas: scheduled.length,
+        empresas_ok: processadasOk,
+        empresas_ignoradas: ignoradas,
+        empresas_erro: comErro,
+        wall_total_ms: wallTotalMs,
       },
     });
   } catch (e) {
