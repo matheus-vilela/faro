@@ -160,97 +160,97 @@ function ProductPicker({
   const showCreateRow = enableCreateProduct && !!companyId;
   return (
     <>
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full justify-between font-normal"
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-between font-normal"
+          >
+            <span className="truncate text-left">
+              {selected ? selected.name : placeholder}
+            </span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[var(--radix-popover-trigger-width)] p-0"
+          onWheel={(e) => e.stopPropagation()}
         >
-          <span className="truncate text-left">
-            {selected ? selected.name : placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-[var(--radix-popover-trigger-width)] p-0"
-        onWheel={(e) => e.stopPropagation()}
-      >
-        <div className="border-b p-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar produto..."
-              className="h-9 pl-8"
-            />
+          <div className="border-b p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar produto..."
+                className="h-9 pl-8"
+              />
+            </div>
           </div>
-        </div>
-        <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
-          {filtered.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={cn(
-                "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
-                value === p.id && "bg-accent/80",
-              )}
-              onClick={() => {
-                onChange(p.id);
-                setOpen(false);
-                setQ("");
-              }}
-            >
-              {p.name}
-            </button>
-          ))}
-          {filtered.length === 0 && searchActive ? (
-            <p className="px-2 py-3 text-sm text-muted-foreground">
-              Nenhum produto encontrado.
-            </p>
-          ) : null}
-          {showCreateRow ? (
-            <div className="mt-1 border-t border-border p-1">
+          <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
+            {filtered.map((p) => (
               <button
+                key={p.id}
                 type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-2.5 text-left text-sm font-medium text-primary hover:bg-accent"
+                className={cn(
+                  "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                  value === p.id && "bg-accent/80",
+                )}
                 onClick={() => {
+                  onChange(p.id);
                   setOpen(false);
-                  setCreateOpen(true);
+                  setQ("");
                 }}
               >
-                <Plus className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 truncate">
-                  Cadastrar produto
-                  {searchActive ? (
-                    <span className="font-normal text-muted-foreground">
-                      {" "}
-                      · «{q.trim()}»
-                    </span>
-                  ) : null}
-                </span>
+                {p.name}
               </button>
-            </div>
-          ) : null}
-        </div>
-      </PopoverContent>
-    </Popover>
-    {companyId && enableCreateProduct ? (
-      <CreateProductSheet
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        companyId={companyId}
-        defaultName={q.trim()}
-        onSuccess={(product) => {
-          onProductCreated?.(product);
-          onChange(product.id);
-          setQ("");
-        }}
-      />
-    ) : null}
+            ))}
+            {filtered.length === 0 && searchActive ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">
+                Nenhum produto encontrado.
+              </p>
+            ) : null}
+            {showCreateRow ? (
+              <div className="mt-1 border-t border-border p-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-2.5 text-left text-sm font-medium text-primary hover:bg-accent"
+                  onClick={() => {
+                    setOpen(false);
+                    setCreateOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 truncate">
+                    Cadastrar produto
+                    {searchActive ? (
+                      <span className="font-normal text-muted-foreground">
+                        {" "}
+                        · «{q.trim()}»
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {companyId && enableCreateProduct ? (
+        <CreateProductSheet
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          companyId={companyId}
+          defaultName={q.trim()}
+          onSuccess={(product) => {
+            onProductCreated?.(product);
+            onChange(product.id);
+            setQ("");
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -388,8 +388,8 @@ function RecipeIngredientsAddPanel({
     if (oneInSelected == null) {
       return (
         <p className="text-[11px] text-amber-800 dark:text-amber-200">
-          Falta conversão para {systemUnitLabel(draftUnitCode)}. Busque a unidade
-          na lista e use «Cadastrar conversão».
+          Falta conversão para {systemUnitLabel(draftUnitCode)}. Busque a
+          unidade na lista e use «Cadastrar conversão».
         </p>
       );
     }
@@ -544,40 +544,40 @@ function RecipeIngredientsAddPanel({
 export const EstoqueReceitasPanel = forwardRef<
   EstoqueReceitasPanelHandle,
   {
-  companyId: string;
-  onStockChanged?: () => void;
-  /** Produto-alvo para vincular à ficha (saída em ficha nova ou saída/ingrediente em ficha existente). */
-  prefillNewRecipeOutputProductId?: string | null;
-  /**
-   * Se true (padrão), abre o sheet de nova receita assim que o produto estiver carregado (ex.: deep link em Produtos).
-   * Se false, só define o contexto de vínculo: o utilizador escolhe ficha na lista ou “Nova ficha técnica”.
-   */
-  prefillNewRecipeAutoOpen?: boolean;
-  /** Chamado após aplicar o preenchimento para limpar query string na URL. */
-  onPrefillConsumed?: () => void;
-  /** Só renderiza o sheet lateral (ex.: dashboard EPOC). */
-  sheetOnly?: boolean;
-  /** Sheet limitado a ingredientes; nome/rendimento/saída ficam ocultos. */
-  ingredientsOnly?: boolean;
-  /** Renderiza o editor no fluxo (sem Sheet), ex.: coluna direita no dashboard. */
-  embedInline?: boolean;
-  /** Abre esta receita no sheet após carregar o catálogo. */
-  initialOpenRecipeId?: string | null;
-  onSheetOpenChange?: (open: boolean) => void;
-}
+    companyId: string;
+    onStockChanged?: () => void;
+    /** Produto-alvo para vincular à ficha (saída em ficha nova ou saída/ingrediente em ficha existente). */
+    prefillNewRecipeOutputProductId?: string | null;
+    /**
+     * Se true (padrão), abre o sheet de nova receita assim que o produto estiver carregado (ex.: deep link em Produtos).
+     * Se false, só define o contexto de vínculo: o utilizador escolhe ficha na lista ou “Nova ficha técnica”.
+     */
+    prefillNewRecipeAutoOpen?: boolean;
+    /** Chamado após aplicar o preenchimento para limpar query string na URL. */
+    onPrefillConsumed?: () => void;
+    /** Só renderiza o sheet lateral (ex.: dashboard EPOC). */
+    sheetOnly?: boolean;
+    /** Sheet limitado a ingredientes; nome/rendimento/saída ficam ocultos. */
+    ingredientsOnly?: boolean;
+    /** Renderiza o editor no fluxo (sem Sheet), ex.: coluna direita no dashboard. */
+    embedInline?: boolean;
+    /** Abre esta receita no sheet após carregar o catálogo. */
+    initialOpenRecipeId?: string | null;
+    onSheetOpenChange?: (open: boolean) => void;
+  }
 >(function EstoqueReceitasPanel(
   {
-  companyId,
-  onStockChanged,
-  prefillNewRecipeOutputProductId,
-  prefillNewRecipeAutoOpen = true,
-  onPrefillConsumed,
-  sheetOnly = false,
-  ingredientsOnly = false,
-  embedInline = false,
-  initialOpenRecipeId,
-  onSheetOpenChange,
-},
+    companyId,
+    onStockChanged,
+    prefillNewRecipeOutputProductId,
+    prefillNewRecipeAutoOpen = true,
+    onPrefillConsumed,
+    sheetOnly = false,
+    ingredientsOnly = false,
+    embedInline = false,
+    initialOpenRecipeId,
+    onSheetOpenChange,
+  },
   ref,
 ) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -600,9 +600,9 @@ export const EstoqueReceitasPanel = forwardRef<
   const [linkContextProductId, setLinkContextProductId] = useState<
     string | null
   >(null);
-  const [savedIngsSnapshot, setSavedIngsSnapshot] = useState<NormalizedIngRow[]>(
-    [],
-  );
+  const [savedIngsSnapshot, setSavedIngsSnapshot] = useState<
+    NormalizedIngRow[]
+  >([]);
   const [unsavedLeaveOpen, setUnsavedLeaveOpen] = useState(false);
   const unsavedLeaveProceedRef = useRef<(() => void) | null>(null);
   const unsavedLeaveResolveRef = useRef<
@@ -721,6 +721,8 @@ export const EstoqueReceitasPanel = forwardRef<
           }
         }
         setSheetMode("edit");
+      } else if (embedInline && !ingredientsOnly) {
+        setSheetMode("edit");
       } else {
         setSheetMode("summary");
       }
@@ -731,7 +733,7 @@ export const EstoqueReceitasPanel = forwardRef<
       setSheetOpen(true);
       onSheetOpenChange?.(true);
     },
-    [ingredientsOnly, onSheetOpenChange, productById, products],
+    [embedInline, ingredientsOnly, onSheetOpenChange, productById, products],
   );
 
   const proceedUnsavedLeave = useCallback(() => {
@@ -1382,11 +1384,13 @@ export const EstoqueReceitasPanel = forwardRef<
                       <ChefHat className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0 space-y-0.5">
-                      <h3 className="text-base font-semibold text-foreground">
-                        Cadastrar insumos
+                      <h3 className="text-sm font-medium text-muted-foreground">
+                        {ingredientsOnly
+                          ? "Cadastrar ficha"
+                          : "Editar ficha técnica"}
                       </h3>
-                      {name.trim() ? (
-                        <p className="truncate text-sm text-muted-foreground">
+                      {ingredientsOnly && name.trim() ? (
+                        <p className="truncate text-md font-bold text-foreground">
                           {name}
                         </p>
                       ) : null}
@@ -1400,14 +1404,57 @@ export const EstoqueReceitasPanel = forwardRef<
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : ingredientsOnly ? (
+                      "Salvar ficha"
                     ) : (
-                      "Salvar insumos"
+                      "Salvar alterações"
                     )}
                   </Button>
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
                 <div className="space-y-4 p-4">
+                  {!ingredientsOnly ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Nome</Label>
+                        <Input
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Rendimento (porções por lote)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          value={batchYield}
+                          onChange={(e) => setBatchYield(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Produto de saída (opcional)</Label>
+                        <div className="space-y-2">
+                          <ProductPicker
+                            products={products}
+                            value={outputId}
+                            onChange={(id) => setOutputId(id)}
+                            placeholder="Selecionar produto de saída"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setOutputId("")}
+                          >
+                            Limpar seleção
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
                   <RecipeIngredientsAddPanel
                     key={editingRecipeId}
                     companyId={companyId}
@@ -1463,7 +1510,7 @@ export const EstoqueReceitasPanel = forwardRef<
                   <div className="min-w-0 flex-1 space-y-1 pr-2">
                     <SheetTitle className="text-xl font-semibold sm:text-2xl">
                       {ingredientsOnly
-                        ? "Cadastrar insumos"
+                        ? "Cadastrar ficha"
                         : editingRecipeId
                           ? sheetMode === "summary"
                             ? "Resumo da ficha técnica"

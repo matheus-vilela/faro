@@ -47,8 +47,8 @@ function RecipeListItem({
         className={cn(
           "flex h-full min-h-[6.25rem] flex-col rounded-xl border p-3 transition-colors w-full",
           isSelected
-            ? "border-violet-500/50 bg-violet-500/10 ring-1 ring-violet-500/30"
-            : "border-border/80 bg-background/60 hover:border-violet-500/25 hover:bg-muted/30",
+            ? "border-amber-500/50 bg-amber-500/10 ring-1 ring-amber-500/30"
+            : "border-border/80 bg-background/60 hover:border-amber-500/25 hover:bg-muted/30",
         )}
         type="button"
         onClick={() => onSelect(row.recipe_id)}
@@ -58,7 +58,7 @@ function RecipeListItem({
           <p className="mt-0.5 text-xs text-muted-foreground">
             Unidade de venda: {row.unit}
             {row.priority_epoc ? (
-              <span className="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-violet-900 dark:text-violet-200">
+              <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-900 dark:text-amber-200">
                 Importação EPOC
               </span>
             ) : null}
@@ -72,7 +72,7 @@ function RecipeListItem({
             disabled={busyId === row.product_id}
             onClick={() => onSelect(row.recipe_id)}
           >
-            Cadastrar insumos
+            Cadastrar ficha
           </Button>
           <Button
             type="button"
@@ -194,8 +194,8 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
     <section
       className={cn("flex min-h-0 flex-col gap-2", !isMobile && "h-full")}
     >
-      <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Fichas pendentes ({rows.length})
+      <p className="shrink-0 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        Fichas pendentes <strong>({rows.length})</strong>
       </p>
       <ul
         className={cn(
@@ -224,32 +224,32 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
 
       <Card
         className={cn(
-          "flex flex-col overflow-hidden border-violet-500/20 bg-gradient-to-br from-card to-violet-500/5 md:col-span-2",
+          "flex flex-col overflow-hidden border-amber-500/50 bg-gradient-to-br from-card to-amber-500/15 md:col-span-2 w-full",
           CARD_MAX_HEIGHT,
         )}
       >
         <CardHeader className="shrink-0 pb-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-800 dark:text-violet-300">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300">
                 <ChefHat className="h-5 w-5" />
               </div>
               <div className="min-w-0 space-y-1">
                 <CardTitle className="text-lg leading-snug">
-                  Fichas técnicas sem insumos
+                  Fichas técnicas sem produto vinculado
                 </CardTitle>
                 <CardDescription className="text-pretty">
                   Itens classificados como <strong>ficha técnica</strong> na
                   importação do EPOC (ex.: caipirinha, balde de cerveja).{" "}
                   {isMobile ? (
                     <>
-                      Toque em <strong>Cadastrar insumos</strong> para abrir o
+                      Toque em <strong>Cadastrar produto</strong> para abrir o
                       editor ou use <strong>Não é ficha</strong> para tratar
                       como produto de venda.
                     </>
                   ) : (
                     <>
-                      Selecione uma ficha à esquerda e cadastre os insumos à
+                      Selecione uma ficha à esquerda e cadastre os produtos à
                       direita, ou use <strong>Não é uma ficha técnica</strong>{" "}
                       para tratar como produto de venda.
                     </>
@@ -261,7 +261,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
               className={cn(
                 "flex shrink-0 items-center justify-center rounded-full border px-3 py-1 text-sm font-semibold tabular-nums",
                 rows.length > 0
-                  ? "border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100"
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100"
                   : "border-muted text-muted-foreground",
               )}
               aria-live="polite"
@@ -290,7 +290,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
               {listSection}
               <section className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
                 <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Insumos da ficha
+                  Produtos da ficha
                 </p>
                 {selectedRecipeId ? (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -302,9 +302,9 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
                     <p>
                       Selecione uma ficha na lista ou clique em{" "}
                       <span className="font-medium text-foreground">
-                        Cadastrar insumos
+                        Cadastrar produtos
                       </span>{" "}
-                      para montar os ingredientes aqui.
+                      para montar os produtos aqui.
                     </p>
                   </div>
                 )}

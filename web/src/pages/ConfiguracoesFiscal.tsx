@@ -433,17 +433,6 @@ export function ConfiguracoesFiscal() {
           </div>
         </CardContent>
       </Card>
-
-      <Card className="border-muted">
-        <CardHeader>
-          <CardTitle className="text-base">NF-e recebidas (Focus)</CardTitle>
-          <CardDescription>
-            A sincronização manual que descarregava XML pela API Focus e processava lotes
-            nesta app foi removida. O novo fluxo de importação será ligado separadamente.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
       {!(!onboardingBatchId || purging) && (
         <Card className="border-destructive/30">
           <CardHeader>
