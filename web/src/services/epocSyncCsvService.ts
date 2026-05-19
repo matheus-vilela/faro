@@ -101,33 +101,36 @@ export async function invokeEpocCsvSync(
   options?: InvokeEpocCsvSyncOptions,
 ): Promise<EpocSyncCsvResponse> {
   const lockOnboardingPdv = options?.lockOnboardingPdv === true;
+  const isOnboardingFlow =
+    lockOnboardingPdv || options?.sync_mode === "onboarding_initial";
   const resetPdvOnboarding =
     options?.resetPdvOnboardingCompleted === true;
   const resetOnboardingMetrics =
-    lockOnboardingPdv ||
-    resetPdvOnboarding ||
-    options?.sync_mode === "onboarding_initial";
+    isOnboardingFlow ||
+    resetPdvOnboarding;
 
-  const { error: syncStartErr } = await patchCompanyOnboardingPdv(companyId, {
-    sync: true,
-    ...(resetPdvOnboarding ? { completed: false } : {}),
-    ...(resetOnboardingMetrics
-      ? {
-          sales_total: 0,
-          sales_sync: 0,
-          portal_busy: true,
-          portal_outcome: null,
-          portal_message: null,
-          import_status: null,
-          import_error: null,
-        }
-      : { portal_busy: true }),
-  });
-  if (syncStartErr) {
-    return {
-      ok: false,
-      error: syncStartErr.slice(0, 500),
-    };
+  if (isOnboardingFlow) {
+    const { error: syncStartErr } = await patchCompanyOnboardingPdv(companyId, {
+      sync: true,
+      ...(resetPdvOnboarding ? { completed: false } : {}),
+      ...(resetOnboardingMetrics
+        ? {
+            sales_total: 0,
+            sales_sync: 0,
+            portal_busy: true,
+            portal_outcome: null,
+            portal_message: null,
+            import_status: null,
+            import_error: null,
+          }
+        : { portal_busy: true }),
+    });
+    if (syncStartErr) {
+      return {
+        ok: false,
+        error: syncStartErr.slice(0, 500),
+      };
+    }
   }
 
   const body: Record<string, unknown> = { company_id: companyId };
@@ -147,50 +150,58 @@ export async function invokeEpocCsvSync(
         body,
       });
     if (error) {
-      await patchCompanyOnboardingPdv(companyId, {
-        sync: false,
-        portal_busy: false,
-        portal_outcome: "failed",
-        portal_message: (await messageFromInvokeFailure(error, response)).slice(
-          0,
-          500,
-        ),
-      });
+      if (isOnboardingFlow) {
+        await patchCompanyOnboardingPdv(companyId, {
+          sync: false,
+          portal_busy: false,
+          portal_outcome: "failed",
+          portal_message: (await messageFromInvokeFailure(error, response)).slice(
+            0,
+            500,
+          ),
+        });
+      }
       return {
         ok: false,
         error: await messageFromInvokeFailure(error, response),
       };
     }
     if (!data) {
-      await patchCompanyOnboardingPdv(companyId, {
-        sync: false,
-        portal_busy: false,
-        portal_outcome: "failed",
-        portal_message: "Resposta vazia da função",
-      });
+      if (isOnboardingFlow) {
+        await patchCompanyOnboardingPdv(companyId, {
+          sync: false,
+          portal_busy: false,
+          portal_outcome: "failed",
+          portal_message: "Resposta vazia da função",
+        });
+      }
       return { ok: false, error: "Resposta vazia da função" };
     }
     if (!data.ok) {
-      await patchCompanyOnboardingPdv(companyId, {
-        sync: false,
-        portal_busy: false,
-        portal_outcome: "failed",
-        portal_message: (data.error ?? "Falha na sincronização").slice(0, 500),
-      });
+      if (isOnboardingFlow) {
+        await patchCompanyOnboardingPdv(companyId, {
+          sync: false,
+          portal_busy: false,
+          portal_outcome: "failed",
+          portal_message: (data.error ?? "Falha na sincronização").slice(0, 500),
+        });
+      }
       return data;
     }
-    if (!lockOnboardingPdv) {
+    if (isOnboardingFlow && !lockOnboardingPdv) {
       await patchCompanyOnboardingPdv(companyId, { sync: false });
     }
     return data;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao executar sincronização.";
-    await patchCompanyOnboardingPdv(companyId, {
-      sync: false,
-      portal_busy: false,
-      portal_outcome: "failed",
-      portal_message: msg.slice(0, 500),
-    });
+    if (isOnboardingFlow) {
+      await patchCompanyOnboardingPdv(companyId, {
+        sync: false,
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: msg.slice(0, 500),
+      });
+    }
     return { ok: false, error: msg };
   }
 }

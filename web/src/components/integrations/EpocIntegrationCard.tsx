@@ -89,10 +89,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     () => userCompanies.find((uc) => uc.company.id === companyId)?.company,
     [userCompanies, companyId],
   );
-  const lockOnboardingPdv = companyMeta
-    ? companyMeta.onboarding_pdv?.completed !== true
-    : false;
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -507,9 +503,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSyncingFull(true);
     let res: Awaited<ReturnType<typeof invokeEpocCsvSync>>;
     try {
-      res = await invokeEpocCsvSync(companyId, {
-        lockOnboardingPdv,
-      });
+      res = await invokeEpocCsvSync(companyId);
     } finally {
       setSyncingFull(false);
       await refetchCompanies();
@@ -580,7 +574,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     try {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
-        lockOnboardingPdv,
       });
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
@@ -731,9 +724,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSheetOpen(false);
 
     if (enabled && baseUrl.trim()) {
-      triggerEpocCsvSyncInBackground(companyId, {
-        lockOnboardingPdv,
-      });
+      triggerEpocCsvSyncInBackground(companyId);
       void refetchCompanies();
       toast.message(
         "Sincronização EPOC em segundo plano: login e exportação do CSV.",

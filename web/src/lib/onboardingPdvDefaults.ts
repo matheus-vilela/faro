@@ -86,7 +86,28 @@ export function isOnboardingPdvSyncInProgress(raw: unknown): boolean {
   return o?.sync === true;
 }
 
-/** Card de onboarding EPOC no dashboard: só enquanto `onboarding_pdv.completed` ≠ true. */
+/** Fluxo de onboarding PDV já iniciado (métricas/portal/import/sync). */
+export function isOnboardingPdvFlowEngaged(raw: unknown): boolean {
+  const o = onboardingPdvObject(raw);
+  if (!o) return false;
+  if (o.sync === true) return true;
+  if (o.portal_busy === true) return true;
+  if (o.portal_outcome != null && String(o.portal_outcome).trim() !== "") {
+    return true;
+  }
+  const st = o.import_status;
+  if (st === "pending" || st === "processing" || st === "failed") {
+    return true;
+  }
+  const { sales_total, sales_sync } = parseOnboardingPdvSalesMetrics(raw);
+  return sales_total > 0 || sales_sync > 0;
+}
+
+/**
+ * Card de onboarding EPOC no dashboard: etapa PDV em aberto e fluxo já iniciado
+ * (evita card por `completed: false` sem nunca ter entrado no onboarding).
+ */
 export function isOnboardingPdvDashboardCardVisible(raw: unknown): boolean {
-  return !isOnboardingPdvJsonCompleted(raw);
+  if (isOnboardingPdvJsonCompleted(raw)) return false;
+  return isOnboardingPdvFlowEngaged(raw);
 }

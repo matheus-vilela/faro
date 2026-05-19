@@ -25,7 +25,9 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 /**
- * Onboarding EPOC · vendas: estado só em `companies.onboarding_pdv` (Realtime).
+ * Onboarding EPOC · vendas: lê apenas `companies.onboarding_pdv` atualizado pelo fluxo
+ * `onboarding_initial` / `lockOnboardingPdv` (setup da unidade ou «Tentar novamente» aqui).
+ * Syncs `full`, `previous_day` e rotina diária não alteram este JSON.
  */
 export function DashboardIntegrationCsvRevenueCard({
   company,
@@ -34,25 +36,19 @@ export function DashboardIntegrationCsvRevenueCard({
 }) {
   const { refetchCompanies } = useCompany();
   const companyId = company.id;
-  const ob = useMemo(
-    () => parseOnboardingPdv(company.onboarding_pdv),
-    [company.onboarding_pdv],
-  );
+  const onboardingPdv = company.onboarding_pdv;
+  const ob = useMemo(() => parseOnboardingPdv(onboardingPdv), [onboardingPdv]);
 
   const [retryBusy, setRetryBusy] = useState(false);
   const [completeIntegrationBusy, setCompleteIntegrationBusy] = useState(false);
 
-  const confirmPhase = isOnboardingPdvConfirmPhase(company.onboarding_pdv);
-  const portalFailure = isOnboardingPdvPortalFailure(company.onboarding_pdv);
-  const processingSales = isOnboardingPdvProcessingSales(
-    company.onboarding_pdv,
-  );
-  const awaitingEpocSync = isOnboardingPdvAwaitingEpocSync(
-    company.onboarding_pdv,
-  );
+  const confirmPhase = isOnboardingPdvConfirmPhase(onboardingPdv);
+  const portalFailure = isOnboardingPdvPortalFailure(onboardingPdv);
+  const processingSales = isOnboardingPdvProcessingSales(onboardingPdv);
+  const awaitingEpocSync = isOnboardingPdvAwaitingEpocSync(onboardingPdv);
   const importFailed = ob.import_status === "failed";
 
-  const percent = onboardingPdvDashboardProgressPercent(company.onboarding_pdv);
+  const percent = onboardingPdvDashboardProgressPercent(onboardingPdv);
 
   const { title, subtitle, showSpinner, icon } = useMemo(() => {
     if (confirmPhase) {
@@ -65,17 +61,17 @@ export function DashboardIntegrationCsvRevenueCard({
     }
     if (importFailed) {
       return {
-        title: "Falha no processamento do CSV",
+        title: "Falha no processamento da sincronização EPOC",
         subtitle:
           ob.import_error?.slice(0, 260) ||
-          "O processamento do CSV falhou; pode tentar de novo ou rever a integração.",
+          "O processamento da sincronização EPOC falhou; pode tentar de novo ou rever a integração.",
         showSpinner: false,
         icon: "error" as const,
       };
     }
     if (portalFailure) {
       return {
-        title: "Sincronização sem CSV utilizável",
+        title: "Não foram  encontrado dados válidos na integração EPOC",
         subtitle:
           ob.portal_message?.slice(0, 260) ||
           "A exportação no portal não produziu tabela utilizável nesta sincronização.",
@@ -181,7 +177,7 @@ export function DashboardIntegrationCsvRevenueCard({
     }
   }, [companyId, refetchCompanies]);
 
-  if (isOnboardingPdvJsonCompleted(company.onboarding_pdv)) {
+  if (isOnboardingPdvJsonCompleted(onboardingPdv)) {
     return null;
   }
 

@@ -2,7 +2,9 @@
  * Rotina EPOC do dia anterior (America/Sao_Paulo), uma unidade por invocação.
  *
  * Cron (pg_cron a cada 10 min): processa no máximo um estabelecimento com integração
- * EPOC ativa; a mesma unidade só volta ao rodízio após 12 h (`epoc_daily_sync_rotacao_at`).
+ * EPOC ativa. Rodízio (`epoc_daily_sync_rotacao_at`):
+ * - última tentativa **ok** (com ou sem vendas): só no **dia civil seguinte** (SP);
+ * - última tentativa **falhou**: nova tentativa após **12 h**.
  * Ao reservar a unidade, grava `epoc_daily_sync_rotacao_at` antes de chamar `epoc-sync-csv`.
  *
  * Protegida por `EPOC_DAILY_CRON_SECRET` no header Authorization (verify_jwt = false).
@@ -23,7 +25,9 @@ const corsHeaders: Record<string, string> = {
 
 const LOG = "[epoc-daily-sync]";
 
-/** Intervalo mínimo entre processamentos da mesma unidade no rodízio cron. */
+const SP_TZ = "America/Sao_Paulo";
+
+/** Intervalo mínimo entre tentativas após falha no rodízio cron. */
 const ROTACAO_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 type IntegrationRow = {
@@ -48,9 +52,37 @@ function rotacaoAtMs(settings: Record<string, unknown> | null): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function ymdInTimeZone(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function spTodayYmd(): string {
+  return ymdInTimeZone(new Date(), SP_TZ);
+}
+
+function lastDailyAttemptOk(
+  settings: Record<string, unknown> | null,
+): boolean | null {
+  if (settings?.epoc_daily_sync_last_attempt_ok === true) return true;
+  if (settings?.epoc_daily_sync_last_attempt_ok === false) return false;
+  return null;
+}
+
 function isRotacaoDue(settings: Record<string, unknown> | null): boolean {
   const lastMs = rotacaoAtMs(settings);
   if (lastMs === 0) return true;
+
+  const lastOk = lastDailyAttemptOk(settings);
+  if (lastOk === true) {
+    const rotacaoDay = ymdInTimeZone(new Date(lastMs), SP_TZ);
+    return spTodayYmd() > rotacaoDay;
+  }
+
   return Date.now() - lastMs >= ROTACAO_INTERVAL_MS;
 }
 
@@ -103,6 +135,8 @@ async function persistDailyAttempt(
   companyId: string,
   ok: boolean,
   errorSummary: string | null,
+  outcome?: string | null,
+  consultedDayBr?: string | null,
 ): Promise<void> {
   const { data: fresh } = await admin
     .from("company_integrations")
@@ -116,10 +150,18 @@ async function persistDailyAttempt(
     ...base,
     epoc_daily_sync_last_attempt_at: nowIso,
     epoc_daily_sync_last_attempt_ok: ok,
+    epoc_daily_sync_last_attempt_outcome: ok
+      ? (outcome === "no_tbl_export" ? "no_tbl_export" : "success")
+      : "failed",
     epoc_daily_sync_last_attempt_error: ok
       ? null
       : (errorSummary ?? "Erro").slice(0, 900),
   };
+  if (ok && outcome === "no_tbl_export" && consultedDayBr?.trim()) {
+    nextSettings.epoc_daily_sync_last_consulted_day_br = consultedDayBr.trim();
+  } else if (ok && outcome === "success") {
+    nextSettings.epoc_daily_sync_last_consulted_day_br = null;
+  }
   const { error } = await admin
     .from("company_integrations")
     .update({
@@ -230,7 +272,7 @@ Deno.serve(async (req) => {
       skipReason =
         totalEnabled === 0
           ? "nenhuma integração EPOC ativa"
-          : "todas as unidades processadas há menos de 12 horas";
+          : "todas as unidades aguardam o próximo dia (última sync ok) ou 12 h após falha";
       console.log(LOG, "rodizio_sem_unidade", {
         total_enabled: totalEnabled,
         skip: skipReason,
@@ -241,7 +283,8 @@ Deno.serve(async (req) => {
         reason: skipReason,
         companies_enabled: totalEnabled,
         companies_processed: 0,
-        rotacao_interval_hours: 12,
+        rotacao_after_failure_hours: 12,
+        rotacao_after_success: "proximo_dia_civil_sp",
       });
     }
   }
@@ -273,6 +316,8 @@ Deno.serve(async (req) => {
   const syncUrl = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/epoc-sync-csv`;
   let syncOk = false;
   let errText: string | null = null;
+  let attemptOutcome: string | null = null;
+  let consultedDayBr: string | null = null;
   let syncPayload: {
     csv_revenue_import_job_id?: string | null;
     epoc_csv_sync_run_id?: string | null;
@@ -294,10 +339,18 @@ Deno.serve(async (req) => {
     const data = (await res.json()) as {
       ok?: boolean;
       error?: string;
+      outcome?: string;
+      consulted_day_br?: string | null;
       csv_revenue_import_job_id?: string | null;
       epoc_csv_sync_run_id?: string | null;
     };
     syncOk = res.ok && data?.ok === true;
+    attemptOutcome =
+      typeof data?.outcome === "string" ? data.outcome.trim() : null;
+    consultedDayBr =
+      typeof data?.consulted_day_br === "string"
+        ? data.consulted_day_br.trim()
+        : null;
     errText = syncOk ? null : (data?.error ?? `HTTP ${res.status}`);
     syncPayload = {
       csv_revenue_import_job_id: data?.csv_revenue_import_job_id ?? null,
@@ -315,7 +368,14 @@ Deno.serve(async (req) => {
     console.error(LOG, "unidade_excecao", { company_id: companyId, msg: errText });
   }
 
-  await persistDailyAttempt(admin, companyId, syncOk, errText);
+  await persistDailyAttempt(
+    admin,
+    companyId,
+    syncOk,
+    errText,
+    attemptOutcome,
+    consultedDayBr,
+  );
 
   console.log(LOG, "concluido", {
     company_id: companyId,
@@ -330,7 +390,8 @@ Deno.serve(async (req) => {
     companies_processed: 1,
     company_id: companyId,
     rotacao_at: reserve.rotacao_at,
-    rotacao_interval_hours: 12,
+    rotacao_after_failure_hours: 12,
+    rotacao_after_success: "proximo_dia_civil_sp",
     manual: Boolean(bodyCompanyId),
     result: {
       company_id: companyId,

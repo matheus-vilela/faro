@@ -42,6 +42,18 @@ const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 
+interface OnboardingPdv {
+  sync: boolean;
+  completed: boolean;
+  sales_sync: number;
+  portal_busy: boolean;
+  sales_total: number;
+  import_error: string | null;
+  import_status: string | null;
+  portal_message: string | null;
+  portal_outcome: string | null;
+}
+
 function headersValidador(
   cookies: string,
   origin: string,
@@ -775,8 +787,12 @@ Deno.serve(async (req) => {
       .select("onboarding_pdv")
       .eq("id", companyId)
       .maybeSingle();
-    const ob = coRow?.onboarding_pdv as Record<string, unknown> | undefined;
-    patchOnboardingPdvEnabled = ob?.completed !== true && ob?.sync === true;
+    const ob = coRow?.onboarding_pdv as OnboardingPdv | undefined;
+    patchOnboardingPdvEnabled =
+      ob?.completed !== true &&
+      ob?.sync === true &&
+      (ob?.sales_total === 0 ||
+        (ob?.sales_total > 0 && ob?.sales_total !== ob?.sales_sync));
   }
 
   async function patchOb(patch: OnboardingPdvPatch): Promise<void> {
@@ -1418,13 +1434,56 @@ Deno.serve(async (req) => {
       portal_message: summary.slice(0, 500),
       sync: false,
     });
+
+    const isDailyPreviousDayOnly =
+      syncMode === "previous_day" && !manualConsultaDias?.length;
+
+    if (isDailyPreviousDayOnly) {
+      const nowIso = new Date().toISOString();
+      const nextSettings: Record<string, unknown> = {
+        ...raw,
+        epoc_daily_sync_last_attempt_at: nowIso,
+        epoc_daily_sync_last_attempt_ok: true,
+        epoc_daily_sync_last_attempt_outcome: "no_tbl_export",
+        epoc_daily_sync_last_attempt_error: null,
+        epoc_daily_sync_last_consulted_day_br: diasConsulta[0] ?? null,
+      };
+      const { error: upDailyErr } = await admin
+        .from("company_integrations")
+        .update({
+          settings: nextSettings,
+          updated_at: nowIso,
+        })
+        .eq("company_id", companyId)
+        .eq("provider", "epoc");
+      if (upDailyErr) {
+        log("epoc_daily_sync_no_sales_settings_falhou", {
+          message: upDailyErr.message,
+        });
+      }
+
+      return json({
+        ok: true,
+        outcome: "no_tbl_export",
+        message: summary,
+        consulted_day_br: diasConsulta[0] ?? null,
+        tblExport_found: false,
+        dias_consultados: diasConsulta.length,
+        epoc_csv_sync_run_id: epocCsvSyncRunId,
+        steps_prefix: stepsPrefix,
+        steps,
+        signed_url_expires_in: signedTtl,
+      });
+    }
+
     return await failJson(
       502,
-      `Nenhuma venda foi encontrada no dia (${yesterdayDateBrInTz("America/Sao_Paulo")}).`,
+      summary,
       {
         tblExport_found: false,
         dias_consultados: diasConsulta.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
+        outcome: "no_tbl_export",
       },
       { skipPortalPatch: true },
     );
@@ -1516,7 +1575,9 @@ Deno.serve(async (req) => {
   ) {
     nextSettings.epoc_daily_sync_last_attempt_at = nowIso;
     nextSettings.epoc_daily_sync_last_attempt_ok = true;
+    nextSettings.epoc_daily_sync_last_attempt_outcome = "success";
     nextSettings.epoc_daily_sync_last_attempt_error = null;
+    nextSettings.epoc_daily_sync_last_consulted_day_br = null;
   }
 
   const { error: upIntegErr } = await admin
