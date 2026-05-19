@@ -1,13 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCompany } from "@/contexts/CompanyContext";
-import { supabase } from "@/lib/supabase";
 import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
+import { supabase } from "@/lib/supabase";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
 import { parseEpocSettings } from "@/types/companyIntegration";
 import { AlertTriangle, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 /** Sem registo recente de tentativa diária (~40 h). */
@@ -224,18 +223,18 @@ export function DashboardEpocDailySyncAlertCard({
             ) : (
               <>
                 <RefreshCw className="mr-2 h-4 w-4" />
-                Sincronizar dia anterior agora
+                Tentar novamente
               </>
             )}
           </Button>
-          <Button
+          {/* <Button
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
             asChild
           >
             <Link to="/app/integracoes">Abrir integrações</Link>
-          </Button>
+          </Button> */}
           <Button
             type="button"
             variant="ghost"

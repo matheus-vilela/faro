@@ -10,11 +10,11 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import {
   patchOnboardingPdv,
   type OnboardingPdvPatch,
 } from "../_shared/onboardingPdvPatch.ts";
-import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -177,7 +177,9 @@ function normalizeEpocBaseUrl(base: string): string {
   const lower = t.toLowerCase();
   const suf = "/index.php";
   if (lower.endsWith(suf)) {
-    return t.slice(0, -suf.length).replace(/\/$/, "") || t.slice(0, -suf.length);
+    return (
+      t.slice(0, -suf.length).replace(/\/$/, "") || t.slice(0, -suf.length)
+    );
   }
   return t;
 }
@@ -664,7 +666,9 @@ Deno.serve(async (req) => {
       : body.sync_mode === "onboarding_initial"
         ? "onboarding_initial"
         : "full";
-  const manualConsultaDias = normalizeConsultaDiasBrInput(body.consulta_dias_br);
+  const manualConsultaDias = normalizeConsultaDiasBrInput(
+    body.consulta_dias_br,
+  );
 
   const admin = createClient(supabaseUrl, serviceKey);
   const serviceKeyNorm = serviceKey.trim();
@@ -772,8 +776,7 @@ Deno.serve(async (req) => {
       .eq("id", companyId)
       .maybeSingle();
     const ob = coRow?.onboarding_pdv as Record<string, unknown> | undefined;
-    patchOnboardingPdvEnabled =
-      ob?.completed !== true && ob?.sync === true;
+    patchOnboardingPdvEnabled = ob?.completed !== true && ob?.sync === true;
   }
 
   async function patchOb(patch: OnboardingPdvPatch): Promise<void> {
@@ -1135,7 +1138,10 @@ Deno.serve(async (req) => {
     token: tokenForBody,
   });
   if (!acoes1.ok) {
-    return await failJson(502, acoes1.step.message ?? "acoes.php (fase1) falhou.");
+    return await failJson(
+      502,
+      acoes1.step.message ?? "acoes.php (fase1) falhou.",
+    );
   }
   if (!hasConteudoTela(acoes1.text)) {
     acoes1.step.status = "fail";
@@ -1241,14 +1247,12 @@ Deno.serve(async (req) => {
 
         const htmlDia = unwrapAcoesHtml(acoesDia.text);
         if (!htmlHasId(htmlDia, EPOC_ID_TBL_EXPORT)) {
-          const portalMsg =
-            mensagemPortalSemEventosPorFiltro(acoesDia.text);
+          const portalMsg = mensagemPortalSemEventosPorFiltro(acoesDia.text);
           return {
             dia,
             suffix,
             ok: false as const,
-            message:
-              portalMsg ?? "Sem id=tblExport para este dia.",
+            message: portalMsg ?? "Sem id=tblExport para este dia.",
             portal_feedback: portalMsg ?? undefined,
           };
         }
@@ -1296,14 +1300,10 @@ Deno.serve(async (req) => {
           `Resumo consulta diária ${result.dia}`,
           {
             status: "warn",
-            message: portalFb
-              ? `${result.dia}: ${portalFb}`
-              : result.message,
+            message: portalFb ? `${result.dia}: ${portalFb}` : result.message,
             detalhes: {
               dia: result.dia,
-              ...(portalFb
-                ? { mensagem_portal_epoc: portalFb }
-                : {}),
+              ...(portalFb ? { mensagem_portal_epoc: portalFb } : {}),
             },
           },
         );
@@ -1420,7 +1420,7 @@ Deno.serve(async (req) => {
     });
     return await failJson(
       502,
-      `Nenhuma tabela #tblExport encontrada na janela (${diasConsultaLabel}).`,
+      `Nenhuma venda foi encontrada no dia (${yesterdayDateBrInTz("America/Sao_Paulo")}).`,
       {
         tblExport_found: false,
         dias_consultados: diasConsulta.length,
