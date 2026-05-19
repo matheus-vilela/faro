@@ -1,15 +1,16 @@
 /**
- * Orquestra sincronização EPOC só do dia anterior (America/Sao_Paulo) para todas
- * as unidades com integração ativa. Protegida por `EPOC_DAILY_CRON_SECRET` no header
- * Authorization (verify_jwt = false). Cada unidade chama `epoc-sync-csv` com a
- * service role e `sync_mode: "previous_day"`.
+ * Rotina EPOC do dia anterior (America/Sao_Paulo), uma unidade por invocação.
  *
- * Após cada tentativa atualiza `company_integrations.settings` com os campos:
- * epoc_daily_sync_last_attempt_at, epoc_daily_sync_last_attempt_ok,
- * epoc_daily_sync_last_attempt_error (para o dashboard mostrar falhas/atrasos).
+ * Cron (pg_cron a cada 10 min): processa no máximo um estabelecimento com integração
+ * EPOC ativa; a mesma unidade só volta ao rodízio após 12 h (`epoc_daily_sync_rotacao_at`).
+ * Ao reservar a unidade, grava `epoc_daily_sync_rotacao_at` antes de chamar `epoc-sync-csv`.
  *
- * Agendar às 05:00 em São Paulo (≈ 08:00 UTC em horário padrão Brasília): no Dashboard
- * Supabase (Cron / pg_net) ou serviço externo, POST nesta função com o secret.
+ * Protegida por `EPOC_DAILY_CRON_SECRET` no header Authorization (verify_jwt = false).
+ *
+ * Body opcional:
+ * - `{ "company_id": "<uuid>" }` — força uma unidade (ignora intervalo de 12 h).
+ *
+ * Após cada tentativa atualiza `epoc_daily_sync_last_attempt_*` (dashboard).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -22,6 +23,14 @@ const corsHeaders: Record<string, string> = {
 
 const LOG = "[epoc-daily-sync]";
 
+/** Intervalo mínimo entre processamentos da mesma unidade no rodízio cron. */
+const ROTACAO_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+type IntegrationRow = {
+  company_id: string;
+  settings: Record<string, unknown> | null;
+};
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -30,6 +39,63 @@ function json(body: unknown, status = 200): Response {
       "Content-Type": "application/json; charset=utf-8",
     },
   });
+}
+
+function rotacaoAtMs(settings: Record<string, unknown> | null): number {
+  const raw = settings?.epoc_daily_sync_rotacao_at;
+  if (typeof raw !== "string" || !raw.trim()) return 0;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isRotacaoDue(settings: Record<string, unknown> | null): boolean {
+  const lastMs = rotacaoAtMs(settings);
+  if (lastMs === 0) return true;
+  return Date.now() - lastMs >= ROTACAO_INTERVAL_MS;
+}
+
+function pickCompanyForRotation(
+  rows: IntegrationRow[],
+): IntegrationRow | null {
+  const eligible = rows.filter((r) => isRotacaoDue(r.settings));
+  if (eligible.length === 0) return null;
+  eligible.sort((a, b) => rotacaoAtMs(a.settings) - rotacaoAtMs(b.settings));
+  return eligible[0] ?? null;
+}
+
+async function reserveRotacaoAt(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<{ ok: boolean; rotacao_at?: string; error?: string }> {
+  const { data: fresh, error: readErr } = await admin
+    .from("company_integrations")
+    .select("settings")
+    .eq("company_id", companyId)
+    .eq("provider", "epoc")
+    .maybeSingle();
+
+  if (readErr) {
+    return { ok: false, error: readErr.message };
+  }
+
+  const base = (fresh?.settings ?? {}) as Record<string, unknown>;
+  const rotacaoAt = new Date().toISOString();
+  const { error } = await admin
+    .from("company_integrations")
+    .update({
+      settings: {
+        ...base,
+        epoc_daily_sync_rotacao_at: rotacaoAt,
+      },
+      updated_at: rotacaoAt,
+    })
+    .eq("company_id", companyId)
+    .eq("provider", "epoc");
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true, rotacao_at: rotacaoAt };
 }
 
 async function persistDailyAttempt(
@@ -50,10 +116,9 @@ async function persistDailyAttempt(
     ...base,
     epoc_daily_sync_last_attempt_at: nowIso,
     epoc_daily_sync_last_attempt_ok: ok,
-    epoc_daily_sync_last_attempt_error: ok ? null : (errorSummary ?? "Erro").slice(
-      0,
-      900,
-    ),
+    epoc_daily_sync_last_attempt_error: ok
+      ? null
+      : (errorSummary ?? "Erro").slice(0, 900),
   };
   const { error } = await admin
     .from("company_integrations")
@@ -97,6 +162,18 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Não autorizado" }, 401);
   }
 
+  let bodyCompanyId: string | null = null;
+  try {
+    const raw = await req.text();
+    if (raw.trim()) {
+      const body = JSON.parse(raw) as { company_id?: string };
+      const id = typeof body.company_id === "string" ? body.company_id.trim() : "";
+      if (id) bodyCompanyId = id;
+    }
+  } catch {
+    /* corpo vazio ou JSON inválido: rodízio cron */
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -107,7 +184,7 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: integrations, error: listErr } = await admin
     .from("company_integrations")
-    .select("company_id")
+    .select("company_id, settings")
     .eq("provider", "epoc")
     .eq("enabled", true);
 
@@ -115,86 +192,151 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: listErr.message }, 500);
   }
 
-  const companyIds = [
-    ...new Set(
+  const rows: IntegrationRow[] = [
+    ...new Map(
       (integrations ?? [])
-        .map((r) => r.company_id as string | undefined)
-        .filter((id): id is string => typeof id === "string" && id.length > 0),
-    ),
+        .map((r) => {
+          const companyId = r.company_id as string | undefined;
+          if (typeof companyId !== "string" || !companyId.length) return null;
+          const settings =
+            r.settings && typeof r.settings === "object" && !Array.isArray(r.settings)
+              ? (r.settings as Record<string, unknown>)
+              : null;
+          return [companyId, { company_id: companyId, settings }] as const;
+        })
+        .filter((x): x is readonly [string, IntegrationRow] => x != null),
+    ).values(),
   ];
 
-  const syncUrl = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/epoc-sync-csv`;
-  const results: {
-    company_id: string;
-    ok: boolean;
-    error?: string;
-    csv_revenue_import_job_id?: string | null;
-    epoc_csv_sync_run_id?: string | null;
-  }[] = [];
+  const totalEnabled = rows.length;
+  let selected: IntegrationRow | null = null;
+  let skipReason: string | null = null;
 
-  for (const companyId of companyIds) {
-    let syncOk = false;
-    let errText: string | null = null;
-    try {
-      const res = await fetch(syncUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          apikey: anonKey,
-          "Content-Type": "application/json",
+  if (bodyCompanyId) {
+    selected = rows.find((r) => r.company_id === bodyCompanyId) ?? null;
+    if (!selected) {
+      return json(
+        {
+          ok: false,
+          error: "Integração EPOC ativa não encontrada para company_id informado.",
+          company_id: bodyCompanyId,
         },
-        body: JSON.stringify({
-          company_id: companyId,
-          sync_mode: "previous_day",
-        }),
-      });
-      const data = (await res.json()) as {
-        ok?: boolean;
-        error?: string;
-        csv_revenue_import_job_id?: string | null;
-        epoc_csv_sync_run_id?: string | null;
-      };
-      syncOk = res.ok && data?.ok === true;
-      errText = syncOk ? null : (data?.error ?? `HTTP ${res.status}`);
-      results.push({
-        company_id: companyId,
-        ok: syncOk,
-        error: errText ?? undefined,
-        csv_revenue_import_job_id: data?.csv_revenue_import_job_id ?? null,
-        epoc_csv_sync_run_id: data?.epoc_csv_sync_run_id ?? null,
-      });
-      if (!syncOk) {
-        console.warn(LOG, "unidade_falhou", {
-          company_id: companyId,
-          error: errText,
-          epoc_csv_sync_run_id: data?.epoc_csv_sync_run_id ?? null,
-        });
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      errText = msg;
-      results.push({
-        company_id: companyId,
-        ok: false,
-        error: msg,
-      });
-      console.error(LOG, "unidade_excecao", { company_id: companyId, msg });
+        404,
+      );
     }
-
-    await persistDailyAttempt(admin, companyId, syncOk, errText);
+  } else {
+    selected = pickCompanyForRotation(rows);
+    if (!selected) {
+      skipReason =
+        totalEnabled === 0
+          ? "nenhuma integração EPOC ativa"
+          : "todas as unidades processadas há menos de 12 horas";
+      console.log(LOG, "rodizio_sem_unidade", {
+        total_enabled: totalEnabled,
+        skip: skipReason,
+      });
+      return json({
+        ok: true,
+        skipped: true,
+        reason: skipReason,
+        companies_enabled: totalEnabled,
+        companies_processed: 0,
+        rotacao_interval_hours: 12,
+      });
+    }
   }
 
-  const failed = results.filter((r) => !r.ok).length;
+  const companyId = selected.company_id;
+  const reserve = await reserveRotacaoAt(admin, companyId);
+  if (!reserve.ok) {
+    console.warn(LOG, "reserva_rotacao_falhou", {
+      company_id: companyId,
+      error: reserve.error,
+    });
+    return json(
+      {
+        ok: false,
+        error: reserve.error ?? "Falha ao reservar rodízio",
+        company_id: companyId,
+      },
+      500,
+    );
+  }
+
+  console.log(LOG, "rodizio_inicio", {
+    company_id: companyId,
+    epoc_daily_sync_rotacao_at: reserve.rotacao_at,
+    total_enabled: totalEnabled,
+    manual: Boolean(bodyCompanyId),
+  });
+
+  const syncUrl = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/epoc-sync-csv`;
+  let syncOk = false;
+  let errText: string | null = null;
+  let syncPayload: {
+    csv_revenue_import_job_id?: string | null;
+    epoc_csv_sync_run_id?: string | null;
+  } = {};
+
+  try {
+    const res = await fetch(syncUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: anonKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        company_id: companyId,
+        sync_mode: "previous_day",
+      }),
+    });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+      csv_revenue_import_job_id?: string | null;
+      epoc_csv_sync_run_id?: string | null;
+    };
+    syncOk = res.ok && data?.ok === true;
+    errText = syncOk ? null : (data?.error ?? `HTTP ${res.status}`);
+    syncPayload = {
+      csv_revenue_import_job_id: data?.csv_revenue_import_job_id ?? null,
+      epoc_csv_sync_run_id: data?.epoc_csv_sync_run_id ?? null,
+    };
+    if (!syncOk) {
+      console.warn(LOG, "unidade_falhou", {
+        company_id: companyId,
+        error: errText,
+        epoc_csv_sync_run_id: syncPayload.epoc_csv_sync_run_id,
+      });
+    }
+  } catch (e) {
+    errText = e instanceof Error ? e.message : String(e);
+    console.error(LOG, "unidade_excecao", { company_id: companyId, msg: errText });
+  }
+
+  await persistDailyAttempt(admin, companyId, syncOk, errText);
+
   console.log(LOG, "concluido", {
-    companies: companyIds.length,
-    failed,
+    company_id: companyId,
+    ok: syncOk,
+    total_enabled: totalEnabled,
     at: new Date().toISOString(),
   });
 
   return json({
-    ok: failed === 0,
-    companies: companyIds.length,
-    failed,
-    results,
+    ok: syncOk,
+    companies_enabled: totalEnabled,
+    companies_processed: 1,
+    company_id: companyId,
+    rotacao_at: reserve.rotacao_at,
+    rotacao_interval_hours: 12,
+    manual: Boolean(bodyCompanyId),
+    result: {
+      company_id: companyId,
+      ok: syncOk,
+      error: errText ?? undefined,
+      ...syncPayload,
+    },
   });
 });

@@ -13,6 +13,8 @@ export type EpocIntegrationSettings = {
   /** Preenchido pela edge `epoc-sync-csv` após sucesso. */
   last_epoc_csv_sync_at?: string;
   last_epoc_csv_storage_path?: string;
+  /** Reserva do rodízio cron (`epoc-daily-sync`); mesma unidade só reprocessa após 12 h. */
+  epoc_daily_sync_rotacao_at?: string;
   /** Última tentativa da rotina diária (`epoc-daily-sync`); uso no dashboard. */
   epoc_daily_sync_last_attempt_at?: string;
   epoc_daily_sync_last_attempt_ok?: boolean;
@@ -53,6 +55,10 @@ export function parseEpocSettings(
     last_epoc_csv_storage_path:
       typeof raw.last_epoc_csv_storage_path === "string"
         ? raw.last_epoc_csv_storage_path
+        : "",
+    epoc_daily_sync_rotacao_at:
+      typeof raw.epoc_daily_sync_rotacao_at === "string"
+        ? raw.epoc_daily_sync_rotacao_at
         : "",
     epoc_daily_sync_last_attempt_at:
       typeof raw.epoc_daily_sync_last_attempt_at === "string"
