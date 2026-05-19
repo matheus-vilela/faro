@@ -121,12 +121,15 @@ type ExpenseDetailSheetProps = {
   expenseId: string | null;
   onClose: () => void;
   onRefresh?: () => void;
+  /** Empilha acima de outros sheets (ex.: resumo de boleto no fluxo). */
+  elevated?: boolean;
 };
 
 export function ExpenseDetailSheet({
   expenseId,
   onClose,
   onRefresh,
+  elevated = false,
 }: ExpenseDetailSheetProps) {
   const { currentCompany, currentRole } = useCompany();
   const navigate = useNavigate();
@@ -681,7 +684,13 @@ export function ExpenseDetailSheet({
   return (
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <SheetContent
+          className={cn(
+            "overflow-y-auto sm:max-w-lg",
+            elevated && "z-[70]",
+          )}
+          overlayClassName={elevated ? "z-[70]" : undefined}
+        >
           {loading && (
             <p className="text-sm text-muted-foreground py-8">Carregando…</p>
           )}

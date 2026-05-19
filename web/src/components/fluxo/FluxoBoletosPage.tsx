@@ -4,6 +4,7 @@ import {
   type CalendarDayListPayload,
 } from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
+import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -36,18 +37,18 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { isBoletoPayable } from "@/types/expense";
-import { CheckCircle2, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { CheckCircle2, Copy, FileText, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -74,7 +75,11 @@ export type FluxoBoletosPageConfig = {
   calendarViewMode: BoletosCalendarViewMode;
 };
 
-export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig }) {
+export function FluxoBoletosPage({
+  config,
+}: {
+  config: FluxoBoletosPageConfig;
+}) {
   const {
     flowType,
     title,
@@ -109,7 +114,6 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
   const debouncedSearch = useDebounce(boletosSearch, 300);
   const [loadingList, setLoadingList] = useState(true);
 
-
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
   const [createBoletoDefaultDueDate, setCreateBoletoDefaultDueDate] = useState<
     string | undefined
@@ -117,6 +121,7 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
   const [calendarDayList, setCalendarDayList] =
     useState<CalendarDayListPayload | null>(null);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
+  const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
@@ -191,14 +196,7 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
     setBoletosList((data as Boleto[]) ?? []);
     setBoletosListCount(count ?? 0);
     setLoadingList(false);
-  }, [
-    companyId,
-    period.month,
-    period.year,
-    debouncedSearch,
-    boletosPage,
-  ]);
-
+  }, [companyId, period.month, period.year, debouncedSearch, boletosPage]);
 
   useEffect(() => {
     queueMicrotask(() => setBoletosPage(1));
@@ -212,11 +210,9 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
     queueMicrotask(() => void fetchBoletosList());
   }, [fetchBoletosList]);
 
-
   useEffect(() => {
     if (expenseIdFromUrl) queueMicrotask(() => setBoletoSheetOpen(true));
   }, [expenseIdFromUrl]);
-
 
   useEffect(() => {
     queueMicrotask(() => setMarkPaidDialogOpen(false));
@@ -227,19 +223,29 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
     void fetchBoletosList();
   }, [fetchCalendarBoletos, fetchBoletosList]);
 
+  const refreshBoletoResumo = useCallback(async () => {
+    if (!boletoResumo?.id || !companyId) return;
+    const { data } = await supabase
+      .from("boletos")
+      .select("*")
+      .eq("id", boletoResumo.id)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (data) setBoletoResumo(data as Boleto);
+  }, [boletoResumo?.id, companyId]);
+
+  const closeExpenseDetail = useCallback(() => {
+    setExpenseDetailId(null);
+    void refreshBoletoResumo();
+    refreshAll();
+  }, [refreshAll, refreshBoletoResumo]);
+
   const formatDate = (s: string) => {
     const raw = String(s ?? "").trim();
     if (!raw) return "—";
     const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const d = ymd
-      ? new Date(
-          Number(ymd[1]),
-          Number(ymd[2]) - 1,
-          Number(ymd[3]),
-          12,
-          0,
-          0,
-        )
+      ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 12, 0, 0)
       : new Date(raw.includes("T") ? raw : `${raw}T12:00:00`);
     if (Number.isNaN(d.getTime())) return raw;
     return d.toLocaleDateString("pt-BR", {
@@ -296,11 +302,7 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
   const renderListCard = (b: Boleto) => {
     const payable = isBoletoPayable(b);
     const statusLabel =
-      b.status === "pending"
-        ? "Pendente"
-        : payable
-          ? "Pago"
-          : "Recebido";
+      b.status === "pending" ? "Pendente" : payable ? "Pago" : "Recebido";
     return (
       <div
         key={b.id}
@@ -385,10 +387,13 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
         )}
       >
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="text-sm font-medium leading-snug">
-              {formatBoletoFluxoDescription(b)}
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-1.5 no-wrap">
+            {b.provider ? (
+              <p className="text-sm font-medium leading-snug flex-1">
+                {b.provider}
+              </p>
+            ) : null}
+
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-semibold",
@@ -402,11 +407,12 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
               {statusLabel}
             </span>
           </div>
-          {b.provider ? (
-            <p className="mt-1.5 truncate text-xs text-muted-foreground">
-              {b.provider}
-            </p>
-          ) : null}
+          <p
+            className="
+                mt-1.5 truncate text-xs text-muted-foreground"
+          >
+            {formatBoletoFluxoDescription(b)}
+          </p>
         </div>
         <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -458,7 +464,6 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
         description={periodDescription}
       />
 
-
       {currentCompany?.id && (
         <CreateBoletoSheet
           open={boletoSheetOpen}
@@ -479,50 +484,50 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
         />
       )}
       <BoletosCalendar
-          month={period.month}
-          year={period.year}
-          boletos={calendarBoletos}
-          loading={calendarLoading}
-          viewMode={calendarViewMode}
-          onDayListOpen={setCalendarDayList}
-          formatCurrency={formatCurrency}
-        />
+        month={period.month}
+        year={period.year}
+        boletos={calendarBoletos}
+        loading={calendarLoading}
+        viewMode={calendarViewMode}
+        onDayListOpen={setCalendarDayList}
+        formatCurrency={formatCurrency}
+      />
 
-        <Card>
-          <CardHeader className="flex flex-col gap-5 space-y-0">
-            <div>
-              <CardTitle>{listTitle}</CardTitle>
-              <CardDescription>{listDescription}</CardDescription>
-            </div>
-          </CardHeader>
+      <Card>
+        <CardHeader className="flex flex-col gap-5 space-y-0">
+          <div>
+            <CardTitle>{listTitle}</CardTitle>
+            <CardDescription>{listDescription}</CardDescription>
+          </div>
+        </CardHeader>
 
-          <CardContent>
-            <div className="mb-4 flex flex-wrap gap-3 items-center">
-              <Input
-                placeholder={searchPlaceholder}
-                value={boletosSearch}
-                onChange={(e) => setBoletosSearch(e.target.value)}
-                className="max-w-sm"
-              />
+        <CardContent>
+          <div className="mb-4 flex flex-wrap gap-3 items-center">
+            <Input
+              placeholder={searchPlaceholder}
+              value={boletosSearch}
+              onChange={(e) => setBoletosSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
+          {loadingList ? (
+            <p className="text-muted-foreground">Carregando...</p>
+          ) : boletosList.length === 0 ? (
+            <p className="text-muted-foreground">{emptyListMessage}</p>
+          ) : (
+            <div className="space-y-2">
+              {boletosList.map((b) => renderListCard(b))}
             </div>
-            {loadingList ? (
-              <p className="text-muted-foreground">Carregando...</p>
-            ) : boletosList.length === 0 ? (
-              <p className="text-muted-foreground">{emptyListMessage}</p>
-            ) : (
-              <div className="space-y-2">
-                {boletosList.map((b) => renderListCard(b))}
-              </div>
-            )}
-            {!loadingList && (
-              <Pagination
-                page={boletosPage}
-                totalCount={boletosListCount}
-                onPageChange={setBoletosPage}
-              />
-            )}
-          </CardContent>
-        </Card>
+          )}
+          {!loadingList && (
+            <Pagination
+              page={boletosPage}
+              totalCount={boletosListCount}
+              onPageChange={setBoletosPage}
+            />
+          )}
+        </CardContent>
+      </Card>
 
       <Sheet
         open={!!calendarDayList}
@@ -728,15 +733,12 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
                 {boletoResumo.expense_id && (
                   <Button
                     variant="outline"
-                    onClick={() => {
-                      setBoletoResumo(null);
-                      navigate(
-                        `/app/despesas?expense=${boletoResumo.expense_id}`,
-                      );
-                    }}
+                    onClick={() =>
+                      setExpenseDetailId(boletoResumo.expense_id)
+                    }
                   >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    Ir para despesa
+                    <FileText className="h-4 w-4 mr-2" />
+                    Ver nota fiscal
                   </Button>
                 )}
               </div>
@@ -744,6 +746,13 @@ export function FluxoBoletosPage({ config }: { config: FluxoBoletosPageConfig })
           )}
         </SheetContent>
       </Sheet>
+
+      <ExpenseDetailSheet
+        expenseId={expenseDetailId}
+        elevated
+        onClose={closeExpenseDetail}
+        onRefresh={closeExpenseDetail}
+      />
 
       <Dialog
         open={markPaidDialogOpen}

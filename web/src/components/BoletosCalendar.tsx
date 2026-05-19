@@ -265,7 +265,7 @@ export function BoletosCalendar({
                                       isAdjacent && "opacity-85",
                                     )}
                                   >
-                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1  sm:items-center sm:justify-between sm:gap-1">
                                       <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-emerald-700 dark:text-emerald-400/95 sm:text-[10px]">
                                         Vendas realizadas
                                       </span>
@@ -287,7 +287,7 @@ export function BoletosCalendar({
                                       isAdjacent && "opacity-85",
                                     )}
                                   >
-                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1  sm:items-center sm:justify-between sm:gap-1">
                                       <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[10px]">
                                         Valores a Pagar
                                       </span>

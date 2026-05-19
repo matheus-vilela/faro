@@ -102,10 +102,12 @@ export function DashboardEpocDailySyncAlertCard({
 
   useEffect(() => {
     if (!companyId || !attemptAtIso) {
-      setDismissedLocal(false);
+      queueMicrotask(() => void setDismissedLocal(false));
       return;
     }
-    setDismissedLocal(readDismissedAttemptAt(companyId) === attemptAtIso);
+    queueMicrotask(() =>
+      setDismissedLocal(readDismissedAttemptAt(companyId) === attemptAtIso),
+    );
   }, [companyId, attemptAtIso]);
 
   const alertContent = useMemo(() => {

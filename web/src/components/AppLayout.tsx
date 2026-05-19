@@ -39,7 +39,6 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
-  Monitor,
   Moon,
   Package,
   PackageCheck,
@@ -289,12 +288,6 @@ function AppLayoutContent() {
                 />
                 Escuro
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("system")}>
-                <Monitor
-                  className={`mr-2 h-4 w-4 ${theme === "system" ? "opacity-100" : "opacity-50"}`}
-                />
-                Sistema
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -340,10 +333,7 @@ function AppLayoutContent() {
         </div>
       </header>
 
-      <Sidebar
-        collapsible="icon"
-        className="top-12 bottom-0 h-auto min-h-0"
-      >
+      <Sidebar collapsible="icon" className="top-12 bottom-0 h-auto min-h-0">
         {isMobile && (
           <SidebarHeader className="flex items-start justify-center ">
             <Link

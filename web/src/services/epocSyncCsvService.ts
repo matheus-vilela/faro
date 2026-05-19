@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { shouldKeepOnboardingPdvSync } from "@/lib/onboardingPdvDefaults";
 import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { toast } from "sonner";
 
@@ -71,9 +72,8 @@ export type InvokeEpocCsvSyncOptions = {
   /** Datas no formato EPOC dd/MM/aaaa (repetição a partir do histórico). */
   consulta_dias_br?: string[];
   /**
-   * Se true: em sucesso mantém `onboarding_pdv.sync` até
-   * `completeCompanyOnboardingIntegrationPdvStep`. Se false: em sucesso repõe `sync`
-   * logo após a edge concluir (sync manual pós-onboarding).
+   * Se true: mantém `onboarding_pdv.sync` até o import CSV terminar
+   * (`process-integration-csv-revenue-job` grava `sync: false` ao concluir).
    */
   lockOnboardingPdv?: boolean;
   /** Volta a marcar a etapa PDV como em aberto até «Concluir integração». */
@@ -188,9 +188,6 @@ export async function invokeEpocCsvSync(
       }
       return data;
     }
-    if (isOnboardingFlow && !lockOnboardingPdv) {
-      await patchCompanyOnboardingPdv(companyId, { sync: false });
-    }
     return data;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao executar sincronização.";
@@ -217,11 +214,12 @@ export async function releaseStalePdvSyncLockIfIdle(
     .maybeSingle();
   if (readErr || !row) return false;
 
-  const ob = row.onboarding_pdv as Record<string, unknown> | null;
-  if (!ob || ob.completed === true || ob.sync !== true) return false;
-  if (ob.portal_busy === true) return false;
-  const st = ob.import_status;
-  if (st === "pending" || st === "processing") return false;
+  const ob = row.onboarding_pdv;
+  if (!ob || typeof ob !== "object" || Array.isArray(ob)) return false;
+  const o = ob as Record<string, unknown>;
+  if (o.completed === true || o.sync !== true) return false;
+  if (o.portal_busy === true) return false;
+  if (shouldKeepOnboardingPdvSync(ob)) return false;
 
   const { error } = await patchCompanyOnboardingPdv(companyId, { sync: false });
   return !error;

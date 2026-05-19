@@ -24,7 +24,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Inbox, Link2, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -47,6 +47,20 @@ export function DashboardImportReviewPendingRevenueLinkCard({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] =
     useState<DashboardPendingRevenueLinkRow | null>(null);
+  const skipFullLoadRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  const reloadQuiet = useCallback(async () => {
+    setError(null);
+    const { rows: next, error: err } =
+      await fetchDashboardImportReviewPendingRevenueLink(supabase, companyId);
+    if (err) {
+      setError(err);
+      setRows([]);
+      return;
+    }
+    setRows(next);
+  }, [companyId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,9 +76,24 @@ export function DashboardImportReviewPendingRevenueLinkCard({
     setRows(next);
   }, [companyId]);
 
+  const refreshAfterLocalChange = useCallback(() => {
+    skipFullLoadRef.current = true;
+    void reloadQuiet();
+    onPipelineChange?.();
+  }, [reloadQuiet, onPipelineChange]);
+
   useEffect(() => {
-    void load();
-  }, [load, refreshSignal]);
+    if (skipFullLoadRef.current) {
+      skipFullLoadRef.current = false;
+      return;
+    }
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      void load();
+      return;
+    }
+    void reloadQuiet();
+  }, [load, reloadQuiet, refreshSignal]);
 
   const runFinalize = async () => {
     if (!confirmRow) return;
@@ -89,8 +118,7 @@ export function DashboardImportReviewPendingRevenueLinkCard({
         ? `${res.migrated_entries} lançamento(s) de venda associados à ficha técnica.`
         : "Nenhuma venda pendente em modo produto; estado atualizado.",
     );
-    onPipelineChange?.();
-    void load();
+    refreshAfterLocalChange();
   };
 
   if (rows.length === 0) {

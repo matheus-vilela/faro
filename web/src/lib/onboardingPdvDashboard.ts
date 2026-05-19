@@ -64,15 +64,15 @@ export function parseOnboardingPdv(raw: unknown): ParsedOnboardingPdv {
 }
 
 /**
- * Import concluído: `sales_total > 0` e (`sync` false ou todas as linhas processadas).
+ * Import concluído (`import_status === completed` e todas as linhas processadas).
  * Utilizador confirma no dashboard.
  */
 export function isOnboardingPdvConfirmPhase(raw: unknown): boolean {
   const o = parseOnboardingPdv(raw);
   if (o.completed) return false;
+  if (o.import_status !== "completed") return false;
   if (o.sales_total <= 0) return false;
-  const allRowsProcessed = o.sales_sync >= o.sales_total;
-  return !o.sync || allRowsProcessed;
+  return o.sales_sync >= o.sales_total;
 }
 
 export function isOnboardingPdvPortalFailure(raw: unknown): boolean {

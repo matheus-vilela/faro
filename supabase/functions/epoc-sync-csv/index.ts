@@ -780,20 +780,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Integração inativa" }, 400);
   }
 
-  let patchOnboardingPdvEnabled = syncMode === "onboarding_initial";
-  if (!patchOnboardingPdvEnabled) {
-    const { data: coRow } = await admin
-      .from("companies")
-      .select("onboarding_pdv")
-      .eq("id", companyId)
-      .maybeSingle();
-    const ob = coRow?.onboarding_pdv as OnboardingPdv | undefined;
-    patchOnboardingPdvEnabled =
-      ob?.completed !== true &&
-      ob?.sync === true &&
-      (ob?.sales_total === 0 ||
-        (ob?.sales_total > 0 && ob?.sales_total !== ob?.sales_sync));
-  }
+  /** Só o fluxo `onboarding_initial` atualiza `onboarding_pdv` (card do dashboard). */
+  const patchOnboardingPdvEnabled = syncMode === "onboarding_initial";
 
   async function patchOb(patch: OnboardingPdvPatch): Promise<void> {
     if (!patchOnboardingPdvEnabled) return;

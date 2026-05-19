@@ -86,6 +86,20 @@ export function isOnboardingPdvSyncInProgress(raw: unknown): boolean {
   return o?.sync === true;
 }
 
+/** Import CSV de vendas ainda não terminou (fila, chunks ou linhas em falta). */
+export function isOnboardingPdvImportInProgress(raw: unknown): boolean {
+  const o = onboardingPdvObject(raw);
+  const st = o?.import_status;
+  if (st === "pending" || st === "processing") return true;
+  const { sales_total, sales_sync } = parseOnboardingPdvSalesMetrics(raw);
+  return sales_total > 0 && sales_sync < sales_total;
+}
+
+/** Não limpar `sync` enquanto o import de vendas do onboarding estiver ativo. */
+export function shouldKeepOnboardingPdvSync(raw: unknown): boolean {
+  return isOnboardingPdvImportInProgress(raw);
+}
+
 /** Fluxo de onboarding PDV já iniciado (métricas/portal/import/sync). */
 export function isOnboardingPdvFlowEngaged(raw: unknown): boolean {
   const o = onboardingPdvObject(raw);

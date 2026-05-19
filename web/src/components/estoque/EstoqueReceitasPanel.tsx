@@ -291,8 +291,6 @@ function RecipeIngredientsAddPanel({
   conversionsByProduct,
   handleIngredientConversionsChange,
   toBaseQty,
-  fromBaseQty,
-  formatQtyHint,
   onProductCreated,
 }: IngredientEditorProps) {
   const [draftProductId, setDraftProductId] = useState("");
@@ -306,12 +304,12 @@ function RecipeIngredientsAddPanel({
 
   useEffect(() => {
     if (!draftProductId) {
-      setDraftUnitCode("");
+      queueMicrotask(() => setDraftUnitCode(""));
       return;
     }
     const p = productById.get(draftProductId);
     if (p) {
-      setDraftUnitCode(p.unit.trim().toLowerCase());
+      queueMicrotask(() => setDraftUnitCode(p.unit.trim().toLowerCase()));
     }
   }, [draftProductId, productById]);
 
@@ -370,36 +368,6 @@ function RecipeIngredientsAddPanel({
     // limpar o draftProductId
     setDraftProductId("");
   };
-
-  const draftConversionHint = (() => {
-    if (!draftProduct || !draftUnitCode) return null;
-    const isBase =
-      draftUnitCode.trim().toLowerCase() ===
-      draftProduct.unit.trim().toLowerCase();
-    if (isBase) {
-      return (
-        <p className="text-[11px] text-muted-foreground">
-          Quantidade na unidade de estoque ({systemUnitLabel(draftProduct.unit)}
-          ).
-        </p>
-      );
-    }
-    const oneInSelected = fromBaseQty(draftProductId, 1, draftUnitCode);
-    if (oneInSelected == null) {
-      return (
-        <p className="text-[11px] text-amber-800 dark:text-amber-200">
-          Falta conversão para {systemUnitLabel(draftUnitCode)}. Busque a
-          unidade na lista e use «Cadastrar conversão».
-        </p>
-      );
-    }
-    return (
-      <p className="text-[11px] text-muted-foreground">
-        {formatQtyHint(oneInSelected)} {systemUnitLabel(draftUnitCode)}{" "}
-        equivalem a 1 {systemUnitLabel(draftProduct.unit)}.
-      </p>
-    );
-  })();
 
   return (
     <div className="space-y-4">
@@ -1079,7 +1047,10 @@ export const EstoqueReceitasPanel = forwardRef<
       setIngs([]);
     }
     onStockChanged?.();
-    void load();
+    const keepEditorOpenAfterSave = ingredientsOnly && embedInline;
+    if (!keepEditorOpenAfterSave) {
+      void load();
+    }
     return true;
   };
 
@@ -1109,7 +1080,9 @@ export const EstoqueReceitasPanel = forwardRef<
     setOutputId("");
     setIngs([]);
     onStockChanged?.();
-    void load();
+    if (!(ingredientsOnly && embedInline)) {
+      void load();
+    }
   };
 
   const consume = async () => {

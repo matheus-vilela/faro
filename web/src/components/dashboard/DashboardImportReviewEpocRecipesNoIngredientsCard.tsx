@@ -110,6 +110,23 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const recipePanelRef = useRef<EstoqueReceitasPanelHandle>(null);
+  /** Evita spinner no card quando o próprio save/revert disparou refreshSignal. */
+  const skipFullLoadRef = useRef(false);
+
+  const reloadQuiet = useCallback(async () => {
+    setError(null);
+    const { rows: next, error: err } =
+      await fetchDashboardImportReviewEpocRecipesNoIngredients(
+        supabase,
+        companyId,
+      );
+    if (err) {
+      setError(err);
+      setRows([]);
+      return;
+    }
+    setRows(next);
+  }, [companyId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,9 +145,26 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
     setRows(next);
   }, [companyId]);
 
+  const refreshAfterLocalChange = useCallback(() => {
+    skipFullLoadRef.current = true;
+    void reloadQuiet();
+    onPipelineChange?.();
+  }, [reloadQuiet, onPipelineChange]);
+
+  const mountedRef = useRef(false);
+
   useEffect(() => {
-    void load();
-  }, [load, refreshSignal]);
+    if (skipFullLoadRef.current) {
+      skipFullLoadRef.current = false;
+      return;
+    }
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      void load();
+      return;
+    }
+    void reloadQuiet();
+  }, [load, reloadQuiet, refreshSignal]);
 
   useEffect(() => {
     if (
@@ -154,8 +188,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       return;
     }
     toast.success("Item reclassificado como produto de venda.");
-    onPipelineChange?.();
-    void load();
+    refreshAfterLocalChange();
   };
 
   if (rows.length === 0) {
@@ -183,10 +216,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       onSheetOpenChange={(open) => {
         if (!open) setSelectedRecipeId(null);
       }}
-      onStockChanged={() => {
-        onPipelineChange?.();
-        void load();
-      }}
+      onStockChanged={refreshAfterLocalChange}
     />
   ) : null;
 
@@ -199,7 +229,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       </p>
       <ul
         className={cn(
-          "min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1",
+          "min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 pb-20",
           PENDING_LIST_VIEWPORT_MIN_HEIGHT,
           isMobile && MOBILE_LIST_MAX_HEIGHT,
         )}
@@ -283,7 +313,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
           ) : (
             <div
               className={cn(
-                "grid flex-1 items-stretch gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]",
+                "grid flex-1 pb-20 items-stretch gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]",
                 DESKTOP_GRID_MIN_HEIGHT,
               )}
             >

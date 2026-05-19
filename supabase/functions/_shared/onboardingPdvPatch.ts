@@ -38,6 +38,32 @@ export function onboardingPdvPatchAllowed(raw: unknown): boolean {
   return (raw as Record<string, unknown>).completed !== true;
 }
 
+/** Import CSV de vendas ainda não terminou (fila, chunks ou linhas em falta). */
+export function isOnboardingPdvImportInProgress(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const o = raw as Record<string, unknown>;
+  const st = o.import_status;
+  if (st === "pending" || st === "processing") return true;
+  const salesTotal = numMetric(o.sales_total);
+  const salesSync = numMetric(o.sales_sync);
+  return salesTotal > 0 && salesSync < salesTotal;
+}
+
+/** Remove `sync: false` do patch se o import ainda estiver ativo. */
+export function onboardingPdvPatchWithoutPrematureSyncClear(
+  raw: unknown,
+  patch: OnboardingPdvPatch,
+): OnboardingPdvPatch {
+  if (patch.sync !== false) return patch;
+  if (patch.import_status === "completed" || patch.import_status === "failed") {
+    return patch;
+  }
+  if (!isOnboardingPdvImportInProgress(raw)) return patch;
+  const next = { ...patch };
+  delete next.sync;
+  return next;
+}
+
 /** Merge parcial em `onboarding_pdv` enquanto a etapa PDV não estiver concluída. */
 export async function patchOnboardingPdv(
   admin: Admin,
@@ -58,6 +84,12 @@ export async function patchOnboardingPdv(
   }
   if (!onboardingPdvPatchAllowed(row.onboarding_pdv)) return;
 
+  const effective = onboardingPdvPatchWithoutPrematureSyncClear(
+    row.onboarding_pdv,
+    patch,
+  );
+  if (Object.keys(effective).length === 0) return;
+
   const raw = row.onboarding_pdv;
   const prev =
     raw && typeof raw === "object" && !Array.isArray(raw)
@@ -65,7 +97,7 @@ export async function patchOnboardingPdv(
       : {};
   const next: Record<string, unknown> = { ...prev };
 
-  for (const [k, v] of Object.entries(patch)) {
+  for (const [k, v] of Object.entries(effective)) {
     if (v === undefined) continue;
     if (k === "sales_total" || k === "sales_sync") {
       next[k] = numMetric(v);
@@ -82,5 +114,8 @@ export async function patchOnboardingPdv(
     console.warn(logTag, "update", companyId, upErr.message);
     return;
   }
-  console.log(logTag, JSON.stringify({ company_id: companyId, keys: Object.keys(patch) }));
+  console.log(
+    logTag,
+    JSON.stringify({ company_id: companyId, keys: Object.keys(effective) }),
+  );
 }

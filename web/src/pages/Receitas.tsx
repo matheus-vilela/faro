@@ -876,7 +876,7 @@ export function Receitas() {
     <PageShell className="space-y-8 pb-0" narrow>
       <PageHeader
         title="Vendas"
-        description="Vendas manuais e por produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria). O CMV segue o grupo cadastrado no produto."
+        description="Vendas manuais e por produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria) e pode gerar conta a pagar de dedução no fluxo."
         icon={CircleDollarSign}
         action={
           <Button
