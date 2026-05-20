@@ -3,6 +3,7 @@ import {
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   catalogMatchNameKey,
+  findCatalogProductByNameKey,
   findCatalogProductByNormalizedName,
   findDirectMatchByNcmAndName,
 } from "./llmCatalogCandidates.ts";
@@ -17,6 +18,15 @@ Deno.test("findCatalogProductByNormalizedName: vincula nome IA ao cadastro exist
     { id: "p2", name: "CERVEJA HEINEKEN" },
   ];
   const hit = findCatalogProductByNormalizedName(catalog, "ÁGUA COM GÁS");
+  assertEquals(hit?.id, "p1");
+});
+
+Deno.test("findCatalogProductByNameKey: mesmo nome com NCM diferente", () => {
+  const catalog = [
+    { id: "p1", name: "AGUA SANITARIA", ncm: "38089419" },
+    { id: "p2", name: "CERVEJA HEINEKEN", ncm: "22030000" },
+  ];
+  const hit = findCatalogProductByNameKey(catalog, "AGUA SANITARIA");
   assertEquals(hit?.id, "p1");
 });
 

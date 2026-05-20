@@ -57,11 +57,22 @@ export async function ensureProductForLine(
   const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
+  const cn = canonicalProductName(name);
+  if (cn) {
+    const { data: dup } = await supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("canonical_name", cn)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (dup?.id) return { productId: String(dup.id), created: false };
+  }
+
   const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
     item,
     pm,
   );
-  const cn = canonicalProductName(name);
   const insertRow: Record<string, unknown> = {
     company_id: companyId,
     name,

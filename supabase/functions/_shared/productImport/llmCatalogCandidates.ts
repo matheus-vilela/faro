@@ -37,6 +37,28 @@ export function catalogMatchNameKey(name: string): string {
   return stripDiacriticsLower(sanitizeCatalogProductName(name));
 }
 
+/**
+ * Produto já cadastrado com o mesmo nome de catálogo (ignora NCM).
+ * Evita duplicar "AGUA SANITARIA" quando a nota traz NCM diferente do cadastro.
+ */
+export function findCatalogProductByNameKey<T extends { id: string; name: string }>(
+  catalog: T[],
+  invoiceOrCatalogName: string,
+): T | undefined {
+  const lineKey = catalogMatchNameKey(invoiceOrCatalogName);
+  if (!lineKey || lineKey.length < 2) return undefined;
+  const matches = catalog.filter((p) => catalogMatchNameKey(p.name) === lineKey);
+  if (matches.length === 0) return undefined;
+  if (matches.length === 1) return matches[0];
+  const strict = stripDiacriticsLower(
+    sanitizeCatalogProductName(invoiceOrCatalogName),
+  );
+  const strictHits = matches.filter(
+    (p) => stripDiacriticsLower(sanitizeCatalogProductName(p.name)) === strict,
+  );
+  return strictHits[0] ?? matches[0];
+}
+
 /** Produto já cadastrado com o mesmo nome normalizado (pós-IA ou dedupe). */
 export function findCatalogProductByNormalizedName<T extends { id: string; name: string }>(
   catalog: T[],

@@ -17,11 +17,15 @@ import {
   buildNewProductCatalogFromNfeLine,
   insertProductUnitConversions,
 } from "./productImport/buildPackUnitConversionsFromLabel.ts";
-import { sanitizeCatalogProductName } from "./productImport/canonicalName.ts";
+import {
+  canonicalProductName,
+  sanitizeCatalogProductName,
+} from "./productImport/canonicalName.ts";
 import {
   buildLlmCatalogForInvoiceLine,
   catalogMatchNameKey,
   catalogToLlmArbiterCandidates,
+  findCatalogProductByNameKey,
   findCatalogProductByNormalizedName,
   findDirectMatchByNcmAndName,
 } from "./productImport/llmCatalogCandidates.ts";
@@ -180,6 +184,7 @@ function productRowForDbInsert(
     cfop != null ? String(cfop).replace(/\D/g, "").slice(0, 4) : "";
   const csosnRaw =
     csosn != null ? String(csosn).replace(/\D/g, "").slice(0, 4) : "";
+  const cn = canonicalProductName(String(name ?? ""));
   return {
     company_id,
     name,
@@ -190,6 +195,9 @@ function productRowForDbInsert(
     ean: ean ?? null,
     min_quantity: min_quantity ?? 0,
     current_quantity: current_quantity ?? 0,
+    canonical_name: cn.length >= 2 ? cn : null,
+    is_active: true,
+    stock_control_type: "DIRECT",
   };
 }
 
@@ -328,6 +336,51 @@ async function stagingInterpretCreateProduct(
 ): Promise<string | null> {
   if (!built) return null;
   const nomeProduto = String(built.payload.name ?? "").trim() || "—";
+
+  const existingInCatalog = findCatalogProductByNameKey(catalog, nomeProduto);
+  if (existingInCatalog) {
+    chunkProductDedupeByKey.set(dedupeKey, existingInCatalog.id);
+    console.log(
+      LOG,
+      "produto_reutilizado_por_nome",
+      JSON.stringify({
+        product_id: existingInCatalog.id,
+        nome: nomeProduto,
+        criterio: contexto,
+      }),
+    );
+    return existingInCatalog.id;
+  }
+
+  const cn = canonicalProductName(nomeProduto);
+  if (cn.length >= 2) {
+    const { data: dup } = await admin
+      .from("products")
+      .select("id, name, ncm, cfop, csosn, ean, unit")
+      .eq("company_id", companyId)
+      .eq("canonical_name", cn)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (dup?.id) {
+      const row = catalogRowFromStagingInsert(String(dup.id), {
+        name: String(dup.name ?? nomeProduto),
+        ncm: dup.ncm,
+        cfop: dup.cfop,
+        csosn: dup.csosn,
+        ean: dup.ean,
+        unit: dup.unit,
+      });
+      registerNewProductInStagingCatalog(catalog, ncmBuckets, row);
+      chunkProductDedupeByKey.set(dedupeKey, row.id);
+      console.log(
+        LOG,
+        "produto_reutilizado_por_canonical_name",
+        JSON.stringify({ product_id: row.id, canonical_name: cn, criterio: contexto }),
+      );
+      return row.id;
+    }
+  }
+
   const newId = await insertProductFromStagingInterpret(
     admin,
     companyId,
@@ -512,6 +565,17 @@ export async function resolveProductsForInterpretLog(
       productIdByLineIndex.set(lineIndex, hit.id);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
       chunkProductDedupeByKey.set(dedupeKey, hit.id);
+      continue;
+    }
+
+    const byName = findCatalogProductByNameKey(
+      activeCatalog,
+      String(line.nome ?? "").trim(),
+    );
+    if (byName) {
+      productIdByLineIndex.set(lineIndex, byName.id);
+      invoiceResolvedProductByDedupeKey.set(dedupeKey, byName.id);
+      chunkProductDedupeByKey.set(dedupeKey, byName.id);
       continue;
     }
 
