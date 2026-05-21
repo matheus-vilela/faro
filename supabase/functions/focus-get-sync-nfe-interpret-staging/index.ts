@@ -20,6 +20,7 @@
  * Opcional: `FOCUS_GET_SYNC_INTERPRET_MAX_JOBS` (default 2), `FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK` (default 5),
  * `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` (default 120).
  * Opcional (LLM): `OPENAI_API_KEY`, `OPENAI_PRODUCT_MATCH_MODEL`.
+ * Catálogo global `unified_supplier_*` é atualizado aqui (parse XML por nota), não em `focus-get-sync-nfe`.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -33,6 +34,7 @@ import {
   persistStagingInterpretExpenseAndBoletos,
   resolveProductsForInterpretLog,
 } from "../_shared/stagingNfeInterpretPostProcess.ts";
+import { upsertUnifiedSupplierCatalogFromNfeXml } from "../_shared/unifiedSupplierCatalogFromNfeXml.ts";
 
 const LOG = "[focus-get-sync-nfe-interpret-staging]";
 
@@ -331,6 +333,31 @@ async function runInterpretStagingChunk(
 
     const productIdByLineIndex = new Map<number, string>();
     const t0 = Date.now();
+    const xmlRaw = st.xml_content as string | null | undefined;
+    const catalogPromise =
+      typeof xmlRaw === "string" && xmlRaw.trim().startsWith("<")
+        ? upsertUnifiedSupplierCatalogFromNfeXml(admin, xmlRaw, {
+            chave_nfe: chaveNfe,
+            company_id: row.company_id,
+          }).then((catalogRes) => {
+            if (!catalogRes.ok && catalogRes.skippedReason) {
+              logPhase("unified_catalog_skip", {
+                staging_id: stagingId,
+                chave_nfe: chaveNfe,
+                reason: catalogRes.skippedReason,
+              });
+            }
+            return catalogRes;
+          }).catch((catalogErr) => {
+            logPhase("unified_catalog_err", {
+              staging_id: stagingId,
+              chave_nfe: chaveNfe,
+              error: String(catalogErr),
+            });
+            return null;
+          })
+        : Promise.resolve(null);
+
     await Promise.all([
       ensureSupplierForInterpretLog(admin, row.company_id, payload),
       resolveProductsForInterpretLog(
@@ -341,6 +368,7 @@ async function runInterpretStagingChunk(
         productIdByLineIndex,
         chunkProductDedupeByKey,
       ),
+      catalogPromise,
     ]);
     logPhase("staging_row_produtos_fornecedor", {
       staging_id: stagingId,

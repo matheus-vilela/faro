@@ -29,7 +29,6 @@ type SupabaseClient = any;
 
 export type NfeXmlBatchFinalizeMeta = {
   xml_line_identity: string;
-  raw_import_id: string | null;
   resolution: NfeCatalogLineResolution;
   product_id_snapshot: string | null;
   unit_conflict_auto_linked?: boolean;
@@ -57,13 +56,12 @@ export async function buildNfeXmlExpenseItemInserts(
     items: ExtractedExpenseItem[];
     motorVersion: string;
     xmlLineIdentities: string[];
-    rawImportIdsOrdered: (string | null)[];
   },
 ): Promise<{
   matchResult: Awaited<ReturnType<typeof matchNfeExpenseCatalogLines>>;
   lines: BuiltXmlCatalogExpenseLine[];
 }> {
-  const { companyId, items, motorVersion, xmlLineIdentities, rawImportIdsOrdered } = params;
+  const { companyId, items, motorVersion, xmlLineIdentities } = params;
   const matchResult = await matchNfeExpenseCatalogLines(
     supabase,
     companyId,
@@ -111,9 +109,6 @@ export async function buildNfeXmlExpenseItemInserts(
     const lineItem = matchResult.items[i] as ItemWithProductMatch | undefined;
     const pm = lineItem?.productMatch;
     const xml_line_identity = xmlLineIdentities[i] ?? `nItem:${i + 1}:cProd:x`;
-    const rawIdRaw = rawImportIdsOrdered[i];
-    const raw_import_id =
-      rawIdRaw && String(rawIdRaw).trim() ? String(rawIdRaw).trim() : null;
 
     let productId =
       String(pm?.resolvedProductId ?? "").trim() ||
@@ -216,11 +211,7 @@ export async function buildNfeXmlExpenseItemInserts(
       }
     }
 
-    const onboardingXmlLine = Boolean(raw_import_id);
-    const importPendingResolution =
-      onboardingXmlLine && String(productId ?? "").trim()
-        ? false
-        : needsCatalogReview;
+    const importPendingResolution = needsCatalogReview;
 
     const import_resolution_status_line =
       unitConflictAutoLinked && String(productId ?? "").trim()
@@ -229,7 +220,6 @@ export async function buildNfeXmlExpenseItemInserts(
 
     const batchFinalize: NfeXmlBatchFinalizeMeta = {
       xml_line_identity,
-      raw_import_id,
       resolution: resolutionLabel,
       product_id_snapshot: productId,
       unit_conflict_auto_linked: unitConflictAutoLinked || undefined,

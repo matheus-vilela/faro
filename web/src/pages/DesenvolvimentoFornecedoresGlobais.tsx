@@ -12,7 +12,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { maskCpfCnpj } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
@@ -48,13 +47,21 @@ type UnifiedSupplierProduct = {
   cfop: string | null;
   csosn: string | null;
   unit_commercial: string | null;
-  unit_value_last: number | null;
   min_price: number | null;
   max_price: number | null;
-  last_effective_unit_price: number | null;
+  min_price_chave_nfe: string | null;
+  max_price_chave_nfe: string | null;
+  min_price_nfe_xml: string | null;
+  max_price_nfe_xml: string | null;
   xml_prod: Record<string, unknown>;
   sighting_count: number;
   last_seen_at: string;
+};
+
+type NfeXmlSheetState = {
+  title: string;
+  chaveNfe: string | null;
+  xml: string;
 };
 
 type ProductHistoryRow = {
@@ -88,9 +95,6 @@ function formatMoney(v: number | null): string {
 }
 
 export function DesenvolvimentoFornecedoresGlobais() {
-  const { currentCompany } = useCompany();
-  const companyId = currentCompany?.id ?? "";
-
   const [suppliers, setSuppliers] = useState<UnifiedSupplier[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -109,6 +113,8 @@ export function DesenvolvimentoFornecedoresGlobais() {
     useState<UnifiedSupplierProduct | null>(null);
   const [historyRows, setHistoryRows] = useState<ProductHistoryRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [nfeXmlSheet, setNfeXmlSheet] = useState<NfeXmlSheetState | null>(null);
 
   const fetchSuppliers = useCallback(async () => {
     setLoading(true);
@@ -154,7 +160,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
   }, [debouncedSearch]);
 
   const fetchProducts = useCallback(async () => {
-    if (!selectedSupplier || !companyId) return;
+    if (!selectedSupplier) return;
     setProductsLoading(true);
 
     let query = supabase
@@ -175,66 +181,11 @@ export function DesenvolvimentoFornecedoresGlobais() {
     if (error) {
       console.error("[unified_supplier_products]", error.message);
       setProducts([]);
-      setProductsLoading(false);
-      return;
+    } else {
+      setProducts((data ?? []) as UnifiedSupplierProduct[]);
     }
-
-    const base = (data ?? []) as Omit<
-      UnifiedSupplierProduct,
-      "min_price" | "max_price" | "last_effective_unit_price"
-    >[];
-    const productIds = base.map((p) => p.id);
-    const priceByProductId = new Map<
-      string,
-      {
-        min_price: number | null;
-        max_price: number | null;
-        last_effective_unit_price: number | null;
-      }
-    >();
-
-    if (productIds.length > 0) {
-      const { data: priceRows, error: priceErr } = await supabase
-        .from("unified_supplier_product_company_prices")
-        .select("unified_supplier_product_id, min_price, max_price, last_effective_unit_price")
-        .eq("company_id", companyId)
-        .in("unified_supplier_product_id", productIds);
-
-      if (priceErr) {
-        console.error(
-          "[unified_supplier_product_company_prices]",
-          priceErr.message,
-        );
-      } else {
-        for (const row of priceRows ?? []) {
-          const pid = String(
-            (row as { unified_supplier_product_id: string })
-              .unified_supplier_product_id,
-          );
-          priceByProductId.set(pid, {
-            min_price: (row as { min_price: number | null }).min_price,
-            max_price: (row as { max_price: number | null }).max_price,
-            last_effective_unit_price: (
-              row as { last_effective_unit_price: number | null }
-            ).last_effective_unit_price,
-          });
-        }
-      }
-    }
-
-    setProducts(
-      base.map((p) => {
-        const pr = priceByProductId.get(p.id);
-        return {
-          ...p,
-          min_price: pr?.min_price ?? null,
-          max_price: pr?.max_price ?? null,
-          last_effective_unit_price: pr?.last_effective_unit_price ?? null,
-        };
-      }),
-    );
     setProductsLoading(false);
-  }, [selectedSupplier, debouncedProductSearch, companyId]);
+  }, [selectedSupplier, debouncedProductSearch]);
 
   useEffect(() => {
     if (selectedSupplier) void fetchProducts();
@@ -265,7 +216,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
     <PageShell className="space-y-6">
       <PageHeader
         title="Fornecedores globais"
-        description="Catálogo global de fornecedores (CPF/CNPJ + cProd). Menor/maior preço referem-se à unidade selecionada no menu (unitário efetivo da NF-e)."
+        description="Catálogo global de fornecedores (CPF/CNPJ + cProd). Menor e maior preço unitário efetivo e XML da NF-e de cada extremo, no ecossistema Faro."
         icon={FlaskConical}
         action={
           <Button variant="outline" size="sm" className="gap-2" asChild>
@@ -381,25 +332,19 @@ export function DesenvolvimentoFornecedoresGlobais() {
                 />
               </div>
 
-              {!companyId ? (
-                <p className="text-sm text-muted-foreground px-1">
-                  Selecione uma unidade no menu para ver preços efetivos desta
-                  empresa.
-                </p>
-              ) : productsLoading ? (
+              {productsLoading ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : !companyId ? null : products.length === 0 ? (
+              ) : products.length === 0 ? (
                 <p className="text-sm text-muted-foreground px-1">
                   Nenhum produto com cProd para este fornecedor.
                 </p>
               ) : (
                 <div className="space-y-2 px-1 pb-6 min-w-0">
                   <p className="text-xs text-muted-foreground">
-                    {products.length} produto(s) · preço efetivo (líquido da
-                    linha + rateio frete/desconto/outros da nota) por{" "}
-                    {currentCompany?.name?.trim() || "unidade atual"}
+                    {products.length} produto(s) · menor/maior preço unitário
+                    efetivo (global)
                   </p>
                   <div className="overflow-x-auto rounded-md border">
                     <table className="w-full caption-bottom border-collapse text-sm">
@@ -422,10 +367,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
                           <th className="p-2 text-right font-medium">
                             Maior preço
                           </th>
-                          <th className="p-2 text-right font-medium hidden sm:table-cell">
-                            Últ. efetivo
-                          </th>
-                          <th className="p-2 text-center font-medium">NF-e</th>
+                          <th className="p-2 font-medium">XML min / max</th>
                           <th className="p-2 font-medium" />
                         </tr>
                       </thead>
@@ -461,14 +403,41 @@ export function DesenvolvimentoFornecedoresGlobais() {
                             <td className="p-2 text-right font-mono text-xs tabular-nums whitespace-nowrap">
                               {formatMoney(p.max_price)}
                             </td>
-                            <td className="p-2 text-right font-mono text-xs tabular-nums whitespace-nowrap hidden sm:table-cell">
-                              {formatMoney(
-                                p.last_effective_unit_price ??
-                                  p.unit_value_last,
-                              )}
-                            </td>
-                            <td className="p-2 text-center text-xs text-muted-foreground tabular-nums">
-                              {p.sighting_count}
+                            <td className="p-2 whitespace-nowrap">
+                              <div className="flex flex-col gap-1">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] px-2"
+                                  disabled={!p.min_price_nfe_xml?.trim()}
+                                  onClick={() =>
+                                    setNfeXmlSheet({
+                                      title: "NF-e — menor preço",
+                                      chaveNfe: p.min_price_chave_nfe,
+                                      xml: p.min_price_nfe_xml!.trim(),
+                                    })
+                                  }
+                                >
+                                  XML menor
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] px-2"
+                                  disabled={!p.max_price_nfe_xml?.trim()}
+                                  onClick={() =>
+                                    setNfeXmlSheet({
+                                      title: "NF-e — maior preço",
+                                      chaveNfe: p.max_price_chave_nfe,
+                                      xml: p.max_price_nfe_xml!.trim(),
+                                    })
+                                  }
+                                >
+                                  XML maior
+                                </Button>
+                              </div>
                             </td>
                             <td className="p-2 whitespace-nowrap">
                               <Button
@@ -490,6 +459,30 @@ export function DesenvolvimentoFornecedoresGlobais() {
               )}
             </>
           ) : null}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={nfeXmlSheet != null}
+        onOpenChange={(open) => {
+          if (!open) setNfeXmlSheet(null);
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="flex w-full flex-col sm:max-w-2xl"
+        >
+          <SheetHeader>
+            <SheetTitle>{nfeXmlSheet?.title ?? "XML da NF-e"}</SheetTitle>
+            <SheetDescription className="font-mono text-xs break-all">
+              {nfeXmlSheet?.chaveNfe
+                ? `Chave ${nfeXmlSheet.chaveNfe}`
+                : "Sem chave gravada"}
+            </SheetDescription>
+          </SheetHeader>
+          <pre className="flex-1 min-h-0 overflow-auto rounded-md border bg-muted/30 p-3 text-[10px] leading-relaxed font-mono whitespace-pre-wrap break-all">
+            {nfeXmlSheet?.xml ?? ""}
+          </pre>
         </SheetContent>
       </Sheet>
 

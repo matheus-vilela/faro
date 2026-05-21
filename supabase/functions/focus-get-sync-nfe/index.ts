@@ -29,12 +29,13 @@
  * entre blocos aplica `FOCUS_NFE_XML_THROTTLE_MS` (default 450 ms).
  * Com pelo menos uma linha em `focus_get_sync_nfe_staging` com XML, enfileira `focus_get_sync_nfe_interpret_jobs`
  * (`staging_xml_total` = total de XMLs; `staging_process_offset` = progresso).
+ * Catálogo global de fornecedores (`unified_supplier_*`) roda em `focus-get-sync-nfe-interpret-staging`, não aqui
+ * (evita CPU Time exceeded ao parsear cada XML nesta função).
  * (com `onboarding` quando o body pediu `onboarding: true`).
  * (processamento assíncrono via pg_cron → `focus-get-sync-nfe-interpret-staging`).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { upsertUnifiedSupplierCatalogFromNfeXml } from "../_shared/unifiedSupplierCatalogFromNfeXml.ts";
 
 const LOG = "[focus-get-sync-nfe]";
 
@@ -1455,24 +1456,32 @@ Deno.serve(async (req) => {
             }),
           );
 
-          for (const { cab, chave, xmlContent } of chunkWithXml) {
-            const { data: stagingExisting, error: stagingSelErr } = await admin
+          const chunkChaves = chunkWithXml.map((x) => x.chave);
+          const existingStagingByChave = new Map<string, string>();
+          if (chunkChaves.length > 0) {
+            const { data: existingRows, error: stagingBatchErr } = await admin
               .from("focus_get_sync_nfe_staging")
-              .select("id")
+              .select("id,chave_nfe")
               .eq("company_id", companyId)
-              .eq("chave_nfe", chave)
-              .limit(1)
-              .maybeSingle();
-            if (stagingSelErr) {
+              .in("chave_nfe", chunkChaves);
+            if (stagingBatchErr) {
               console.warn(
                 LOG,
-                "staging_select",
+                "staging_select_batch",
                 companyId,
-                chave,
-                stagingSelErr.message,
+                stagingBatchErr.message,
               );
-              continue;
+            } else {
+              for (const r of existingRows ?? []) {
+                const k = String(r.chave_nfe ?? "").replace(/\D/g, "");
+                const id = r.id != null ? String(r.id) : "";
+                if (k.length === 44 && id) existingStagingByChave.set(k, id);
+              }
             }
+          }
+
+          for (const { cab, chave, xmlContent } of chunkWithXml) {
+            const stagingExistingId = existingStagingByChave.get(chave) ?? null;
 
             const vnf = cab["versao"];
             const versaoNf =
@@ -1500,11 +1509,11 @@ Deno.serve(async (req) => {
               ...(xmlContent != null ? { xml_content: xmlContent } : {}),
             };
 
-            if (stagingExisting?.id) {
+            if (stagingExistingId) {
               const { error: updErr } = await admin
                 .from("focus_get_sync_nfe_staging")
                 .update(stagingRow)
-                .eq("id", stagingExisting.id);
+                .eq("id", stagingExistingId);
               if (updErr) {
                 console.warn(
                   LOG,
@@ -1515,30 +1524,6 @@ Deno.serve(async (req) => {
                 );
               } else {
                 notasEncontradas += 1;
-                if (xmlContent != null && String(xmlContent).trim().startsWith("<")) {
-                  try {
-                    const catalogRes = await upsertUnifiedSupplierCatalogFromNfeXml(
-                      admin,
-                      String(xmlContent),
-                      { chave_nfe: chave, company_id: companyId },
-                    );
-                    if (!catalogRes.ok && catalogRes.skippedReason) {
-                      console.warn(
-                        LOG,
-                        "unified_catalog_skip",
-                        chave,
-                        catalogRes.skippedReason,
-                      );
-                    }
-                  } catch (catalogErr) {
-                    console.warn(
-                      LOG,
-                      "unified_catalog_err",
-                      chave,
-                      String(catalogErr),
-                    );
-                  }
-                }
               }
             } else {
               const { error: insErr } = await admin
@@ -1553,30 +1538,6 @@ Deno.serve(async (req) => {
                 console.warn(LOG, "staging_insert", companyId, insErr.message);
               } else {
                 notasEncontradas += 1;
-                if (xmlContent != null && String(xmlContent).trim().startsWith("<")) {
-                  try {
-                    const catalogRes = await upsertUnifiedSupplierCatalogFromNfeXml(
-                      admin,
-                      String(xmlContent),
-                      { chave_nfe: chave, company_id: companyId },
-                    );
-                    if (!catalogRes.ok && catalogRes.skippedReason) {
-                      console.warn(
-                        LOG,
-                        "unified_catalog_skip",
-                        chave,
-                        catalogRes.skippedReason,
-                      );
-                    }
-                  } catch (catalogErr) {
-                    console.warn(
-                      LOG,
-                      "unified_catalog_err",
-                      chave,
-                      String(catalogErr),
-                    );
-                  }
-                }
               }
             }
           }

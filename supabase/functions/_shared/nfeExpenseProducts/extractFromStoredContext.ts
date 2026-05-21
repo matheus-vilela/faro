@@ -77,7 +77,8 @@ export type LoadedNfeMotorContext = {
   payload_enriched: ExtractedDocumentResult;
   import_job_file_id: string | null;
   import_job_batch_id: string | null;
-  raw_rows_ordered: Array<{ id: string; expense_item_id: string | null }>;
+  /** Despesa criada pelo interpret NF-e do onboarding (Focus). */
+  is_focus_interpret_expense: boolean;
 };
 
 /**
@@ -140,34 +141,9 @@ export async function loadNfeMotorExtractContext(
   const items = normalizeExtractedItemsLikeBatch(payload);
   const xml_line_identities = buildXmlLineIdentities(items);
 
-  const expenseItemIds = (expenseItemRows as Array<{ id: string }>).map((r) =>
-    String(r.id),
-  );
-
-  let rawCandidate: Array<{
-    id: string;
-    expense_item_id: string | null;
-  }> = [];
-  if (expenseItemIds.length > 0) {
-    const { data: rr } = await supabase
-      .from("onboarding_import_item_raw")
-      .select("id, expense_item_id")
-      .eq("company_id", companyId)
-      .in("expense_item_id", expenseItemIds);
-    rawCandidate = (rr ?? []) as Array<{
-      id: string;
-      expense_item_id: string | null;
-    }>;
-  }
-
-  const byEi = new Map<string, { id: string; expense_item_id: string | null }>();
-  for (const r of rawCandidate) {
-    if (r.expense_item_id) byEi.set(String(r.expense_item_id), r);
-  }
-
-  const raw_rows_ordered = expenseItemIds.map((eid) => {
-    return byEi.get(eid) ?? { id: "", expense_item_id: eid };
-  });
+  const frj = expenseRow.financial_reconciliation_json as Record<string, unknown> | null;
+  const isFocusInterpret =
+    String(frj?.source ?? "").trim() === "focus_get_sync_nfe_interpret_staging";
 
   return {
     items,
@@ -176,6 +152,6 @@ export async function loadNfeMotorExtractContext(
     payload_enriched: payload,
     import_job_file_id: null,
     import_job_batch_id: null,
-    raw_rows_ordered,
+    is_focus_interpret_expense: isFocusInterpret,
   };
 }

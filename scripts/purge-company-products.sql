@@ -9,7 +9,7 @@
 -- Receitas (recipes) mantêm-se com output_product_id = NULL se apontavam ao produto.
 -- revenue_entries: FK é ON DELETE SET NULL, mas product_sale exige product_id NOT NULL
 -- (revenue_entries_sale_fields_check). Por isso apagamos primeiro os lançamentos ligados aos
--- produtos da unidade. onboarding_import_item_raw.created_product_id continua SET NULL.
+-- produtos da unidade.
 --
 -- Recomendação: apague primeiro as despesas (purge-company-expenses.sql) se quiser
 -- um reset completo da unidade; caso contrário expense_items ficam sem product_id.

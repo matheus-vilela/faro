@@ -5,9 +5,11 @@ import { normalizeTaxIdForSupplierDocument } from "./expenseSupplierEnsure.ts";
 import {
   computeEffectiveUnitPricesForCatalogLines,
   effectiveUnitPriceWithoutGlobalAllocation,
-  type EffectiveUnitPriceBreakdown,
 } from "./nfeEffectiveUnitPrice.ts";
+import { priceBoundNfeXmlUpdates } from "./nfePriceBoundXml.ts";
 import { parseNfeXmlForUnifiedCatalog } from "./parseNfeXml.ts";
+
+export { priceBoundNfeXmlUpdates } from "./nfePriceBoundXml.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseAdmin = any;
@@ -114,68 +116,59 @@ export type UpsertUnifiedCatalogResult = {
  * Garante fornecedor global (CPF/CNPJ) e produtos (cProd) a partir do XML.
  * Ignora XML sem documento fiscal válido ou linhas sem cProd.
  */
-async function upsertCompanyProductPriceBounds(
-  admin: SupabaseAdmin,
-  companyId: string,
-  unifiedSupplierProductId: string,
+function priceBoundsChanged(
+  prevMin: number | null,
+  prevMax: number | null,
+  bounds: { min_price: number | null; max_price: number | null },
+): boolean {
+  const eps = 1e-9;
+  const minCh =
+    bounds.min_price != null &&
+    (prevMin == null || Math.abs(bounds.min_price - prevMin) > eps);
+  const maxCh =
+    bounds.max_price != null &&
+    (prevMax == null || Math.abs(bounds.max_price - prevMax) > eps);
+  return minCh || maxCh;
+}
+
+/** Campos de menor/maior preço + XML da NF-e (só inclui o que mudou). */
+function buildGlobalProductPriceFields(
+  prevMin: number | null,
+  prevMax: number | null,
   observedUnitPrice: number | null,
-  breakdown: EffectiveUnitPriceBreakdown | null,
-  nowIso: string,
-): Promise<void> {
-  if (observedUnitPrice == null || !(observedUnitPrice > 0)) return;
+  nfeSnapshot?: { chave_nfe: string | null; xml_text: string | null },
+  isNewProduct: boolean,
+): Record<string, unknown> {
+  if (observedUnitPrice == null || !(observedUnitPrice > 0)) return {};
 
-  const { data: existing, error: selErr } = await admin
-    .from("unified_supplier_product_company_prices")
-    .select("id, min_price, max_price, sighting_count")
-    .eq("company_id", companyId)
-    .eq("unified_supplier_product_id", unifiedSupplierProductId)
-    .maybeSingle();
+  const bounds = mergeMinMaxPrice(observedUnitPrice, prevMin, prevMax);
+  const xmlUpdates = priceBoundNfeXmlUpdates({
+    observed: observedUnitPrice,
+    prevMin,
+    prevMax,
+    bounds,
+    chaveNfe: nfeSnapshot?.chave_nfe ?? null,
+    xmlText: nfeSnapshot?.xml_text ?? null,
+  });
 
-  if (selErr) {
-    console.error(LOG, "company_price_select_err", selErr.message);
-    return;
+  if (isNewProduct) {
+    return {
+      min_price: bounds.min_price,
+      max_price: bounds.max_price,
+      ...xmlUpdates,
+    };
   }
 
-  const bounds = mergeMinMaxPrice(
-    observedUnitPrice,
-    existing?.min_price,
-    existing?.max_price,
-  );
+  const boundsCh = priceBoundsChanged(prevMin, prevMax, bounds);
+  const hasXml = Object.keys(xmlUpdates).length > 0;
+  if (!boundsCh && !hasXml) return {};
 
-  const row = {
-    company_id: companyId,
-    unified_supplier_product_id: unifiedSupplierProductId,
-    min_price: bounds.min_price,
-    max_price: bounds.max_price,
-    last_effective_unit_price: observedUnitPrice,
-    price_breakdown_last: breakdown,
-    last_seen_at: nowIso,
-  };
-
-  if (existing?.id) {
-    const { error: updErr } = await admin
-      .from("unified_supplier_product_company_prices")
-      .update({
-        ...row,
-        sighting_count: Number(existing.sighting_count ?? 1) + 1,
-      })
-      .eq("id", existing.id);
-    if (updErr) {
-      console.error(LOG, "company_price_update_err", updErr.message);
-    }
-    return;
+  const patch: Record<string, unknown> = { ...xmlUpdates };
+  if (boundsCh) {
+    patch.min_price = bounds.min_price;
+    patch.max_price = bounds.max_price;
   }
-
-  const { error: insErr } = await admin
-    .from("unified_supplier_product_company_prices")
-    .insert({
-      ...row,
-      first_seen_at: nowIso,
-      sighting_count: 1,
-    });
-  if (insErr) {
-    console.error(LOG, "company_price_insert_err", insErr.message);
-  }
+  return patch;
 }
 
 export async function upsertUnifiedSupplierCatalogFromNfeXml(
@@ -320,7 +313,9 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
 
     const { data: existingProduct, error: selProdErr } = await admin
       .from("unified_supplier_products")
-      .select("id, product_name, ean, sighting_count")
+      .select(
+        "id, product_name, ean, sighting_count, min_price, max_price",
+      )
       .eq("unified_supplier_id", supplierId)
       .eq("c_prod", cProd)
       .maybeSingle();
@@ -329,6 +324,25 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
       console.error(LOG, "product_select_err", cProd, selProdErr.message);
       continue;
     }
+
+    const prevMin =
+      existingProduct?.min_price != null &&
+        Number.isFinite(Number(existingProduct.min_price))
+        ? Number(existingProduct.min_price)
+        : null;
+    const prevMax =
+      existingProduct?.max_price != null &&
+        Number.isFinite(Number(existingProduct.max_price))
+        ? Number(existingProduct.max_price)
+        : null;
+
+    const priceFields = buildGlobalProductPriceFields(
+      prevMin,
+      prevMax,
+      observedUnitPrice,
+      { chave_nfe: chaveNfe, xml_text: xmlText },
+      !existingProduct?.id,
+    );
 
     const productRow = {
       unified_supplier_id: supplierId,
@@ -340,11 +354,10 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
       csosn: line.csosn,
       unit_commercial: uCom,
       unit_tax: uTrib && uCom && uTrib !== uCom ? uTrib : null,
-      unit_value_last: observedUnitPrice,
       xml_prod: line.prod,
       xml_det: line.xmlDet,
-      chave_nfe_last: chaveNfe,
       last_seen_at: nowIso,
+      ...priceFields,
     };
 
     if (existingProduct?.id) {
@@ -384,14 +397,6 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
         continue;
       }
       productsUpserted += 1;
-      await upsertCompanyProductPriceBounds(
-        admin,
-        companyId,
-        String(existingProduct.id),
-        observedUnitPrice,
-        effective?.breakdown ?? null,
-        nowIso,
-      );
     } else {
       const { data: insProd, error: insProdErr } = await admin
         .from("unified_supplier_products")
@@ -407,14 +412,6 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
         continue;
       }
       productsUpserted += 1;
-      await upsertCompanyProductPriceBounds(
-        admin,
-        companyId,
-        String(insProd.id),
-        observedUnitPrice,
-        effective?.breakdown ?? null,
-        nowIso,
-      );
     }
   }
 

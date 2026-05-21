@@ -23,7 +23,6 @@ export type NfeCatalogLineResolution =
 
 export type NfeExpenseProductsResultLine = {
   expense_item_id: string;
-  raw_import_id?: string | null;
   xml_line_identity: string;
   resolution: NfeCatalogLineResolution;
   product_id: string | null;

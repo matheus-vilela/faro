@@ -250,18 +250,9 @@ export async function runNfeExpenseProductMotor(
         String(batchFinalize?.xml_line_identity ?? "").trim() ||
         ctx.xml_line_identities[i] ||
         `nItem:${i + 1}:cProd:x`;
-      const rawRow = ctx.raw_rows_ordered[i];
-      const raw_import_id_from_ctx =
-        rawRow?.id && String(rawRow.id).trim() ? String(rawRow.id) : null;
-      const raw_import_id =
-        batchFinalize?.raw_import_id != null && String(batchFinalize.raw_import_id).trim()
-          ? String(batchFinalize.raw_import_id).trim()
-          : raw_import_id_from_ctx;
-
       if (!expenseItemId) {
         linesOutFin.push({
           expense_item_id: "",
-          raw_import_id,
           xml_line_identity,
           resolution: "SKIPPED",
           product_id: null,
@@ -277,7 +268,6 @@ export async function runNfeExpenseProductMotor(
         );
         linesOutFin.push({
           expense_item_id: expenseItemId,
-          raw_import_id,
           xml_line_identity,
           resolution: "SKIPPED",
           product_id: null,
@@ -304,17 +294,6 @@ export async function runNfeExpenseProductMotor(
             productId,
           );
         }
-        if (raw_import_id && productId) {
-          await supabase
-            .from("onboarding_import_item_raw")
-            .update({
-              created_product_id: productId,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", raw_import_id)
-            .eq("company_id", companyId);
-        }
-
         await supabase.from("expense_xml_item_motor_pass").upsert(
           {
             company_id: companyId,
@@ -376,7 +355,6 @@ export async function runNfeExpenseProductMotor(
 
       linesOutFin.push({
         expense_item_id: expenseItemId,
-        raw_import_id,
         xml_line_identity,
         resolution: resolutionLabel,
         product_id: productId,
@@ -457,14 +435,9 @@ export async function runNfeExpenseProductMotor(
     const pm = lineItem?.productMatch;
     const expenseItemId = expenseItemIds[i] ?? "";
     const xml_line_identity = ctx.xml_line_identities[i] ?? `nItem:${i + 1}:cProd:x`;
-    const rawRow = ctx.raw_rows_ordered[i];
-    const raw_import_id =
-      rawRow?.id && String(rawRow.id).trim() ? String(rawRow.id) : null;
-
     if (!expenseItemId) {
       linesOut.push({
         expense_item_id: "",
-        raw_import_id,
         xml_line_identity,
         resolution: "SKIPPED",
         product_id: null,
@@ -593,10 +566,9 @@ export async function runNfeExpenseProductMotor(
         }
       }
 
-      /** Onboarding ZIP: com produto resolvido, liberta `import_pending_resolution` para a entrada automática de stock, mantendo `import_review_pending` quando `needsCatalogReview`. */
-      const onboardingXmlLine = Boolean(raw_import_id);
+      /** Focus interpret (onboarding fiscal): com produto resolvido, liberta stock automático. */
       const importPendingResolution =
-        onboardingXmlLine && String(productId ?? "").trim()
+        ctx.is_focus_interpret_expense && String(productId ?? "").trim()
           ? false
           : needsCatalogReview;
 
@@ -672,17 +644,6 @@ export async function runNfeExpenseProductMotor(
         );
       }
 
-      if (raw_import_id && productId) {
-        await supabase
-          .from("onboarding_import_item_raw")
-          .update({
-            created_product_id: productId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", raw_import_id)
-          .eq("company_id", companyId);
-      }
-
       await supabase.from("expense_xml_item_motor_pass").upsert(
         {
           company_id: companyId,
@@ -743,7 +704,6 @@ export async function runNfeExpenseProductMotor(
 
       linesOut.push({
         expense_item_id: expenseItemId,
-        raw_import_id,
         xml_line_identity,
         resolution: resolutionLabel,
         product_id: productId,
@@ -761,7 +721,6 @@ export async function runNfeExpenseProductMotor(
           : mapResolution(pm, false);
       linesOut.push({
         expense_item_id: expenseItemId,
-        raw_import_id,
         xml_line_identity,
         resolution: dryResolution,
         product_id:

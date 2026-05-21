@@ -1,8 +1,8 @@
 -- =============================================================================
 -- Reparo onboarding XML: entrada de stock + alinhamento de recebimentos
 -- =============================================================================
--- 1) Desbloqueia `import_pending_resolution` em linhas de despesas ligadas a
---    `onboarding_import_item_raw` com `product_id`, sem stock ainda e sem
+-- 1) Desbloqueia `import_pending_resolution` em linhas de despesas Focus interpret
+--    (`financial_reconciliation_json.source`) com `product_id`, sem stock ainda e sem
 --    `EXPLODE_BY_RECIPE` (mesma ideia do motor quando o catálogo já está ok).
 -- 2) Entrada de stock por linha (mesma lógica que a migração
 --    `apply_xml_import_direct_stock_for_expense` — inline para ambientes onde
@@ -38,10 +38,10 @@ BEGIN
   -- (1) Desbloquear linhas elegíveis para entrada de stock
   WITH targets AS (
     SELECT ei.id
-    FROM public.onboarding_import_item_raw o
-    INNER JOIN public.expense_items ei ON ei.id = o.expense_item_id
-    INNER JOIN public.expenses e ON e.id = ei.expense_id AND e.company_id = o.company_id
+    FROM public.expenses e
+    INNER JOIN public.expense_items ei ON ei.expense_id = e.id
     WHERE e.company_id = v_company
+      AND e.financial_reconciliation_json->>'source' = 'focus_get_sync_nfe_interpret_staging'
       AND ei.product_id IS NOT NULL
       AND COALESCE(ei.stock_added, false) = false
       AND COALESCE(ei.import_pending_resolution, false) = true
@@ -61,10 +61,10 @@ BEGIN
   -- (2) Entrada de stock (idempotente: ignora stock_added)
   FOR vexp IN
     SELECT DISTINCT ei.expense_id
-    FROM public.onboarding_import_item_raw o
-    INNER JOIN public.expense_items ei ON ei.id = o.expense_item_id
-    INNER JOIN public.expenses e ON e.id = ei.expense_id AND e.company_id = o.company_id
+    FROM public.expenses e
+    INNER JOIN public.expense_items ei ON ei.expense_id = e.id
     WHERE e.company_id = v_company
+      AND e.financial_reconciliation_json->>'source' = 'focus_get_sync_nfe_interpret_staging'
   LOOP
     v_applied := 0;
     FOR v_row IN
@@ -122,11 +122,11 @@ BEGIN
   -- (3) Recebimentos (mesma lógica da finalize)
   WITH onboarding_recs AS (
     SELECT DISTINCT recv.id AS recebimento_id
-    FROM public.onboarding_import_item_raw o
-    INNER JOIN public.expense_items ei ON ei.id = o.expense_item_id
-    INNER JOIN public.expenses e ON e.id = ei.expense_id AND e.company_id = o.company_id
+    FROM public.expenses e
+    INNER JOIN public.expense_items ei ON ei.expense_id = e.id
     INNER JOIN public.recebimentos recv ON recv.expense_id = ei.expense_id
     WHERE e.company_id = v_company
+      AND e.financial_reconciliation_json->>'source' = 'focus_get_sync_nfe_interpret_staging'
   ),
   computed AS (
     SELECT
@@ -178,11 +178,11 @@ BEGIN
 
   WITH onboarding_recs AS (
     SELECT DISTINCT recv.id AS recebimento_id
-    FROM public.onboarding_import_item_raw o
-    INNER JOIN public.expense_items ei ON ei.id = o.expense_item_id
-    INNER JOIN public.expenses e ON e.id = ei.expense_id AND e.company_id = o.company_id
+    FROM public.expenses e
+    INNER JOIN public.expense_items ei ON ei.expense_id = e.id
     INNER JOIN public.recebimentos recv ON recv.expense_id = ei.expense_id
     WHERE e.company_id = v_company
+      AND e.financial_reconciliation_json->>'source' = 'focus_get_sync_nfe_interpret_staging'
   )
   UPDATE public.recebimentos rec
   SET

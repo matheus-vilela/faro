@@ -33,7 +33,12 @@ CREATE TABLE IF NOT EXISTS public.unified_supplier_products (
   csosn TEXT,
   unit_commercial TEXT,
   unit_tax TEXT,
-  unit_value_last NUMERIC(18, 6),
+  min_price NUMERIC(18, 6),
+  max_price NUMERIC(18, 6),
+  min_price_chave_nfe TEXT,
+  max_price_chave_nfe TEXT,
+  min_price_nfe_xml TEXT,
+  max_price_nfe_xml TEXT,
   xml_prod JSONB NOT NULL DEFAULT '{}'::jsonb,
   xml_det JSONB NOT NULL DEFAULT '{}'::jsonb,
   chave_nfe_last TEXT,
@@ -48,8 +53,18 @@ CREATE TABLE IF NOT EXISTS public.unified_supplier_products (
 
 COMMENT ON TABLE public.unified_supplier_products IS
   'Produtos do fornecedor identificados por cProd (tag prod da NF-e); xml_prod/xml_det guardam o bloco XML parseado.';
-COMMENT ON COLUMN public.unified_supplier_products.unit_value_last IS
-  'Último preço unitário efetivo (uCom): líquido da linha NF-e + rateio proporcional de frete/desconto/outros do ICMSTot.';
+COMMENT ON COLUMN public.unified_supplier_products.min_price IS
+  'Menor preço unitário efetivo (uCom) observado para este cProd.';
+COMMENT ON COLUMN public.unified_supplier_products.max_price IS
+  'Maior preço unitário efetivo (uCom) observado para este cProd.';
+COMMENT ON COLUMN public.unified_supplier_products.min_price_chave_nfe IS
+  'Chave NF-e da nota em que foi registrado o menor preço.';
+COMMENT ON COLUMN public.unified_supplier_products.max_price_chave_nfe IS
+  'Chave NF-e da nota em que foi registrado o maior preço.';
+COMMENT ON COLUMN public.unified_supplier_products.min_price_nfe_xml IS
+  'XML completo da NF-e do menor preço unitário efetivo.';
+COMMENT ON COLUMN public.unified_supplier_products.max_price_nfe_xml IS
+  'XML completo da NF-e do maior preço unitário efetivo.';
 COMMENT ON COLUMN public.unified_supplier_products.xml_prod IS
   'Objeto JSON do elemento <prod> da linha <det> (todos os campos presentes no XML).';
 COMMENT ON COLUMN public.unified_supplier_products.xml_det IS
