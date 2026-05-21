@@ -2540,16 +2540,6 @@ export function Produtos() {
                           className={SHEET_SECTION}
                         />
 
-                        {currentCompany?.id ? (
-                          <ProductUnitConversionsReadOnly
-                            companyId={currentCompany.id}
-                            stockUnitCode={stockProduct.unit}
-                            conversions={stockProductConversions}
-                            loading={stockProductConversionsLoading}
-                            className={SHEET_SECTION}
-                          />
-                        ) : null}
-
                         <div>
                           <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                             Estoque e valor
@@ -2687,6 +2677,16 @@ export function Produtos() {
                             </div>
                           </div>
                         </div>
+
+                        {currentCompany?.id ? (
+                          <ProductUnitConversionsReadOnly
+                            companyId={currentCompany.id}
+                            stockUnitCode={stockProduct.unit}
+                            conversions={stockProductConversions}
+                            loading={stockProductConversionsLoading}
+                            className={SHEET_SECTION}
+                          />
+                        ) : null}
 
                         <div
                           className={cn(

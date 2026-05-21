@@ -40,6 +40,7 @@ import {
   Copy,
   CreditCard,
   Link2,
+  Package,
   Pencil,
   Plus,
   Truck,
@@ -59,6 +60,56 @@ const PIX_TYPES = [
   { value: "phone", label: "Telefone" },
   { value: "random", label: "Chave aleatória" },
 ];
+
+type SupplierPurchaseProduct = {
+  productId: string | null;
+  name: string;
+  unit: string | null;
+  purchaseCount: number;
+};
+
+type ExpenseItemPurchaseRow = {
+  product_id: string | null;
+  product_name: string | null;
+  products:
+    | { id: string; name: string; unit: string }
+    | { id: string; name: string; unit: string }[]
+    | null;
+};
+
+function expenseItemProduct(
+  products: ExpenseItemPurchaseRow["products"],
+): { id: string; name: string; unit: string } | null {
+  if (!products) return null;
+  return Array.isArray(products) ? (products[0] ?? null) : products;
+}
+
+function aggregateSupplierPurchaseProducts(
+  rows: ExpenseItemPurchaseRow[],
+): SupplierPurchaseProduct[] {
+  const map = new Map<string, SupplierPurchaseProduct>();
+  for (const row of rows) {
+    const prod = expenseItemProduct(row.products);
+    const name = (prod?.name ?? row.product_name ?? "").trim() || "Item sem nome";
+    const key = prod?.id ?? `n:${name.toLowerCase()}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.purchaseCount += 1;
+    } else {
+      map.set(key, {
+        productId: prod?.id ?? null,
+        name,
+        unit: prod?.unit ?? null,
+        purchaseCount: 1,
+      });
+    }
+  }
+  return [...map.values()].sort(
+    (a, b) =>
+      b.purchaseCount - a.purchaseCount ||
+      a.name.localeCompare(b.name, "pt-BR"),
+  );
+}
 
 export function Fornecedores() {
   const { currentCompany } = useCompany();
@@ -101,6 +152,12 @@ export function Fornecedores() {
   const [generatedLink, setGeneratedLink] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   const [linkGenerating, setLinkGenerating] = useState(false);
+
+  const [supplierPurchaseProducts, setSupplierPurchaseProducts] = useState<
+    SupplierPurchaseProduct[]
+  >([]);
+  const [supplierPurchaseProductsLoading, setSupplierPurchaseProductsLoading] =
+    useState(false);
 
   const fetchSuppliers = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -250,6 +307,51 @@ export function Fornecedores() {
 
   const hasPaymentInfo = (s: Supplier) =>
     s.payment_info && (s.payment_info.bank_name || s.payment_info.pix_key);
+
+  const fetchSupplierPurchaseProducts = useCallback(
+    async (supplierId: string) => {
+      if (!currentCompany?.id) return;
+      setSupplierPurchaseProductsLoading(true);
+      const { data, error } = await supabase
+        .from("expense_items")
+        .select(
+          `
+          product_id,
+          product_name,
+          products ( id, name, unit ),
+          expenses!inner ( company_id, supplier_id )
+        `,
+        )
+        .eq("expenses.company_id", currentCompany.id)
+        .eq("expenses.supplier_id", supplierId)
+        .limit(3000);
+
+      if (error) {
+        console.error("[fornecedores] produtos_comprados", error.message);
+        setSupplierPurchaseProducts([]);
+      } else {
+        setSupplierPurchaseProducts(
+          aggregateSupplierPurchaseProducts(
+            (data ?? []) as ExpenseItemPurchaseRow[],
+          ),
+        );
+      }
+      setSupplierPurchaseProductsLoading(false);
+    },
+    [currentCompany?.id],
+  );
+
+  useEffect(() => {
+    if (!detailSupplier || detailEditMode) {
+      setSupplierPurchaseProducts([]);
+      return;
+    }
+    void fetchSupplierPurchaseProducts(detailSupplier.id);
+  }, [
+    detailSupplier?.id,
+    detailEditMode,
+    fetchSupplierPurchaseProducts,
+  ]);
 
   const openDetail = (s: Supplier) => {
     setDetailSupplier(s);
@@ -870,6 +972,51 @@ export function Fornecedores() {
                       <Link2 className="h-4 w-4 mr-2" />
                       Gerar link
                     </Button>
+                  </div>
+
+                  <div className="border-t border-border pt-4">
+                    <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                      Produtos que você costuma comprar
+                    </p>
+                    {supplierPurchaseProductsLoading ? (
+                      <p className="text-sm text-muted-foreground">
+                        Carregando histórico de compras…
+                      </p>
+                    ) : supplierPurchaseProducts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground italic">
+                        Nenhum produto vinculado em despesas deste fornecedor
+                        ainda.
+                      </p>
+                    ) : (
+                      <ul className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-border/80 bg-muted/20 p-2">
+                        {supplierPurchaseProducts.map((item) => (
+                          <li
+                            key={
+                              item.productId ??
+                              `name-${item.name}`
+                            }
+                            className="flex items-start justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
+                          >
+                            <span className="min-w-0 leading-snug">
+                              <span className="font-medium text-foreground">
+                                {item.name}
+                              </span>
+                              {item.unit ? (
+                                <span className="ml-1 text-xs text-muted-foreground">
+                                  ({item.unit})
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                              {item.purchaseCount === 1
+                                ? "1× em notas"
+                                : `${item.purchaseCount}× em notas`}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
               )}

@@ -20,8 +20,9 @@
  * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) com
  * **primeira** sync (`nfes_recebidas_ultima_sync_at` ausente) entram com prioridade (tier 0);
  * onboarding pendente que já sincronizou ao menos uma vez entra no rodízio (tier 2), como as demais.
- * Cron automático (secret, sem `manual: true`): não lista na Focus se a unidade tiver job em
- * `focus_get_sync_nfe_interpret_jobs` com `status` `pending` ou `processing` (interpretação em andamento).
+ * Cron automático (secret, sem `manual: true`): processa **no máximo 1 empresa por execução** e **não
+ * inicia** se existir **qualquer** job em `focus_get_sync_nfe_interpret_jobs` com `pending` ou
+ * `processing` (aguarda a fila de interpretação terminar).
  * Rodízio cron (fora onboarding/retry/manual): só empresas sem `nfes_recebidas_ultima_sync_at` ou com
  * última sync há ≥ 12 h. Ao reservar a unidade no run, grava `nfes_recebidas_ultima_sync_at` de imediato
  * (antes do GET na Focus) para o próximo disparo não repetir a mesma empresa.
@@ -794,6 +795,7 @@ type ActiveInterpretJob = {
   exec_id: string;
   status: string;
   onboarding: boolean | null;
+  company_id: string;
 };
 
 async function countStagingXmlsForInterpretJob(
@@ -812,6 +814,24 @@ async function countStagingXmlsForInterpretJob(
   return { count: count ?? 0 };
 }
 
+/** Qualquer unidade com interpretação NF-e ainda na fila (pending/processing). */
+async function findIfThereIsAnyActiveInterpretJob(
+  admin: ReturnType<typeof createClient>,
+): Promise<ActiveInterpretJob | null> {
+  const { data, error } = await admin
+    .from("focus_get_sync_nfe_interpret_jobs")
+    .select("id, exec_id, status, onboarding, company_id")
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn(LOG, "interpret_job_global_active_select", error.message);
+    return null;
+  }
+  if (!data?.id) return null;
+  return data as ActiveInterpretJob;
+}
 async function findActiveInterpretJob(
   admin: ReturnType<typeof createClient>,
   companyId: string,
@@ -899,40 +919,42 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    const execId = crypto.randomUUID();
+
+    if (isCron) {
+      const interpretJobBloqueando =
+        await findIfThereIsAnyActiveInterpretJob(admin);
+      if (interpretJobBloqueando?.id) {
+        logPhase("sync_adiada_interpret_job_global", {
+          exec_id: execId,
+          motivo:
+            "existe job pending/processing; aguardar focus-get-sync-nfe-interpret-staging",
+          interpret_job_id: interpretJobBloqueando.id,
+          interpret_job_status: interpretJobBloqueando.status,
+          interpret_job_company_id: interpretJobBloqueando.company_id,
+          interpret_job_exec_id: interpretJobBloqueando.exec_id,
+        });
+        return json({
+          ok: true,
+          skipped: true,
+          exec_id: execId,
+          reason: "interpret_job_ativo",
+          interpret_job: {
+            id: interpretJobBloqueando.id,
+            status: interpretJobBloqueando.status,
+            company_id: interpretJobBloqueando.company_id,
+            exec_id: interpretJobBloqueando.exec_id,
+          },
+          detail: [],
+        });
+      }
+    }
+
     let companiesToProcess: CoRow[] = [];
     let isManualSingle = false;
     let bodyVersaoInicial: number | null = null;
 
     if (isCron) {
-      const interpretJobBloqueando = await findActiveInterpretJob(
-        admin,
-        companyId,
-      );
-
-      if (interpretJobBloqueando?.id) {
-        logPhase("interpret_job_pending_ou_processing", {
-          exec_id: execId,
-          company_id: companyId,
-          motivo:
-            "interpret job ativo (pending/processing); sync automática adiada",
-        });
-        detail.push({
-          company_id: companyId,
-          skipped:
-            "interpret job ativo (pending/processing); sync automática adiada",
-          interpret_job_id: interpretJobBloqueando.id,
-          interpret_job_status: interpretJobBloqueando.status,
-        });
-        return json(
-          {
-            ok: false,
-            error:
-              "Interpret job ativo (pending/processing); sync automática adiada",
-          },
-          400,
-        );
-      }
-
       const { data: companies, error: listErr } = await admin
         .from("companies")
         .select("id, document, focusnfe, onboarding_fiscal");
@@ -1013,7 +1035,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const execId = crypto.randomUUID();
+    const maxCompaniesThisRun = isCron ? 1 : maxCompanies;
 
     logPhase("exec_inicio", {
       exec_id: execId,
@@ -1022,7 +1044,7 @@ Deno.serve(async (req) => {
       onboarding_retry: onboardingRetry,
       company_id_filtro: cronFilterCompanyId || null,
       empresas_candidatas: companiesToProcess.length,
-      max_empresas_por_run: maxCompanies,
+      max_empresas_por_run: maxCompaniesThisRun,
       max_paginas_por_empresa: maxPages,
       versao_manual: bodyVersaoInicial,
     });
@@ -1081,7 +1103,7 @@ Deno.serve(async (req) => {
 
     const { scheduled, waitlisted } = scheduleCompaniesForRun(
       companiesToProcess,
-      maxCompanies,
+      maxCompaniesThisRun,
       onboardingFlow,
       onboardingRetry,
       skipRotation,

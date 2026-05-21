@@ -425,9 +425,7 @@ export function DashboardDayOperations() {
           <h2 className="text-sm font-semibold tracking-tight">
             Operação do dia
           </h2>
-          <p className="text-xs text-muted-foreground">
-            Resumo de hoje · abra o card para a lista completa
-          </p>
+          <p className="text-xs text-muted-foreground">Resumo de hoje</p>
         </div>
       </div>
 
@@ -744,7 +742,9 @@ function DayOpCard({
       <div
         className={cn(
           "flex items-center gap-2.5 border-b px-3.5 py-3",
-          isPrimary ? "border-primary/15 bg-primary/[0.04]" : "border-border/60 bg-muted/20",
+          isPrimary
+            ? "border-primary/15 bg-primary/[0.04]"
+            : "border-border/60 bg-muted/20",
         )}
       >
         <div

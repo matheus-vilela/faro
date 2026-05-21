@@ -18,10 +18,7 @@ import {
   buildNewProductCatalogFromNfeLine,
   insertProductUnitConversions,
 } from "./productImport/buildPackUnitConversionsFromLabel.ts";
-import {
-  canonicalProductName,
-  sanitizeCatalogProductName,
-} from "./productImport/canonicalName.ts";
+import { canonicalProductName } from "./productImport/canonicalName.ts";
 import {
   buildLlmCatalogForInvoiceLine,
   catalogMatchNameKey,
@@ -30,7 +27,6 @@ import {
   findCatalogProductByNormalizedName,
   findDirectMatchByNcmAndName,
 } from "./productImport/llmCatalogCandidates.ts";
-import type { NfeRagArbiterCandidate } from "./productImport/productMatchLlmAssist.ts";
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";
 import {
   assistStagingNfeLineStockNormalizeAndMatch,
@@ -53,14 +49,18 @@ function normalizeNcm8(ncm: string | null | undefined): string | null {
 function normalizeOptionalCfop(
   line: StagingNfeInterpretLog["produtos"][number],
 ): string | null {
-  const cfop = String(line.cfop ?? "").replace(/\D/g, "").slice(0, 4);
+  const cfop = String(line.cfop ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return cfop.length === 4 ? cfop : null;
 }
 
 function normalizeOptionalCsosn(
   line: StagingNfeInterpretLog["produtos"][number],
 ): string | null {
-  const csosn = String(line.csosn ?? "").replace(/\D/g, "").slice(0, 4);
+  const csosn = String(line.csosn ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return csosn.length >= 2 ? csosn : null;
 }
 
@@ -133,7 +133,9 @@ function productInsertPayload(
   estoquePreview?: Record<string, unknown> | null,
 ): {
   payload: Record<string, unknown>;
-  conversions: ReturnType<typeof buildNewProductCatalogFromNfeLine>["conversions"];
+  conversions: ReturnType<
+    typeof buildNewProductCatalogFromNfeLine
+  >["conversions"];
   registrationNote: string | null;
 } | null {
   const fiscal = normalizeLineFiscalForProduct(line);
@@ -165,7 +167,11 @@ function productInsertPayload(
   if (estoquePreview && Object.keys(estoquePreview).length > 0) {
     base.estoque_entrada_preview = estoquePreview;
   }
-  return { payload: base, conversions: catalog.conversions, registrationNote: catalog.registrationNote };
+  return {
+    payload: base,
+    conversions: catalog.conversions,
+    registrationNote: catalog.registrationNote,
+  };
 }
 
 /** Colunas válidas em `products` (exclui preview JSON só para log). */
@@ -210,7 +216,9 @@ async function insertProductFromStagingInterpret(
   admin: SupabaseAdmin,
   companyId: string,
   payload: Record<string, unknown>,
-  conversions: ReturnType<typeof buildNewProductCatalogFromNfeLine>["conversions"],
+  conversions: ReturnType<
+    typeof buildNewProductCatalogFromNfeLine
+  >["conversions"],
   contexto: string,
 ): Promise<string | null> {
   const row = productRowForDbInsert(payload);
@@ -380,7 +388,11 @@ async function stagingInterpretCreateProduct(
       console.log(
         LOG,
         "produto_reutilizado_por_canonical_name",
-        JSON.stringify({ product_id: row.id, canonical_name: cn, criterio: contexto }),
+        JSON.stringify({
+          product_id: row.id,
+          canonical_name: cn,
+          criterio: contexto,
+        }),
       );
       return row.id;
     }
@@ -454,7 +466,7 @@ export async function ensureSupplierForInterpretLog(
     name:
       (interpret.fornecedor.nome ?? "").trim() || "Fornecedor (NF-e staging)",
     document: digits,
-    notes: "Cadastrado automaticamente — focus-get-sync-nfe-interpret-staging",
+    notes: "Cadastrado automaticamente",
   };
 
   const { error: insErr } = await admin
@@ -643,7 +655,11 @@ export async function resolveProductsForInterpretLog(
         chunkProductDedupeByKey,
         dedupeKey,
         built,
-        !openaiKey ? "sem_openai" : llmCatalog.length === 0 ? "sem_candidatos_ncm" : "sem_openai",
+        !openaiKey
+          ? "sem_openai"
+          : llmCatalog.length === 0
+            ? "sem_candidatos_ncm"
+            : "sem_openai",
       );
       if (newId) {
         productIdByLineIndex.set(lineIndex, newId);
@@ -704,7 +720,12 @@ export async function resolveProductsForInterpretLog(
         continue;
       }
       const preview = stockEntradaPreviewFromLlm(line, arb);
-      const built = productInsertPayload(companyId, line, nomeCadastro, preview);
+      const built = productInsertPayload(
+        companyId,
+        line,
+        nomeCadastro,
+        preview,
+      );
       if (!built) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
         continue;
@@ -801,9 +822,7 @@ function resolveStagingExpenseDocumentTotal(
       }
     }
     const documentTotal =
-      sumBonificacao > 0.000001
-        ? roundMoney(vnf - sumBonificacao)
-        : vnf;
+      sumBonificacao > 0.000001 ? roundMoney(vnf - sumBonificacao) : vnf;
 
     const patch: Record<string, unknown> = {};
     if (sumBonificacao > 0.000001) {
@@ -816,9 +835,10 @@ function resolveStagingExpenseDocumentTotal(
         document_total_adjusted: true,
         document_total_before: valorHeader,
         document_total_after: documentTotal,
-        document_total_source: sumBonificacao > 0.000001
-          ? "icms_tot_vNF_minus_bonification_5910"
-          : "icms_tot_vNF",
+        document_total_source:
+          sumBonificacao > 0.000001
+            ? "icms_tot_vNF_minus_bonification_5910"
+            : "icms_tot_vNF",
       });
     }
     return { document_total: documentTotal, reconciliation_patch: patch };
@@ -1002,7 +1022,7 @@ export async function persistStagingInterpretExpenseAndBoletos(
     admin,
     companyId,
     extractedFromStagingInterpret(interpret),
-    "Cadastrado automaticamente — importação NF-e staging (focus-get-sync-nfe-interpret-staging)",
+    "Cadastrado automaticamente — importação NF-e staging",
   );
 
   const { data: dupRow, error: dupErr } = await admin.rpc(
