@@ -545,6 +545,7 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
       const qty = parseFloat(l.quantity.replace(",", "."));
       const baseQty = toBaseQty(l.product_id, qty, l.unit_code);
       return {
+        company_id: companyId,
         order_id: oid,
         product_id: l.product_id,
         quantity: baseQty ?? qty,

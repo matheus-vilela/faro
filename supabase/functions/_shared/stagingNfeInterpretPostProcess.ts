@@ -840,6 +840,7 @@ function extractedFromStagingInterpret(
 async function finalizeStagingRecebimentoEStock(
   admin: SupabaseAdmin,
   expenseId: string,
+  companyId: string,
 ): Promise<void> {
   let recebimentoId: string | null = null;
   const { data: existingRec, error: selRecErr } = await admin
@@ -856,7 +857,7 @@ async function finalizeStagingRecebimentoEStock(
   } else {
     const { data: insRec, error: insRecErr } = await admin
       .from("recebimentos")
-      .insert({ expense_id: expenseId })
+      .insert({ company_id: companyId, expense_id: expenseId })
       .select("id")
       .single();
     if (insRecErr) {
@@ -907,6 +908,7 @@ async function finalizeStagingRecebimentoEStock(
     const status = pid ? "received" : "not_received";
     const qtyRec = pid ? (stk ? sq : q) : 0;
     statusRows.push({
+      company_id: companyId,
       recebimento_id: recebimentoId,
       expense_item_id: ei.id,
       status,
@@ -1067,6 +1069,7 @@ export async function persistStagingInterpretExpenseAndBoletos(
     const uv = Math.round((Number(line.valor_unitario) || 0) * 100) / 100;
     const pid = productIdByLineIndex.get(i);
     const row: Record<string, unknown> = {
+      company_id: companyId,
       expense_id: expenseId,
       product_name: (line.nome ?? "").trim() || "Item",
       quantity: q,
@@ -1123,5 +1126,5 @@ export async function persistStagingInterpretExpenseAndBoletos(
     }
   }
 
-  await finalizeStagingRecebimentoEStock(admin, expenseId);
+  await finalizeStagingRecebimentoEStock(admin, expenseId, companyId);
 }

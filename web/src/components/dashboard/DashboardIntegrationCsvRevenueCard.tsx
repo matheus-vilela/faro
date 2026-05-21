@@ -82,8 +82,7 @@ export function DashboardIntegrationCsvRevenueCard({
     if (ob.portal_busy && !processingSales) {
       return {
         title: "Sincronização com o portal EPOC",
-        subtitle:
-          "A função está a obter dados do portal EPOC. Depois disto o CSV entra na fila de receitas.",
+        subtitle: "A função está a obter dados do portal EPOC. Aguarde...",
         showSpinner: true,
         icon: "sync" as const,
       };

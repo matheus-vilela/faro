@@ -166,6 +166,7 @@ function randomShortSlug(len = 8): string {
 /** Cria ou reutiliza slug em `whatsapp_expense_draft_short_links` (service role). */
 async function ensureWhatsappExpenseDraftShortSlug(
   supabase: Supabase,
+  companyId: string,
   draftId: string,
   accessTokenUuid: string,
 ): Promise<string | null> {
@@ -185,6 +186,7 @@ async function ensureWhatsappExpenseDraftShortSlug(
     const { error } = await supabase
       .from("whatsapp_expense_draft_short_links")
       .insert({
+        company_id: companyId,
         slug,
         draft_id: draftId,
         access_token: accessTokenUuid,
@@ -205,6 +207,7 @@ async function ensureWhatsappExpenseDraftShortSlug(
 /** URL pública do rascunho: `/e/:slug` quando possível; senão `/w/:token`. */
 async function buildDraftShortLink(
   supabase: Supabase,
+  companyId: string,
   draftId: string,
   accessToken: string | null | undefined,
 ): Promise<string> {
@@ -212,6 +215,7 @@ async function buildDraftShortLink(
   if (!base || !accessToken) return "";
   const slug = await ensureWhatsappExpenseDraftShortSlug(
     supabase,
+    companyId,
     draftId,
     accessToken,
   );
@@ -402,6 +406,7 @@ async function insertExpense(
     const q = Math.max(0.0001, Number(it.quantity));
     const uv = Math.round(Number(it.unitValue) * 10000) / 10000;
     const row: Record<string, unknown> = {
+      company_id: companyId,
       expense_id: expenseId,
       product_name: (it.productName ?? "").trim() || "Item",
       quantity: q,
@@ -594,7 +599,12 @@ async function processMatchedExpenseFlow(
       sourceDocumentPath,
     );
     const shortLink = saved
-      ? await buildDraftShortLink(supabase, saved.draftId, saved.accessToken)
+      ? await buildDraftShortLink(
+          supabase,
+          companyId,
+          saved.draftId,
+          saved.accessToken,
+        )
       : "";
     const linkBlock = shortLink ? `\n\n🔗 Conferir produtos: ${shortLink}` : "";
     await sendWhatsapp(
@@ -625,7 +635,12 @@ async function processMatchedExpenseFlow(
   );
 
   const shortLink = saved
-    ? await buildDraftShortLink(supabase, saved.draftId, saved.accessToken)
+    ? await buildDraftShortLink(
+        supabase,
+        companyId,
+        saved.draftId,
+        saved.accessToken,
+      )
     : "";
   const linkBlock = shortLink
     ? `\n\n🔗 Conferir e corrigir no app: ${shortLink}`
@@ -786,6 +801,7 @@ export async function tryHandleExpenseDraftReply(
   if (extracted._requiresProductConfirmation) {
     const linkRem = await buildDraftShortLink(
       supabase,
+      companyId,
       draft.id,
       draft.access_token,
     );
@@ -882,6 +898,7 @@ export async function tryHandleExpenseDraftReply(
 
   const linkRem = await buildDraftShortLink(
     supabase,
+    companyId,
     draft.id,
     draft.access_token,
   );

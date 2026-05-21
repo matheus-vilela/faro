@@ -153,7 +153,9 @@ export function Recebimento() {
       return;
     }
     setCreatingRecebimento(true);
+    if (!currentCompany?.id) return;
     const { error } = await supabase.from("recebimentos").insert({
+      company_id: currentCompany.id,
       expense_id: selectedExpenseId,
     });
     setCreatingRecebimento(false);

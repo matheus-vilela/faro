@@ -585,6 +585,7 @@ export function Despesas() {
           ? toStockQty(it.product_id, Number(it.quantity), invoiceUnit)
           : null;
       await supabase.from("expense_items").insert({
+        company_id: currentCompany.id,
         expense_id: exp.id,
         product_name: it.product_name,
         quantity: it.quantity,
@@ -596,6 +597,7 @@ export function Despesas() {
       });
     }
     await supabase.from("recebimentos").insert({
+      company_id: currentCompany.id,
       expense_id: exp.id,
     });
     setType("nota_fiscal");

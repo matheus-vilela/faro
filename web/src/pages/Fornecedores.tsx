@@ -159,7 +159,7 @@ export function Fornecedores() {
   };
 
   const handleSavePayment = async () => {
-    if (!paymentSupplier) return;
+    if (!paymentSupplier || !currentCompany?.id) return;
     setPaymentSaving(true);
     const pi = paymentSupplier.payment_info;
     if (pi?.id) {
@@ -177,6 +177,7 @@ export function Fornecedores() {
         .eq("id", pi.id);
     } else {
       await supabase.from("supplier_payment_info").insert({
+        company_id: currentCompany.id,
         supplier_id: paymentSupplier.id,
         bank_name: bankName.trim() || null,
         bank_code: bankCode.trim() || null,
@@ -193,6 +194,7 @@ export function Fornecedores() {
   };
 
   const openLinkDialog = async (s: Supplier, invalidatePrevious = false) => {
+    if (!currentCompany?.id) return;
     setLinkSupplier(s);
     setGeneratedLink("");
     setLinkDialogOpen(true);
@@ -206,7 +208,7 @@ export function Fornecedores() {
     }
     const { data } = await supabase
       .from("supplier_update_tokens")
-      .insert({ supplier_id: s.id })
+      .insert({ company_id: currentCompany.id, supplier_id: s.id })
       .select("token")
       .single();
     setLinkGenerating(false);
@@ -225,7 +227,7 @@ export function Fornecedores() {
   };
 
   const handleGenerateNewLink = async () => {
-    if (!linkSupplier) return;
+    if (!linkSupplier || !currentCompany?.id) return;
     setLinkGenerating(true);
     await supabase
       .from("supplier_update_tokens")
@@ -234,7 +236,7 @@ export function Fornecedores() {
       .is("used_at", null);
     const { data } = await supabase
       .from("supplier_update_tokens")
-      .insert({ supplier_id: linkSupplier.id })
+      .insert({ company_id: currentCompany.id, supplier_id: linkSupplier.id })
       .select("token")
       .single();
     setLinkGenerating(false);

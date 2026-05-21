@@ -1525,6 +1525,7 @@ export function Produtos() {
           .from("product_category_assignments")
           .insert(
             idsToPersist.map((category_id) => ({
+              company_id: currentCompany.id,
               product_id: stockProduct.id,
               category_id,
             })),

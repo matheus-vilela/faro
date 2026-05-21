@@ -1013,6 +1013,7 @@ export const EstoqueReceitasPanel = forwardRef<
     }
     const rows = preparedRows.map((x) => ({
       ...x,
+      company_id: companyId,
       recipe_id: rid,
     }));
 

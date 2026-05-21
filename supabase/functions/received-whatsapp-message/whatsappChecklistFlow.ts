@@ -176,6 +176,7 @@ async function createChecklistRun(
   const { data: run, error: e3 } = await supabase
     .from("checklist_runs")
     .insert({
+      company_id: companyId,
       checklist_id: checklistId,
       company_member_id: companyMemberId,
     })
@@ -199,6 +200,7 @@ async function createChecklistRun(
   }
 
   const rows = items.map((it: { id: string }) => ({
+    company_id: companyId,
     run_id: run.id,
     checklist_item_id: it.id,
   }));
@@ -223,6 +225,7 @@ function randomShortSlug(len = 8): string {
 /** Cria ou reutiliza slug em `checklist_run_short_links` (service role). */
 async function ensureChecklistRunShortSlug(
   supabase: ReturnType<typeof createClient>,
+  companyId: string,
   runId: string,
   tokenUuid: string,
 ): Promise<string | null> {
@@ -240,6 +243,7 @@ async function ensureChecklistRunShortSlug(
   for (let attempt = 0; attempt < 15; attempt++) {
     const slug = randomShortSlug(8);
     const { error } = await supabase.from("checklist_run_short_links").insert({
+      company_id: companyId,
       slug,
       run_id: runId,
       token: tokenUuid,
@@ -425,6 +429,7 @@ export async function tryChecklistNumericReply(
 
   const slug = await ensureChecklistRunShortSlug(
     supabase,
+    auth.companyId,
     run.runId,
     run.token,
   );

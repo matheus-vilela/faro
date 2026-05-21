@@ -285,6 +285,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       .from("inventory_count_listing_products")
       .insert(
         productIds.map((productId) => ({
+          company_id: companyId,
           listing_id: listingId,
           product_id: productId,
         })),
@@ -454,6 +455,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       .from("inventory_count_listing_products")
       .insert(
         productIds.map((productId) => ({
+          company_id: companyId,
           listing_id: activeListingId,
           product_id: productId,
         })),
@@ -501,6 +503,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         const { error: le } = await supabase
           .from("inventory_count_short_links")
           .insert({
+            company_id: companyId,
             slug: s,
             session_id: sess.id,
             token: sess.token,

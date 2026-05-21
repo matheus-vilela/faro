@@ -1332,6 +1332,7 @@ Deno.serve(async (req) => {
           const { error: pcaErr } = await admin
             .from("product_category_assignments")
             .insert({
+              company_id: job.company_id,
               product_id: productId,
               category_id: sugPc.categoryId,
             });

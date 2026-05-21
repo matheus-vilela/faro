@@ -100,6 +100,7 @@ export function CreateSupplierSheet({
     if (hasPaymentInfo) {
       await supabase.from("supplier_payment_info").upsert(
         {
+          company_id: companyId,
           supplier_id: supplier.id,
           bank_name: bankName.trim() || null,
           bank_code: bankCode.trim() || null,

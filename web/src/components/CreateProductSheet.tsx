@@ -258,6 +258,7 @@ export function CreateProductSheet({
         .from('product_category_assignments')
         .insert(
           productCategoryIds.map((category_id) => ({
+            company_id: companyId,
             product_id: product.id,
             category_id,
           })),

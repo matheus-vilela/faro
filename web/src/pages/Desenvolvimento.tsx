@@ -12,6 +12,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UnitSetupResetCard } from "@/components/unit-setup/UnitSetupResetCard";
 import { useCompany } from "@/contexts/CompanyContext";
 import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
 import { consolidationKey } from "@/lib/productImport/consolidateItems";
@@ -28,11 +29,13 @@ import {
   ChevronRight,
   FileCode2,
   FlaskConical,
+  LayoutDashboard,
   Loader2,
   Package,
   RefreshCw,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 type PreviewOkResponse = {
@@ -148,6 +151,7 @@ function catalogCardTitleClean(
 }
 
 export function Desenvolvimento() {
+  const navigate = useNavigate();
   const { currentCompany, refetchCompanies } = useCompany();
   const companyId = currentCompany?.id ?? "";
   const companyLabel = currentCompany?.name?.trim() || "—";
@@ -390,6 +394,24 @@ export function Desenvolvimento() {
         icon={FlaskConical}
       />
 
+      <UnitSetupResetCard />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={() => navigate("/app/dashboard-2")}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          Abrir Painel 2
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          Protótipo do painel no layout de referência (Alô Chefia).
+        </p>
+      </div>
+
       <div className="flex flex-wrap gap-2 border-b border-border pb-px">
         <button
           type="button"
@@ -435,34 +457,6 @@ export function Desenvolvimento() {
                     {companyId}
                   </span>
                 ) : null}
-                . Lista NF-e recebidas na Focus (sem parâmetro{" "}
-                <code className="rounded bg-muted px-1 text-xs">limite</code>;
-                tamanho da página é o da API) com paginação por{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  x-total-count
-                </code>{" "}
-                /{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  x-max-version
-                </code>{" "}
-                e grava em{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  focus_get_sync_nfe_staging
-                </code>{" "}
-                apenas notas com{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  nfe_completa
-                </code>{" "}
-                explicitamente verdadeiro (sem download de XML nem fila de
-                import). Com{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  onboarding: true
-                </code>
-                , a primeira lista Focus bem-sucedida atualiza{" "}
-                <code className="rounded bg-muted px-1 text-xs">
-                  companies.onboarding_fiscal.max_nfes_sync
-                </code>{" "}
-                para o dashboard.
               </CardDescription>
             </CardHeader>
             <CardContent className="min-w-0 space-y-6">

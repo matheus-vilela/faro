@@ -634,6 +634,7 @@ export function ExpenseDetailSheet({
       const { data: inserted } = await supabase
         .from("expense_items")
         .insert({
+          company_id: detailExpense.company_id,
           expense_id: detailExpense.id,
           product_name: it.product_name,
           quantity: it.quantity,
