@@ -30,6 +30,7 @@ export function mapInvoiceUnitToCatalogUnit(raw: string | null | undefined): {
     cx: "cx",
     caixa: "cx",
     pct: "pct",
+    pac: "pct",
     pacote: "pct",
     kg: "kg",
     g: "g",

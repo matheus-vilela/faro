@@ -3,6 +3,7 @@
  */
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
 import type { ExtractedDocumentResult, ExtractedExpenseItem } from "./openaiExpense.ts";
+import { nfeUsesUnTaxUnitBase } from "./productImport/nfeCommercialTaxUnitConversion.ts";
 
 function num(v: unknown): number {
   if (v === undefined || v === null) return 0;
@@ -190,16 +191,26 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     const qTribRaw = num(prod.qTrib);
     const quantityCommercial = qComRaw > 0 ? qComRaw : null;
     const quantityTax = qTribRaw > 0 ? qTribRaw : null;
-    const quantity = Math.max(
-      0.0001,
-      quantityCommercial ?? quantityTax ?? 0.0001,
-    );
     const vUnCom = num(prod.vUnCom);
     const vUnTrib = num(prod.vUnTrib);
-    const unitValue = vUnCom > 0 ? vUnCom : vUnTrib > 0 ? vUnTrib : 0;
     const lineTotal = num(prod.vProd);
     const uCom = str(prod.uCom);
     const uTrib = str(prod.uTrib);
+    const useUnTaxBase = uCom != null && uTrib != null &&
+      nfeUsesUnTaxUnitBase(uCom, uTrib);
+    const quantity = Math.max(
+      0.0001,
+      useUnTaxBase && quantityTax != null
+        ? quantityTax
+        : quantityCommercial ?? quantityTax ?? 0.0001,
+    );
+    let unitValue = vUnCom > 0 ? vUnCom : vUnTrib > 0 ? vUnTrib : 0;
+    if (useUnTaxBase) {
+      if (vUnTrib > 0) unitValue = vUnTrib;
+      else if (lineTotal > 0 && quantityTax != null && quantityTax > 0) {
+        unitValue = lineTotal / quantityTax;
+      }
+    }
     const ncm = str(prod.NCM ?? prod.ncm);
     const ean =
       str(prod.cEAN as string | undefined) ??

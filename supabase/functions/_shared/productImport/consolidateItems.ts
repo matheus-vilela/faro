@@ -1,4 +1,5 @@
 import { canonicalProductName } from "./canonicalName.ts"
+import { nfeUsesUnTaxUnitBase } from "./nfeCommercialTaxUnitConversion.ts"
 import { normalizeUnitLabel, type NormalizedUnitCode } from "./unitNormalize.ts"
 
 /** Campos mínimos de linha + metadados de NF (unidade, NCM, EAN). */
@@ -20,13 +21,14 @@ export type ExtractedItemWithInvoiceMeta = InvoiceItemFields & {
   _consolidatedFrom?: number
 }
 
-/** Prioriza unidade comercial, depois tributável, para refletir a nota. */
+/** Prioriza unidade comercial; se uTrib for UN distinta de uCom, prioriza UN (estoque). */
 export function pickInvoiceUnitRaw(it: InvoiceItemFields): string | null {
+  const c = it.unitCommercial?.trim()
+  const t = it.unitTax?.trim()
+  if (c && t && nfeUsesUnTaxUnitBase(c, t)) return t
   const a = it.invoiceUnitRaw?.trim()
   if (a) return a
-  const c = it.unitCommercial?.trim()
   if (c) return c
-  const t = it.unitTax?.trim()
   return t ?? null
 }
 

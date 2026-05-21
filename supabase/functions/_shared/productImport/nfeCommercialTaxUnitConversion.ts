@@ -1,5 +1,6 @@
 /**
- * NF-e: quando uCom ≠ uTrib, deriva conversão 1 uCom = (qTrib/qCom) uTrib.
+ * NF-e: quando uCom ≠ uTrib, deriva conversão entre as duas unidades.
+ * Se uTrib for UN (unidade), estoque e cálculos usam UN; conversão N un → 1 uCom.
  */
 import type { ProductUnitConversionInsert } from "./buildPackUnitConversionsFromLabel.ts";
 import { mapInvoiceUnitToCatalogUnit } from "./invoiceUnitToCatalogUnit.ts";
@@ -36,6 +37,18 @@ export function nfeCommercialAndTaxUnitsDiffer(
   return ra.length > 0 && rb.length > 0 && ra !== rb;
 }
 
+/** uTrib é UN/UND e uCom é outra → estoque, preço e conversão na base UN. */
+export function nfeUsesUnTaxUnitBase(
+  unitCommercial: string | null | undefined,
+  unitTax: string | null | undefined,
+): boolean {
+  const uCom = String(unitCommercial ?? "").trim();
+  const uTrib = String(unitTax ?? "").trim();
+  if (!uCom || !uTrib) return false;
+  if (!nfeCommercialAndTaxUnitsDiffer(uCom, uTrib)) return false;
+  return normalizeUnitLabel(uTrib) === "UND";
+}
+
 export type CommercialTaxUnitConversionResult = {
   stockUnit: string;
   conversions: ProductUnitConversionInsert[];
@@ -43,7 +56,9 @@ export type CommercialTaxUnitConversionResult = {
 };
 
 /**
- * Constrói 1 {uCom} = (qTrib/qCom) {uTrib} quando a NF-e informa ambas as unidades.
+ * Constrói conversão entre uCom e uTrib quando a NF-e informa ambas as quantidades.
+ * Com uTrib UN: estoque em UN e `{factor} un = 1 {uCom}`.
+ * Caso contrário: estoque em uCom e `1 {uCom} = {factor} {uTrib}`.
  */
 export function buildCommercialTaxUnitConversion(
   input: NfeCommercialTaxUnitInput,
@@ -63,20 +78,35 @@ export function buildCommercialTaxUnitConversion(
 
   const mappedCom = mapInvoiceUnitToCatalogUnit(uCom);
   const mappedTrib = mapInvoiceUnitToCatalogUnit(uTrib);
-  const stockUnit = mappedCom.unit.slice(0, 32) || "un";
-  const secondary = mappedTrib.unit.slice(0, 32) || "un";
-  if (stockUnit === secondary) return null;
+  const comUnit = mappedCom.unit.slice(0, 32) || "un";
+  const tribUnit = mappedTrib.unit.slice(0, 32) || "un";
+  if (comUnit === tribUnit) return null;
+
+  if (nfeUsesUnTaxUnitBase(uCom, uTrib)) {
+    return {
+      stockUnit: tribUnit,
+      conversions: [
+        {
+          primary_qty: factor,
+          primary_unit_code: tribUnit,
+          secondary_qty: 1,
+          secondary_unit_code: comUnit,
+        },
+      ],
+      note: `NF-e: ${factor} ${tribUnit} = 1 ${comUnit} (base UN)`,
+    };
+  }
 
   return {
-    stockUnit,
+    stockUnit: comUnit,
     conversions: [
       {
         primary_qty: 1,
-        primary_unit_code: stockUnit,
+        primary_unit_code: comUnit,
         secondary_qty: factor,
-        secondary_unit_code: secondary,
+        secondary_unit_code: tribUnit,
       },
     ],
-    note: `NF-e: 1 ${stockUnit} = ${factor} ${secondary} (qCom/qTrib)`,
+    note: `NF-e: 1 ${comUnit} = ${factor} ${tribUnit} (qCom/qTrib)`,
   };
 }

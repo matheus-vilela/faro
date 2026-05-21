@@ -69,15 +69,16 @@ export function unitPriceFromNfeLine(
   return null;
 }
 
-/** Unitário efetivo observado: rateio global + ajustes de linha; fallback só com ajustes da linha. */
+/** Unitário efetivo observado: rateio global + ajustes da linha; fallback só com ajustes da linha. */
 export function observedUnitPriceFromNfeLine(
   effectiveUnitPrice: number | null | undefined,
   prod: Record<string, unknown>,
+  imposto?: Record<string, unknown>,
 ): number | null {
   if (effectiveUnitPrice != null && effectiveUnitPrice > 0) {
     return roundUnitPrice(effectiveUnitPrice);
   }
-  return effectiveUnitPriceWithoutGlobalAllocation(prod);
+  return effectiveUnitPriceWithoutGlobalAllocation(prod, imposto);
 }
 
 export function mergeMinMaxPrice(
@@ -306,9 +307,15 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
     const uCom = str(line.prod.uCom);
     const uTrib = str(line.prod.uTrib);
     const effective = effectiveByIndex[lineIdx];
+    const imposto = line.xmlDet.imposto;
+    const impostoObj =
+      imposto != null && typeof imposto === "object" && !Array.isArray(imposto)
+        ? (imposto as Record<string, unknown>)
+        : undefined;
     const observedUnitPrice = observedUnitPriceFromNfeLine(
       effective?.effectiveUnitPrice,
       line.prod,
+      impostoObj,
     );
 
     const { data: existingProduct, error: selProdErr } = await admin

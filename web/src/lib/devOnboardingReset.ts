@@ -78,8 +78,8 @@ async function focusnfeClearedOfRecebidasSyncCursor(
   const hadSyncAt = "nfes_recebidas_ultima_sync_at" in current;
   if (!hadVersao && !hadSyncAt) return {};
 
-  delete current.nfes_recebidas_ultima_versao;
-  delete current.nfes_recebidas_ultima_sync_at;
+  current.nfes_recebidas_ultima_versao = 0;
+  current.nfes_recebidas_ultima_sync_at = null;
   return { focusnfe: current };
 }
 
