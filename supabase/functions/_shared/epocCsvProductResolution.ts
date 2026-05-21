@@ -1,19 +1,20 @@
 /**
- * Resolução de produto na importação EPOC/CSV — alinhada ao motor de NF-e:
- * nome de cadastro (sanitize), deduplicação por canonical_name e cache por linha.
+ * Resolução de produto na importação EPOC/CSV:
+ * match exato por nome (produtos e fichas ativos), batch OpenAI para não encontrados.
  */
 import {
-  catalogMatchNameKey,
-  findCatalogProductByNameKey,
-} from "./productImport/llmCatalogCandidates.ts";
+  batchResolveEpocUnmatchedWithOpenAi,
+  type EpocOpenAiCreateHint,
+  type EpocOpenAiMatchAssignment,
+  type EpocRecipeCatalogEntry,
+} from "./epocCsvProductMatchOpenAi.ts";
 import {
   canonicalProductName,
   sanitizeCatalogProductName,
 } from "./productImport/canonicalName.ts";
 
-/** Score mínimo (0–100) para vincular linha EPOC a produto existente por tokens. */
+/** Score mínimo (0–100) para match fuzzy legado (não usado no fluxo EPOC). */
 export const EPOC_FUZZY_MATCH_MIN_SCORE = 82;
-/** Diferença mínima entre 1º e 2º candidato para não considerar ambíguo. */
 export const EPOC_FUZZY_MATCH_MIN_GAP = 8;
 
 export type EpocCatalogProduct = {
@@ -23,7 +24,7 @@ export type EpocCatalogProduct = {
   canonical_name?: string | null;
 };
 
-function normalizeCatalogName(s: string): string {
+export function normalizeCatalogName(s: string): string {
   return String(s ?? "")
     .trim()
     .toLowerCase()
@@ -31,6 +32,11 @@ function normalizeCatalogName(s: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Agrupa linhas do CSV com o mesmo nome (após normalizar acentos/caixa). */
+export function epocExactNameKey(raw: string): string {
+  return normalizeCatalogName(raw);
 }
 
 /** Chave estável para cache/metadata (canonical preferido). */
@@ -150,21 +156,47 @@ export type ResolveEpocProductResult = {
   ambiguousReason?: "canonical" | "display_name";
 };
 
+function findExactActiveProductsByName(
+  catalog: EpocCatalogProduct[],
+  rawName: string,
+): EpocCatalogProduct[] {
+  const norm = epocExactNameKey(rawName);
+  if (!norm) return [];
+  return catalog.filter((p) => epocExactNameKey(p.name) === norm);
+}
+
+function findExactActiveRecipeByName(
+  recipes: EpocRecipeCatalogEntry[],
+  rawName: string,
+): EpocRecipeCatalogEntry | null {
+  const norm = epocExactNameKey(rawName);
+  if (!norm) return null;
+  const hits = recipes.filter((r) => epocExactNameKey(r.name) === norm);
+  if (hits.length !== 1) return null;
+  return hits[0]!;
+}
+
+/**
+ * Match estrito: mesmo nome (normalizado) em produto ativo ou ficha técnica ativa.
+ * Não usa fuzzy nem canonical_name.
+ */
 export function resolveEpocProductId(
   rawName: string,
   catalog: EpocCatalogProduct[],
   cache: Map<string, string | null>,
-  canonicalIndex: Map<string, string | null>,
+  _canonicalIndex: Map<string, string | null>,
+  recipes: EpocRecipeCatalogEntry[] = [],
 ): ResolveEpocProductResult {
   const catalogName = epocCatalogDisplayName(rawName);
   const lineKey = epocProductLineKey(rawName);
+  const exactKey = epocExactNameKey(rawName);
   const canonicalName =
     canonicalProductName(catalogName || rawName) || lineKey;
 
-  if (cache.has(lineKey)) {
-    const cached = cache.get(lineKey) ?? null;
+  const cachedExact = cache.get(exactKey);
+  if (cache.has(exactKey)) {
     return {
-      productId: cached,
+      productId: cachedExact,
       lineKey,
       catalogName,
       canonicalName,
@@ -172,85 +204,9 @@ export function resolveEpocProductId(
     };
   }
 
-  const canonId = canonicalIndex.get(canonicalName);
-  if (canonId === null) {
-    cache.set(lineKey, null);
-    return {
-      productId: null,
-      lineKey,
-      catalogName,
-      canonicalName,
-      ambiguous: true,
-      ambiguousReason: "canonical",
-    };
-  }
-  if (typeof canonId === "string" && canonId) {
-    cache.set(lineKey, canonId);
-    return {
-      productId: canonId,
-      lineKey,
-      catalogName,
-      canonicalName,
-      ambiguous: false,
-    };
-  }
-
-  const byNameKey = findCatalogProductByNameKey(catalog, rawName);
-  if (byNameKey) {
-    cache.set(lineKey, byNameKey.id);
-    return {
-      productId: byNameKey.id,
-      lineKey,
-      catalogName,
-      canonicalName,
-      ambiguous: false,
-    };
-  }
-
-  const fuzzy = findEpocFuzzyCatalogMatch(catalog, rawName);
-  if (fuzzy) {
-    cache.set(lineKey, fuzzy.id);
-    return {
-      productId: fuzzy.id,
-      lineKey,
-      catalogName,
-      canonicalName,
-      ambiguous: false,
-    };
-  }
-
-  let id = resolveByNormalizedName(rawName, catalog, cache);
-  if (id) {
-    cache.set(lineKey, id);
-    return {
-      productId: id,
-      lineKey,
-      catalogName,
-      canonicalName,
-      ambiguous: false,
-    };
-  }
-  if (normalizeCatalogName(catalogName) !== normalizeCatalogName(rawName)) {
-    id = resolveByNormalizedName(catalogName, catalog, cache);
-    if (id) {
-      cache.set(lineKey, id);
-      return {
-        productId: id,
-        lineKey,
-        catalogName,
-        canonicalName,
-        ambiguous: false,
-      };
-    }
-  }
-
-  const ambRaw = catalogNameMatchCount(rawName, catalog);
-  const ambCatalog =
-    normalizeCatalogName(catalogName) !== normalizeCatalogName(rawName)
-      ? catalogNameMatchCount(catalogName, catalog)
-      : 0;
-  if (ambRaw > 1 || ambCatalog > 1) {
-    cache.set(lineKey, null);
+  const productHits = findExactActiveProductsByName(catalog, rawName);
+  if (productHits.length > 1) {
+    cache.set(exactKey, null);
     return {
       productId: null,
       lineKey,
@@ -260,8 +216,31 @@ export function resolveEpocProductId(
       ambiguousReason: "display_name",
     };
   }
+  if (productHits.length === 1) {
+    const id = productHits[0]!.id;
+    cache.set(exactKey, id);
+    return {
+      productId: id,
+      lineKey,
+      catalogName,
+      canonicalName,
+      ambiguous: false,
+    };
+  }
 
-  cache.set(lineKey, null);
+  const recipeHit = findExactActiveRecipeByName(recipes, rawName);
+  if (recipeHit?.output_product_id) {
+    cache.set(exactKey, recipeHit.output_product_id);
+    return {
+      productId: recipeHit.output_product_id,
+      lineKey,
+      catalogName,
+      canonicalName,
+      ambiguous: false,
+    };
+  }
+
+  cache.set(exactKey, null);
   return {
     productId: null,
     lineKey,
@@ -295,7 +274,8 @@ export function registerResolvedEpocProduct(
   cache.set(lineKey, product.id);
   const normCatalog = normalizeCatalogName(catalogName);
   if (normCatalog) cache.set(normCatalog, product.id);
-  cache.set(normalizeCatalogName(product.name), product.id);
+  cache.set(epocExactNameKey(product.name), product.id);
+  if (catalogName) cache.set(epocExactNameKey(catalogName), product.id);
 }
 
 // deno-lint-ignore no-explicit-any
@@ -338,12 +318,379 @@ export function loadProductIdCacheFromMetadata(
   meta: Record<string, unknown> | undefined,
 ): Map<string, string | null> {
   const cache = new Map<string, string | null>();
-  const raw = meta?.epoc_product_id_by_line_key;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return cache;
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof v === "string" && v) cache.set(k, v);
+  const rawLine = meta?.epoc_product_id_by_line_key;
+  if (rawLine && typeof rawLine === "object" && !Array.isArray(rawLine)) {
+    for (const [k, v] of Object.entries(rawLine as Record<string, unknown>)) {
+      if (typeof v === "string" && v) cache.set(k, v);
+    }
+  }
+  const rawExact = meta?.epoc_product_id_by_exact_name;
+  if (rawExact && typeof rawExact === "object" && !Array.isArray(rawExact)) {
+    for (const [k, v] of Object.entries(rawExact as Record<string, unknown>)) {
+      if (typeof v === "string" && v) cache.set(k, v);
+    }
   }
   return cache;
+}
+
+export function productIdCacheExactNameToMetadata(
+  cache: Map<string, string | null>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of cache.entries()) {
+    if (typeof v === "string" && v && k === epocExactNameKey(k)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export type StoredEpocOpenAiPlan = {
+  action: string;
+  product_id?: string | null;
+  recipe_id?: string | null;
+  create?: EpocOpenAiCreateHint | null;
+  instructions?: string | null;
+};
+
+export function loadEpocOpenAiPlanFromMetadata(
+  meta: Record<string, unknown> | undefined,
+): Map<string, StoredEpocOpenAiPlan> {
+  const out = new Map<string, StoredEpocOpenAiPlan>();
+  const raw = meta?.epoc_openai_plan_by_exact_name;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      out.set(k, v as StoredEpocOpenAiPlan);
+    }
+  }
+  return out;
+}
+
+export type RunEpocProductMatchPipelineResult = {
+  openAiPlanByExactName: Map<string, StoredEpocOpenAiPlan>;
+  manualReviewExactNames: string[];
+};
+
+export async function runEpocProductMatchPipeline(input: {
+  admin: SupabaseAdmin;
+  companyId: string;
+  uniqueNames: Map<string, string>;
+  catalog: EpocCatalogProduct[];
+  recipes: EpocRecipeCatalogEntry[];
+  canonicalIndex: Map<string, string | null>;
+  cache: Map<string, string | null>;
+  priorOpenAiPlan: Map<string, StoredEpocOpenAiPlan>;
+  openaiApiKey: string;
+  openaiModel: string;
+  productEnsure: EpocProductEnsureCoordinator;
+  inferUnit: (raw: string, catalog: EpocCatalogProduct[]) => string;
+  mapStockControl: (operationalType: string) => string;
+  deriveOperationalType: (categoryName: string, raw: string) => string;
+  defaultCategoryName: string;
+}): Promise<RunEpocProductMatchPipelineResult> {
+  const openAiPlanByExactName = new Map(input.priorOpenAiPlan);
+  const manualReviewExactNames: string[] = [];
+  const unmatchedForAi: { exactKey: string; raw: string }[] = [];
+
+  for (const [exactKey, raw] of input.uniqueNames) {
+    if (input.cache.get(exactKey)) continue;
+    const prior = openAiPlanByExactName.get(exactKey);
+    if (prior?.action === "MANUAL_REVIEW") {
+      manualReviewExactNames.push(exactKey);
+      continue;
+    }
+    if (
+      prior &&
+      (prior.action === "MATCH_PRODUCT" || prior.action === "MATCH_RECIPE") &&
+      prior.product_id
+    ) {
+      input.cache.set(exactKey, prior.product_id);
+      continue;
+    }
+
+    const resolved = resolveEpocProductId(
+      raw,
+      input.catalog,
+      input.cache,
+      input.canonicalIndex,
+      input.recipes,
+    );
+    if (resolved.ambiguous) {
+      manualReviewExactNames.push(exactKey);
+      openAiPlanByExactName.set(exactKey, {
+        action: "MANUAL_REVIEW",
+        instructions:
+          "Mais de um produto ativo com o mesmo nome exato; consolidar cadastro.",
+      });
+      continue;
+    }
+    if (resolved.productId) {
+      const matched = input.catalog.find((p) => p.id === resolved.productId);
+      await ensureProductSaleUnitUnConversion(
+        input.admin,
+        input.companyId,
+        resolved.productId,
+        matched?.unit ?? "un",
+        null,
+      );
+      continue;
+    }
+
+    if (
+      prior?.action === "CREATE_PRODUCT" ||
+      prior?.action === "CREATE_RECIPE"
+    ) {
+      await applyEpocOpenAiCreatePlan({
+        exactKey,
+        raw,
+        plan: prior,
+        ...input,
+        openAiPlanByExactName,
+      });
+      continue;
+    }
+
+    unmatchedForAi.push({ exactKey, raw });
+  }
+
+  if (unmatchedForAi.length && input.openaiApiKey) {
+    const labels = unmatchedForAi.map((u) => u.raw);
+    const aiMap = await batchResolveEpocUnmatchedWithOpenAi({
+      apiKey: input.openaiApiKey,
+      model: input.openaiModel,
+      csvLines: labels,
+      products: input.catalog,
+      recipes: input.recipes,
+    });
+
+    for (let i = 0; i < unmatchedForAi.length; i++) {
+      const { exactKey, raw } = unmatchedForAi[i]!;
+      const assignment: EpocOpenAiMatchAssignment | undefined = aiMap.get(i);
+      if (!assignment) {
+        manualReviewExactNames.push(exactKey);
+        openAiPlanByExactName.set(exactKey, {
+          action: "MANUAL_REVIEW",
+          instructions:
+            "Sem resposta da IA; revisar manualmente ou repetir importação.",
+        });
+        continue;
+      }
+      const plan = assignmentToStoredPlan(assignment);
+      openAiPlanByExactName.set(exactKey, plan);
+      if (plan.action === "MANUAL_REVIEW") {
+        manualReviewExactNames.push(exactKey);
+        continue;
+      }
+      if (
+        (plan.action === "MATCH_PRODUCT" || plan.action === "MATCH_RECIPE") &&
+        plan.product_id
+      ) {
+        const pid = plan.product_id;
+        const prod =
+          input.catalog.find((p) => p.id === pid) ??
+          (await fetchActiveProductRowById(input.admin, input.companyId, pid));
+        if (prod) {
+          registerResolvedEpocProduct(
+            input.catalog,
+            input.canonicalIndex,
+            input.cache,
+            prod,
+            epocProductLineKey(raw),
+            prod.name,
+          );
+          await ensureProductSaleUnitUnConversion(
+            input.admin,
+            input.companyId,
+            pid,
+            prod.unit ?? "un",
+            null,
+          );
+        } else {
+          manualReviewExactNames.push(exactKey);
+        }
+        continue;
+      }
+      if (
+        plan.action === "CREATE_PRODUCT" ||
+        plan.action === "CREATE_RECIPE"
+      ) {
+        await applyEpocOpenAiCreatePlan({
+          exactKey,
+          raw,
+          plan,
+          ...input,
+          openAiPlanByExactName,
+        });
+      }
+    }
+  } else if (unmatchedForAi.length) {
+    for (const { exactKey } of unmatchedForAi) {
+      manualReviewExactNames.push(exactKey);
+      openAiPlanByExactName.set(exactKey, {
+        action: "MANUAL_REVIEW",
+        instructions:
+          "OPENAI_API_KEY ausente; cadastre o produto ou configure a chave.",
+      });
+    }
+  }
+
+  return { openAiPlanByExactName, manualReviewExactNames };
+}
+
+function assignmentToStoredPlan(a: EpocOpenAiMatchAssignment): StoredEpocOpenAiPlan {
+  if (a.action === "MATCH_PRODUCT") {
+    return {
+      action: a.action,
+      product_id: a.product_id ?? null,
+    };
+  }
+  if (a.action === "MATCH_RECIPE") {
+    return {
+      action: a.action,
+      product_id: a.product_id ?? null,
+      recipe_id: a.recipe_id ?? null,
+    };
+  }
+  if (a.action === "CREATE_PRODUCT" || a.action === "CREATE_RECIPE") {
+    return {
+      action: a.action,
+      create: a.create ?? null,
+    };
+  }
+  return {
+    action: "MANUAL_REVIEW",
+    instructions: a.instructions ?? "Revisão manual necessária.",
+  };
+}
+
+async function fetchActiveProductRowById(
+  admin: SupabaseAdmin,
+  companyId: string,
+  productId: string,
+): Promise<EpocCatalogProduct | null> {
+  const { data, error } = await admin
+    .from("products")
+    .select("id, name, unit, canonical_name")
+    .eq("company_id", companyId)
+    .eq("id", productId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error || !data?.id) return null;
+  return {
+    id: String(data.id),
+    name: String(data.name ?? ""),
+    unit: (data.unit as string | null) ?? null,
+    canonical_name: (data.canonical_name as string | null) ?? null,
+  };
+}
+
+async function applyEpocOpenAiCreatePlan(ctx: {
+  exactKey: string;
+  raw: string;
+  plan: StoredEpocOpenAiPlan;
+  admin: SupabaseAdmin;
+  companyId: string;
+  catalog: EpocCatalogProduct[];
+  recipes: EpocRecipeCatalogEntry[];
+  canonicalIndex: Map<string, string | null>;
+  cache: Map<string, string | null>;
+  productEnsure: EpocProductEnsureCoordinator;
+  inferUnit: (raw: string, catalog: EpocCatalogProduct[]) => string;
+  mapStockControl: (operationalType: string) => string;
+  deriveOperationalType: (categoryName: string, raw: string) => string;
+  defaultCategoryName: string;
+  openAiPlanByExactName: Map<string, StoredEpocOpenAiPlan>;
+}): Promise<void> {
+  const create = ctx.plan.create;
+  if (!create?.catalog_name) return;
+  const asRecipe = ctx.plan.action === "CREATE_RECIPE" || create.kind === "RECIPE";
+  const catalogName = epocCatalogDisplayName(create.catalog_name);
+  const unit = (create.unit || "un").trim().toLowerCase() || "un";
+  const autoOp = asRecipe
+    ? "RECEITA_FICHA"
+    : ctx.deriveOperationalType(ctx.defaultCategoryName, ctx.raw);
+  const ensured = await ctx.productEnsure.ensure({
+    rawName: ctx.raw,
+    catalogName,
+    lineKey: epocProductLineKey(ctx.raw),
+    canonicalName: canonicalProductName(catalogName) || ctx.exactKey,
+    inferredUnit: unit,
+    autoStock: asRecipe ? "RECIPE_CONTROLLED" : ctx.mapStockControl(autoOp),
+  });
+  if (!ensured.productId) return;
+  await ensureProductSaleUnitUnConversion(
+    ctx.admin,
+    ctx.companyId,
+    ensured.productId,
+    unit,
+    create.un_per_stock_unit ?? null,
+  );
+  if (asRecipe && ensured.created) {
+    await ctx.admin.from("recipes").insert({
+      company_id: ctx.companyId,
+      name: catalogName.slice(0, 500),
+      output_product_id: ensured.productId,
+      batch_yield: 1,
+      active: true,
+      recipe_type: "PREP",
+    });
+  }
+}
+
+/** Garante conversão da unidade de estoque para UN (vendas EPOC em un). */
+export async function ensureProductSaleUnitUnConversion(
+  admin: SupabaseAdmin,
+  companyId: string,
+  productId: string,
+  hubUnit: string,
+  unPerStockUnit: number | null,
+): Promise<void> {
+  const hub = (hubUnit || "un").trim().toLowerCase();
+  if (hub === "un") return;
+
+  const { data: convs, error } = await admin
+    .from("product_unit_conversions")
+    .select("secondary_unit_code")
+    .eq("company_id", companyId)
+    .eq("product_id", productId)
+    .eq("primary_unit_code", hub);
+
+  if (error) {
+    console.error(
+      "[epocCsvProductResolution] load conversions:",
+      error.message,
+    );
+    return;
+  }
+
+  const hasUn = (convs ?? []).some(
+    (r: { secondary_unit_code?: string }) =>
+      String(r.secondary_unit_code ?? "").trim().toLowerCase() === "un",
+  );
+  if (hasUn) return;
+
+  const secondaryQty =
+    unPerStockUnit != null &&
+    Number.isFinite(Number(unPerStockUnit)) &&
+    Number(unPerStockUnit) > 0
+      ? Number(unPerStockUnit)
+      : 1;
+
+  const { error: insErr } = await admin.from("product_unit_conversions").insert({
+    company_id: companyId,
+    product_id: productId,
+    primary_unit_code: hub,
+    primary_qty: 1,
+    secondary_unit_code: "un",
+    secondary_qty: secondaryQty,
+  });
+  if (insErr) {
+    console.error(
+      "[epocCsvProductResolution] insert un conversion:",
+      insErr.message,
+    );
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -419,6 +766,7 @@ export class EpocProductEnsureCoordinator {
       this.catalog,
       this.cache,
       this.canonicalIndex,
+      [],
     );
     if (first.ambiguous) {
       return {
@@ -452,28 +800,6 @@ export class EpocProductEnsureCoordinator {
   private async ensureOnce(
     params: EnsureEpocProductParams,
   ): Promise<EnsureEpocProductResult> {
-    const fuzzyResolved = resolveEpocProductId(
-      params.rawName,
-      this.catalog,
-      this.cache,
-      this.canonicalIndex,
-    );
-    if (fuzzyResolved.productId) {
-      return {
-        productId: fuzzyResolved.productId,
-        created: false,
-        ambiguous: false,
-      };
-    }
-    if (fuzzyResolved.ambiguous) {
-      return {
-        productId: null,
-        created: false,
-        ambiguous: true,
-        ambiguousReason: fuzzyResolved.ambiguousReason,
-      };
-    }
-
     const fromDb = await fetchActiveProductRowByCanonical(
       this.admin,
       this.companyId,
@@ -501,6 +827,7 @@ export class EpocProductEnsureCoordinator {
       this.catalog,
       this.cache,
       this.canonicalIndex,
+      [],
     );
     if (again.ambiguous) {
       return {

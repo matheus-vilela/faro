@@ -83,6 +83,7 @@ import {
   buildNextConversionsAfterHubChange,
   computeStockQuantityAfterHubChange,
 } from "@/lib/companyUnits/stockHubUnitChange";
+import { productConversionRowLabel } from "@/lib/companyUnits/productConversionRows";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -2060,13 +2061,17 @@ export function Produtos() {
                   {products.map((p) => {
                     const qNum = Number(p.current_quantity);
                     const minNum = Number(p.min_quantity ?? 0);
-                    const stockIsZero = p.stock_is_zero ?? qNum <= 0;
+                    const stockIsNegative = qNum < 0;
+                    const stockIsZero =
+                      !stockIsNegative && (p.stock_is_zero ?? qNum <= 0);
                     const stockBelowMinPositive =
                       p.stock_below_min_positive ??
                       (minNum > 0 && qNum > 0 && qNum <= minNum);
                     const needsStockHighlight =
                       p.stock_has_alert ??
-                      (stockIsZero || (minNum > 0 && qNum <= minNum));
+                      (stockIsNegative ||
+                        stockIsZero ||
+                        (minNum > 0 && qNum <= minNum));
                     const qtyStr = Number(p.current_quantity).toLocaleString(
                       "pt-BR",
                     );
@@ -2102,9 +2107,26 @@ export function Produtos() {
                       : convRows.length > 0
                         ? "configurada"
                         : "pendente";
+                    const hubUnit = (p.unit || "un").trim();
+                    const exampleConvRow =
+                      convRows.find(
+                        (r) =>
+                          r.primary_unit_code.trim().toLowerCase() ===
+                          hubUnit.toLowerCase(),
+                      ) ?? convRows[0];
                     const conversionExample =
-                      convRows.length > 0
-                        ? `${convRows[0]!.secondary_qty} ${convRows[0]!.secondary_unit_code.toUpperCase()} = ${convRows[0]!.primary_qty} ${convRows[0]!.primary_unit_code.toUpperCase()}`
+                      exampleConvRow != null
+                        ? productConversionRowLabel(
+                            {
+                              company_id: currentCompany?.id ?? "",
+                              primary_qty: exampleConvRow.primary_qty,
+                              primary_unit_code: exampleConvRow.primary_unit_code,
+                              secondary_qty: exampleConvRow.secondary_qty,
+                              secondary_unit_code:
+                                exampleConvRow.secondary_unit_code,
+                            },
+                            hubUnit,
+                          )
                         : "Sem conversão cadastrada";
                     return (
                       <li key={p.id}>
@@ -2155,6 +2177,15 @@ export function Produtos() {
                                       >
                                         <PowerOff className="h-3 w-3" />
                                         Inativo
+                                      </Badge>
+                                    )}
+                                    {stockIsNegative && (
+                                      <Badge
+                                        variant="destructive"
+                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
+                                      >
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Estoque negativo
                                       </Badge>
                                     )}
                                     {stockIsZero && (

@@ -51,12 +51,18 @@ import {
 import {
   buildCanonicalProductIndex,
   EpocProductEnsureCoordinator,
+  epocExactNameKey,
   epocProductLineKey,
+  ensureProductSaleUnitUnConversion,
+  loadEpocOpenAiPlanFromMetadata,
   loadProductIdCacheFromMetadata,
+  productIdCacheExactNameToMetadata,
   productIdCacheToMetadata,
   resolveEpocProductId,
+  runEpocProductMatchPipeline,
   type EpocCatalogProduct,
 } from "../_shared/epocCsvProductResolution.ts";
+import type { EpocRecipeCatalogEntry } from "../_shared/epocCsvProductMatchOpenAi.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -356,6 +362,35 @@ async function loadProductCatalog(
   }
   const catalog = (data ?? []) as EpocCatalogProduct[];
   return { ok: true, catalog };
+}
+
+async function loadRecipeCatalog(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<
+  | { ok: true; recipes: EpocRecipeCatalogEntry[] }
+  | { ok: false; message: string }
+> {
+  const { data, error } = await admin
+    .from("recipes")
+    .select("id, name, output_product_id, active")
+    .eq("company_id", companyId)
+    .eq("active", true);
+  if (error) {
+    console.error(
+      "[process-integration-csv-revenue-job] recipes",
+      error.message,
+    );
+    return { ok: false, message: error.message };
+  }
+  const recipes = (data ?? []).map((r) => ({
+    id: String(r.id),
+    name: String(r.name ?? "").trim(),
+    output_product_id: r.output_product_id
+      ? String(r.output_product_id)
+      : null,
+  }));
+  return { ok: true, recipes };
 }
 
 function extractJobId(body: Record<string, unknown>): string | null {
@@ -696,7 +731,16 @@ Deno.serve(async (req) => {
         `Falha ao ler o catálogo de produtos: ${productCatalogLoad.message}`,
       );
     }
+    const recipeCatalogLoad = await loadRecipeCatalog(admin, job.company_id);
+    if (!recipeCatalogLoad.ok) {
+      return await fail(
+        `Falha ao ler fichas técnicas: ${recipeCatalogLoad.message}`,
+      );
+    }
     const productCatalog: EpocCatalogProduct[] = [...productCatalogLoad.catalog];
+    const recipeCatalog: EpocRecipeCatalogEntry[] = [
+      ...recipeCatalogLoad.recipes,
+    ];
     const canonicalProductIndex = buildCanonicalProductIndex(productCatalog);
 
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
@@ -822,11 +866,55 @@ Deno.serve(async (req) => {
     const openaiProductKindModel =
       Deno.env.get("OPENAI_EPOC_PRODUCT_KIND_MODEL")?.trim() ||
       openaiClassifyModel;
+    const openaiProductMatchModel =
+      Deno.env.get("OPENAI_EPOC_PRODUCT_MATCH_MODEL")?.trim() ||
+      openaiClassifyModel;
 
     const chunkEndExclusive = Math.min(
       rows.length,
       startOffset + ROWS_HARD_CAP,
     );
+
+    const uniqueEpocNames = new Map<string, string>();
+    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
+      const row = rows[pi]!;
+      const totalCell = sanitizeCell(row[totalCol] ?? "");
+      if (parseBrMoney(totalCell) == null) continue;
+      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
+      if (!parseFlexibleDate(rawDate)) continue;
+      const rawP =
+        produtoCol >= 0
+          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+      if (!rawP) continue;
+      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
+      const exactKey = epocExactNameKey(rawP);
+      if (!exactKey) continue;
+      if (!uniqueEpocNames.has(exactKey)) uniqueEpocNames.set(exactKey, rawP);
+    }
+
+    const priorOpenAiPlan = loadEpocOpenAiPlanFromMetadata(priorMeta);
+    const matchPipeline = await runEpocProductMatchPipeline({
+      admin,
+      companyId: job.company_id,
+      uniqueNames: uniqueEpocNames,
+      catalog: productCatalog,
+      recipes: recipeCatalog,
+      canonicalIndex: canonicalProductIndex,
+      cache: productIdCache,
+      priorOpenAiPlan,
+      openaiApiKey,
+      openaiModel: openaiProductMatchModel,
+      productEnsure,
+      inferUnit: inferUnitFromProductName,
+      mapStockControl: mapOperationalTypeToStockControl,
+      deriveOperationalType: deriveOperationalTypeForAutoProduct,
+      defaultCategoryName: defaultLeaf.name,
+    });
+    const manualReviewExactNames = new Set(
+      matchPipeline.manualReviewExactNames,
+    );
+    const openAiPlanByExactName = matchPipeline.openAiPlanByExactName;
     const pendingHeuristic = new Map<
       string,
       { raw: string; pick: ReturnType<typeof classifyRevenueCategoryHeuristic> }
@@ -932,11 +1020,14 @@ Deno.serve(async (req) => {
 
       const k = epocProductLineKey(rawP);
       if (!k || kindByKey[k]) continue;
+      const exactKeyKind = epocExactNameKey(rawP);
+      if (manualReviewExactNames.has(exactKeyKind)) continue;
       const kindResolve = resolveEpocProductId(
         rawP,
         productCatalog,
         productIdCache,
         canonicalProductIndex,
+        recipeCatalog,
       );
       if (kindResolve.productId || kindResolve.ambiguous) continue;
       if (pendingProductKind.has(k)) continue;
@@ -1097,11 +1188,33 @@ Deno.serve(async (req) => {
       const rowSubcategoryId = scRowForLine?.subcategory_id ?? defaultLeaf.id;
       const rowCategoryId = scRowForLine?.category_id ?? defaultLeaf.parent_id;
 
+      const exactKeyRow = epocExactNameKey(rawProdutoForMatch);
+      if (manualReviewExactNames.has(exactKeyRow)) {
+        skippedChunk += 1;
+        skipNoProductChunk += 1;
+        const plan = openAiPlanByExactName.get(exactKeyRow);
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "epoc_manual_review",
+          details:
+            plan?.instructions ??
+            "Item sem match exato; revisar cadastro conforme orientação da importação.",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
+
       const productResolve = resolveEpocProductId(
         rawProdutoForMatch,
         productCatalog,
         productIdCache,
         canonicalProductIndex,
+        recipeCatalog,
       );
       let productId = productResolve.productId;
       const catalogName = productResolve.catalogName;
@@ -1127,157 +1240,36 @@ Deno.serve(async (req) => {
       }
 
       if (!productId) {
-        const inferredUnit = inferUnitFromProductName(
-          rawProdutoForMatch,
-          productCatalog,
-        );
-        const leafForAutoCreate =
-          leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const kindPick =
-          kindByKey[lineKey] ??
-          ({
-            kind: "PRODUCT" as EpocProductKind,
-            confidence: 0.4,
-            reason: "missing_kind_cache",
-            src: "default",
-          } satisfies StoredEpocProductKind);
-        const asRecipe = kindPick.kind === "RECIPE";
-        const autoOpType = asRecipe
-          ? "RECEITA_FICHA"
-          : deriveOperationalTypeForAutoProduct(
-              leafForAutoCreate.name,
-              rawProdutoForMatch,
-            );
-        const autoStock = asRecipe
-          ? "RECIPE_CONTROLLED"
-          : mapOperationalTypeToStockControl(autoOpType);
-        const ensured = await productEnsure.ensure({
-          rawName: rawProdutoForMatch,
-          catalogName,
-          lineKey,
-          canonicalName: productResolve.canonicalName,
-          inferredUnit,
-          autoStock,
-        });
-
-        if (ensured.ambiguous) {
-          skippedChunk += 1;
-          skipNoProductChunk += 1;
-          pushDiagnostic({
-            row_index: idx + 1,
-            entry_date_raw: rawDate,
-            product_name_raw: rawProdutoForMatch,
-            quantity_raw: qtyCell,
-            total_received_raw: totalCell,
-            reason: "product_ambiguous",
-            details:
-              ensured.ambiguousReason === "canonical"
-                ? "Mais de um produto com o mesmo nome canônico"
-                : "Mais de um produto com o mesmo nome normalizado",
-            action: "linha ignorada; consolidar nomes duplicados no cadastro",
-          });
-          idx += 1;
-          continue;
-        }
-
-        if (!ensured.productId) {
-          skippedChunk += 1;
-          skipNoProductChunk += 1;
-          pushDiagnostic({
-            row_index: idx + 1,
-            entry_date_raw: rawDate,
-            product_name_raw: rawProdutoForMatch,
-            quantity_raw: qtyCell,
-            total_received_raw: totalCell,
-            reason: "product_create_failed",
-            details: "Falha ao criar produto automaticamente",
-            action: "linha ignorada",
-          });
-          idx += 1;
-          continue;
-        }
-
-        productId = ensured.productId;
-        if (ensured.created) {
-          createdNewProductThisIteration = true;
-        }
-
-        if (asRecipe && createdNewProductThisIteration) {
-          const recipeTitle = `${catalogName}`.slice(0, 500);
-          const { data: createdRecipe, error: recipeErr } = await admin
-            .from("recipes")
-            .insert({
-              company_id: job.company_id,
-              name: recipeTitle,
-              output_product_id: productId,
-              batch_yield: 1,
-              active: true,
-              recipe_type: "PREP",
-            })
-            .select("id")
-            .single();
-          if (recipeErr || !createdRecipe?.id) {
-            skippedChunk += 1;
-            skipNoProductChunk += 1;
-            pushDiagnostic({
-              row_index: idx + 1,
-              entry_date_raw: rawDate,
-              product_name_raw: rawProdutoForMatch,
-              quantity_raw: qtyCell,
-              total_received_raw: totalCell,
-              reason: "product_create_failed",
-              details:
-                recipeErr?.message ??
-                "Produto criado, mas falha ao criar ficha técnica",
-              action: "linha ignorada",
-            });
-            idx += 1;
-            continue;
-          }
-          createdNewRecipeThisIteration = true;
-          recipesAutoCreatedChunk += 1;
-
-          const { error: reviewErr } = await admin
-            .from("product_import_dashboard_review")
-            .upsert(
-              {
-                company_id: job.company_id,
-                product_id: productId,
-                review_bucket: "RECIPE_NO_INGREDIENTS",
-                resolution: "OPEN",
-                notes:
-                  "Ficha criada automaticamente na importação EPOC; cadastre insumos.",
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "company_id,product_id,review_bucket" },
-            );
-          if (reviewErr) {
-            console.error(
-              "[process-integration-csv-revenue-job] product_import_dashboard_review",
-              reviewErr.message,
-            );
-          }
-        } else if (createdNewProductThisIteration) {
-          productsAutoCreatedChunk += 1;
-        }
-      }
-      if (!productId) {
         skippedChunk += 1;
         skipNoProductChunk += 1;
+        const plan = openAiPlanByExactName.get(exactKeyRow);
         pushDiagnostic({
           row_index: idx + 1,
           entry_date_raw: rawDate,
           product_name_raw: rawProdutoForMatch,
           quantity_raw: qtyCell,
           total_received_raw: totalCell,
-          reason: "product_create_failed",
+          reason: "epoc_product_unresolved",
           details:
-            "Produto nao encontrado e criacao automatica nao retornou id",
+            plan?.instructions ??
+            plan?.create?.instructions ??
+            "Sem match exato no cadastro; aguardando resolução da importação.",
           action: "linha ignorada",
         });
         idx += 1;
         continue;
       }
+
+      const hubUnit =
+        productCatalog.find((p) => p.id === productId)?.unit ?? "un";
+      await ensureProductSaleUnitUnConversion(
+        admin,
+        job.company_id,
+        productId,
+        hubUnit,
+        openAiPlanByExactName.get(exactKeyRow)?.create?.un_per_stock_unit ??
+          null,
+      );
 
       let batchId = batchByDate.get(entryDate);
       if (!batchId) {
@@ -1440,6 +1432,12 @@ Deno.serve(async (req) => {
       epoc_revenue_category_by_product: catByKey,
       epoc_product_kind_by_name: kindByKey,
       epoc_product_id_by_line_key: productIdCacheToMetadata(productIdCache),
+      epoc_product_id_by_exact_name: productIdCacheExactNameToMetadata(
+        productIdCache,
+      ),
+      epoc_openai_plan_by_exact_name: Object.fromEntries(
+        openAiPlanByExactName,
+      ),
       batch_by_reference_date: batchMapObj,
       csv_total_data_rows: rows.length,
       revenue_entries_created_total: prevCreated + createdChunk,

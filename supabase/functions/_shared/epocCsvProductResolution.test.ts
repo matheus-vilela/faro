@@ -2,55 +2,76 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   buildCanonicalProductIndex,
   EpocProductEnsureCoordinator,
+  epocExactNameKey,
   epocProductLineKey,
   findEpocFuzzyCatalogMatch,
   registerResolvedEpocProduct,
   resolveEpocProductId,
   scoreEpocProductNameMatch,
 } from "./epocCsvProductResolution.ts";
+import type { EpocRecipeCatalogEntry } from "./epocCsvProductMatchOpenAi.ts";
 
-Deno.test("scoreEpocProductNameMatch: AGUA COM GAS casa com AGUA MINERAL CRYSTAL COM GAS", () => {
+Deno.test("scoreEpocProductNameMatch: AGUA COM GAS não é match exato com CRYSTAL", () => {
   const score = scoreEpocProductNameMatch(
     "AGUA COM GAS",
     "AGUA MINERAL CRYSTAL COM GAS",
   );
   assertEquals(score >= 82, true);
-  const hit = findEpocFuzzyCatalogMatch(
+  const fuzzy = findEpocFuzzyCatalogMatch(
     [{ id: "p1", name: "AGUA MINERAL CRYSTAL COM GAS" }],
     "AGUA COM GAS",
   );
-  assertEquals(hit?.id, "p1");
+  assertEquals(fuzzy?.id, "p1");
 });
 
-Deno.test("epocProductLineKey unifica variações do CSV com o nome de cadastro", () => {
-  const raw = "Coca Cola 350ml";
-  const key = epocProductLineKey(raw);
-  assertEquals(typeof key, "string");
-  assertEquals(key.length > 0, true);
-  assertEquals(epocProductLineKey("COCA COLA"), key);
-});
-
-Deno.test("resolveEpocProductId encontra por canonical_name no índice", () => {
+Deno.test("resolveEpocProductId: match exato por nome, sem fuzzy", () => {
   const catalog = [
-    {
-      id: "p1",
-      name: "CERVEJA LATA",
-      canonical_name: "cerveja lata",
-    },
+    { id: "p1", name: "AGUA MINERAL CRYSTAL COM GAS" },
+    { id: "p2", name: "AGUA COM GAS" },
   ];
   const cache = new Map<string, string | null>();
   const index = buildCanonicalProductIndex(catalog);
   const r = resolveEpocProductId(
-    "Cerveja Lata 350ml",
+    "AGUA COM GAS",
     catalog,
     cache,
     index,
+    [],
   );
-  assertEquals(r.productId, "p1");
-  assertEquals(r.ambiguous, false);
+  assertEquals(r.productId, "p2");
+  const noFuzzy = resolveEpocProductId(
+    "AGUA COM GAS",
+    [{ id: "p1", name: "AGUA MINERAL CRYSTAL COM GAS" }],
+    new Map(),
+    buildCanonicalProductIndex([{ id: "p1", name: "AGUA MINERAL CRYSTAL COM GAS" }]),
+    [],
+  );
+  assertEquals(noFuzzy.productId, null);
 });
 
-Deno.test("resolveEpocProductId reutiliza produto criado no mesmo job via cache", () => {
+Deno.test("resolveEpocProductId: ficha técnica ativa com mesmo nome", () => {
+  const recipes: EpocRecipeCatalogEntry[] = [
+    {
+      id: "r1",
+      name: "Caipirinha",
+      output_product_id: "out1",
+    },
+  ];
+  const r = resolveEpocProductId(
+    "Caipirinha",
+    [],
+    new Map(),
+    new Map(),
+    recipes,
+  );
+  assertEquals(r.productId, "out1");
+});
+
+Deno.test("epocExactNameKey agrupa variações de caixa/acento", () => {
+  assertEquals(epocExactNameKey("Água COM GAS"), epocExactNameKey("agua com gas"));
+});
+
+Deno.test("resolveEpocProductId reutiliza cache por nome exato", () => {
   const catalog: Array<{
     id: string;
     name: string;
@@ -58,9 +79,6 @@ Deno.test("resolveEpocProductId reutiliza produto criado no mesmo job via cache"
   }> = [];
   const cache = new Map<string, string | null>();
   const index = buildCanonicalProductIndex(catalog);
-
-  const first = resolveEpocProductId("Água Mineral", catalog, cache, index);
-  assertEquals(first.productId, null);
 
   registerResolvedEpocProduct(
     catalog,
@@ -71,17 +89,27 @@ Deno.test("resolveEpocProductId reutiliza produto criado no mesmo job via cache"
       name: "AGUA MINERAL SEM GAS",
       canonical_name: "agua mineral",
     },
-    first.lineKey,
-    first.catalogName,
+    epocProductLineKey("AGUA MINERAL SEM GAS"),
+    "AGUA MINERAL SEM GAS",
   );
 
   const second = resolveEpocProductId(
+    "AGUA MINERAL SEM GAS",
+    catalog,
+    cache,
+    index,
+    [],
+  );
+  assertEquals(second.productId, "new1");
+
+  const different = resolveEpocProductId(
     "agua mineral 500ml",
     catalog,
     cache,
     index,
+    [],
   );
-  assertEquals(second.productId, "new1");
+  assertEquals(different.productId, null);
 });
 
 Deno.test("EpocProductEnsureCoordinator serializa duas linhas iguais na mesma invocação", async () => {
