@@ -26,9 +26,12 @@ import {
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
+import type {
+  ExpenseSeriesType,
+  RecurrenceFrequency,
+} from "@/types/expenseSeries";
 import { FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -99,8 +102,10 @@ interface CreateBoletoSheetProps {
   expenseId?: string | null;
   /** YYYY-MM-DD — preenche vencimento ao abrir (ex.: dia clicado no calendário) */
   defaultDueDate?: string | null;
-  /** Tipo de lançamento ao abrir sem despesa vinculada. */
+  /** Tipo de lançamento ao abrir sem despesa vinculada (quando não há `fixedAccountFlow`). */
   defaultAccountFlow?: BoletoFlowType;
+  /** Fixa o fluxo e oculta o seletor conta a pagar / a receber (ex.: página de Contas a pagar). */
+  fixedAccountFlow?: BoletoFlowType;
   onSuccess?: (boleto: Boleto) => void;
 }
 
@@ -111,9 +116,12 @@ export function CreateBoletoSheet({
   expenseId,
   defaultDueDate,
   defaultAccountFlow = "payable",
+  fixedAccountFlow,
   onSuccess,
 }: CreateBoletoSheetProps) {
-  const [accountFlow, setAccountFlow] = useState<BoletoFlowType>(defaultAccountFlow);
+  const [accountFlow, setAccountFlow] = useState<BoletoFlowType>(
+    fixedAccountFlow ?? defaultAccountFlow,
+  );
   const [paymentType, setPaymentType] = useState<PaymentType>("boleto");
   const [companyCategories, setCompanyCategories] = useState<
     CompanyCategory[]
@@ -140,24 +148,35 @@ export function CreateBoletoSheet({
   const [account, setAccount] = useState("");
   const [accountType, setAccountType] = useState("conta_corrente");
 
+  const [seriesType, setSeriesType] = useState<ExpenseSeriesType>("single");
+  const [recurrenceFrequency, setRecurrenceFrequency] =
+    useState<RecurrenceFrequency>("monthly");
+  const [installmentCount, setInstallmentCount] = useState("12");
+
   useEffect(() => {
     if (!open) return;
-    if (!expenseId) setAccountFlow(defaultAccountFlow);
+    if (!expenseId) {
+      setAccountFlow(fixedAccountFlow ?? defaultAccountFlow);
+    }
+    setSeriesType("single");
     if (defaultDueDate?.trim()) {
       setDueDate(defaultDueDate.trim().slice(0, 10));
     } else {
       setDueDate("");
     }
-  }, [open, defaultDueDate, defaultAccountFlow, expenseId]);
+  }, [open, defaultDueDate, defaultAccountFlow, fixedAccountFlow, expenseId]);
 
-  const effectiveFlow: BoletoFlowType = expenseId ? "payable" : accountFlow;
+  const effectiveFlow: BoletoFlowType = expenseId
+    ? "payable"
+    : (fixedAccountFlow ?? accountFlow);
   const requiresPaymentDetails = effectiveFlow === "payable";
   const categoryNatureza = effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
 
   const loadCategories = useCallback(
     async (opts?: { selectDefault?: boolean }) => {
       if (!companyId) return;
-      const natureza = expenseId ? "DESPESA" : accountFlow === "payable" ? "DESPESA" : "RECEITA";
+      const natureza =
+        expenseId || effectiveFlow === "payable" ? "DESPESA" : "RECEITA";
       setCategoriesLoading(true);
       const { data, error } = await supabase
         .from("company_categories")
@@ -177,11 +196,11 @@ export function CreateBoletoSheet({
       const list = (data ?? []) as CompanyCategory[];
       setCompanyCategories(list);
       if (opts?.selectDefault) {
-        const flow = expenseId ? "payable" : accountFlow;
+        const flow = expenseId ? "payable" : (fixedAccountFlow ?? accountFlow);
         setCompanyCategoryId(pickDefaultForFlow(list, flow));
       }
     },
-    [companyId, expenseId, accountFlow],
+    [companyId, expenseId, accountFlow, fixedAccountFlow, effectiveFlow],
   );
 
   useEffect(() => {
@@ -208,6 +227,60 @@ export function CreateBoletoSheet({
     if (!companyId || !canSubmit) return;
     setLoading(true);
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    let linkedExpenseId = expenseId ?? null;
+
+    if (
+      !linkedExpenseId &&
+      effectiveFlow === "payable" &&
+      seriesType !== "single"
+    ) {
+      const installments =
+        seriesType === "installment" ? parseInt(installmentCount, 10) : null;
+      if (seriesType === "installment" && (!installments || installments < 2)) {
+        setLoading(false);
+        toast.error("Informe pelo menos 2 parcelas.");
+        return;
+      }
+      const { data: expRow, error: expErr } = await supabase
+        .from("expenses")
+        .insert({
+          company_id: companyId,
+          created_by: user?.id ?? null,
+          type: "recibo",
+          display_name: description.trim(),
+          status: "approved",
+          expense_source: "manual",
+          reference_date: dueDate,
+          document_total: parseFloat(amount),
+          series_type: seriesType,
+          recurrence_frequency:
+            seriesType === "recurring" ? recurrenceFrequency : null,
+          installment_count: installments,
+          recurrence_status: seriesType === "recurring" ? "active" : null,
+          series_anchor_due_date: dueDate,
+        })
+        .select("id")
+        .single();
+      if (expErr) {
+        setLoading(false);
+        toast.error(expErr.message ?? "Não foi possível criar a série.");
+        return;
+      }
+      linkedExpenseId = expRow.id;
+      await supabase.from("expense_items").insert({
+        company_id: companyId,
+        expense_id: expRow.id,
+        product_name: description.trim(),
+        quantity: 1,
+        unit_value: parseFloat(amount),
+        stock_added: false,
+      });
+    }
+
     const payload: Record<string, unknown> = {
       company_id: companyId,
       company_category_id: companyCategoryId,
@@ -216,9 +289,9 @@ export function CreateBoletoSheet({
       due_date: dueDate,
       amount: parseFloat(amount),
       status: "pending",
-      flow_type: expenseId ? "payable" : accountFlow,
+      flow_type: effectiveFlow,
     };
-    if (expenseId) payload.expense_id = expenseId;
+    if (linkedExpenseId) payload.expense_id = linkedExpenseId;
 
     if (requiresPaymentDetails) {
       payload.payment_type = paymentType;
@@ -275,7 +348,7 @@ export function CreateBoletoSheet({
     setAgency("");
     setAccount("");
     setPaymentType("boleto");
-    setAccountFlow("payable");
+    setAccountFlow(fixedAccountFlow ?? "payable");
     setCompanyCategoryId("");
     onOpenChange(false);
     toast.success("Conta cadastrada com sucesso.");
@@ -305,49 +378,62 @@ export function CreateBoletoSheet({
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="grid gap-4">
-            {!expenseId && (
-              <div className="space-y-2">
-                <Label>Tipo de conta</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAccountFlow("payable");
-                      setCompanyCategoryId("");
-                    }}
-                    disabled={loading}
-                    className={cn(
-                      "rounded-md border px-3 py-2 text-left text-sm transition-colors",
-                      accountFlow === "payable"
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border hover:bg-muted/60",
-                    )}
-                  >
-                    <p className="font-medium">Conta a pagar</p>
+            {!expenseId && effectiveFlow === "payable" && (
+              <div className="space-y-3 rounded-lg border p-4">
+                <Label>Tipo de lançamento</Label>
+                <Select
+                  value={seriesType}
+                  onValueChange={(v) => setSeriesType(v as ExpenseSeriesType)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">Única</SelectItem>
+                    <SelectItem value="recurring">Recorrente</SelectItem>
+                    <SelectItem value="installment">Parcelada</SelectItem>
+                  </SelectContent>
+                </Select>
+                {seriesType === "recurring" && (
+                  <div className="space-y-2">
+                    <Label>Recorrência</Label>
+                    <Select
+                      value={recurrenceFrequency}
+                      onValueChange={(v) =>
+                        setRecurrenceFrequency(v as RecurrenceFrequency)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Semanal</SelectItem>
+                        <SelectItem value="biweekly">Quinzenal</SelectItem>
+                        <SelectItem value="monthly">Mensal</SelectItem>
+                        <SelectItem value="bimonthly">Bimestral</SelectItem>
+                        <SelectItem value="quarterly">Trimestral</SelectItem>
+                        <SelectItem value="semiannual">Semestral</SelectItem>
+                        <SelectItem value="annual">Anual</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <p className="text-xs text-muted-foreground">
-                      Saídas e obrigações a quitar (categorias de despesa)
+                    Define de quanto em quanto tempo esta despesa será repetida automaticamente.
                     </p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAccountFlow("receivable");
-                      setCompanyCategoryId("");
-                    }}
-                    disabled={loading}
-                    className={cn(
-                      "rounded-md border px-3 py-2 text-left text-sm transition-colors",
-                      accountFlow === "receivable"
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border hover:bg-muted/60",
-                    )}
-                  >
-                    <p className="font-medium">Conta a receber</p>
-                    <p className="text-xs text-muted-foreground">
-                      Entradas previstas no fluxo de caixa
-                    </p>
-                  </button>
-                </div>
+                  </div>
+                )}
+                {seriesType === "installment" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="installment-count">Número de parcelas</Label>
+                    <Input
+                      id="installment-count"
+                      type="number"
+                      min={2}
+                      max={360}
+                      value={installmentCount}
+                      onChange={(e) => setInstallmentCount(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
             )}
             {requiresPaymentDetails && (

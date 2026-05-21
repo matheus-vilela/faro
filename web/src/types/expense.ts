@@ -37,6 +37,19 @@ export interface Expense {
   supplier_name: string | null
   is_recurring?: boolean
   display_name?: string | null
+  series_type?: 'single' | 'recurring' | 'installment'
+  recurrence_frequency?: string | null
+  installment_count?: number | null
+  recurrence_status?: 'active' | 'inactive' | null
+  parent_expense_id?: string | null
+  series_anchor_due_date?: string | null
+  occurrence_month?: string | null
+  scheduled_adjustments?: Array<{
+    effective_from: string
+    amount?: number
+    due_date?: string
+  }>
+  suppressed_occurrences?: string[]
   status: ExpenseStatus
   notes: string | null
   /** Caminho no bucket `expense-documents` (comprovante). */

@@ -1573,7 +1573,10 @@ export function Despesas() {
                     ? "Nota fiscal"
                     : TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS];
                 const displayTitle =
-                  exp.supplier_name?.trim() || typeLabel || "Sem fornecedor";
+                  exp.display_name?.trim() ||
+                  exp.supplier_name?.trim() ||
+                  typeLabel ||
+                  "Sem fornecedor";
                 return (
                   <div
                     key={exp.id}
