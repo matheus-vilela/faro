@@ -38,6 +38,18 @@ export function normalizeExtractedItemsLikeBatch(
           : (Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(unitValue) ? unitValue : 0),
         unitCommercial: it.unitCommercial == null ? null : String(it.unitCommercial),
         unitTax: it.unitTax == null ? null : String(it.unitTax),
+        quantityCommercial:
+          it.quantityCommercial == null
+            ? null
+            : parseLooseNumber(it.quantityCommercial),
+        quantityTax:
+          it.quantityTax == null ? null : parseLooseNumber(it.quantityTax),
+        unitValueCommercial:
+          it.unitValueCommercial == null
+            ? null
+            : parseLooseNumber(it.unitValueCommercial),
+        unitValueTax:
+          it.unitValueTax == null ? null : parseLooseNumber(it.unitValueTax),
         productCode: it.productCode == null ? null : String(it.productCode),
         ncm: it.ncm == null ? null : String(it.ncm),
         ean: it.ean == null ? null : String(it.ean),

@@ -58,6 +58,8 @@ type NavItem = {
   url: string;
   icon: LucideIcon;
   roles: UserCompanyRole[];
+  /** Só marca ativo na URL exata (evita sub-rotas, ex. /desenvolvimento vs /desenvolvimento/fornecedores). */
+  exact?: boolean;
 };
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -161,6 +163,13 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         url: "/app/desenvolvimento",
         icon: FlaskConical,
         roles: ["operador", "gestor", "owner"],
+        exact: true,
+      },
+      {
+        title: "Fornecedores globais",
+        url: "/app/desenvolvimento/fornecedores",
+        icon: Truck,
+        roles: ["operador", "gestor", "owner"],
       },
     ],
   },
@@ -177,9 +186,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-function isNavActive(pathname: string, url: string): boolean {
+function isNavActive(pathname: string, url: string, exact?: boolean): boolean {
   if (url === "/app") {
     return pathname === "/app" || pathname === "/app/";
+  }
+  if (exact) {
+    return pathname === url || pathname === `${url}/`;
   }
   return pathname === url || pathname.startsWith(`${url}/`);
 }
@@ -370,7 +382,11 @@ function AppLayoutContent() {
               <SidebarGroupContent className="mt-0">
                 <SidebarMenu>
                   {section.items.map((item) => {
-                    const active = isNavActive(location.pathname, item.url);
+                    const active = isNavActive(
+                      location.pathname,
+                      item.url,
+                      item.exact,
+                    );
                     return (
                       <SidebarMenuItem key={item.url}>
                         <SidebarMenuButton

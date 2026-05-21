@@ -191,6 +191,12 @@ async function processOneItem(
   const uCom = item.unitCommercial != null ? String(item.unitCommercial) : null;
   const uTrib = item.unitTax != null ? String(item.unitTax) : null;
   const qty = Number(item.quantity);
+  const qtyCom = Number(
+    (item as { quantityCommercial?: number }).quantityCommercial ?? qty,
+  );
+  const qtyTrib = Number(
+    (item as { quantityTax?: number }).quantityTax ?? 0,
+  );
   const uv = Number(item.unitValue);
   const lt = Number(item.lineTotal);
 
@@ -199,6 +205,8 @@ async function processOneItem(
     unit_commercial: uCom,
     unit_tax: uTrib,
     quantity: qty,
+    quantity_commercial: qtyCom > 0 ? qtyCom : qty,
+    quantity_tax: qtyTrib > 0 ? qtyTrib : null,
     unit_value: uv,
     line_total: lt,
     matched_catalog_unit: matchedUnit,

@@ -1,9 +1,8 @@
+import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
-import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
-import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -231,7 +230,9 @@ export function Dashboard() {
       ) : null}
       {/* {currentCompany ? <SetupProgressCard /> : null} */}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
+      {companyId ? <DashboardDayOperations /> : null}
+
+      {/* <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">
           <DashboardQuickLinks role={currentRole} />
         </section>
@@ -248,7 +249,7 @@ export function Dashboard() {
             formatCurrency={formatCurrency}
           />
         </section>
-      </div>
+      </div> */}
 
       <div className="grid gap-6">
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}

@@ -1,3 +1,4 @@
+import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { UnitSetupResetCard } from "@/components/unit-setup/UnitSetupResetCard";
 import { useCompany } from "@/contexts/CompanyContext";
 import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
@@ -30,13 +30,12 @@ import {
   ChevronRight,
   FileCode2,
   FlaskConical,
-  LayoutDashboard,
   Loader2,
   Package,
   RefreshCw,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 type PreviewOkResponse = {
@@ -398,22 +397,6 @@ export function Desenvolvimento() {
       <UnitSetupResetCard />
 
       <OnboardingResetCard />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => navigate("/app/dashboard-2")}
-        >
-          <LayoutDashboard className="h-4 w-4" />
-          Abrir Painel 2
-        </Button>
-        <p className="text-sm text-muted-foreground">
-          Protótipo do painel no layout de referência (Alô Chefia).
-        </p>
-      </div>
 
       <div className="flex flex-wrap gap-2 border-b border-border pb-px">
         <button

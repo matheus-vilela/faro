@@ -14,6 +14,7 @@ export type IcmsTotalsSlice = {
   vFrete: number | null;
   /** Desconto global (positivo no XML). */
   vDesc: number | null;
+  vSeg: number | null;
   vOutro: number | null;
 };
 
@@ -47,11 +48,13 @@ export function extractIcmsTotalsFromNfeXml(xmlText: string): IcmsTotalsSlice | 
   const vNF = vNFraw > 0 ? Math.round(vNFraw * 100) / 100 : null;
   const vf = num(icmsTot.vFrete);
   const vd = num(icmsTot.vDesc);
+  const vs = num(icmsTot.vSeg);
   const vo = num(icmsTot.vOutro);
   return {
     vNF,
     vFrete: vf > 0 ? Math.round(vf * 100) / 100 : null,
     vDesc: vd > 0 ? Math.round(vd * 100) / 100 : null,
+    vSeg: vs > 0 ? Math.round(vs * 100) / 100 : null,
     vOutro: vo > 0 ? Math.round(vo * 100) / 100 : null,
   };
 }

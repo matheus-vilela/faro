@@ -31,6 +31,9 @@ export type StagingNfeInterpretLog = {
     valor_unitario: number;
     valor_total_linha: number;
     unidade_comercial: string | null;
+    unidade_tributavel: string | null;
+    quantidade_comercial: number | null;
+    quantidade_tributavel: number | null;
   }>;
   impostos: NfeXmlTaxTotals | null;
   cobranca_boletos: Array<{
@@ -71,6 +74,9 @@ function buildFromExtracted(
       valor_unitario: it.unitValue,
       valor_total_linha: it.lineTotal,
       unidade_comercial: it.unitCommercial ?? null,
+      unidade_tributavel: it.unitTax ?? null,
+      quantidade_comercial: it.quantityCommercial ?? it.quantity ?? null,
+      quantidade_tributavel: it.quantityTax ?? null,
     })),
     impostos: taxes,
     cobranca_boletos: dups.map((d) => ({

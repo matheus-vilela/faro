@@ -31,7 +31,7 @@ const TARGET_LABELS: Record<
   fiscal: {
     title: "Repor onboarding fiscal?",
     description:
-      "Redefine onboarding_fiscal (sync ativo, completed false, contadores zerados). O card de NF-e recebidas volta a aparecer no painel para testar o fluxo fiscal.",
+      "Redefine onboarding_fiscal (sync ativo, completed false, contadores zerados) e remove nfes_recebidas_ultima_versao e nfes_recebidas_ultima_sync_at de focusnfe. O card de NF-e recebidas volta a aparecer no painel para testar o fluxo fiscal do zero.",
   },
   pdv: {
     title: "Repor onboarding PDV?",
@@ -41,7 +41,7 @@ const TARGET_LABELS: Record<
   both: {
     title: "Repor onboarding fiscal e PDV?",
     description:
-      "Aplica as duas reposições acima na unidade selecionada. Use para reiniciar os dois fluxos de onboarding no dashboard. Mantém setup.epoc.",
+      "Aplica as duas reposições acima na unidade selecionada (inclui limpar o cursor NF-e em focusnfe). Use para reiniciar os dois fluxos de onboarding no dashboard. Mantém setup.epoc.",
   },
 };
 
@@ -86,8 +86,10 @@ export function OnboardingResetCard() {
             e/ou{" "}
             <code className="rounded bg-muted px-1 text-xs">onboarding_pdv</code>{" "}
             da unidade atual para testar de novo os fluxos exibidos no painel
-            (NF-e Focus e vendas EPOC). Não reinicia o wizard nem limpa{" "}
-            <code className="rounded bg-muted px-1 text-xs">setup.epoc</code>.
+            (NF-e Focus e vendas EPOC). O reset fiscal também zera o cursor em{" "}
+            <code className="rounded bg-muted px-1 text-xs">focusnfe</code>{" "}
+            (versão e última sync de NF-e recebidas). Não reinicia o wizard nem
+            limpa <code className="rounded bg-muted px-1 text-xs">setup.epoc</code>.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">

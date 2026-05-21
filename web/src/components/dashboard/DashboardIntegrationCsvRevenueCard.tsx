@@ -73,8 +73,7 @@ export function DashboardIntegrationCsvRevenueCard({
       return {
         title: "Não foram  encontrado dados válidos na integração EPOC",
         subtitle:
-          ob.portal_message?.slice(0, 260) ||
-          "A exportação no portal não produziu tabela utilizável nesta sincronização.",
+          "A exportação no portal não produziu dados utilizáveis nesta sincronização.",
         showSpinner: false,
         icon: "error" as const,
       };

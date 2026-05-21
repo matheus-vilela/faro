@@ -69,6 +69,20 @@ Deno.test("buildNewProductCatalogFromNfeLine: nota em kg → estoque un, primary
   assert(g != null);
 });
 
+Deno.test("buildNewProductCatalogFromNfeLine: KG com qTrib em gramas", () => {
+  const r = buildNewProductCatalogFromNfeLine({
+    productName: "Açúcar",
+    invoiceUnitRaw: "KG",
+    unitCommercial: "KG",
+    unitTax: "G",
+    quantityCommercial: 1,
+    quantityTax: 1000,
+  });
+  assertEquals(r.stockUnit, "kg");
+  const toG = r.conversions.find((c) => c.secondary_unit_code === "g");
+  assertEquals(toG?.secondary_qty, 1000);
+});
+
 Deno.test("buildNewProductCatalogFromNfeLine: nome limpo sem 10x1kg", () => {
   const r = buildNewProductCatalogFromNfeLine({
     productName: "AÇUCAR CARAVELAS 10X1KG",

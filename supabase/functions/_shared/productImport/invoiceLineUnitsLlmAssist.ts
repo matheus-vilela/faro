@@ -17,6 +17,10 @@ export type InvoiceLineUnitsAssistInput = {
   unit_commercial: string | null;
   unit_tax: string | null;
   quantity: number;
+  /** qCom quando disponível. */
+  quantity_commercial?: number | null;
+  /** qTrib quando disponível. */
+  quantity_tax?: number | null;
   unit_value: number;
   line_total: number;
   /** Unidade do produto sugerido/cadastro, se houver match (só contexto para a IA). */
@@ -190,6 +194,8 @@ export async function assistInvoiceLineUnits(
       unit_commercial: input.unit_commercial,
       unit_tax: input.unit_tax,
       quantity: input.quantity,
+      quantity_commercial: input.quantity_commercial ?? input.quantity,
+      quantity_tax: input.quantity_tax ?? null,
       unit_value: input.unit_value,
       line_total: input.line_total,
     },

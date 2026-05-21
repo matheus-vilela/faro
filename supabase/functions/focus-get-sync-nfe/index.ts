@@ -34,6 +34,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { upsertUnifiedSupplierCatalogFromNfeXml } from "../_shared/unifiedSupplierCatalogFromNfeXml.ts";
 
 const LOG = "[focus-get-sync-nfe]";
 
@@ -1514,6 +1515,30 @@ Deno.serve(async (req) => {
                 );
               } else {
                 notasEncontradas += 1;
+                if (xmlContent != null && String(xmlContent).trim().startsWith("<")) {
+                  try {
+                    const catalogRes = await upsertUnifiedSupplierCatalogFromNfeXml(
+                      admin,
+                      String(xmlContent),
+                      { chave_nfe: chave, company_id: companyId },
+                    );
+                    if (!catalogRes.ok && catalogRes.skippedReason) {
+                      console.warn(
+                        LOG,
+                        "unified_catalog_skip",
+                        chave,
+                        catalogRes.skippedReason,
+                      );
+                    }
+                  } catch (catalogErr) {
+                    console.warn(
+                      LOG,
+                      "unified_catalog_err",
+                      chave,
+                      String(catalogErr),
+                    );
+                  }
+                }
               }
             } else {
               const { error: insErr } = await admin
@@ -1528,6 +1553,30 @@ Deno.serve(async (req) => {
                 console.warn(LOG, "staging_insert", companyId, insErr.message);
               } else {
                 notasEncontradas += 1;
+                if (xmlContent != null && String(xmlContent).trim().startsWith("<")) {
+                  try {
+                    const catalogRes = await upsertUnifiedSupplierCatalogFromNfeXml(
+                      admin,
+                      String(xmlContent),
+                      { chave_nfe: chave, company_id: companyId },
+                    );
+                    if (!catalogRes.ok && catalogRes.skippedReason) {
+                      console.warn(
+                        LOG,
+                        "unified_catalog_skip",
+                        chave,
+                        catalogRes.skippedReason,
+                      );
+                    }
+                  } catch (catalogErr) {
+                    console.warn(
+                      LOG,
+                      "unified_catalog_err",
+                      chave,
+                      String(catalogErr),
+                    );
+                  }
+                }
               }
             }
           }

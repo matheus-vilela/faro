@@ -5,6 +5,10 @@
 import { sanitizeCatalogProductName } from "./canonicalName.ts";
 import { mapInvoiceUnitToCatalogUnit } from "./invoiceUnitToCatalogUnit.ts";
 import {
+  buildCommercialTaxUnitConversion,
+  type NfeCommercialTaxUnitInput,
+} from "./nfeCommercialTaxUnitConversion.ts";
+import {
   massPerCountUnitFromLabelKg,
   packSizeFromLabel,
   stripPackSizeFromLabel,
@@ -247,7 +251,7 @@ function measureQtyPerStockUnit(
   return roundQty(perUnitQty);
 }
 
-function dedupeConversions(
+export function dedupeProductUnitConversions(
   rows: ProductUnitConversionInsert[],
 ): ProductUnitConversionInsert[] {
   const out: ProductUnitConversionInsert[] = [];
@@ -264,11 +268,40 @@ function dedupeConversions(
 /**
  * Monta nome, unidade de estoque e conversões para insert em `products` + `product_unit_conversions`.
  */
+export function mergeProductUnitConversionGroups(
+  ...groups: ProductUnitConversionInsert[][]
+): ProductUnitConversionInsert[] {
+  return dedupeProductUnitConversions(groups.flat());
+}
+
+function applyCommercialTaxUnitOverlay(
+  base: NewProductCatalogFromNfeLine,
+  nfeUnits: NfeCommercialTaxUnitInput,
+): NewProductCatalogFromNfeLine {
+  const ct = buildCommercialTaxUnitConversion(nfeUnits);
+  if (!ct) return base;
+  const noteParts = [ct.note, base.registrationNote].filter(Boolean);
+  return {
+    catalogName: base.catalogName,
+    stockUnit: ct.stockUnit,
+    conversions: mergeProductUnitConversionGroups(
+      ct.conversions,
+      base.conversions,
+    ),
+    registrationNote: noteParts.length > 0 ? noteParts.join("; ") : null,
+  };
+}
+
 export function buildNewProductCatalogFromNfeLine(input: {
   productName: string;
   invoiceUnitRaw: string | null | undefined;
   /** Nome sugerido pela IA (já normalizado); se vazio, deriva do xProd. */
   suggestedCatalogName?: string | null;
+  /** uCom / uTrib e quantidades da NF-e para conversão automática. */
+  unitCommercial?: string | null;
+  unitTax?: string | null;
+  quantityCommercial?: number | null;
+  quantityTax?: number | null;
 }): NewProductCatalogFromNfeLine {
   const rawName = String(input.productName ?? "").trim() || "Item";
   const stripped = stripPackSizeFromLabel(
@@ -346,49 +379,61 @@ export function buildNewProductCatalogFromNfeLine(input: {
       registrationNote = `Embalagem no nome: ${notes.join("; ")}`;
     }
 
-    return {
-      catalogName,
-      stockUnit,
-      conversions: dedupeConversions(conversions),
-      registrationNote,
-    };
+    return applyCommercialTaxUnitOverlay(
+      {
+        catalogName,
+        stockUnit,
+        conversions: dedupeProductUnitConversions(conversions),
+        registrationNote,
+      },
+      input,
+    );
   }
 
   const invNorm = normalizeUnitLabel(
     String(input.invoiceUnitRaw ?? "").trim() || mapped.unit,
   );
   if (invNorm === "KG" || invNorm === "G" || invNorm === "MG") {
-    return {
-      catalogName,
-      stockUnit: "un",
-      conversions: dedupeConversions(
-        // primary_unit_code deve ser a unidade de estoque ("un"), não a unidade da NF-e.
-        expandMassVolumeConversionFamily("un", 100, "G"),
-      ),
-      registrationNote: "Nota em massa: estoque em un com ponte 1 un = 100 g",
-    };
+    return applyCommercialTaxUnitOverlay(
+      {
+        catalogName,
+        stockUnit: "un",
+        conversions: dedupeProductUnitConversions(
+          // primary_unit_code deve ser a unidade de estoque ("un"), não a unidade da NF-e.
+          expandMassVolumeConversionFamily("un", 100, "G"),
+        ),
+        registrationNote: "Nota em massa: estoque em un com ponte 1 un = 100 g",
+      },
+      input,
+    );
   }
   if (invNorm === "L" || invNorm === "ML") {
-    return {
-      catalogName,
-      stockUnit: "un",
-      conversions: dedupeConversions(
-        expandMassVolumeConversionFamily("un", 100, "ML"),
-      ),
-      registrationNote: "Nota em volume: estoque em un com ponte 1 un = 100 ml",
-    };
+    return applyCommercialTaxUnitOverlay(
+      {
+        catalogName,
+        stockUnit: "un",
+        conversions: dedupeProductUnitConversions(
+          expandMassVolumeConversionFamily("un", 100, "ML"),
+        ),
+        registrationNote: "Nota em volume: estoque em un com ponte 1 un = 100 ml",
+      },
+      input,
+    );
   }
 
   const stockUnit = mapped.needsReview
     ? (invoiceCountable ?? "un")
     : mapped.unit.slice(0, 32) || "un";
 
-  return {
-    catalogName,
-    stockUnit,
-    conversions: [],
-    registrationNote: null,
-  };
+  return applyCommercialTaxUnitOverlay(
+    {
+      catalogName,
+      stockUnit,
+      conversions: [],
+      registrationNote: null,
+    },
+    input,
+  );
 }
 
 export async function insertProductUnitConversions(

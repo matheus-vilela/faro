@@ -108,6 +108,10 @@ export function autoCatalogStockUnitWithOptionalUnPack(
     productName: String(item.productName ?? "").trim() || "Item",
     invoiceUnitRaw: raw,
     suggestedCatalogName: pm.borderlineLlmSuggestedName ?? null,
+    unitCommercial: item.unitCommercial ?? null,
+    unitTax: item.unitTax ?? null,
+    quantityCommercial: item.quantityCommercial ?? item.quantity ?? null,
+    quantityTax: item.quantityTax ?? null,
   });
   if (built.conversions.length > 0) {
     return {

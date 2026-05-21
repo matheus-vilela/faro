@@ -57,6 +57,32 @@ async function restoreSetupEpocIfChanged(
   return {};
 }
 
+/** Remove cursor de listagem NF-e recebidas em `companies.focusnfe` (re-sync do zero). */
+async function focusnfeClearedOfRecebidasSyncCursor(
+  companyId: string,
+): Promise<{ focusnfe?: Record<string, unknown>; error?: string }> {
+  const { data, error } = await supabase
+    .from("companies")
+    .select("focusnfe")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+
+  const raw = data?.focusnfe;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const current = { ...(raw as Record<string, unknown>) };
+  const hadVersao = "nfes_recebidas_ultima_versao" in current;
+  const hadSyncAt = "nfes_recebidas_ultima_sync_at" in current;
+  if (!hadVersao && !hadSyncAt) return {};
+
+  delete current.nfes_recebidas_ultima_versao;
+  delete current.nfes_recebidas_ultima_sync_at;
+  return { focusnfe: current };
+}
+
 /** Repõe PDV para reexibir cards e fluxo EPOC no dashboard (`sync: true`, contadores zerados). */
 export function onboardingPdvRecordForDevReset(): Record<string, unknown> {
   return mergeOnboardingPdv(defaultOnboardingPdvRecord(), {
@@ -85,6 +111,11 @@ export async function resetCompanyOnboardingForDev(
   const patch: Record<string, unknown> = {};
   if (target === "fiscal" || target === "both") {
     patch.onboarding_fiscal = defaultOnboardingFiscalRecord();
+    const clearedFocus = await focusnfeClearedOfRecebidasSyncCursor(companyId);
+    if (clearedFocus.error) return { error: clearedFocus.error };
+    if (clearedFocus.focusnfe) {
+      patch.focusnfe = clearedFocus.focusnfe;
+    }
   }
   if (touchesPdv) {
     patch.onboarding_pdv = onboardingPdvRecordForDevReset();

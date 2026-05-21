@@ -58,6 +58,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/checklists", label: "Checklists" },
     { prefix: "/app/alertas", label: "Alertas" },
     { prefix: "/app/integracoes", label: "Integrações" },
+    { prefix: "/app/desenvolvimento/fornecedores", label: "Fornecedores globais" },
     { prefix: "/app/desenvolvimento", label: "Desenvolvimento" },
     { prefix: "/app/dre", label: "DRE" },
   ];

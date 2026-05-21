@@ -186,8 +186,17 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     if (!prod) continue;
     const { cfop, csosn } = extractCfopAndCsosnFromDet(d);
     const productName = str(prod.xProd) ?? "Item";
-    const quantity = Math.max(0.0001, num(prod.qCom ?? prod.qTrib));
-    const unitValue = num(prod.vUnCom ?? prod.vUnTrib);
+    const qComRaw = num(prod.qCom);
+    const qTribRaw = num(prod.qTrib);
+    const quantityCommercial = qComRaw > 0 ? qComRaw : null;
+    const quantityTax = qTribRaw > 0 ? qTribRaw : null;
+    const quantity = Math.max(
+      0.0001,
+      quantityCommercial ?? quantityTax ?? 0.0001,
+    );
+    const vUnCom = num(prod.vUnCom);
+    const vUnTrib = num(prod.vUnTrib);
+    const unitValue = vUnCom > 0 ? vUnCom : vUnTrib > 0 ? vUnTrib : 0;
     const lineTotal = num(prod.vProd);
     const uCom = str(prod.uCom);
     const uTrib = str(prod.uTrib);
@@ -199,7 +208,11 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     items.push({
       productName,
       quantity,
+      quantityCommercial,
+      quantityTax,
       unitValue,
+      unitValueCommercial: vUnCom > 0 ? vUnCom : null,
+      unitValueTax: vUnTrib > 0 ? vUnTrib : null,
       lineTotal: lineTotal > 0 ? lineTotal : quantity * unitValue,
       productCode,
       unitCommercial: uCom,
@@ -341,5 +354,97 @@ export function extractNfeTaxTotalsFromXml(xmlText: string): NfeXmlTaxTotals | n
     vOutro: taxField(icmsTot, "vOutro"),
     vNF: taxField(icmsTot, "vNF"),
     vTotTrib: taxField(icmsTot, "vTotTrib"),
+  };
+}
+
+/** Linha `<det>` com bloco `<prod>` completo (catálogo global de fornecedores). */
+export type NfeXmlDetLineForCatalog = {
+  nItem: string | null;
+  prod: Record<string, unknown>;
+  xmlDet: Record<string, unknown>;
+  cfop: string | null;
+  csosn: string | null;
+};
+
+export type NfeXmlEmitForCatalog = {
+  supplierName: string;
+  fantasyName: string | null;
+  supplierDocument: string | null;
+  nfeAccessKey: string | null;
+};
+
+/** Emitente + linhas de produto com JSON integral do XML (para `unified_supplier_products`). */
+export function parseNfeXmlForUnifiedCatalog(
+  xmlText: string,
+): { emit: NfeXmlEmitForCatalog; lines: NfeXmlDetLineForCatalog[] } | null {
+  const trimmed = stripBom(xmlText);
+  if (!trimmed.startsWith("<")) return null;
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    removeNSPrefix: true,
+    trimValues: true,
+  });
+
+  let root: Record<string, unknown>;
+  try {
+    root = parser.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const nfeProc = root.nfeProc as Record<string, unknown> | undefined;
+  const nfeRoot = pickNFeRoot(nfeProc?.NFe ?? root.NFe);
+  const infNFe = pickInfNFe(nfeRoot?.infNFe);
+  if (!infNFe || typeof infNFe !== "object") return null;
+
+  const emit = infNFe.emit as Record<string, unknown> | undefined;
+  const supplierName = str(emit?.xNome ?? emit?.xFant) ?? "Emitente NF-e";
+  const fantasyName = str(emit?.xFant);
+  const cnpj = str(emit?.CNPJ ?? emit?.CPF);
+  const supplierDocument = cnpj ? cnpj.replace(/\D/g, "") : null;
+  const infNFeId = str((infNFe as Record<string, unknown>)["@_Id"]);
+  const nfeAccessKey = infNFeId?.startsWith("NFe") ? infNFeId.slice(3) : infNFeId;
+
+  const detList = normalizeDetList(infNFe.det);
+  const lines: NfeXmlDetLineForCatalog[] = [];
+
+  for (const det of detList) {
+    const prod = normalizeProd(det.prod);
+    if (!prod) continue;
+    const { cfop, csosn } = extractCfopAndCsosnFromDet(det);
+    const nItem =
+      str(det["@_nItem"]) ??
+      str((det as Record<string, unknown>).nItem) ??
+      null;
+    const xmlDet: Record<string, unknown> = {
+      ...(nItem ? { nItem } : {}),
+      prod: { ...prod },
+      ...(cfop ? { cfop } : {}),
+      ...(csosn ? { csosn } : {}),
+    };
+    const imposto = det.imposto;
+    if (imposto != null && typeof imposto === "object" && !Array.isArray(imposto)) {
+      xmlDet.imposto = imposto as Record<string, unknown>;
+    }
+    lines.push({
+      nItem,
+      prod: { ...prod },
+      xmlDet,
+      cfop,
+      csosn,
+    });
+  }
+
+  if (lines.length === 0) return null;
+
+  return {
+    emit: {
+      supplierName,
+      fantasyName: fantasyName && fantasyName !== supplierName ? fantasyName : null,
+      supplierDocument,
+      nfeAccessKey: nfeAccessKey ?? null,
+    },
+    lines,
   };
 }

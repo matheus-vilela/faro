@@ -3,7 +3,6 @@ import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -24,7 +23,6 @@ import { cn } from "@/lib/utils";
 import {
   FileKey,
   FolderTree,
-  RotateCcw,
   MessageCircle,
   Percent,
   Settings2,
@@ -119,7 +117,7 @@ export function ConfiguracoesLayout() {
         ))}
       </nav>
 
-      <Card className="border-amber-500/40 bg-amber-500/5">
+      {/* <Card className="border-amber-500/40 bg-amber-500/5">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <RotateCcw className="h-4 w-4" />
@@ -140,7 +138,7 @@ export function ConfiguracoesLayout() {
             Reiniciar setup inicial
           </Button>
         </CardContent>
-      </Card>
+      </Card> */}
 
       <Outlet />
 

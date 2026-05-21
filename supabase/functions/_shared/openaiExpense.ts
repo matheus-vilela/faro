@@ -18,6 +18,14 @@ export type ExtractedExpenseItem = {
   unitCommercial?: string | null;
   /** Unidade tributável (NF-e: uTrib) quando diferente da comercial. */
   unitTax?: string | null;
+  /** qCom — quantidade na unidade comercial. */
+  quantityCommercial?: number | null;
+  /** qTrib — quantidade na unidade tributável. */
+  quantityTax?: number | null;
+  /** vUnCom — valor unitário comercial. */
+  unitValueCommercial?: number | null;
+  /** vUnTrib — valor unitário tributável. */
+  unitValueTax?: number | null;
   /** NCM da linha, se houver. */
   ncm?: string | null;
   /** CFOP da linha (NF-e: prod.CFOP), se houver. */

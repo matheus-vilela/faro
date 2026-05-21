@@ -1086,10 +1086,13 @@ export function Produtos() {
 
   useEffect(() => {
     const est = searchParams.get("estoque");
+    const aba = searchParams.get("aba");
     if (est === "baixo") {
       setEstoqueTab("catalogo");
     } else if (est === "receitas") {
       setEstoqueTab("receitas");
+    } else if (aba === "contagem") {
+      setEstoqueTab("contagem");
     }
   }, [searchParams]);
 

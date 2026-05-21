@@ -142,6 +142,10 @@ function productInsertPayload(
     productName: String(line.nome ?? "").trim() || "Item",
     invoiceUnitRaw: line.unidade_comercial,
     suggestedCatalogName: suggestedName,
+    unitCommercial: line.unidade_comercial,
+    unitTax: line.unidade_tributavel,
+    quantityCommercial: line.quantidade_comercial ?? line.quantidade,
+    quantityTax: line.quantidade_tributavel,
   });
   const name = catalog.catalogName.slice(0, 512) || "Produto (NF-e)";
   const unit = catalog.stockUnit.slice(0, 32) || "un";
