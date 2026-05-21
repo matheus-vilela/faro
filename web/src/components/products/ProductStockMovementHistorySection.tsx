@@ -31,8 +31,17 @@ type MovementRow = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
+  metadata_json: { quantity_unit?: string } | null;
   expense_id: string | null;
 };
+
+function movementQuantityUnit(
+  row: MovementRow,
+  productUnit: string,
+): string {
+  const fromMeta = row.metadata_json?.quantity_unit?.trim();
+  return fromMeta || productUnit || "un";
+}
 
 type Props = {
   productId: string;
@@ -62,7 +71,7 @@ export function ProductStockMovementHistorySection({
     const { data, error } = await supabase
       .from("stock_movements")
       .select(
-        "id, quantity, type, reference_type, reference_id, created_at, unit_cost",
+        "id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json",
       )
       .eq("product_id", productId)
       .order("created_at", { ascending: false })
@@ -154,7 +163,8 @@ export function ProductStockMovementHistorySection({
                       </Badge>
                     </td>
                     <td className="px-3 py-2 tabular-nums">
-                      {Number(row.quantity).toLocaleString("pt-BR")} {unit}
+                      {Number(row.quantity).toLocaleString("pt-BR")}{" "}
+                      {movementQuantityUnit(row, unit)}
                     </td>
                     <td className="px-3 py-2">
                       <StockMovementOriginCell

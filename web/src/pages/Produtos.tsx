@@ -1387,12 +1387,22 @@ export function Produtos() {
     }
     setStockSaving(true);
     if (!unitChanged && qtyChanged) {
+      const unitCostForMovement =
+        delta > 0
+          ? (resolvedLastUnit ??
+            currentLastUnit ??
+            (stockProduct.average_cost != null &&
+            Number(stockProduct.average_cost) > 0
+              ? Number(stockProduct.average_cost)
+              : null))
+          : null;
       const { error } = await supabase.rpc("adjust_product_stock", {
         p_product_id: stockProduct.id,
         p_delta: delta,
         p_type: delta > 0 ? "in" : "out",
         p_reference_type: "adjustment",
         p_reference_id: null,
+        p_unit_value: unitCostForMovement,
       });
       if (error) {
         console.error(error);

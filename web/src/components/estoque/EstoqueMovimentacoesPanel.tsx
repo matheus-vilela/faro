@@ -20,9 +20,16 @@ type Row = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
+  metadata_json: { quantity_unit?: string } | null;
   expense_id: string | null;
   products: { name: string; unit: string } | null;
 };
+
+function movementQuantityUnit(row: Row): string {
+  const fromMeta = row.metadata_json?.quantity_unit?.trim();
+  const fromProduct = row.products?.unit?.trim();
+  return fromMeta || fromProduct || "un";
+}
 
 const REF_LABEL: Record<string, string> = {
   inventory_count: "Contagem",
@@ -50,7 +57,7 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
     const { data, error } = await supabase
       .from("stock_movements")
       .select(
-        "id, quantity, type, reference_type, reference_id, created_at, unit_cost, products!inner(name, unit, company_id)",
+        "id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json, products!inner(name, unit, company_id)",
       )
       .eq("products.company_id", companyId)
       .order("created_at", { ascending: false })
@@ -117,7 +124,7 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
               <tbody>
                 {rows.map((r) => {
                   const name = r.products?.name ?? "—";
-                  const unit = r.products?.unit ?? "";
+                  const qtyUnit = movementQuantityUnit(r);
                   const isIn = r.type === "in";
                   return (
                     <tr key={r.id} className="border-b border-border/60">
@@ -144,7 +151,7 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                         </Badge>
                       </td>
                       <td className="p-2 tabular-nums">
-                        {Number(r.quantity).toLocaleString("pt-BR")} {unit}
+                        {Number(r.quantity).toLocaleString("pt-BR")} {qtyUnit}
                       </td>
                       <td className="p-2">
                         <StockMovementOriginCell
