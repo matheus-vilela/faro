@@ -81,9 +81,6 @@ export async function resetCompanyOnboardingForDev(
   target: DevOnboardingResetTarget,
 ): Promise<{ error?: string }> {
   const touchesPdv = target === "pdv" || target === "both";
-  const epocSnapshot = touchesPdv
-    ? await readSetupEpocSnapshot(companyId)
-    : undefined;
 
   const patch: Record<string, unknown> = {};
   if (target === "fiscal" || target === "both") {
@@ -100,9 +97,5 @@ export async function resetCompanyOnboardingForDev(
     .eq("id", companyId);
   if (error) return { error: error.message };
 
-  if (touchesPdv && epocSnapshot !== undefined) {
-    const restore = await restoreSetupEpocIfChanged(companyId, epocSnapshot);
-    if (restore.error) return restore;
-  }
   return {};
 }
