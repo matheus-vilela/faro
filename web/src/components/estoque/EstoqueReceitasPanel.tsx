@@ -51,6 +51,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   ChefHat,
@@ -627,7 +628,7 @@ export const EstoqueReceitasPanel = forwardRef<
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, r, c] = await Promise.all([
+    const [p, r] = await Promise.all([
       supabase
         .from("products")
         .select("*")
@@ -641,15 +642,14 @@ export const EstoqueReceitasPanel = forwardRef<
         )
         .eq("company_id", companyId)
         .order("name"),
-      supabase
-        .from("product_unit_conversions")
-        .select("*")
-        .eq("company_id", companyId),
     ]);
     setLoading(false);
-    setProducts((p.data ?? []) as Product[]);
+    const productsList = (p.data ?? []) as Product[];
+    setProducts(productsList);
     setRecipes((r.data ?? []) as unknown as RecipeRow[]);
-    setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
   }, [companyId]);
 
   const productById = useMemo(

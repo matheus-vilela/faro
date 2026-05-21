@@ -45,6 +45,7 @@ import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { RecipeListItem } from "@/types/recipe";
 import {
@@ -297,38 +298,33 @@ export function RevenueDetailSheet({
       return;
     }
     setLoading(true);
-    const [entryRes, catRes, prodRes, recipeRes, convRes, taxRes] =
-      await Promise.all([
-        supabase
-          .from("revenue_entries")
-          .select("*")
-          .eq("id", revenueEntryId)
-          .single(),
-        supabase
-          .from("company_categories")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("ordem", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase
-          .from("products")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("name"),
-        supabase
-          .from("recipes")
-          .select("id, name, batch_yield, active")
-          .eq("company_id", companyId)
-          .order("name"),
-        supabase
-          .from("product_unit_conversions")
-          .select("*")
-          .eq("company_id", companyId),
-        supabase
-          .from("company_revenue_category_tax_settings")
-          .select("category_id, tax_type, tax_value")
-          .eq("company_id", companyId),
-      ]);
+    const [entryRes, catRes, prodRes, recipeRes, taxRes] = await Promise.all([
+      supabase
+        .from("revenue_entries")
+        .select("*")
+        .eq("id", revenueEntryId)
+        .single(),
+      supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("ordem", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("recipes")
+        .select("id, name, batch_yield, active")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("company_revenue_category_tax_settings")
+        .select("category_id, tax_type, tax_value")
+        .eq("company_id", companyId),
+    ]);
     setLoading(false);
 
     if (entryRes.error || !entryRes.data) {
@@ -338,11 +334,14 @@ export function RevenueDetailSheet({
       return;
     }
 
+    const productsList = (prodRes.data as Product[]) ?? [];
     setDetail(entryRes.data as RevenueEntry);
     setCompanyCategories((catRes.data as CompanyCategory[]) ?? []);
-    setProducts((prodRes.data as Product[]) ?? []);
+    setProducts(productsList);
     setRecipes((recipeRes.data as RecipeListItem[]) ?? []);
-    setProductConversions((convRes.data as ProductUnitConversionDraft[]) ?? []);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
     setCategoryTaxSettings(
       (taxRes.data ?? []) as Pick<
         CompanyRevenueCategoryTaxSetting,

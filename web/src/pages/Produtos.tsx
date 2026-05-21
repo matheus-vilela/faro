@@ -93,7 +93,11 @@ import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
-import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
+import {
+  loadProductUnitConversions,
+  persistProductUnitConversions,
+} from "@/lib/productUnitConversionsService";
+import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
@@ -286,13 +290,10 @@ async function fetchProductConversionMap(
 > {
   if (productIds.length === 0) return {};
   const { data, error } = await supabase
-    .from("product_unit_conversions")
-    .select(
-      "product_id, primary_qty, primary_unit_code, secondary_qty, secondary_unit_code",
-    )
+    .from("products")
+    .select("id, unit_conversions")
     .eq("company_id", companyId)
-    .in("product_id", productIds)
-    .order("secondary_unit_code", { ascending: true });
+    .in("id", productIds);
   if (error) return {};
   const out: Record<
     string,
@@ -304,20 +305,19 @@ async function fetchProductConversionMap(
     }>
   > = {};
   for (const row of data ?? []) {
-    const r = row as {
-      product_id: string;
-      primary_qty: number;
-      primary_unit_code: string;
-      secondary_qty: number;
-      secondary_unit_code: string;
-    };
-    if (!out[r.product_id]) out[r.product_id] = [];
-    out[r.product_id]!.push({
-      primary_qty: Number(r.primary_qty),
-      primary_unit_code: r.primary_unit_code,
-      secondary_qty: Number(r.secondary_qty),
-      secondary_unit_code: r.secondary_unit_code,
-    });
+    const r = row as { id: string; unit_conversions?: unknown };
+    const parsed = parseProductUnitConversionsJson(
+      r.unit_conversions,
+      companyId,
+      r.id,
+    );
+    if (parsed.length === 0) continue;
+    out[r.id] = parsed.map((c) => ({
+      primary_qty: Number(c.primary_qty),
+      primary_unit_code: c.primary_unit_code,
+      secondary_qty: Number(c.secondary_qty),
+      secondary_unit_code: c.secondary_unit_code,
+    }));
   }
   return out;
 }
@@ -1112,10 +1112,10 @@ export function Produtos() {
     let cancelled = false;
     setStockProductConversionsLoading(true);
     void (async () => {
-      const { data, error } = await supabase
-        .from("product_unit_conversions")
-        .select("*")
-        .eq("product_id", loadPid);
+      const { rows, error } = await loadProductUnitConversions(
+        currentCompany!.id,
+        loadPid,
+      );
       if (cancelled) return;
       if (error) {
         console.error(error);
@@ -1124,7 +1124,6 @@ export function Produtos() {
         setStockProductConversionsLoading(false);
         return;
       }
-      const rows = (data ?? []) as ProductUnitConversionDraft[];
       setStockProductConversions(rows);
       setInitialStockProductConversions(rows);
       productConversionsLoadedIdRef.current = loadPid;
@@ -1601,47 +1600,26 @@ export function Produtos() {
     }
 
     if (conversionsChanged && currentCompany?.id) {
-      const { error: convDelErr } = await supabase
-        .from("product_unit_conversions")
-        .delete()
-        .eq("product_id", stockProduct.id);
-      if (convDelErr) {
-        console.error(convDelErr);
+      const convResult = await persistProductUnitConversions(
+        currentCompany.id,
+        stockProduct.id,
+        stockProductConversions.map((r) => ({
+          ...r,
+          company_id: currentCompany.id,
+          product_id: stockProduct.id,
+        })),
+      );
+      if (!convResult.ok) {
+        console.error(convResult.error);
         setStockSaving(false);
         return;
       }
-      const toPersist =
-        stockProductConversions.length > 0
-          ? prepareProductUnitConversionsForPersist(
-              stockUnit,
-              stockProductConversions.map((r) => ({
-                ...r,
-                company_id: currentCompany.id,
-                product_id: stockProduct.id,
-              })),
-            )
-          : [];
-      if (toPersist.length > 0) {
-        const { error: convInsErr } = await supabase
-          .from("product_unit_conversions")
-          .insert(
-            toPersist.map((r) => ({
-              company_id: currentCompany.id,
-              product_id: stockProduct.id,
-              primary_qty: r.primary_qty,
-              primary_unit_code: r.primary_unit_code,
-              secondary_qty: r.secondary_qty,
-              secondary_unit_code: r.secondary_unit_code,
-            })),
-          );
-        if (convInsErr) {
-          console.error(convInsErr);
-          setStockSaving(false);
-          return;
-        }
-      }
-      setStockProductConversions(toPersist);
-      setInitialStockProductConversions([...toPersist]);
+      const { rows: reloaded } = await loadProductUnitConversions(
+        currentCompany.id,
+        stockProduct.id,
+      );
+      setStockProductConversions(reloaded);
+      setInitialStockProductConversions([...reloaded]);
     }
 
     setStockSaving(false);

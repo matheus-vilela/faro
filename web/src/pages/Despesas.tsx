@@ -76,6 +76,7 @@ import {
   type PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
@@ -342,33 +343,31 @@ export function Despesas() {
 
   const fetchSupportData = useCallback(async () => {
     if (!companyId) return;
-    const [{ data: catRows }, { data: sup }, { data: prod }, { data: conv }] =
-      await Promise.all([
-        supabase
-          .from("company_categories")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("sort_order", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase
-          .from("suppliers")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("name"),
-        supabase
-          .from("products")
-          .select("*")
-          .eq("company_id", companyId)
-          .order("name"),
-        supabase
-          .from("product_unit_conversions")
-          .select("*")
-          .eq("company_id", companyId),
-      ]);
+    const [{ data: catRows }, { data: sup }, { data: prod }] = await Promise.all([
+      supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("suppliers")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+    ]);
+    const productsList = (prod as Product[]) ?? [];
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
-    setProducts((prod as Product[]) ?? []);
-    setProductConversions((conv as ProductUnitConversionDraft[]) ?? []);
+    setProducts(productsList);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
   }, [companyId]);
 
   const fetchData = useCallback(async () => {

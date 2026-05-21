@@ -23,6 +23,8 @@ import {
 } from "@/lib/companyUnits/stockHubUnitChange";
 import type { UnitConversionCodeRow } from "@/lib/companyUnits/convert";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import { loadProductUnitConversions } from "@/lib/productUnitConversionsService";
+import { toProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import { Loader2 } from "lucide-react";
@@ -127,16 +129,14 @@ export function DashboardImportReviewProductCadastroModal({
     let convRows: UnitConversionCodeRow[] = [];
     let nextConvsToInsert: UnitConversionCodeRow[] | null = null;
     if (unitChanged) {
-      const { data: convData, error: convLoadErr } = await supabase
-        .from("product_unit_conversions")
-        .select("primary_qty, primary_unit_code, secondary_qty, secondary_unit_code")
-        .eq("product_id", product.id);
+      const { rows: convDrafts, error: convLoadErr } =
+        await loadProductUnitConversions(companyId, product.id);
       if (convLoadErr) {
         setSaving(false);
-        toast.error(convLoadErr.message ?? "Não foi possível carregar conversões do produto.");
+        toast.error(convLoadErr ?? "Não foi possível carregar conversões do produto.");
         return;
       }
-      convRows = (convData ?? []).map((r) => ({
+      convRows = convDrafts.map((r) => ({
         primary_qty: Number(r.primary_qty),
         primary_unit_code: String(r.primary_unit_code ?? "").trim(),
         secondary_qty: Number(r.secondary_qty),
@@ -181,16 +181,9 @@ export function DashboardImportReviewProductCadastroModal({
       }
       updates.current_quantity = nextCur;
       updates.min_quantity = nextMin;
-
-      const { error: convDelErr } = await supabase
-        .from("product_unit_conversions")
-        .delete()
-        .eq("product_id", product.id);
-      if (convDelErr) {
-        setSaving(false);
-        toast.error(convDelErr.message ?? "Não foi possível atualizar conversões.");
-        return;
-      }
+      updates.unit_conversions = toProductUnitConversionsJson(
+        nextConvsToInsert ?? [],
+      );
     }
 
     const { error } = await supabase.from("products").update(updates).eq("id", product.id);
@@ -198,28 +191,6 @@ export function DashboardImportReviewProductCadastroModal({
       setSaving(false);
       toast.error(error.message ?? "Não foi possível salvar.");
       return;
-    }
-
-    if (unitChanged && nextConvsToInsert && nextConvsToInsert.length > 0) {
-      const { error: convInsErr } = await supabase.from("product_unit_conversions").insert(
-        nextConvsToInsert.map((r) => ({
-          company_id: companyId,
-          product_id: product.id,
-          primary_qty: r.primary_qty,
-          primary_unit_code: r.primary_unit_code,
-          secondary_qty: r.secondary_qty,
-          secondary_unit_code: r.secondary_unit_code,
-        })),
-      );
-      if (convInsErr) {
-        setSaving(false);
-        toast.error(
-          convInsErr.message ??
-            "Unidade e estoque foram gravados, mas falhou ao gravar conversões — conclua na página de produtos.",
-        );
-        onSaved?.();
-        return;
-      }
     }
 
     setSaving(false);

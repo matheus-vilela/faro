@@ -107,17 +107,15 @@ export async function ensureProductForLine(
       "[nfeExpenseMotor]",
     );
   } else if (pack) {
-    const { error: cErr } = await supabase.from("product_unit_conversions").insert({
-      company_id: companyId,
-      product_id: pid,
+    const { appendProductUnitConversionOnProduct } = await import(
+      "../productUnitConversionsOnProduct.ts"
+    );
+    await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
       primary_qty: 1,
-      primary_unit_code: "un",
+      primary_unit_code: stockUnit,
       secondary_qty: pack.secondary_qty,
       secondary_unit_code: pack.secondary_unit_code,
     });
-    if (cErr) {
-      console.error("[nfeExpenseMotor] product_unit_conversions:", cErr.message);
-    }
   }
   return { productId: pid, created: true };
 }
@@ -184,20 +182,15 @@ export async function createProductAutoWhenNoReviewQueue(
       "[nfeExpenseMotor]",
     );
   } else if (pack) {
-    const { error: cErr } = await supabase.from("product_unit_conversions").insert({
-      company_id: companyId,
-      product_id: pid,
+    const { appendProductUnitConversionOnProduct } = await import(
+      "../productUnitConversionsOnProduct.ts"
+    );
+    await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
       primary_qty: 1,
-      primary_unit_code: "un",
+      primary_unit_code: stockUnit,
       secondary_qty: pack.secondary_qty,
       secondary_unit_code: pack.secondary_unit_code,
     });
-    if (cErr) {
-      console.error(
-        "[nfeExpenseMotor] createProductAutoWhenNoReviewQueue conversions:",
-        cErr.message,
-      );
-    }
   }
   return { productId: pid, created: true };
 }

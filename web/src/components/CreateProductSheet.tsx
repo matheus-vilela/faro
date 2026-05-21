@@ -38,7 +38,10 @@ import {
 import { supabase } from '@/lib/supabase'
 import type { CompanyProductCategory } from '@/types/companyProductCategory'
 import type { Product } from '@/types/product'
-import { prepareProductUnitConversionsForPersist } from '@/lib/productUnitConversionsService'
+import {
+  prepareProductUnitConversionsForPersist,
+} from '@/lib/productUnitConversionsService'
+import { toProductUnitConversionsJson } from '@/lib/productUnitConversionsJson'
 import type { ProductUnitConversionDraft } from '@/types/productUnitConversion'
 import { Package, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -225,6 +228,17 @@ export function CreateProductSheet({
             ) ?? lastUnitValueToSave,
           )
         : null
+    const toPersistConversions =
+      pendingConversions.length > 0
+        ? prepareProductUnitConversionsForPersist(
+            unit,
+            pendingConversions.map((r) => ({
+              ...r,
+              company_id: companyId,
+              product_id: '',
+            })),
+          )
+        : []
     const { data, error } = await supabase
       .from('products')
       .insert({
@@ -236,6 +250,7 @@ export function CreateProductSheet({
         current_quantity: 0,
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
+        unit_conversions: toProductUnitConversionsJson(toPersistConversions),
         ...(lastUnitValueToSave != null
           ? {
               last_unit_value: lastUnitValueToSave,
@@ -265,33 +280,6 @@ export function CreateProductSheet({
         )
       if (linkErr) {
         console.error(linkErr)
-        setLoading(false)
-        return
-      }
-    }
-    if (pendingConversions.length > 0) {
-      const toPersist = prepareProductUnitConversionsForPersist(
-        unit,
-        pendingConversions.map((r) => ({
-          ...r,
-          company_id: companyId,
-          product_id: product.id,
-        })),
-      )
-      const { error: convErr } = await supabase
-        .from('product_unit_conversions')
-        .insert(
-          toPersist.map((r) => ({
-            company_id: companyId,
-            product_id: product.id,
-            primary_qty: r.primary_qty,
-            primary_unit_code: r.primary_unit_code,
-            secondary_qty: r.secondary_qty,
-            secondary_unit_code: r.secondary_unit_code,
-          })),
-        )
-      if (convErr) {
-        console.error(convErr)
         setLoading(false)
         return
       }

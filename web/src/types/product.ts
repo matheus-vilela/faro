@@ -32,4 +32,6 @@ export interface Product {
   import_unit_raw?: string | null
   /** Sinaliza produto com unidade legada/desconhecida criada via importação. */
   import_unit_needs_review?: boolean
+  /** Conversões entre unidade de estoque e unidades secundárias (JSON no produto). */
+  unit_conversions?: unknown
 }

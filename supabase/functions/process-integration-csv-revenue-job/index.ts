@@ -11,7 +11,7 @@
  * da linha para uma folha existente (ex.: vendas de bebidas, taxa de serviço, delivery).
  * Produtos: deduplicação (canonical + tokens fuzzy, ex. "AGUA COM GAS" → cadastro existente),
  * reconsulta ao banco antes do INSERT, coordenador anti-paralelo, cache entre chunks.
- * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `product_unit_conversions`.
+ * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `products.unit_conversions`.
  * `product_operational_config` (AUTO/CONFIGURADO) e `product_category_assignments`.
  * Rótulos novos passam por heurística + OpenAI (`OPENAI_API_KEY`, `OPENAI_EPOC_PRODUCT_KIND_MODEL`)
  * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
@@ -1264,7 +1264,6 @@ Deno.serve(async (req) => {
         productCatalog.find((p) => p.id === productId)?.unit ?? "un";
       await ensureProductSaleUnitUnConversion(
         admin,
-        job.company_id,
         productId,
         hubUnit,
         openAiPlanByExactName.get(exactKeyRow)?.create?.un_per_stock_unit ??
@@ -1317,7 +1316,7 @@ Deno.serve(async (req) => {
           reason: "unit_conversion_failed",
           details:
             convErr?.message ??
-            "Quantidade em UN sem conversão para a unidade de estoque do produto (cadastre product_unit_conversions)",
+            "Quantidade em UN sem conversão para a unidade de estoque do produto (cadastre conversões no produto)",
           action: "linha ignorada",
         });
         idx += 1;

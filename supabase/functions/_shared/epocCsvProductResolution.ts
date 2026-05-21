@@ -429,7 +429,6 @@ export async function runEpocProductMatchPipeline(input: {
       const matched = input.catalog.find((p) => p.id === resolved.productId);
       await ensureProductSaleUnitUnConversion(
         input.admin,
-        input.companyId,
         resolved.productId,
         matched?.unit ?? "un",
         null,
@@ -501,7 +500,6 @@ export async function runEpocProductMatchPipeline(input: {
           );
           await ensureProductSaleUnitUnConversion(
             input.admin,
-            input.companyId,
             pid,
             prod.unit ?? "un",
             null,
@@ -621,7 +619,6 @@ async function applyEpocOpenAiCreatePlan(ctx: {
   if (!ensured.productId) return;
   await ensureProductSaleUnitUnConversion(
     ctx.admin,
-    ctx.companyId,
     ensured.productId,
     unit,
     create.un_per_stock_unit ?? null,
@@ -641,7 +638,6 @@ async function applyEpocOpenAiCreatePlan(ctx: {
 /** Garante conversão da unidade de estoque para UN (vendas EPOC em un). */
 export async function ensureProductSaleUnitUnConversion(
   admin: SupabaseAdmin,
-  companyId: string,
   productId: string,
   hubUnit: string,
   unPerStockUnit: number | null,
@@ -649,26 +645,9 @@ export async function ensureProductSaleUnitUnConversion(
   const hub = (hubUnit || "un").trim().toLowerCase();
   if (hub === "un") return;
 
-  const { data: convs, error } = await admin
-    .from("product_unit_conversions")
-    .select("secondary_unit_code")
-    .eq("company_id", companyId)
-    .eq("product_id", productId)
-    .eq("primary_unit_code", hub);
-
-  if (error) {
-    console.error(
-      "[epocCsvProductResolution] load conversions:",
-      error.message,
-    );
-    return;
-  }
-
-  const hasUn = (convs ?? []).some(
-    (r: { secondary_unit_code?: string }) =>
-      String(r.secondary_unit_code ?? "").trim().toLowerCase() === "un",
+  const { appendProductUnitConversionOnProduct } = await import(
+    "./productUnitConversionsOnProduct.ts"
   );
-  if (hasUn) return;
 
   const secondaryQty =
     unPerStockUnit != null &&
@@ -677,20 +656,12 @@ export async function ensureProductSaleUnitUnConversion(
       ? Number(unPerStockUnit)
       : 1;
 
-  const { error: insErr } = await admin.from("product_unit_conversions").insert({
-    company_id: companyId,
-    product_id: productId,
-    primary_unit_code: hub,
+  await appendProductUnitConversionOnProduct(admin, productId, hub, {
     primary_qty: 1,
+    primary_unit_code: hub,
     secondary_unit_code: "un",
     secondary_qty: secondaryQty,
   });
-  if (insErr) {
-    console.error(
-      "[epocCsvProductResolution] insert un conversion:",
-      insErr.message,
-    );
-  }
 }
 
 // deno-lint-ignore no-explicit-any

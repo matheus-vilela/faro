@@ -12,6 +12,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { UnitSetupResetCard } from "@/components/unit-setup/UnitSetupResetCard";
 import { useCompany } from "@/contexts/CompanyContext";
 import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
@@ -395,6 +396,8 @@ export function Desenvolvimento() {
       />
 
       <UnitSetupResetCard />
+
+      <OnboardingResetCard />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button

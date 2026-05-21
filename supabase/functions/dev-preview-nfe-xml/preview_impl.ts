@@ -1252,23 +1252,31 @@ async function enrichPreviewOnly(
   if (matchedProductIds.length > 0) {
     const { data: pRows } = await supabase
       .from("products")
-      .select("id, unit")
+      .select("id, unit, unit_conversions")
       .eq("company_id", companyId)
       .in("id", matchedProductIds);
-    for (const row of (pRows ?? []) as Array<{ id: string; unit: string | null }>) {
+    const { parseUnitConversionsJson } = await import(
+      "../_shared/productUnitConversionsOnProduct.ts"
+    );
+    for (const row of (pRows ?? []) as Array<{
+      id: string;
+      unit: string | null;
+      unit_conversions?: unknown;
+    }>) {
       if (row.unit) productUnitById.set(String(row.id), String(row.unit));
-    }
-    const { data: cRows } = await supabase
-      .from("product_unit_conversions")
-      .select(
-        "product_id, primary_qty, primary_unit_code, secondary_qty, secondary_unit_code",
-      )
-      .eq("company_id", companyId)
-      .in("product_id", matchedProductIds);
-    for (const row of (cRows ?? []) as ConversionRow[]) {
-      const list = conversionsByProductId.get(row.product_id) ?? [];
-      list.push(row);
-      conversionsByProductId.set(row.product_id, list);
+      const parsed = parseUnitConversionsJson(row.unit_conversions);
+      if (parsed.length > 0) {
+        conversionsByProductId.set(
+          String(row.id),
+          parsed.map((c) => ({
+            product_id: String(row.id),
+            primary_qty: c.primary_qty,
+            primary_unit_code: c.primary_unit_code,
+            secondary_qty: c.secondary_qty,
+            secondary_unit_code: c.secondary_unit_code,
+          })),
+        );
+      }
     }
   }
 

@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { RecipeListItem } from "@/types/recipe";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   computeRevenueTaxDeduction,
@@ -631,10 +632,6 @@ export function Receitas() {
       .select("*")
       .eq("company_id", currentCompany.id)
       .order("name");
-    const { data: convRows } = await supabase
-      .from("product_unit_conversions")
-      .select("*")
-      .eq("company_id", currentCompany.id);
 
     const { data: recipeRows } = await supabase
       .from("recipes")
@@ -647,10 +644,13 @@ export function Receitas() {
       .select("category_id, tax_type, tax_value")
       .eq("company_id", currentCompany.id);
 
+    const productsList = (prodRows as Product[]) ?? [];
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    setProducts((prodRows as Product[]) ?? []);
+    setProducts(productsList);
     setRecipes((recipeRows as RecipeListItem[]) ?? []);
-    setProductConversions((convRows as ProductUnitConversionDraft[]) ?? []);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(currentCompany.id, productsList),
+    );
     setCategoryTaxSettings(
       (taxRows ?? []) as Pick<
         CompanyRevenueCategoryTaxSetting,

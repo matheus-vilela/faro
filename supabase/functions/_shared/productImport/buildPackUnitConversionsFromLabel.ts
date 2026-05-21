@@ -401,6 +401,9 @@ export async function insertProductUnitConversions(
 ): Promise<void> {
   if (!conversions.length) return;
 
+  const { loadProductUnitConversionsFromProduct, persistProductUnitConversionsOnProduct } =
+    await import("../productUnitConversionsOnProduct.ts");
+
   const { data: productRow, error: productErr } = await supabase
     .from("products")
     .select("unit")
@@ -410,20 +413,22 @@ export async function insertProductUnitConversions(
   if (productErr || !productRow?.unit) {
     console.error(
       logPrefix,
-      "product_unit_conversions",
+      "unit_conversions",
       "produto_nao_encontrado",
       productErr?.message ?? productId,
     );
     return;
   }
   const stockUnit = String(productRow.unit).trim().toLowerCase();
+  const existing = await loadProductUnitConversionsFromProduct(supabase, productId);
+  const merged = [...existing];
 
   for (const c of conversions) {
     const secondary = String(c.secondary_unit_code).trim().toLowerCase();
     if (!secondary || secondary === stockUnit) {
       console.warn(
         logPrefix,
-        "product_unit_conversions_skip",
+        "unit_conversions_skip",
         JSON.stringify({
           product_id: productId,
           motivo: "secundaria_igual_estoque_ou_vazia",
@@ -433,21 +438,25 @@ export async function insertProductUnitConversions(
       );
       continue;
     }
-    const { error } = await supabase.from("product_unit_conversions").insert({
-      company_id: companyId,
-      product_id: productId,
-      primary_qty: c.primary_qty,
+    const idx = merged.findIndex(
+      (r) => r.secondary_unit_code.toLowerCase() === secondary,
+    );
+    const row = {
+      primary_qty: Number(c.primary_qty) > 0 ? Number(c.primary_qty) : 1,
       primary_unit_code: stockUnit,
-      secondary_qty: c.secondary_qty,
+      secondary_qty: Number(c.secondary_qty) > 0 ? Number(c.secondary_qty) : 1,
       secondary_unit_code: secondary,
-    });
-    if (error) {
-      console.error(
-        logPrefix,
-        "product_unit_conversions",
-        secondary,
-        error.message,
-      );
-    }
+    };
+    if (idx >= 0) merged[idx] = row;
+    else merged.push(row);
+  }
+
+  const { ok, error } = await persistProductUnitConversionsOnProduct(
+    supabase,
+    productId,
+    merged,
+  );
+  if (!ok) {
+    console.error(logPrefix, "unit_conversions", error ?? "persist_failed");
   }
 }
