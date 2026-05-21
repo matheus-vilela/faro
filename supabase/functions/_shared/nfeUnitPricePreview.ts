@@ -2,10 +2,10 @@
  * Breakdown legível do preço unitário efetivo por linha NF-e (laboratório / conferência).
  */
 import {
-  computeEffectiveUnitPricesForCatalogLines,
   extractNfeJurosFromXml,
   type EffectiveUnitPriceBreakdown,
 } from "./nfeEffectiveUnitPrice.ts";
+import { computeNfeEffectivePricingForXml } from "./nfeXmlEffectivePricing.ts";
 import { extractNfeTaxTotalsFromXml } from "./parseNfeXml.ts";
 import { isNfeBonificationCfop, normalizeCfop4 } from "./nfeCfopBonification.ts";
 import { nfeUsesUnTaxUnitBase } from "./productImport/nfeCommercialTaxUnitConversion.ts";
@@ -228,10 +228,9 @@ export function buildNfeUnitPricePreviewFromXml(
   const parsed = parseNfeXmlForUnifiedCatalog(xmlText);
   if (!parsed || parsed.lines.length === 0) return null;
 
-  const prices = computeEffectiveUnitPricesForCatalogLines(
-    parsed.lines,
-    xmlText,
-  );
+  const pricing = computeNfeEffectivePricingForXml(xmlText, parsed.lines);
+  if (!pricing) return null;
+  const prices = pricing.prices;
   const globalJuros = extractNfeJurosFromXml(xmlText);
   const totals = extractNfeTaxTotalsFromXml(xmlText);
   const vNf = totals?.vNF != null && totals.vNF > 0 ? totals.vNF : null;
@@ -288,9 +287,10 @@ export function buildNfeUnitPricePreviewFromXml(
   somaCobrado = Math.round(somaCobrado * 100) / 100;
   somaColunaOutros = Math.round(somaColunaOutros * 100) / 100;
   const valorRealNota =
-    vNf != null
+    pricing.documentTotal ??
+    (vNf != null
       ? Math.round((vNf - somaBonificacao5910) * 100) / 100
-      : null;
+      : null);
 
   return {
     formula:

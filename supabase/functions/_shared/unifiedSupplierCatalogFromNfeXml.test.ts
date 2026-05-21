@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { parseNfeXmlForUnifiedCatalog } from "./parseNfeXml.ts";
-import { computeEffectiveUnitPricesForCatalogLines } from "./nfeEffectiveUnitPrice.ts";
+import { computeNfeEffectivePricingForXml } from "./nfeXmlEffectivePricing.ts";
 import {
   mergeMinMaxPrice,
   observedUnitPriceFromNfeLine,
@@ -58,13 +58,16 @@ Deno.test("observedUnitPriceFromNfeLine: desconto na linha (não vUnCom bruto)",
     baseTotal +
     `</infNFe></NFe></nfeProc>`;
   const parsed = parseNfeXmlForUnifiedCatalog(xml)!;
-  const prices = computeEffectiveUnitPricesForCatalogLines(parsed.lines, xml);
+  const pricing = computeNfeEffectivePricingForXml(xml, parsed.lines)!;
   const prod = parsed.lines[0]!.prod;
-  assertEquals(observedUnitPriceFromNfeLine(prices[0]!.effectiveUnitPrice, prod), 9);
+  assertEquals(
+    observedUnitPriceFromNfeLine(pricing.prices[0]!.effectiveUnitPrice, prod),
+    9,
+  );
   assertEquals(unitPriceFromNfeLine(10, 10, 100), 10);
 });
 
-Deno.test("parseNfeXmlForUnifiedCatalog: ignora det sem cProd", () => {
+Deno.test("parseNfeXmlForUnifiedCatalog: det sem cProd entra nas lines (upsert ignora)", () => {
   const xml =
     `<nfeProc><NFe><infNFe Id="NFe3526">` +
     baseEmit +
@@ -73,5 +76,7 @@ Deno.test("parseNfeXmlForUnifiedCatalog: ignora det sem cProd", () => {
     baseTotal +
     `</infNFe></NFe></nfeProc>`;
   const r = parseNfeXmlForUnifiedCatalog(xml);
-  assertEquals(r, null);
+  assertEquals(r != null, true);
+  assertEquals(r!.lines.length, 1);
+  assertEquals(r!.lines[0]!.prod.cProd, undefined);
 });

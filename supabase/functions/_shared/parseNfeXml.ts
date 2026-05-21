@@ -2,6 +2,7 @@
  * Extrai dados mínimos de NF-e / NFC-e (XML autorizado) para pré-preencher despesa.
  */
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
+import { applyNfeEffectivePricingToExtracted } from "./nfeXmlEffectivePricing.ts";
 import type { ExtractedDocumentResult, ExtractedExpenseItem } from "./openaiExpense.ts";
 import { nfeUsesUnTaxUnitBase } from "./productImport/nfeCommercialTaxUnitConversion.ts";
 
@@ -132,8 +133,7 @@ function extractCfopAndCsosnFromDet(det: Record<string, unknown>): {
   return { cfop, csosn: csosnNorm };
 }
 
-/** Aceita nfeProc, NFe sem wrapper, ou XML com namespace */
-export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult | null {
+function parseNfeXmlInfNFe(xmlText: string): Record<string, unknown> | null {
   const trimmed = stripBom(xmlText);
   if (!trimmed.startsWith("<")) return null;
 
@@ -153,9 +153,61 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   const nfeProc = root.nfeProc as Record<string, unknown> | undefined;
   const nfeRoot = pickNFeRoot(nfeProc?.NFe ?? root.NFe);
   const infNFe = pickInfNFe(nfeRoot?.infNFe);
-  if (!infNFe || typeof infNFe !== "object") {
-    return null;
+  if (!infNFe || typeof infNFe !== "object") return null;
+  return infNFe;
+}
+
+function detToNfeXmlCatalogLine(
+  det: Record<string, unknown>,
+): NfeXmlDetLineForCatalog | null {
+  const prod = normalizeProd(det.prod);
+  if (!prod) return null;
+  const { cfop, csosn } = extractCfopAndCsosnFromDet(det);
+  const nItem =
+    str(det["@_nItem"]) ??
+    str((det as Record<string, unknown>).nItem) ??
+    null;
+  const xmlDet: Record<string, unknown> = {
+    ...(nItem ? { nItem } : {}),
+    prod: { ...prod },
+    ...(cfop ? { cfop } : {}),
+    ...(csosn ? { csosn } : {}),
+  };
+  const imposto = det.imposto;
+  if (imposto != null && typeof imposto === "object" && !Array.isArray(imposto)) {
+    xmlDet.imposto = imposto as Record<string, unknown>;
   }
+  return {
+    nItem,
+    prod: { ...prod },
+    xmlDet,
+    cfop,
+    csosn,
+  };
+}
+
+/** Todas as linhas `<det>` com `<prod>` na ordem do XML (alinhadas a `parseNfeXmlToExtracted`). */
+export function buildNfeXmlDetLinesFromInfNFe(
+  infNFe: Record<string, unknown>,
+): NfeXmlDetLineForCatalog[] {
+  const detList = normalizeDetList(infNFe.det);
+  const lines: NfeXmlDetLineForCatalog[] = [];
+  for (const det of detList) {
+    const line = detToNfeXmlCatalogLine(det);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+export function buildNfeXmlDetLinesFromXml(xmlText: string): NfeXmlDetLineForCatalog[] {
+  const infNFe = parseNfeXmlInfNFe(xmlText);
+  return infNFe ? buildNfeXmlDetLinesFromInfNFe(infNFe) : [];
+}
+
+/** Aceita nfeProc, NFe sem wrapper, ou XML com namespace */
+export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult | null {
+  const infNFe = parseNfeXmlInfNFe(xmlText);
+  if (!infNFe) return null;
 
   const emit = infNFe.emit as Record<string, unknown> | undefined;
   const supplierName = str(emit?.xNome ?? emit?.xFant) ?? "Emitente NF-e";
@@ -180,6 +232,7 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
   }
 
   const detList = normalizeDetList(infNFe.det);
+  const detLines = buildNfeXmlDetLinesFromInfNFe(infNFe);
 
   const items: ExtractedExpenseItem[] = [];
   for (const d of detList) {
@@ -266,7 +319,7 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     totalAmount = roundedSum;
   }
 
-  return {
+  const result: ExtractedDocumentResult = {
     validDocument: true,
     invalidReason: undefined,
     documentKind: "nota_fiscal",
@@ -282,6 +335,12 @@ export function parseNfeXmlToExtracted(xmlText: string): ExtractedDocumentResult
     likelyNotEffectivePurchase: false,
     likelyNotPurchaseReason: null,
   };
+
+  if (detLines.length > 0 && detLines.length === items.length) {
+    applyNfeEffectivePricingToExtracted(result, xmlText, detLines);
+  }
+
+  return result;
 }
 
 /** Totais e bases na tag `ICMSTot` (NF-e / nfeProc). */
@@ -388,26 +447,8 @@ export type NfeXmlEmitForCatalog = {
 export function parseNfeXmlForUnifiedCatalog(
   xmlText: string,
 ): { emit: NfeXmlEmitForCatalog; lines: NfeXmlDetLineForCatalog[] } | null {
-  const trimmed = stripBom(xmlText);
-  if (!trimmed.startsWith("<")) return null;
-
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    removeNSPrefix: true,
-    trimValues: true,
-  });
-
-  let root: Record<string, unknown>;
-  try {
-    root = parser.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-
-  const nfeProc = root.nfeProc as Record<string, unknown> | undefined;
-  const nfeRoot = pickNFeRoot(nfeProc?.NFe ?? root.NFe);
-  const infNFe = pickInfNFe(nfeRoot?.infNFe);
-  if (!infNFe || typeof infNFe !== "object") return null;
+  const infNFe = parseNfeXmlInfNFe(xmlText);
+  if (!infNFe) return null;
 
   const emit = infNFe.emit as Record<string, unknown> | undefined;
   const supplierName = str(emit?.xNome ?? emit?.xFant) ?? "Emitente NF-e";
@@ -417,36 +458,7 @@ export function parseNfeXmlForUnifiedCatalog(
   const infNFeId = str((infNFe as Record<string, unknown>)["@_Id"]);
   const nfeAccessKey = infNFeId?.startsWith("NFe") ? infNFeId.slice(3) : infNFeId;
 
-  const detList = normalizeDetList(infNFe.det);
-  const lines: NfeXmlDetLineForCatalog[] = [];
-
-  for (const det of detList) {
-    const prod = normalizeProd(det.prod);
-    if (!prod) continue;
-    const { cfop, csosn } = extractCfopAndCsosnFromDet(det);
-    const nItem =
-      str(det["@_nItem"]) ??
-      str((det as Record<string, unknown>).nItem) ??
-      null;
-    const xmlDet: Record<string, unknown> = {
-      ...(nItem ? { nItem } : {}),
-      prod: { ...prod },
-      ...(cfop ? { cfop } : {}),
-      ...(csosn ? { csosn } : {}),
-    };
-    const imposto = det.imposto;
-    if (imposto != null && typeof imposto === "object" && !Array.isArray(imposto)) {
-      xmlDet.imposto = imposto as Record<string, unknown>;
-    }
-    lines.push({
-      nItem,
-      prod: { ...prod },
-      xmlDet,
-      cfop,
-      csosn,
-    });
-  }
-
+  const lines = buildNfeXmlDetLinesFromInfNFe(infNFe);
   if (lines.length === 0) return null;
 
   return {

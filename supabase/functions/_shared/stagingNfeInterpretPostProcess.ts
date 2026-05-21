@@ -12,6 +12,7 @@ import {
   ensureSupplierFromExtracted,
   normalizeTaxIdForSupplierDocument,
 } from "./expenseSupplierEnsure.ts";
+import { isNfeBonificationCfop } from "./nfeCfopBonification.ts";
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
 import {
   buildNewProductCatalogFromNfeLine,
@@ -792,16 +793,35 @@ function resolveStagingExpenseDocumentTotal(
       : null;
 
   if (vnf != null) {
+    let sumBonificacao = 0;
+    for (const line of produtos) {
+      if (isNfeBonificationCfop(line.cfop)) {
+        const v = Number(line.valor_total_linha);
+        if (Number.isFinite(v) && v > 0) sumBonificacao += v;
+      }
+    }
+    const documentTotal =
+      sumBonificacao > 0.000001
+        ? roundMoney(vnf - sumBonificacao)
+        : vnf;
+
     const patch: Record<string, unknown> = {};
-    if (valorHeader != null && Math.abs(valorHeader - vnf) > 0.02) {
+    if (sumBonificacao > 0.000001) {
+      patch.document_total_excludes_bonification_5910 = true;
+      patch.bonification_lines_total = roundMoney(sumBonificacao);
+      patch.document_total_vnf_bruto = vnf;
+    }
+    if (valorHeader != null && Math.abs(valorHeader - documentTotal) > 0.02) {
       Object.assign(patch, {
         document_total_adjusted: true,
         document_total_before: valorHeader,
-        document_total_after: vnf,
-        document_total_source: "icms_tot_vNF",
+        document_total_after: documentTotal,
+        document_total_source: sumBonificacao > 0.000001
+          ? "icms_tot_vNF_minus_bonification_5910"
+          : "icms_tot_vNF",
       });
     }
-    return { document_total: vnf, reconciliation_patch: patch };
+    return { document_total: documentTotal, reconciliation_patch: patch };
   }
 
   if (valorHeader != null) {

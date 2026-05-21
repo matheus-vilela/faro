@@ -20,6 +20,8 @@
  * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) com
  * **primeira** sync (`nfes_recebidas_ultima_sync_at` ausente) entram com prioridade (tier 0);
  * onboarding pendente que já sincronizou ao menos uma vez entra no rodízio (tier 2), como as demais.
+ * Cron automático (secret, sem `manual: true`): não lista na Focus se a unidade tiver job em
+ * `focus_get_sync_nfe_interpret_jobs` com `status` `pending` ou `processing` (interpretação em andamento).
  * Rodízio cron (fora onboarding/retry/manual): só empresas sem `nfes_recebidas_ultima_sync_at` ou com
  * última sync há ≥ 12 h. Ao reservar a unidade no run, grava `nfes_recebidas_ultima_sync_at` de imediato
  * (antes do GET na Focus) para o próximo disparo não repetir a mesma empresa.
@@ -259,10 +261,7 @@ function summarizeOnboardingFiscal(raw: unknown): Record<string, unknown> {
   };
 }
 
-function logPhase(
-  phase: string,
-  payload: Record<string, unknown>,
-): void {
+function logPhase(phase: string, payload: Record<string, unknown>): void {
   console.log(LOG, JSON.stringify({ fase: phase, ...payload }));
 }
 
@@ -374,7 +373,8 @@ function classifyCompanyForSync(
       ? (obRaw as Record<string, unknown>)
       : {};
   const sefazUnavailable = o["sefaz_unavailable"] === true;
-  const sefazRetryDue = sefazUnavailable && isSefazRetryDue(o["sefaz_retry_at"]);
+  const sefazRetryDue =
+    sefazUnavailable && isSefazRetryDue(o["sefaz_retry_at"]);
 
   if (bodyOnboardingRetry) {
     if (!pending) {
@@ -410,8 +410,7 @@ function classifyCompanyForSync(
     if (!listPhase) {
       return {
         include: false,
-        skip:
-          "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
+        skip: "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
         tier: 99,
         effectiveOnboarding: false,
         resetOnboardingMetrics: false,
@@ -448,8 +447,7 @@ function classifyCompanyForSync(
   if (pending) {
     return {
       include: false,
-      skip:
-        "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
+      skip: "onboarding_fiscal fora da fase de sincronização (aguardando interpretação)",
       tier: 99,
       effectiveOnboarding: false,
       resetOnboardingMetrics: false,
@@ -533,7 +531,9 @@ async function touchNfesRecebidasUltimaSyncAt(
   if (readErr) return { error: readErr.message };
 
   const current =
-    row?.focusnfe && typeof row.focusnfe === "object" && !Array.isArray(row.focusnfe)
+    row?.focusnfe &&
+    typeof row.focusnfe === "object" &&
+    !Array.isArray(row.focusnfe)
       ? (row.focusnfe as Record<string, unknown>)
       : {};
 
@@ -562,7 +562,9 @@ async function persistFocusNfeSyncCursor(
   if (readErr) return { error: readErr.message };
 
   const current =
-    row?.focusnfe && typeof row.focusnfe === "object" && !Array.isArray(row.focusnfe)
+    row?.focusnfe &&
+    typeof row.focusnfe === "object" &&
+    !Array.isArray(row.focusnfe)
       ? (row.focusnfe as Record<string, unknown>)
       : {};
 
@@ -902,6 +904,35 @@ Deno.serve(async (req) => {
     let bodyVersaoInicial: number | null = null;
 
     if (isCron) {
+      const interpretJobBloqueando = await findActiveInterpretJob(
+        admin,
+        companyId,
+      );
+
+      if (interpretJobBloqueando?.id) {
+        logPhase("interpret_job_pending_ou_processing", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo:
+            "interpret job ativo (pending/processing); sync automática adiada",
+        });
+        detail.push({
+          company_id: companyId,
+          skipped:
+            "interpret job ativo (pending/processing); sync automática adiada",
+          interpret_job_id: interpretJobBloqueando.id,
+          interpret_job_status: interpretJobBloqueando.status,
+        });
+        return json(
+          {
+            ok: false,
+            error:
+              "Interpret job ativo (pending/processing); sync automática adiada",
+          },
+          400,
+        );
+      }
+
       const { data: companies, error: listErr } = await admin
         .from("companies")
         .select("id, document, focusnfe, onboarding_fiscal");
@@ -998,7 +1029,9 @@ Deno.serve(async (req) => {
 
     const detail: Array<Record<string, unknown>> = [];
     const skipRotation =
-      isManualSingle || Boolean(cronFilterCompanyId) || companiesToProcess.length <= 1;
+      isManualSingle ||
+      Boolean(cronFilterCompanyId) ||
+      companiesToProcess.length <= 1;
 
     for (const row of companiesToProcess) {
       const companyId = String(row.id);
@@ -1077,7 +1110,8 @@ Deno.serve(async (req) => {
         });
         detail.push({
           company_id: row.id,
-          skipped: "aguardando rodízio (outra unidade com prioridade neste run)",
+          skipped:
+            "aguardando rodízio (outra unidade com prioridade neste run)",
         });
       }
     }
@@ -1116,7 +1150,10 @@ Deno.serve(async (req) => {
         .slice(0, 14);
       const obRaw = row.onboarding_fiscal;
 
-      const reserveSyncAt = await touchNfesRecebidasUltimaSyncAt(admin, companyId);
+      const reserveSyncAt = await touchNfesRecebidasUltimaSyncAt(
+        admin,
+        companyId,
+      );
       if (reserveSyncAt.error) {
         console.warn(
           LOG,
@@ -1175,7 +1212,8 @@ Deno.serve(async (req) => {
 
       const storedRaw = Number(
         (coFreshRow?.focusnfe as Record<string, unknown> | undefined)
-          ?.nfes_recebidas_ultima_versao ?? focusnfe.nfes_recebidas_ultima_versao,
+          ?.nfes_recebidas_ultima_versao ??
+          focusnfe.nfes_recebidas_ultima_versao,
       );
       const versaoCursorArmazenada =
         Number.isFinite(storedRaw) && storedRaw >= 0
@@ -1507,8 +1545,9 @@ Deno.serve(async (req) => {
               situacao,
               nfe_completa: true,
               payload: cab,
-              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-                .toISOString(),
+              expires_at: new Date(
+                Date.now() + 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
               ...(xmlContent != null ? { xml_content: xmlContent } : {}),
             };
 
@@ -1627,11 +1666,7 @@ Deno.serve(async (req) => {
       };
 
       const { count: stagingXmlTotal, error: xmlCountErr } =
-        await countStagingXmlsForInterpretJob(
-          admin,
-          stagingExecId,
-          companyId,
-        );
+        await countStagingXmlsForInterpretJob(admin, stagingExecId, companyId);
       if (xmlCountErr) {
         console.warn(
           LOG,
@@ -1813,7 +1848,9 @@ Deno.serve(async (req) => {
 
     const wallTotalMs = Math.round(performance.now() - tWall0);
     const processadasOk = detail.filter((d) => d.ok === true).length;
-    const ignoradas = detail.filter((d) => typeof d.skipped === "string").length;
+    const ignoradas = detail.filter(
+      (d) => typeof d.skipped === "string",
+    ).length;
     const comErro = detail.filter((d) => d.ok === false).length;
 
     logPhase("exec_fim", {

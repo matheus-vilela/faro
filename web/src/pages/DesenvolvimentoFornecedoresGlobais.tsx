@@ -13,12 +13,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatXmlForDisplay } from "@/lib/formatXmlForDisplay";
 import { maskCpfCnpj } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   ChevronRight,
+  FileCode2,
   FlaskConical,
   Loader2,
   Search,
@@ -367,7 +369,6 @@ export function DesenvolvimentoFornecedoresGlobais() {
                           <th className="p-2 text-right font-medium">
                             Maior preço
                           </th>
-                          <th className="p-2 font-medium">XML min / max</th>
                           <th className="p-2 font-medium" />
                         </tr>
                       </thead>
@@ -398,46 +399,60 @@ export function DesenvolvimentoFornecedoresGlobais() {
                               {p.unit_commercial ?? "—"}
                             </td>
                             <td className="p-2 text-right font-mono text-xs tabular-nums whitespace-nowrap">
-                              {formatMoney(p.min_price)}
+                              <span className="inline-flex items-center justify-end gap-0.5">
+                                {formatMoney(p.min_price)}
+                                {p.min_price_nfe_xml?.trim() ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                                    title="Ver XML da NF-e (menor preço)"
+                                    onClick={() =>
+                                      setNfeXmlSheet({
+                                        title: "NF-e — menor preço",
+                                        chaveNfe: p.min_price_chave_nfe,
+                                        xml: formatXmlForDisplay(
+                                          p.min_price_nfe_xml!,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <FileCode2 className="h-3.5 w-3.5" />
+                                    <span className="sr-only">
+                                      XML menor preço
+                                    </span>
+                                  </Button>
+                                ) : null}
+                              </span>
                             </td>
                             <td className="p-2 text-right font-mono text-xs tabular-nums whitespace-nowrap">
-                              {formatMoney(p.max_price)}
-                            </td>
-                            <td className="p-2 whitespace-nowrap">
-                              <div className="flex flex-col gap-1">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 text-[10px] px-2"
-                                  disabled={!p.min_price_nfe_xml?.trim()}
-                                  onClick={() =>
-                                    setNfeXmlSheet({
-                                      title: "NF-e — menor preço",
-                                      chaveNfe: p.min_price_chave_nfe,
-                                      xml: p.min_price_nfe_xml!.trim(),
-                                    })
-                                  }
-                                >
-                                  XML menor
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 text-[10px] px-2"
-                                  disabled={!p.max_price_nfe_xml?.trim()}
-                                  onClick={() =>
-                                    setNfeXmlSheet({
-                                      title: "NF-e — maior preço",
-                                      chaveNfe: p.max_price_chave_nfe,
-                                      xml: p.max_price_nfe_xml!.trim(),
-                                    })
-                                  }
-                                >
-                                  XML maior
-                                </Button>
-                              </div>
+                              <span className="inline-flex items-center justify-end gap-0.5">
+                                {formatMoney(p.max_price)}
+                                {p.max_price_nfe_xml?.trim() ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                                    title="Ver XML da NF-e (maior preço)"
+                                    onClick={() =>
+                                      setNfeXmlSheet({
+                                        title: "NF-e — maior preço",
+                                        chaveNfe: p.max_price_chave_nfe,
+                                        xml: formatXmlForDisplay(
+                                          p.max_price_nfe_xml!,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <FileCode2 className="h-3.5 w-3.5" />
+                                    <span className="sr-only">
+                                      XML maior preço
+                                    </span>
+                                  </Button>
+                                ) : null}
+                              </span>
                             </td>
                             <td className="p-2 whitespace-nowrap">
                               <Button
@@ -470,7 +485,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
       >
         <SheetContent
           side="right"
-          className="flex w-full flex-col sm:max-w-2xl"
+          className="flex w-full flex-col sm:max-w-3xl"
         >
           <SheetHeader>
             <SheetTitle>{nfeXmlSheet?.title ?? "XML da NF-e"}</SheetTitle>
@@ -480,7 +495,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
                 : "Sem chave gravada"}
             </SheetDescription>
           </SheetHeader>
-          <pre className="flex-1 min-h-0 overflow-auto rounded-md border bg-muted/30 p-3 text-[10px] leading-relaxed font-mono whitespace-pre-wrap break-all">
+          <pre className="flex-1 min-h-0 overflow-auto rounded-md border bg-muted/40 p-4 text-[11px] leading-relaxed font-mono whitespace-pre text-foreground/90">
             {nfeXmlSheet?.xml ?? ""}
           </pre>
         </SheetContent>

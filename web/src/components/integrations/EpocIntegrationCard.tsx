@@ -20,10 +20,10 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
-import { supabase } from "@/lib/supabase";
 import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
-import { cn } from "@/lib/utils";
 import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import {
   invokeEpocCsvSync,
   releaseStalePdvSyncLockIfIdle,
@@ -283,13 +283,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       username.trim() !== sheetConfigBaseline.username ||
       password.trim().length > 0
     );
-  }, [
-    sheetConfigBaseline,
-    enabled,
-    baseUrl,
-    username,
-    password,
-  ]);
+  }, [sheetConfigBaseline, enabled, baseUrl, username, password]);
 
   const fileNameFromStoragePath = (path: string, fallback: string) => {
     const t = path.trim();
@@ -586,7 +580,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         console.groupEnd();
       }
       if (!res.ok) {
-        toast.error(res.error ?? "Falha ao repetir a sincronização desta(s) data(s).");
+        toast.error(
+          res.error ?? "Falha ao repetir a sincronização desta(s) data(s).",
+        );
         return;
       }
       toast.success(
@@ -805,26 +801,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
               />
             </div>
           </button>
-          {lastEpocCsvStoragePath ? (
-            <div className="flex shrink-0 flex-col justify-center border-l border-border/80 p-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 shrink-0"
-                onClick={() => void handleDownloadLastCsv()}
-                disabled={downloadingLastCsv}
-                title="Baixar último CSV"
-                aria-label="Baixar último CSV EPOC"
-              >
-                {downloadingLastCsv ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          ) : null}
         </div>
       </Card>
 
@@ -989,9 +965,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     type="button"
                     className="w-full"
                     onClick={() => void handleSyncNow()}
-                    disabled={
-                      !enabled || !baseUrl.trim() || epocSyncUiBusy
-                    }
+                    disabled={!enabled || !baseUrl.trim() || epocSyncUiBusy}
                   >
                     {syncingFull ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -2,10 +2,8 @@
  * Catálogo global de fornecedores/produtos a partir de XML NF-e (focus-get-sync-nfe).
  */
 import { normalizeTaxIdForSupplierDocument } from "./expenseSupplierEnsure.ts";
-import {
-  computeEffectiveUnitPricesForCatalogLines,
-  effectiveUnitPriceWithoutGlobalAllocation,
-} from "./nfeEffectiveUnitPrice.ts";
+import { effectiveUnitPriceWithoutGlobalAllocation } from "./nfeEffectiveUnitPrice.ts";
+import { computeNfeEffectivePricingForXml } from "./nfeXmlEffectivePricing.ts";
 import { priceBoundNfeXmlUpdates } from "./nfePriceBoundXml.ts";
 import { parseNfeXmlForUnifiedCatalog } from "./parseNfeXml.ts";
 
@@ -287,10 +285,8 @@ export async function upsertUnifiedSupplierCatalogFromNfeXml(
     supplierId = String(insSup.id);
   }
 
-  const effectiveByIndex = computeEffectiveUnitPricesForCatalogLines(
-    parsed.lines,
-    xmlText,
-  );
+  const pricing = computeNfeEffectivePricingForXml(xmlText, parsed.lines);
+  const effectiveByIndex = pricing?.prices ?? [];
 
   let productsUpserted = 0;
   let historyRows = 0;
