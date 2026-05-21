@@ -3,9 +3,24 @@ import {
   buildCanonicalProductIndex,
   EpocProductEnsureCoordinator,
   epocProductLineKey,
+  findEpocFuzzyCatalogMatch,
   registerResolvedEpocProduct,
   resolveEpocProductId,
+  scoreEpocProductNameMatch,
 } from "./epocCsvProductResolution.ts";
+
+Deno.test("scoreEpocProductNameMatch: AGUA COM GAS casa com AGUA MINERAL CRYSTAL COM GAS", () => {
+  const score = scoreEpocProductNameMatch(
+    "AGUA COM GAS",
+    "AGUA MINERAL CRYSTAL COM GAS",
+  );
+  assertEquals(score >= 82, true);
+  const hit = findEpocFuzzyCatalogMatch(
+    [{ id: "p1", name: "AGUA MINERAL CRYSTAL COM GAS" }],
+    "AGUA COM GAS",
+  );
+  assertEquals(hit?.id, "p1");
+});
 
 Deno.test("epocProductLineKey unifica variações do CSV com o nome de cadastro", () => {
   const raw = "Coca Cola 350ml";

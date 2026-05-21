@@ -3,9 +3,18 @@
  * nome de cadastro (sanitize), deduplicação por canonical_name e cache por linha.
  */
 import {
+  catalogMatchNameKey,
+  findCatalogProductByNameKey,
+} from "./productImport/llmCatalogCandidates.ts";
+import {
   canonicalProductName,
   sanitizeCatalogProductName,
 } from "./productImport/canonicalName.ts";
+
+/** Score mínimo (0–100) para vincular linha EPOC a produto existente por tokens. */
+export const EPOC_FUZZY_MATCH_MIN_SCORE = 82;
+/** Diferença mínima entre 1º e 2º candidato para não considerar ambíguo. */
+export const EPOC_FUZZY_MATCH_MIN_GAP = 8;
 
 export type EpocCatalogProduct = {
   id: string;
@@ -34,6 +43,55 @@ export function epocProductLineKey(raw: string): string {
 
 export function epocCatalogDisplayName(raw: string): string {
   return sanitizeCatalogProductName(raw) || sanitizeCatalogProductName("Produto");
+}
+
+/**
+ * Match por tokens: linha EPOC "AGUA COM GAS" ⊆ cadastro "AGUA MINERAL CRYSTAL COM GAS".
+ * Ignora tokens de ruído (com, de, …) via catalogMatchNameKey.
+ */
+export function scoreEpocProductNameMatch(
+  csvRaw: string,
+  productName: string,
+): number {
+  const lineKey = catalogMatchNameKey(csvRaw);
+  const prodKey = catalogMatchNameKey(productName);
+  if (!lineKey || lineKey.length < 2) return 0;
+  if (lineKey === prodKey) return 100;
+
+  const lineTokens = lineKey.split(" ").filter((t) => t.length >= 2);
+  if (lineTokens.length === 0) return 0;
+  const prodTokens = new Set(prodKey.split(" ").filter((t) => t.length >= 2));
+
+  let hit = 0;
+  for (const t of lineTokens) {
+    if (prodTokens.has(t)) hit += 1;
+  }
+  const coverage = hit / lineTokens.length;
+  if (coverage < 1) return Math.round(coverage * 70);
+
+  const extra = prodTokens.size - hit;
+  if (extra <= 2) return 95;
+  if (extra <= 4) return 88;
+  return 82;
+}
+
+export function findEpocFuzzyCatalogMatch(
+  catalog: EpocCatalogProduct[],
+  rawName: string,
+  minScore = EPOC_FUZZY_MATCH_MIN_SCORE,
+): EpocCatalogProduct | null {
+  const scored: { p: EpocCatalogProduct; score: number }[] = [];
+  for (const p of catalog) {
+    const s = scoreEpocProductNameMatch(rawName, p.name);
+    if (s >= minScore) scored.push({ p, score: s });
+  }
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored[0]!;
+  if (scored.length >= 2 && top.score - scored[1]!.score < EPOC_FUZZY_MATCH_MIN_GAP) {
+    return null;
+  }
+  return top.p;
 }
 
 export function buildCanonicalProductIndex(
@@ -130,6 +188,30 @@ export function resolveEpocProductId(
     cache.set(lineKey, canonId);
     return {
       productId: canonId,
+      lineKey,
+      catalogName,
+      canonicalName,
+      ambiguous: false,
+    };
+  }
+
+  const byNameKey = findCatalogProductByNameKey(catalog, rawName);
+  if (byNameKey) {
+    cache.set(lineKey, byNameKey.id);
+    return {
+      productId: byNameKey.id,
+      lineKey,
+      catalogName,
+      canonicalName,
+      ambiguous: false,
+    };
+  }
+
+  const fuzzy = findEpocFuzzyCatalogMatch(catalog, rawName);
+  if (fuzzy) {
+    cache.set(lineKey, fuzzy.id);
+    return {
+      productId: fuzzy.id,
       lineKey,
       catalogName,
       canonicalName,
@@ -370,6 +452,28 @@ export class EpocProductEnsureCoordinator {
   private async ensureOnce(
     params: EnsureEpocProductParams,
   ): Promise<EnsureEpocProductResult> {
+    const fuzzyResolved = resolveEpocProductId(
+      params.rawName,
+      this.catalog,
+      this.cache,
+      this.canonicalIndex,
+    );
+    if (fuzzyResolved.productId) {
+      return {
+        productId: fuzzyResolved.productId,
+        created: false,
+        ambiguous: false,
+      };
+    }
+    if (fuzzyResolved.ambiguous) {
+      return {
+        productId: null,
+        created: false,
+        ambiguous: true,
+        ambiguousReason: fuzzyResolved.ambiguousReason,
+      };
+    }
+
     const fromDb = await fetchActiveProductRowByCanonical(
       this.admin,
       this.companyId,

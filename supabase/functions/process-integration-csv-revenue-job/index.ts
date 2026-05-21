@@ -9,10 +9,9 @@
  * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR + opcionalmente um único
  * prompt OpenAI por chunk (`OPENAI_API_KEY`, `OPENAI_REVENUE_CLASSIFY_MODEL`) mapeando o rótulo
  * da linha para uma folha existente (ex.: vendas de bebidas, taxa de serviço, delivery).
- * Produtos auto-criados: deduplicação por `canonical_name` (motor NF-e), reconsulta ao banco
- * antes de cada INSERT, coordenador serializa criações na mesma invocação, lease por chunk
- * (`chunk_lease_expires_at`) evita workers paralelos no mesmo offset, cache
- * `epoc_product_id_by_line_key` entre chunks, `stock_control_type`,
+ * Produtos: deduplicação (canonical + tokens fuzzy, ex. "AGUA COM GAS" → cadastro existente),
+ * reconsulta ao banco antes do INSERT, coordenador anti-paralelo, cache entre chunks.
+ * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `product_unit_conversions`.
  * `product_operational_config` (AUTO/CONFIGURADO) e `product_category_assignments`.
  * Rótulos novos passam por heurística + OpenAI (`OPENAI_API_KEY`, `OPENAI_EPOC_PRODUCT_KIND_MODEL`)
  * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
@@ -1307,6 +1306,32 @@ Deno.serve(async (req) => {
 
       const title = rawProdutoForMatch;
 
+      const { data: stockQty, error: convErr } = await admin.rpc(
+        "product_sale_qty_in_stock_unit",
+        {
+          p_product_id: productId,
+          p_sale_quantity: quantity,
+          p_sale_unit_code: "un",
+        },
+      );
+      if (convErr || stockQty == null || Number(stockQty) <= 0) {
+        skippedChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "unit_conversion_failed",
+          details:
+            convErr?.message ??
+            "Quantidade em UN sem conversão para a unidade de estoque do produto (cadastre product_unit_conversions)",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
+
       const { data: entryId, error: rpcErr } = await admin.rpc(
         "create_revenue_entry",
         {
@@ -1322,6 +1347,7 @@ Deno.serve(async (req) => {
             product_id: productId,
             recipe_id: null,
             quantity,
+            sale_unit_code: "un",
             pricing_mode: "total",
             unit_value: null,
             _csv_import_job_id: job.id,
