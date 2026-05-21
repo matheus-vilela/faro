@@ -1,5 +1,6 @@
 import {
   convertQuantityForProduct,
+  normalizeProductConversionRowsToPrimaryOne,
   type UnitConversionCodeRow,
   rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
@@ -26,22 +27,54 @@ function isVolumeCode(u: string) {
 
 export type UnPackDimension = "mass" | "volume";
 
-/** Decide se o “pacote” da UN é massa ou volume com base na unidade anterior e nas conversões atuais (hub antigo). */
+function oldHubHasSecondaryDimension(
+  oldHub: string,
+  convs: UnitConversionCodeRow[],
+  kind: "mass" | "volume",
+): boolean {
+  const o = norm(oldHub);
+  return convs.some((c) => {
+    if (norm(c.primary_unit_code) !== o) return false;
+    const sec = norm(c.secondary_unit_code);
+    return kind === "volume" ? isVolumeCode(sec) : isMassCode(sec);
+  });
+}
+
+function rebasedUnHasSecondaryDimension(
+  rebased: UnitConversionCodeRow[],
+  kind: "mass" | "volume",
+): boolean {
+  return rebased.some((c) => {
+    if (norm(c.primary_unit_code) !== "un") return false;
+    const sec = norm(c.secondary_unit_code);
+    return kind === "volume" ? isVolumeCode(sec) : isMassCode(sec);
+  });
+}
+
+/** Decide se o “pacote” da UN é massa ou volume (fallback só quando não há conversão cadastrada). */
 export function inferUnPackDimension(
   oldHub: string,
   convsForOldHub: UnitConversionCodeRow[],
 ): UnPackDimension {
   const o = norm(oldHub);
-  if (isVolumeCode(o) && !isMassCode(o)) return "volume";
-  if (isMassCode(o)) return "mass";
+  const vol =
+    isVolumeCode(o) ||
+    oldHubHasSecondaryDimension(o, convsForOldHub, "volume");
+  const mass =
+    isMassCode(o) || oldHubHasSecondaryDimension(o, convsForOldHub, "mass");
+  if (vol && !mass) return "volume";
+  if (mass && !vol) return "mass";
+  if (vol && mass) return "volume";
   if (o === "un") {
     const hasMl = convsForOldHub.some(
       (c) =>
-        norm(c.primary_unit_code) === "un" && norm(c.secondary_unit_code) === "ml",
+        norm(c.primary_unit_code) === "un" &&
+        norm(c.secondary_unit_code) === "ml",
     );
     const hasG = convsForOldHub.some(
       (c) =>
-        norm(c.primary_unit_code) === "un" && norm(c.secondary_unit_code) === "g",
+        norm(c.primary_unit_code) === "un" &&
+        norm(c.secondary_unit_code) === "g",
     );
     if (hasMl && !hasG) return "volume";
     return "mass";
@@ -139,7 +172,10 @@ function fromMl(
   return null;
 }
 
-/** Reaproveita rebasing; na UN aplica o modelo 1 UN = 100 g ou 100 ml conforme a dimensão. */
+/**
+ * Reaproveita rebasing. Para hub `un`, só aplica 1 UN = 100 g/ml (modelo NF-e)
+ * quando não existir conversão de massa/volume já derivada do cadastro.
+ */
 export function buildNextConversionsAfterHubChange(
   existing: UnitConversionCodeRow[],
   oldHub: string,
@@ -149,14 +185,17 @@ export function buildNextConversionsAfterHubChange(
   let next = rebaseProductConversionsToHub(existing, oldHub, newHub);
   if (nextHub !== "un") return next;
 
-  const dim = inferUnPackDimension(oldHub, existing);
-  next = next.filter((r) => {
-    if (norm(r.primary_unit_code) !== "un") return true;
-    const s = norm(r.secondary_unit_code);
-    if (s === "g" || s === "ml") return false;
-    return true;
-  });
+  const hasVolumeFromCadastro = rebasedUnHasSecondaryDimension(next, "volume");
+  const hasMassFromCadastro = rebasedUnHasSecondaryDimension(next, "mass");
 
+  if (hasVolumeFromCadastro || hasMassFromCadastro) {
+    return normalizeProductConversionRowsToPrimaryOne(next, nextHub).sort(
+      (a, b) =>
+        a.secondary_unit_code.localeCompare(b.secondary_unit_code, "pt-BR"),
+    );
+  }
+
+  const dim = inferUnPackDimension(oldHub, existing);
   if (dim === "mass") {
     next.push({
       primary_unit_code: "un",
@@ -173,7 +212,7 @@ export function buildNextConversionsAfterHubChange(
     });
   }
 
-  return next.sort((a, b) =>
+  return normalizeProductConversionRowsToPrimaryOne(next, nextHub).sort((a, b) =>
     a.secondary_unit_code.localeCompare(b.secondary_unit_code, "pt-BR"),
   );
 }

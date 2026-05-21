@@ -31,6 +31,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -66,11 +76,13 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
-  convertQuantityForProduct,
   convertUnitPriceForProduct,
   getLockedSystemSecondaryQty,
-  rebaseProductConversionsToHub,
 } from "@/lib/companyUnits/convert";
+import {
+  buildNextConversionsAfterHubChange,
+  computeStockQuantityAfterHubChange,
+} from "@/lib/companyUnits/stockHubUnitChange";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -475,6 +487,8 @@ export function Produtos() {
     >
   >({});
   const [stockSaving, setStockSaving] = useState(false);
+  const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
+  const [stockDeleting, setStockDeleting] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
   >([]);
@@ -537,17 +551,29 @@ export function Produtos() {
       primary_qty: Number(r.primary_qty),
       secondary_qty: Number(r.secondary_qty),
     }));
-    const cq = qOk
-      ? convertQuantityForProduct(q, prev, next, prev, convRows)
-      : null;
-    const cm = mOk
-      ? convertQuantityForProduct(m, prev, next, prev, convRows)
-      : null;
-    const rebasedConversions = rebaseProductConversionsToHub(
+    const rebasedConversions = buildNextConversionsAfterHubChange(
       convRows,
       prev,
       next,
     );
+    const cq = qOk
+      ? computeStockQuantityAfterHubChange(
+          q,
+          prev,
+          next,
+          convRows,
+          rebasedConversions,
+        )
+      : null;
+    const cm = mOk
+      ? computeStockQuantityAfterHubChange(
+          m,
+          prev,
+          next,
+          convRows,
+          rebasedConversions,
+        )
+      : null;
     setStockUnit(next);
     setStockProductConversions(
       rebasedConversions.map((r) => ({
@@ -555,6 +581,33 @@ export function Produtos() {
         company_id: currentCompany?.id ?? "",
       })),
     );
+    const prevPriceUnit = (
+      stockLastUnitValueUnitCode.trim() || prev
+    ).toLowerCase();
+    if (prevPriceUnit === prev.trim().toLowerCase()) {
+      setStockLastUnitValueUnitCode(next);
+    }
+    const parsedLast = parseCurrencyInput(stockLastUnitValue);
+    if (
+      parsedLast != null &&
+      Number.isFinite(parsedLast) &&
+      prevPriceUnit === prev.trim().toLowerCase() &&
+      cq != null &&
+      qOk &&
+      cq > 0
+    ) {
+      const nextPrice = (parsedLast * q) / cq;
+      if (Number.isFinite(nextPrice)) {
+        setStockLastUnitValue(
+          new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: "BRL",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(nextPrice),
+        );
+      }
+    }
     if (cq != null) {
       setStockQuantity(String(cq));
     } else if (qOk) {
@@ -568,6 +621,10 @@ export function Produtos() {
     if (stockProductConversions.length > 0 && rebasedConversions.length === 0) {
       toast.message(
         "Não foi possível reaproveitar as conversões com a nova unidade.",
+      );
+    } else if (cq != null || cm != null) {
+      toast.message(
+        "Unidade de estoque atualizada no formulário. Salve para persistir.",
       );
     }
   };
@@ -1210,6 +1267,7 @@ export function Produtos() {
     setStockProductConversions([]);
     setInitialStockProductConversions([]);
     setStockProductConversionsLoading(false);
+    setStockDeleteDialogOpen(false);
   };
 
   useEffect(() => {
@@ -1588,6 +1646,27 @@ export function Produtos() {
     setStockSaving(false);
     closeStockSheet();
     void loadCompanyProductCategories();
+    fetchProducts();
+    void fetchLowStockCount();
+    if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
+  };
+
+  const handleStockProductDelete = async () => {
+    if (!stockProduct) return;
+    setStockDeleting(true);
+    const { error } = await supabase
+      .from("products")
+      .update({ is_active: false })
+      .eq("id", stockProduct.id);
+    setStockDeleting(false);
+    setStockDeleteDialogOpen(false);
+    if (error) {
+      console.error(error);
+      toast.error(error.message ?? "Não foi possível excluir o produto.");
+      return;
+    }
+    toast.success("Produto excluído. Ele deixa de aparecer na lista de ativos.");
+    closeStockSheet();
     fetchProducts();
     void fetchLowStockCount();
     if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
@@ -2657,7 +2736,16 @@ export function Produtos() {
                     )}
                   </div>
 
-                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
+                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-destructive/40 text-destructive hover:bg-destructive/10 sm:w-auto"
+                      onClick={() => setStockDeleteDialogOpen(true)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Excluir produto
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
@@ -3016,6 +3104,7 @@ export function Produtos() {
                           stockUnitCode={stockUnit}
                           value={stockProductConversions}
                           onChange={setStockProductConversions}
+                          onPromoteSecondaryToStockUnit={handleStockUnitChange}
                           disabled={stockSaving}
                           sectionClassName={SHEET_SECTION}
                         />
@@ -3047,7 +3136,18 @@ export function Produtos() {
                     </div>
                   </div>
 
-                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
+                  <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-destructive/40 text-destructive hover:bg-destructive/10 sm:w-auto"
+                      onClick={() => setStockDeleteDialogOpen(true)}
+                      disabled={stockSaving || stockDeleting}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Excluir produto
+                    </Button>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
                     <Button
                       type="button"
                       variant="ghost"
@@ -3089,11 +3189,45 @@ export function Produtos() {
                         {stockSaving ? "Salvando..." : "Salvar"}
                       </Button>
                     </div>
+                    </div>
                   </SheetFooter>
                 </>
               )}
             </SheetContent>
           </Sheet>
+
+          <AlertDialog
+            open={stockDeleteDialogOpen}
+            onOpenChange={(open) => {
+              if (!stockDeleting) setStockDeleteDialogOpen(open);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Excluir produto?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {stockProduct
+                    ? `O produto "${stockProduct.name}" será inativado e deixará de aparecer na lista de ativos. O histórico de movimentações é preservado.`
+                    : "O produto será inativado e deixará de aparecer na lista de ativos."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={stockDeleting}>
+                  Cancelar
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={stockDeleting}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void handleStockProductDelete();
+                  }}
+                >
+                  {stockDeleting ? "Excluindo..." : "Excluir"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {lowStockCount > 0 && (
             <Card className="border-destructive/50">

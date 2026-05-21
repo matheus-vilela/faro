@@ -202,6 +202,28 @@ export function formatUnitLabelFromCodes(code: string): string {
   return `${systemUnitLabel(code)} (${code})`;
 }
 
+/** Exibe e persiste conversões na forma canônica: 1 unidade de estoque = X outra. */
+export function normalizeProductConversionRowsToPrimaryOne(
+  rows: UnitConversionCodeRow[],
+  hubCode: string,
+): UnitConversionCodeRow[] {
+  const hub = hubCode.trim().toLowerCase();
+  if (!hub) return rows;
+  return rows.map((r) => {
+    if (r.primary_unit_code.trim().toLowerCase() !== hub) return { ...r };
+    const p = Number(r.primary_qty);
+    const s = Number(r.secondary_qty);
+    if (!Number.isFinite(p) || !Number.isFinite(s) || p <= 0 || s <= 0) {
+      return { ...r };
+    }
+    return {
+      ...r,
+      primary_qty: 1,
+      secondary_qty: s / p,
+    };
+  });
+}
+
 export function rebaseProductConversionsToHub(
   conversions: UnitConversionCodeRow[],
   prevHubCode: string,
@@ -300,7 +322,8 @@ export function rebaseProductConversionsToHub(
     });
   }
 
-  return rebased.sort((a, b) =>
-    a.secondary_unit_code.localeCompare(b.secondary_unit_code, "pt-BR"),
+  return normalizeProductConversionRowsToPrimaryOne(rebased, nextHub).sort(
+    (a, b) =>
+      a.secondary_unit_code.localeCompare(b.secondary_unit_code, "pt-BR"),
   );
 }

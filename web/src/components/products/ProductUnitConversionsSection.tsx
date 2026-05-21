@@ -10,7 +10,7 @@ import {
 } from "@/lib/companyUnits/productConversionRows";
 import { SYSTEM_PRODUCT_UNITS } from "@/lib/companyUnits/systemUnits";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 interface ProductUnitConversionsSectionProps {
@@ -19,6 +19,8 @@ interface ProductUnitConversionsSectionProps {
   stockUnitCode: string;
   value: ProductUnitConversionDraft[];
   onChange: (next: ProductUnitConversionDraft[]) => void;
+  /** Torna a unidade secundária da regra a unidade de estoque (rebase + conversão de quantidades). */
+  onPromoteSecondaryToStockUnit?: (secondaryUnitCode: string) => void;
   disabled?: boolean;
   sectionClassName?: string;
 }
@@ -28,6 +30,7 @@ export function ProductUnitConversionsSection({
   stockUnitCode,
   value,
   onChange,
+  onPromoteSecondaryToStockUnit,
   disabled,
   sectionClassName = PRODUCT_SHEET_SECTION,
 }: ProductUnitConversionsSectionProps) {
@@ -147,23 +150,48 @@ export function ProductUnitConversionsSection({
                   <span>
                     {productConversionRowLabel(row, stockUnitCode)}
                   </span>
-                  {isLocked ? (
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Travada
-                    </span>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 text-destructive"
-                      disabled={disabled}
-                      onClick={() => removeAt(index - lockedRows.length)}
-                      aria-label="Remover conversão"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {isLocked ? (
+                      <span className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Travada
+                      </span>
+                    ) : (
+                      <>
+                        {onPromoteSecondaryToStockUnit &&
+                        row.secondary_unit_code.trim().toLowerCase() !==
+                          stockUnitCode.trim().toLowerCase() &&
+                        row.primary_unit_code.trim().toLowerCase() ===
+                          stockUnitCode.trim().toLowerCase() ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-xs"
+                            disabled={disabled}
+                            onClick={() =>
+                              onPromoteSecondaryToStockUnit(
+                                row.secondary_unit_code.trim(),
+                              )
+                            }
+                          >
+                            <Star className="h-3.5 w-3.5" />
+                            Usar como unidade de estoque
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-destructive"
+                          disabled={disabled}
+                          onClick={() => removeAt(index - lockedRows.length)}
+                          aria-label="Remover conversão"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </li>
               );
             })}
