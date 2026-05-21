@@ -10,8 +10,10 @@
  *
  * **Manual:** `{ "manual": true, "company_id": "<uuid>" }` + `Authorization: Bearer <JWT>`.
  * Opcional: `versao` (número inicial do cursor; senão usa `focusnfe.nfes_recebidas_ultima_versao` ou 0).
- * Opcional: `onboarding: true` — fluxo de onboarding fiscal: ao **terminar** o sync (staging completo), grava
- * `companies.onboarding_fiscal.max_nfes_sync` = notas efetivamente gravadas em staging (total exato a interpretar).
+ * Opcional: `onboarding: true` — fluxo de onboarding fiscal: `max_nfes_sync` = XMLs a interpretar;
+ * `sync` só passa a `false` se a listagem Focus terminar sem XML em staging, ou quando o job de interpretação
+ * (`focus-get-sync-nfe-interpret-staging`) marcar `status=done` após processar todos os XMLs.
+ * `nfes_sync` na interpretação segue o offset do job (teto = `max_nfes_sync`), não soma +5 por chunk.
  * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
  * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
  * Com `onboarding` / `onboarding_retry`, ignora unidades com `onboarding_fiscal.completed` ou fora da fase de listagem (`sync: false`).
@@ -743,11 +745,15 @@ async function applyOnboardingFiscalDefaults(
   return {};
 }
 
-/** Encerra fase de listagem (`sync: false`) e grava total em staging para a interpretação. */
-async function finalizeOnboardingFiscalListagem(
+/**
+ * Após listagem Focus no onboarding: grava `max_nfes_sync`.
+ * `sync: false` só se não há XML em staging (`endListagemSync`); senão mantém `sync: true` até o job `done`.
+ */
+async function patchOnboardingFiscalAfterListagem(
   admin: ReturnType<typeof createClient>,
   companyId: string,
   maxNfesSync: number,
+  opts: { endListagemSync: boolean },
 ): Promise<{ error?: string }> {
   const { data: row, error: rErr } = await admin
     .from("companies")
@@ -767,7 +773,8 @@ async function finalizeOnboardingFiscalListagem(
     ...base,
     ...prev,
     max_nfes_sync: maxNfesSync,
-    sync: false,
+    nfes_sync: opts.endListagemSync ? prev.nfes_sync : 0,
+    sync: opts.endListagemSync ? false : true,
   });
   const { error: uErr } = await admin
     .from("companies")
@@ -1500,10 +1507,6 @@ Deno.serve(async (req) => {
               situacao,
               nfe_completa: true,
               payload: cab,
-              page_index: page,
-              versao_query_used: versao,
-              x_total_count_snapshot: xTotalCount,
-              x_max_version_snapshot: xMaxVersion,
               expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
                 .toISOString(),
               ...(xmlContent != null ? { xml_content: xmlContent } : {}),
@@ -1623,28 +1626,6 @@ Deno.serve(async (req) => {
         wall_total_ms_ate_agora: Math.round(performance.now() - tWall0),
       };
 
-      if (
-        companyOnboardingFlow &&
-        hadSuccessfulListFetch &&
-        listagemConcluida
-      ) {
-        const { error: obErr } = await finalizeOnboardingFiscalListagem(
-          admin,
-          companyId,
-          notasEncontradas,
-        );
-        if (obErr) {
-          console.warn(LOG, "onboarding_fiscal_listagem_fim", companyId, obErr);
-        } else {
-          logPhase("onboarding_fiscal_listagem_finalizada", {
-            exec_id: execId,
-            company_id: companyId,
-            max_nfes_sync: notasEncontradas,
-            sync: false,
-          });
-        }
-      }
-
       const { count: stagingXmlTotal, error: xmlCountErr } =
         await countStagingXmlsForInterpretJob(
           admin,
@@ -1738,6 +1719,32 @@ Deno.serve(async (req) => {
           company_id: companyId,
           notas_staging_sem_xml: notasEncontradas,
         });
+      }
+
+      if (
+        companyOnboardingFlow &&
+        hadSuccessfulListFetch &&
+        listagemConcluida
+      ) {
+        const xmlTotal = Math.max(0, stagingXmlTotal ?? 0);
+        const endListagemSync = xmlTotal === 0;
+        const { error: obErr } = await patchOnboardingFiscalAfterListagem(
+          admin,
+          companyId,
+          xmlTotal,
+          { endListagemSync },
+        );
+        if (obErr) {
+          console.warn(LOG, "onboarding_fiscal_listagem_fim", companyId, obErr);
+        } else {
+          logPhase("onboarding_fiscal_listagem_finalizada", {
+            exec_id: execId,
+            company_id: companyId,
+            max_nfes_sync: xmlTotal,
+            sync: endListagemSync ? false : true,
+            aguarda_interpret_job: !endListagemSync,
+          });
+        }
       }
 
       const shouldPersistCursor = hadSuccessfulListFetch;

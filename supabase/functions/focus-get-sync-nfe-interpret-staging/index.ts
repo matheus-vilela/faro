@@ -21,6 +21,7 @@
  * `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` (default 120).
  * Opcional (LLM): `OPENAI_API_KEY`, `OPENAI_PRODUCT_MATCH_MODEL`.
  * Catálogo global `unified_supplier_*` é atualizado aqui (parse XML por nota), não em `focus-get-sync-nfe`.
+ * Onboarding: `companies.onboarding_fiscal.nfes_sync` = `staging_process_offset` (teto `max_nfes_sync`), não +chunk.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -159,16 +160,18 @@ function numOnboardingMetric(v: unknown): number {
   return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0;
 }
 
-/** Atualiza `companies.onboarding_fiscal` durante/ao fim da interpretação (job com `onboarding`). */
-async function applyOnboardingInterpretProgress(
+/**
+ * Progresso da interpretação = offset já processado no job (absoluto, não soma por chunk).
+ * Limita a `max_nfes_sync` para não passar de 100% no dashboard nem acumular em retries.
+ */
+async function setOnboardingInterpretNfesSyncProgress(
   admin: Admin,
   companyId: string,
   isOnboardingJob: boolean,
-  rowsProcessedThisChunk: number,
-  finalizeInterpretSync: boolean,
+  processedOffset: number,
 ): Promise<void> {
   if (!isOnboardingJob) return;
-  const add = Math.max(0, Math.floor(rowsProcessedThisChunk));
+  const processed = Math.max(0, Math.floor(processedOffset));
   const { data: row, error } = await admin
     .from("companies")
     .select("onboarding_fiscal")
@@ -183,12 +186,12 @@ async function applyOnboardingInterpretProgress(
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? { ...(raw as Record<string, unknown>) }
       : {};
-  const next: Record<string, unknown> = { ...prev };
-  next.nfes_sync = numOnboardingMetric(prev.nfes_sync) + add;
-  if (finalizeInterpretSync) {
-    next.sync = false;
-    next.completed = false;
-  }
+  const max = numOnboardingMetric(prev.max_nfes_sync);
+  const nfes_sync = max > 0 ? Math.min(processed, max) : processed;
+  const next: Record<string, unknown> = {
+    ...prev,
+    nfes_sync,
+  };
   const { error: upErr } = await admin
     .from("companies")
     .update({ onboarding_fiscal: next })
@@ -199,10 +202,71 @@ async function applyOnboardingInterpretProgress(
   }
   logPhase("onboarding_fiscal_interpret", {
     company_id: companyId,
-    nfes_sync: next.nfes_sync,
-    delta: add,
-    finalize: finalizeInterpretSync,
+    nfes_sync,
+    processed_offset: processed,
+    max_nfes_sync: max,
   });
+}
+
+/** Só após `finalizeJobDone`: encerra fase de sync (`sync: false`), aguarda confirmação no dashboard. */
+async function finalizeOnboardingFiscalSyncAfterInterpretJobDone(
+  admin: Admin,
+  companyId: string,
+  isOnboardingJob: boolean,
+): Promise<void> {
+  if (!isOnboardingJob) return;
+  const { data: row, error } = await admin
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error || !row) {
+    console.warn(LOG, "onboarding_fiscal_read", companyId, error?.message);
+    return;
+  }
+  const raw = row.onboarding_fiscal;
+  const prev =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : {};
+  const completed = prev.completed === true;
+  if (completed) return;
+  const max = numOnboardingMetric(prev.max_nfes_sync);
+  const synced = numOnboardingMetric(prev.nfes_sync);
+  const next: Record<string, unknown> = {
+    ...prev,
+    sync: false,
+    completed: false,
+    nfes_sync: max > 0 ? Math.max(synced, max) : synced,
+  };
+  const { error: upErr } = await admin
+    .from("companies")
+    .update({ onboarding_fiscal: next })
+    .eq("id", companyId);
+  if (upErr) {
+    console.warn(LOG, "onboarding_fiscal_sync_off", companyId, upErr.message);
+    return;
+  }
+  logPhase("onboarding_fiscal_interpret_sync_off", {
+    company_id: companyId,
+    nfes_sync: next.nfes_sync,
+  });
+}
+
+/** Marca job `done` e só então `onboarding_fiscal.sync = false` (onboarding). */
+async function completeInterpretJobAndEndOnboardingSync(
+  admin: Admin,
+  job: { id: string; company_id: string; onboarding?: boolean | null },
+): Promise<string | null> {
+  const err = await finalizeJobDone(admin, job.id);
+  if (!err) {
+    await finalizeOnboardingFiscalSyncAfterInterpretJobDone(
+      admin,
+      job.company_id,
+      job.onboarding === true,
+    );
+  }
+  return err;
 }
 
 async function runInterpretStagingChunk(
@@ -557,14 +621,7 @@ async function recoverOrphanInterpretJobs(
       }
 
       if (chunk.kind === "empty_done" || chunk.kind === "offset_done") {
-        await applyOnboardingInterpretProgress(
-          admin,
-          row.company_id,
-          row.onboarding === true,
-          0,
-          true,
-        );
-        const err = await finalizeJobDone(admin, row.id);
+        const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
         if (!err) {
           result.finalized.push(row.id);
           logPhase("recover_job_finalizado", {
@@ -632,14 +689,7 @@ async function recoverOrphanInterpretJobs(
     if ((count ?? 0) > 0) continue;
 
     logPhase("recover_pending_sem_staging", { job_id: row.id });
-    await applyOnboardingInterpretProgress(
-      admin,
-      row.company_id,
-      row.onboarding === true,
-      0,
-      true,
-    );
-    const err = await finalizeJobDone(admin, row.id);
+    const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
     if (!err) {
       result.finalized.push(row.id);
       logPhase("recover_job_finalizado", {
@@ -699,12 +749,11 @@ async function applyChunkOutcome(
         await finalizeJobFailed(admin, row.id, pendErr.message);
         return { done: false, err: pendErr.message };
       }
-      await applyOnboardingInterpretProgress(
+      await setOnboardingInterpretNfesSyncProgress(
         admin,
         row.company_id,
         isOnboardingJob,
-        chunk.listLen,
-        false,
+        chunk.nextOffset,
       );
       logPhase("job_reposto_pending_chain_cap", { job_id: row.id });
       return { done: false, fell_back_to_pending: true };
@@ -724,12 +773,11 @@ async function applyChunkOutcome(
       return { done: false, err: partialErr.message };
     }
 
-    await applyOnboardingInterpretProgress(
+    await setOnboardingInterpretNfesSyncProgress(
       admin,
       row.company_id,
       isOnboardingJob,
-      chunk.listLen,
-      false,
+      chunk.nextOffset,
     );
 
     if (!anonKey.trim()) {
@@ -769,15 +817,14 @@ async function applyChunkOutcome(
     return { done: false };
   }
 
-  await applyOnboardingInterpretProgress(
+  await setOnboardingInterpretNfesSyncProgress(
     admin,
     row.company_id,
     isOnboardingJob,
-    chunk.listLen,
-    true,
+    chunk.nextOffset,
   );
 
-  const doneErr = await finalizeJobDone(admin, row.id);
+  const doneErr = await completeInterpretJobAndEndOnboardingSync(admin, row);
   if (doneErr) {
     await finalizeJobFailed(admin, row.id, doneErr);
     logPhase("job_finalizar_erro", { job_id: row.id, error: doneErr });
@@ -950,14 +997,7 @@ Deno.serve(async (req) => {
     }
 
     if (chunk.kind === "empty_done") {
-      await applyOnboardingInterpretProgress(
-        admin,
-        row.company_id,
-        row.onboarding === true,
-        0,
-        true,
-      );
-      const err = await finalizeJobDone(admin, row.id);
+      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
       if (err) await finalizeJobFailed(admin, row.id, err);
       return json({
         ok: true,
@@ -968,14 +1008,7 @@ Deno.serve(async (req) => {
     }
 
     if (chunk.kind === "offset_done") {
-      await applyOnboardingInterpretProgress(
-        admin,
-        row.company_id,
-        row.onboarding === true,
-        0,
-        true,
-      );
-      const err = await finalizeJobDone(admin, row.id);
+      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
       if (err) await finalizeJobFailed(admin, row.id, err);
       return json({
         ok: true,
@@ -1097,14 +1130,7 @@ Deno.serve(async (req) => {
     }
 
     if (chunk.kind === "empty_done") {
-      await applyOnboardingInterpretProgress(
-        admin,
-        row.company_id,
-        row.onboarding === true,
-        0,
-        true,
-      );
-      const err = await finalizeJobDone(admin, row.id);
+      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
       if (!err) {
         processed.push(row.id);
         summaries.push({
@@ -1126,14 +1152,7 @@ Deno.serve(async (req) => {
     }
 
     if (chunk.kind === "offset_done") {
-      await applyOnboardingInterpretProgress(
-        admin,
-        row.company_id,
-        row.onboarding === true,
-        0,
-        true,
-      );
-      const err = await finalizeJobDone(admin, row.id);
+      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
       if (!err) {
         processed.push(row.id);
         summaries.push({

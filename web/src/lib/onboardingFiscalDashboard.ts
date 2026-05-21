@@ -27,8 +27,8 @@ export function isOnboardingFiscalFlowCompleted(raw: unknown): boolean {
 }
 
 /**
- * Card de NF-e / onboarding fiscal: fase de progresso com `sync` ativo (ou chave ausente).
- * Com `sync` explicitamente falso, usar `isOnboardingFiscalInterpretConfirmPhase` para confirmação.
+ * Card de NF-e / onboarding fiscal: fase de progresso com `sync` ativo (listagem Focus ou interpretação XML).
+ * `sync` só fica false sem notas em staging ou após job de interpretação `done`; então confirmação manual.
  */
 export function isOnboardingFiscalNfeRecebidasDashboardEnabled(raw: unknown): boolean {
   const o = onboardingFiscalObject(raw);

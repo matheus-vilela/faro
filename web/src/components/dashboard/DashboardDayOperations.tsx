@@ -21,6 +21,7 @@ import type { Boleto } from "@/types/expense";
 import type { Recebimento } from "@/types/recebimento";
 import {
   ArrowRight,
+  ChevronRight,
   ClipboardList,
   ListChecks,
   Loader2,
@@ -419,17 +420,18 @@ export function DashboardDayOperations() {
 
   return (
     <section aria-label="Operação do dia" className="min-w-0 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold tracking-tight">
-          Operação do dia
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Toque em um card para ver detalhes. Use o botão para abrir a tela
-          completa.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight">
+            Operação do dia
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Resumo de hoje · abra o card para a lista completa
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <DayOpCard
           icon={TrendingDown}
           title="Contas a pagar"
@@ -577,7 +579,7 @@ export function DashboardDayOperations() {
               {checklistRunsToday.map((r) => (
                 <li
                   key={r.id}
-                  className="flex items-start justify-between gap-2 border-b border-border/60 py-2 text-sm last:border-0"
+                  className="flex items-start justify-between gap-2 px-3 py-2.5 text-sm"
                 >
                   <div className="min-w-0">
                     <p className="font-medium truncate">
@@ -599,7 +601,7 @@ export function DashboardDayOperations() {
               {checklistPendingRows.map((p, i) => (
                 <li
                   key={`${p.checklistTitle}-${p.memberName}-${i}`}
-                  className="border-b border-border/60 py-2 text-sm last:border-0"
+                  className="px-3 py-2.5 text-sm"
                 >
                   <p className="font-medium">{p.checklistTitle}</p>
                   <p className="text-xs text-muted-foreground">
@@ -725,59 +727,105 @@ function DayOpCard({
   tone: "primary" | "muted";
   onOpen: () => void;
 }) {
-  const ring =
-    tone === "primary"
-      ? "border-primary/25 bg-primary/[0.06]"
-      : "border-border/80 bg-card";
+  const isPrimary = tone === "primary";
 
   return (
     <button
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex w-full flex-col gap-3 rounded-xl border p-4 text-left shadow-sm transition-colors",
-        "hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        ring,
+        "group flex w-full flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors",
+        "hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isPrimary
+          ? "border-primary/30 ring-1 ring-primary/10"
+          : "border-border/80",
       )}
     >
-      <div className="flex items-start gap-3">
+      <div
+        className={cn(
+          "flex items-center gap-2.5 border-b px-3.5 py-3",
+          isPrimary ? "border-primary/15 bg-primary/[0.04]" : "border-border/60 bg-muted/20",
+        )}
+      >
         <div
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-            tone === "primary"
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+            isPrimary
               ? "bg-primary/15 text-primary"
-              : "bg-muted text-muted-foreground",
+              : "bg-background text-muted-foreground shadow-sm",
           )}
         >
-          <Icon className="h-5 w-5" />
+          <Icon className="h-4 w-4" />
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold leading-tight">{title}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Toque para detalhes
-          </p>
-        </div>
+        <p className="min-w-0 flex-1 text-sm font-semibold leading-snug">
+          {title}
+        </p>
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            "group-hover:translate-x-0.5 group-hover:text-foreground",
+          )}
+          aria-hidden
+        />
       </div>
+
       {loading ? (
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="flex min-h-[5.5rem] items-center justify-center px-3 py-4">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {metrics.map((m) => (
-            <div key={m.label} className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {m.label}
-              </p>
-              <p className="text-xl font-bold tabular-nums leading-tight">
-                {m.value}
-              </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {m.hint}
-              </p>
-            </div>
+        <div className="grid grid-cols-2 divide-x divide-border/70">
+          {metrics.map((m, i) => (
+            <DayOpMetricCell
+              key={m.label}
+              label={m.label}
+              value={m.value}
+              hint={m.hint}
+              emphasize={isPrimary && i === 0}
+            />
           ))}
         </div>
       )}
     </button>
+  );
+}
+
+function DayOpMetricCell({
+  label,
+  value,
+  hint,
+  emphasize,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  emphasize?: boolean;
+}) {
+  const isZero = value === "0";
+  return (
+    <div className="flex min-w-0 flex-col gap-1 px-3.5 py-3">
+      <span className="text-[11px] font-medium text-muted-foreground leading-none">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-2xl font-bold tabular-nums leading-none tracking-tight",
+          emphasize && !isZero && "text-primary",
+          isZero && "text-muted-foreground",
+        )}
+      >
+        {value}
+      </span>
+      <span
+        className={cn(
+          "line-clamp-2 text-[11px] leading-snug",
+          isZero ? "text-muted-foreground/80" : "text-foreground/70",
+        )}
+        title={hint}
+      >
+        {hint}
+      </span>
+    </div>
   );
 }
 
@@ -793,14 +841,21 @@ function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <div>
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      </div>
       {count === 0 ? (
-        <p className="text-sm text-muted-foreground">{empty}</p>
+        <p className="rounded-lg border border-dashed bg-muted/15 px-3 py-4 text-sm text-muted-foreground">
+          {empty}
+        </p>
       ) : (
-        <ul>{children}</ul>
+        <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border bg-muted/10">
+          {children}
+        </ul>
       )}
     </div>
   );
@@ -822,7 +877,7 @@ function InventoryListItem({
     variant === "open" ? formatDt(row.created_at) : formatDt(row.submitted_at);
 
   return (
-    <li className="border-b border-border/60 py-2 text-sm last:border-0">
+    <li className="px-3 py-2.5 text-sm">
       <p className="font-medium">
         {group} · {listing}
       </p>
@@ -842,7 +897,7 @@ function RecebimentoListItem({
 }) {
   const nf = row.expenses?.invoice_number?.trim();
   return (
-    <li className="border-b border-border/60 py-2 text-sm last:border-0">
+    <li className="px-3 py-2.5 text-sm">
       <p className="font-medium truncate">{recebimentoTitle(row)}</p>
       <p className="text-xs text-muted-foreground">
         {nf ? `NF ${nf} · ` : ""}

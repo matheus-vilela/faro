@@ -11,10 +11,6 @@ create table if not exists public.focus_get_sync_nfe_staging (
   situacao text,
   nfe_completa boolean not null default true,
   payload jsonb not null,
-  page_index int not null,
-  versao_query_used bigint not null,
-  x_total_count_snapshot int,
-  x_max_version_snapshot bigint,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default (now() + interval '7 days')
 );
