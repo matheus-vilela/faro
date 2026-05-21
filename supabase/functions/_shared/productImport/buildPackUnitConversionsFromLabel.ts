@@ -251,6 +251,34 @@ function measureQtyPerStockUnit(
   return roundQty(perUnitQty);
 }
 
+/**
+ * Volume/massa no xProd (ex.: 330 ml, 0,330GFA) é por unidade consumível (garrafa/un),
+ * não pelo total da caixa. Com N un por embalagem, conversões L/ml/kg ficam em `un`.
+ */
+function shouldAnchorMassVolumeOnInnerUnit(
+  innerUnits: number | null,
+): boolean {
+  return innerUnits != null && innerUnits >= MIN_INNER_UNITS;
+}
+
+function massVolumePrimaryUnit(
+  stockUnit: string,
+  innerUnits: number | null,
+): string {
+  return shouldAnchorMassVolumeOnInnerUnit(innerUnits) ? "un" : stockUnit;
+}
+
+function massVolumeMeasureQty(
+  measurePerInnerUnit: number,
+  stockUnit: string,
+  innerUnits: number | null,
+): number {
+  if (shouldAnchorMassVolumeOnInnerUnit(innerUnits)) {
+    return roundQty(measurePerInnerUnit);
+  }
+  return measureQtyPerStockUnit(measurePerInnerUnit, stockUnit, innerUnits);
+}
+
 export function dedupeProductUnitConversions(
   rows: ProductUnitConversionInsert[],
 ): ProductUnitConversionInsert[] {
@@ -335,39 +363,61 @@ export function buildNewProductCatalogFromNfeLine(input: {
     if (composite) {
       const baseCode = normalizedToCatalogCode(composite.inner_unit);
       if (baseCode) {
-        const total = composite.total_per_pack;
+        const mvPrimary = massVolumePrimaryUnit(stockUnit, innerUnits);
+        const mvQty = shouldAnchorMassVolumeOnInnerUnit(innerUnits)
+          ? composite.inner_value
+          : composite.total_per_pack;
         conversions.push(
           ...expandMassVolumeConversionFamily(
-            stockUnit,
-            total,
+            mvPrimary,
+            mvQty,
             composite.inner_unit,
           ),
         );
-        notes.push(
-          `${composite.outer_count}×${composite.inner_value} ${baseCode} → 1 ${stockUnit} = ${total} ${baseCode}`,
-        );
+        if (shouldAnchorMassVolumeOnInnerUnit(innerUnits)) {
+          notes.push(
+            `1 un = ${composite.inner_value} ${baseCode} (${composite.outer_count}× por ${stockUnit})`,
+          );
+        } else {
+          notes.push(
+            `${composite.outer_count}×${composite.inner_value} ${baseCode} → 1 ${stockUnit} = ${composite.total_per_pack} ${baseCode}`,
+          );
+        }
       }
     } else if (embedded) {
       const embCode = normalizedToCatalogCode(embedded.unit);
       if (embCode) {
-        const totalPerPack = measureQtyPerStockUnit(
+        const mvPrimary = massVolumePrimaryUnit(stockUnit, innerUnits);
+        const mvQty = massVolumeMeasureQty(
           embedded.value,
           stockUnit,
           innerUnits,
         );
         conversions.push(
           ...expandMassVolumeConversionFamily(
-            stockUnit,
-            totalPerPack,
+            mvPrimary,
+            mvQty,
             embedded.unit,
           ),
         );
-        if (innerUnits != null && stockUnit !== "un") {
+        if (shouldAnchorMassVolumeOnInnerUnit(innerUnits)) {
+          notes.push(
+            `1 un = ${embedded.value} ${embCode}` +
+              (innerUnits != null && stockUnit !== "un"
+                ? ` (${innerUnits} un por ${stockUnit})`
+                : ""),
+          );
+        } else if (innerUnits != null && stockUnit !== "un") {
+          const totalPerPack = measureQtyPerStockUnit(
+            embedded.value,
+            stockUnit,
+            innerUnits,
+          );
           notes.push(
             `${innerUnits} un × ${embedded.value} ${embCode} → 1 ${stockUnit} = ${totalPerPack} ${embCode}`,
           );
         } else {
-          notes.push(`1 ${stockUnit} = ${totalPerPack} ${embCode}`);
+          notes.push(`1 ${stockUnit} = ${mvQty} ${embCode}`);
         }
       }
     } else if (invoiceCountable === "mco") {

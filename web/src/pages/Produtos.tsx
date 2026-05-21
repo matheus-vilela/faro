@@ -21,15 +21,6 @@ import {
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +31,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -79,25 +79,25 @@ import {
   convertUnitPriceForProduct,
   getLockedSystemSecondaryQty,
 } from "@/lib/companyUnits/convert";
-import {
-  buildNextConversionsAfterHubChange,
-  computeStockQuantityAfterHubChange,
-} from "@/lib/companyUnits/stockHubUnitChange";
 import { productConversionRowLabel } from "@/lib/companyUnits/productConversionRows";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
   isSystemUnitCode,
 } from "@/lib/companyUnits/productUnitOptions";
+import {
+  buildNextConversionsAfterHubChange,
+  computeStockQuantityAfterHubChange,
+} from "@/lib/companyUnits/stockHubUnitChange";
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import {
   loadProductUnitConversions,
   persistProductUnitConversions,
 } from "@/lib/productUnitConversionsService";
-import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
@@ -1657,7 +1657,9 @@ export function Produtos() {
       toast.error(error.message ?? "Não foi possível excluir o produto.");
       return;
     }
-    toast.success("Produto excluído. Ele deixa de aparecer na lista de ativos.");
+    toast.success(
+      "Produto excluído. Ele deixa de aparecer na lista de ativos.",
+    );
     closeStockSheet();
     fetchProducts();
     void fetchLowStockCount();
@@ -2111,7 +2113,8 @@ export function Produtos() {
                             {
                               company_id: currentCompany?.id ?? "",
                               primary_qty: exampleConvRow.primary_qty,
-                              primary_unit_code: exampleConvRow.primary_unit_code,
+                              primary_unit_code:
+                                exampleConvRow.primary_unit_code,
                               secondary_qty: exampleConvRow.secondary_qty,
                               secondary_unit_code:
                                 exampleConvRow.secondary_unit_code,
@@ -2252,30 +2255,17 @@ export function Produtos() {
                                   ) : null}
 
                                   <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
-                                    <span className="font-mono text-[0.8rem] sm:text-sm">
-                                      {p.sku ? p.sku : "—"}
-                                    </span>
-                                    <span className="mx-2 text-border">·</span>
-                                    <span>Unidade: {p.unit}</span>
-                                    <span className="mx-2 text-border">·</span>
-                                    <span>
-                                      Compra:{" "}
-                                      {p.last_unit_value_unit_code ?? p.unit}
-                                    </span>
-                                    {p.import_unit_needs_review &&
-                                    p.import_unit_raw ? (
+                                    {p.sku && (
                                       <>
+                                        <span className="font-mono text-[0.8rem] sm:text-sm">
+                                          {p.sku ? p.sku : "—"}
+                                        </span>
                                         <span className="mx-2 text-border">
                                           ·
                                         </span>
-                                        <span>XML: {p.import_unit_raw}</span>
                                       </>
-                                    ) : null}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
-                                    Conversões: {convRows.length} · Exemplo:{" "}
-                                    {conversionExample} · Situação:{" "}
-                                    {conversionStatus}
+                                    )}
+                                    <span> Conversões: {convRows.length}</span>
                                   </p>
                                 </div>
 
@@ -3170,47 +3160,47 @@ export function Produtos() {
                       Excluir produto
                     </Button>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full sm:w-auto"
-                      onClick={() => {
-                        productSheetViewRef.current = "summary";
-                        syncStockFormFromProduct(stockProduct);
-                        void (async () => {
-                          const ids = await loadAssignmentsForProduct(
-                            stockProduct.id,
-                          );
-                          setStockProductCategoryIds(ids);
-                          setInitialStockProductCategoryIds(ids);
-                          stockProductCategoryIdsRef.current = ids;
-                        })();
-                        setProductSheetView("summary");
-                        setProductDetailTab("resumo");
-                      }}
-                      disabled={stockSaving}
-                    >
-                      Voltar ao resumo
-                    </Button>
-                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                         className="w-full sm:w-auto"
-                        onClick={closeStockSheet}
+                        onClick={() => {
+                          productSheetViewRef.current = "summary";
+                          syncStockFormFromProduct(stockProduct);
+                          void (async () => {
+                            const ids = await loadAssignmentsForProduct(
+                              stockProduct.id,
+                            );
+                            setStockProductCategoryIds(ids);
+                            setInitialStockProductCategoryIds(ids);
+                            stockProductCategoryIdsRef.current = ids;
+                          })();
+                          setProductSheetView("summary");
+                          setProductDetailTab("resumo");
+                        }}
                         disabled={stockSaving}
                       >
-                        Cancelar
+                        Voltar ao resumo
                       </Button>
-                      <Button
-                        type="button"
-                        className="w-full sm:w-auto"
-                        onClick={handleStockSave}
-                        disabled={stockSaving}
-                      >
-                        {stockSaving ? "Salvando..." : "Salvar"}
-                      </Button>
-                    </div>
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full sm:w-auto"
+                          onClick={closeStockSheet}
+                          disabled={stockSaving}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          type="button"
+                          className="w-full sm:w-auto"
+                          onClick={handleStockSave}
+                          disabled={stockSaving}
+                        >
+                          {stockSaving ? "Salvando..." : "Salvar"}
+                        </Button>
+                      </div>
                     </div>
                   </SheetFooter>
                 </>

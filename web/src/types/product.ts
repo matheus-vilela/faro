@@ -20,6 +20,8 @@ export interface Product {
   average_cost?: number | null
   /** Código para etiqueta (EAN/Code128) */
   barcode?: string | null
+  /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
+  ean?: string | null
   is_active?: boolean
   created_at: string
   updated_at: string

@@ -92,7 +92,7 @@ Deno.test("buildNewProductCatalogFromNfeLine: nome limpo sem 10x1kg", () => {
   assertEquals(r.stockUnit, "fd");
 });
 
-Deno.test("buildNewProductCatalogFromNfeLine: cx + 12un + 500ml → 12 un, 6 l e 6000 ml", () => {
+Deno.test("buildNewProductCatalogFromNfeLine: cx + 12un + 500ml → 12 un, 0,5 l e 500 ml por un", () => {
   const r = buildNewProductCatalogFromNfeLine({
     productName: "AGUA MINERAL 500ML 12UN",
     invoiceUnitRaw: "CX",
@@ -100,7 +100,30 @@ Deno.test("buildNewProductCatalogFromNfeLine: cx + 12un + 500ml → 12 un, 6 l e
   const un = r.conversions.find((c) => c.secondary_unit_code === "un");
   assertEquals(un?.secondary_qty, 12);
   const l = r.conversions.find((c) => c.secondary_unit_code === "l");
-  assertEquals(l?.secondary_qty, 6);
+  assertEquals(l?.primary_unit_code, "un");
+  assertEquals(l?.secondary_qty, 0.5);
   const ml = r.conversions.find((c) => c.secondary_unit_code === "ml");
-  assertEquals(ml?.secondary_qty, 6000);
+  assertEquals(ml?.primary_unit_code, "un");
+  assertEquals(ml?.secondary_qty, 500);
+});
+
+Deno.test("buildNewProductCatalogFromNfeLine: cx 24un + 0,330GFA + uTrib UN → 1 un = 0,33 l e 330 ml", () => {
+  const r = buildNewProductCatalogFromNfeLine({
+    productName: "CERV HEINEKEN 0,330GFA DES 24UN",
+    invoiceUnitRaw: "CX",
+    unitCommercial: "CX",
+    unitTax: "UN",
+    quantityCommercial: 1,
+    quantityTax: 24,
+  });
+  assertEquals(r.stockUnit, "un");
+  const toCx = r.conversions.find((c) => c.secondary_unit_code === "cx");
+  assertEquals(toCx?.primary_qty, 24);
+  assertEquals(toCx?.secondary_qty, 1);
+  const l = r.conversions.find((c) => c.secondary_unit_code === "l");
+  assertEquals(l?.primary_unit_code, "un");
+  assertEquals(l?.secondary_qty, 0.33);
+  const ml = r.conversions.find((c) => c.secondary_unit_code === "ml");
+  assertEquals(ml?.primary_unit_code, "un");
+  assertEquals(ml?.secondary_qty, 330);
 });
