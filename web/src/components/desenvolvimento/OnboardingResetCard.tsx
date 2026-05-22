@@ -17,6 +17,7 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   resetCompanyOnboardingForDev,
+  triggerPdvOnboardingInitialSyncAfterDevReset,
   type DevOnboardingResetTarget,
 } from "@/lib/devOnboardingReset";
 import { FileSpreadsheet, Receipt, RotateCcw } from "lucide-react";
@@ -36,12 +37,12 @@ const TARGET_LABELS: Record<
   pdv: {
     title: "Repor onboarding PDV?",
     description:
-      "Redefine onboarding_pdv (sync ativo, import e vendas zerados, completed false). O card de vendas EPOC volta a aparecer no painel para testar o fluxo PDV. Mantém setup.epoc (credenciais/modo PDV do wizard).",
+      "Redefine onboarding_pdv (import e vendas zerados, completed false) e inicia de imediato a sincronização onboarding_initial no portal EPOC (mês anterior → ontem). O card de vendas volta ao painel. Mantém setup.epoc (credenciais do wizard).",
   },
   both: {
     title: "Repor onboarding fiscal e PDV?",
     description:
-      "Aplica as duas reposições acima na unidade selecionada (inclui limpar o cursor NF-e em focusnfe). Use para reiniciar os dois fluxos de onboarding no dashboard. Mantém setup.epoc.",
+      "Repor fiscal e PDV como acima; no PDV também dispara onboarding_initial no EPOC. Inclui limpar o cursor NF-e em focusnfe. Mantém setup.epoc.",
   },
 };
 
@@ -65,6 +66,28 @@ export function OnboardingResetCard() {
     }
     await refetchCompanies();
     setPendingTarget(null);
+
+    const touchesPdv =
+      pendingTarget === "pdv" || pendingTarget === "both";
+    if (touchesPdv) {
+      const sync = await triggerPdvOnboardingInitialSyncAfterDevReset(
+        currentCompany.id,
+      );
+      if (sync.started) {
+        toast.success(
+          "Onboarding PDV reposto. Sincronização EPOC iniciada em segundo plano — acompanhe no painel.",
+          { duration: 6000 },
+        );
+      } else {
+        toast.warning(
+          sync.error ??
+            "Onboarding PDV reposto, mas a sincronização EPOC não foi iniciada.",
+          { duration: 8000 },
+        );
+      }
+      return;
+    }
+
     toast.success("Onboarding reposto. Confira os cards no painel.");
   };
 

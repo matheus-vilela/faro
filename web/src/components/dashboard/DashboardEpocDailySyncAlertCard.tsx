@@ -51,7 +51,7 @@ export function DashboardEpocDailySyncAlertCard({
 }: {
   companyId: string | undefined;
 }) {
-  const { refetchCompanies } = useCompany();
+  const { currentCompany, refetchCompanies } = useCompany();
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [nowMs] = useState(() => Date.now());
@@ -59,6 +59,7 @@ export function DashboardEpocDailySyncAlertCard({
     !!companyId &&
     isEpocCsvSyncUiBusy(companyId, {
       localSyncing: retrying,
+      onboardingPdv: currentCompany?.onboarding_pdv,
     });
   const [enabled, setEnabled] = useState(false);
   const [settingsRaw, setSettingsRaw] = useState<Record<string, unknown>>({});

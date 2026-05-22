@@ -8,6 +8,7 @@ import {
   type EpocOpenAiMatchAssignment,
   type EpocRecipeCatalogEntry,
 } from "./epocCsvProductMatchOpenAi.ts";
+import { appendProductUnitConversionOnProduct } from "./productUnitConversionsOnProduct.ts";
 import {
   canonicalProductName,
   sanitizeCatalogProductName,
@@ -644,10 +645,6 @@ export async function ensureProductSaleUnitUnConversion(
 ): Promise<void> {
   const hub = (hubUnit || "un").trim().toLowerCase();
   if (hub === "un") return;
-
-  const { appendProductUnitConversionOnProduct } = await import(
-    "./productUnitConversionsOnProduct.ts"
-  );
 
   const secondaryQty =
     unPerStockUnit != null &&

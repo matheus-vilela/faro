@@ -2,6 +2,7 @@ import type { ItemWithProductMatch } from "../../received-whatsapp-message/produ
 import { canonicalProductName } from "../productImport/canonicalName.ts";
 import type { ImportItemResolutionStatus } from "../productImport/resolutionStatus.ts";
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
+import { appendProductUnitConversionOnProduct } from "../productUnitConversionsOnProduct.ts";
 import {
   autoCatalogStockUnitWithOptionalUnPack,
   catalogRegistrationNameFromNfeLine,
@@ -107,9 +108,6 @@ export async function ensureProductForLine(
       "[nfeExpenseMotor]",
     );
   } else if (pack) {
-    const { appendProductUnitConversionOnProduct } = await import(
-      "../productUnitConversionsOnProduct.ts"
-    );
     await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
       primary_qty: 1,
       primary_unit_code: stockUnit,
@@ -182,9 +180,6 @@ export async function createProductAutoWhenNoReviewQueue(
       "[nfeExpenseMotor]",
     );
   } else if (pack) {
-    const { appendProductUnitConversionOnProduct } = await import(
-      "../productUnitConversionsOnProduct.ts"
-    );
     await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
       primary_qty: 1,
       primary_unit_code: stockUnit,

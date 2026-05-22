@@ -3,6 +3,7 @@ import {
   defaultOnboardingPdvRecord,
   mergeOnboardingPdv,
 } from "@/lib/onboardingPdvDefaults";
+import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
 import { supabase } from "@/lib/supabase";
 
 export type DevOnboardingResetTarget = "fiscal" | "pdv" | "both";
@@ -129,4 +130,44 @@ export async function resetCompanyOnboardingForDev(
   if (error) return { error: error.message };
 
   return {};
+}
+
+/**
+ * Dispara `onboarding_initial` após repor PDV (mesmo gatilho do passo 3 do wizard).
+ * Exige integração EPOC ativa com URL base.
+ */
+export async function triggerPdvOnboardingInitialSyncAfterDevReset(
+  companyId: string,
+): Promise<{ started: boolean; error?: string }> {
+  const { data: integ, error: integErr } = await supabase
+    .from("company_integrations")
+    .select("enabled, settings")
+    .eq("company_id", companyId)
+    .eq("provider", "epoc")
+    .maybeSingle();
+  if (integErr) return { started: false, error: integErr.message };
+  if (!integ?.enabled) {
+    return {
+      started: false,
+      error:
+        "Integração EPOC inativa. Configure e ative em Integrações (ou no assistente da unidade).",
+    };
+  }
+  const settings =
+    integ.settings && typeof integ.settings === "object" && !Array.isArray(integ.settings)
+      ? (integ.settings as Record<string, unknown>)
+      : {};
+  if (!String(settings.base_url ?? "").trim()) {
+    return {
+      started: false,
+      error: "URL base do portal EPOC não configurada na integração.",
+    };
+  }
+
+  triggerEpocCsvSyncInBackground(companyId, {
+    sync_mode: "onboarding_initial",
+    lockOnboardingPdv: true,
+    resetPdvOnboardingCompleted: true,
+  });
+  return { started: true };
 }

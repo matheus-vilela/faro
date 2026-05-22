@@ -14,6 +14,7 @@
  *
  * Após cada tentativa atualiza `epoc_daily_sync_last_attempt_*` (dashboard).
  */
+import { isOnboardingPdvSyncInProgress } from "../_shared/onboardingPdvPatch.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
@@ -86,10 +87,35 @@ function isRotacaoDue(settings: Record<string, unknown> | null): boolean {
   return Date.now() - lastMs >= ROTACAO_INTERVAL_MS;
 }
 
+async function companyIdsWithPdvSyncInProgress(
+  admin: ReturnType<typeof createClient>,
+  companyIds: string[],
+): Promise<Set<string>> {
+  const busy = new Set<string>();
+  if (!companyIds.length) return busy;
+  const { data, error } = await admin
+    .from("companies")
+    .select("id, onboarding_pdv")
+    .in("id", companyIds);
+  if (error) {
+    console.warn(LOG, "onboarding_pdv_read_falhou", { message: error.message });
+    return busy;
+  }
+  for (const row of data ?? []) {
+    const id = row.id as string | undefined;
+    if (!id) continue;
+    if (isOnboardingPdvSyncInProgress(row.onboarding_pdv)) busy.add(id);
+  }
+  return busy;
+}
+
 function pickCompanyForRotation(
   rows: IntegrationRow[],
+  pdvSyncBusy: Set<string>,
 ): IntegrationRow | null {
-  const eligible = rows.filter((r) => isRotacaoDue(r.settings));
+  const eligible = rows.filter(
+    (r) => isRotacaoDue(r.settings) && !pdvSyncBusy.has(r.company_id),
+  );
   if (eligible.length === 0) return null;
   eligible.sort((a, b) => rotacaoAtMs(a.settings) - rotacaoAtMs(b.settings));
   return eligible[0] ?? null;
@@ -251,6 +277,10 @@ Deno.serve(async (req) => {
   ];
 
   const totalEnabled = rows.length;
+  const pdvSyncBusy = await companyIdsWithPdvSyncInProgress(
+    admin,
+    rows.map((r) => r.company_id),
+  );
   let selected: IntegrationRow | null = null;
   let skipReason: string | null = null;
 
@@ -266,13 +296,29 @@ Deno.serve(async (req) => {
         404,
       );
     }
+    if (pdvSyncBusy.has(bodyCompanyId)) {
+      console.log(LOG, "rodizio_ignorado_onboarding_pdv_sync", {
+        company_id: bodyCompanyId,
+      });
+      return json({
+        ok: true,
+        skipped: true,
+        reason: "onboarding_pdv.sync em curso — rotina diária indisponível",
+        company_id: bodyCompanyId,
+        companies_enabled: totalEnabled,
+        companies_processed: 0,
+      });
+    }
   } else {
-    selected = pickCompanyForRotation(rows);
+    selected = pickCompanyForRotation(rows, pdvSyncBusy);
     if (!selected) {
-      skipReason =
-        totalEnabled === 0
+      const allBusyPdv =
+        totalEnabled > 0 && rows.every((r) => pdvSyncBusy.has(r.company_id));
+      skipReason = allBusyPdv
+        ? "onboarding_pdv.sync em curso em todas as unidades elegíveis"
+        : totalEnabled === 0
           ? "nenhuma integração EPOC ativa"
-          : "todas as unidades aguardam o próximo dia (última sync ok) ou 12 h após falha";
+          : "todas as unidades aguardam o próximo dia (última sync ok), 12 h após falha ou sync PDV ativo";
       console.log(LOG, "rodizio_sem_unidade", {
         total_enabled: totalEnabled,
         skip: skipReason,

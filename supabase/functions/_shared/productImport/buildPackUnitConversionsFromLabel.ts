@@ -15,6 +15,10 @@ import {
   volumePerCountUnitFromLabelLiters,
 } from "./packSizeFromLabel.ts";
 import {
+  loadProductUnitConversionsFromProduct,
+  persistProductUnitConversionsOnProduct,
+} from "../productUnitConversionsOnProduct.ts";
+import {
   conversionFactorToA,
   normalizeUnitLabel,
   type NormalizedUnitCode,
@@ -495,9 +499,6 @@ export async function insertProductUnitConversions(
   logPrefix: string,
 ): Promise<void> {
   if (!conversions.length) return;
-
-  const { loadProductUnitConversionsFromProduct, persistProductUnitConversionsOnProduct } =
-    await import("../productUnitConversionsOnProduct.ts");
 
   const { data: productRow, error: productErr } = await supabase
     .from("products")

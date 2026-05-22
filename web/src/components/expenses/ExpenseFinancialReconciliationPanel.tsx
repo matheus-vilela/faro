@@ -63,17 +63,24 @@ function Row({
   return (
     <div className="flex justify-between gap-3 text-sm py-0.5 border-b border-border/40 last:border-0">
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="font-medium text-right tabular-nums">{formatCurrency(value)}</span>
+      <span className="font-medium text-right tabular-nums">
+        {formatCurrency(value)}
+      </span>
     </div>
   );
 }
 
-function sortIcmsRows(rows: Array<{ key: string; label: string; value: number }>) {
+function sortIcmsRows(
+  rows: Array<{ key: string; label: string; value: number }>,
+) {
   const rank = (k: string) => {
     const i = ICMS_ORDER.indexOf(k);
     return i === -1 ? 1000 + k.charCodeAt(0) : i;
   };
-  return [...rows].sort((a, b) => rank(a.key) - rank(b.key) || a.label.localeCompare(b.label, "pt-BR"));
+  return [...rows].sort(
+    (a, b) =>
+      rank(a.key) - rank(b.key) || a.label.localeCompare(b.label, "pt-BR"),
+  );
 }
 
 export function ExpenseFinancialReconciliationPanel({
@@ -129,40 +136,56 @@ export function ExpenseFinancialReconciliationPanel({
   const chave = String(data.chave_nfe ?? "").trim();
 
   const stagingAdjusted =
-    data.document_total_adjusted === true || data.document_total_adjusted === "true";
+    data.document_total_adjusted === true ||
+    data.document_total_adjusted === "true";
   const beforeAdj = numOrNull(data.document_total_before);
   const afterAdj = numOrNull(data.document_total_after);
 
-  if (!hasIcms && !hasConferenceBody && !hasTop && !source && !chave && !stagingAdjusted)
+  if (
+    !hasIcms &&
+    !hasConferenceBody &&
+    !hasTop &&
+    !source &&
+    !chave &&
+    !stagingAdjusted
+  )
     return null;
 
   return (
     <div className="rounded-lg border p-4 space-y-4">
       <div>
         <p className="text-sm font-medium">Impostos e totais (NF-e)</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Valores do XML (ICMSTot) e, quando houver, a conferência entre soma das linhas e total da
-          nota.
-        </p>
       </div>
 
       {stagingAdjusted && (beforeAdj != null || afterAdj != null) && (
         <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs space-y-1">
-          <p className="font-medium text-foreground">Total da despesa alinhado ao XML (vNF)</p>
+          <p className="font-medium text-foreground">
+            Total da despesa alinhado ao XML (vNF)
+          </p>
           <p className="text-muted-foreground">
-            O total gravado na despesa foi definido a partir do <span className="font-medium">vNF</span> do
-            bloco ICMSTot da NF-e, quando este valor difere do total vindo só da interpretação das linhas.
+            O total gravado na despesa foi definido a partir do{" "}
+            <span className="font-medium">vNF</span> do bloco ICMSTot da NF-e,
+            quando este valor difere do total vindo só da interpretação das
+            linhas.
           </p>
           {beforeAdj != null && (
             <p>
-              <span className="text-muted-foreground">Total interpretado (antes):</span>{" "}
-              <span className="font-medium tabular-nums">{formatCurrency(beforeAdj)}</span>
+              <span className="text-muted-foreground">
+                Total interpretado (antes):
+              </span>{" "}
+              <span className="font-medium tabular-nums">
+                {formatCurrency(beforeAdj)}
+              </span>
             </p>
           )}
           {afterAdj != null && (
             <p>
-              <span className="text-muted-foreground">Total aplicado (vNF):</span>{" "}
-              <span className="font-medium tabular-nums">{formatCurrency(afterAdj)}</span>
+              <span className="text-muted-foreground">
+                Total aplicado (vNF):
+              </span>{" "}
+              <span className="font-medium tabular-nums">
+                {formatCurrency(afterAdj)}
+              </span>
             </p>
           )}
         </div>
@@ -172,24 +195,33 @@ export function ExpenseFinancialReconciliationPanel({
         <div className="text-xs text-muted-foreground space-y-1">
           {valorTop != null && (
             <p>
-              <span className="text-muted-foreground">Total na interpretação:</span>{" "}
-              <span className="font-medium text-foreground">{formatCurrency(valorTop)}</span>
+              <span className="text-muted-foreground">
+                Total na interpretação:
+              </span>{" "}
+              <span className="font-medium text-foreground">
+                {formatCurrency(valorTop)}
+              </span>
             </p>
           )}
           {docTotal != null && docTotal !== valorTop && (
             <p>
-              <span className="text-muted-foreground">Total do documento (conferência):</span>{" "}
-              <span className="font-medium text-foreground">{formatCurrency(docTotal)}</span>
+              <span className="text-muted-foreground">
+                Total do documento (conferência):
+              </span>{" "}
+              <span className="font-medium text-foreground">
+                {formatCurrency(docTotal)}
+              </span>
             </p>
           )}
-          {source && (
+          {/* {source && (
             <p>
               Origem: <span className="font-mono text-foreground">{source}</span>
             </p>
-          )}
+          )} */}
           {chave && (
             <p className="break-all">
-              Chave NF-e: <span className="font-mono text-foreground">{chave}</span>
+              Chave NF-e:{" "}
+              <span className="font-mono text-foreground">{chave}</span>
             </p>
           )}
         </div>
@@ -197,12 +229,14 @@ export function ExpenseFinancialReconciliationPanel({
 
       {hasIcms && (
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-            ICMSTot (XML)
-          </p>
           <div className="rounded-md bg-muted/30 px-3 py-2 space-y-0">
             {sortIcmsRows(icmsRows).map((r) => (
-              <Row key={r.key} label={r.label} value={r.value} formatCurrency={formatCurrency} />
+              <Row
+                key={r.key}
+                label={r.label}
+                value={r.value}
+                formatCurrency={formatCurrency}
+              />
             ))}
           </div>
         </div>
@@ -215,10 +249,18 @@ export function ExpenseFinancialReconciliationPanel({
           </p>
           <div className="rounded-md bg-muted/30 px-3 py-2 space-y-0">
             {lineSum != null && lineSum !== 0 && (
-              <Row label="Soma das linhas" value={lineSum} formatCurrency={formatCurrency} />
+              <Row
+                label="Soma das linhas"
+                value={lineSum}
+                formatCurrency={formatCurrency}
+              />
             )}
             {plusFrete != null && plusFrete !== 0 && (
-              <Row label="(+) Frete" value={plusFrete} formatCurrency={formatCurrency} />
+              <Row
+                label="(+) Frete"
+                value={plusFrete}
+                formatCurrency={formatCurrency}
+              />
             )}
             {minusDiscount != null && minusDiscount !== 0 && (
               <Row
@@ -228,10 +270,18 @@ export function ExpenseFinancialReconciliationPanel({
               />
             )}
             {plusOther != null && plusOther !== 0 && (
-              <Row label="(+) Outros (XML)" value={plusOther} formatCurrency={formatCurrency} />
+              <Row
+                label="(+) Outros (XML)"
+                value={plusOther}
+                formatCurrency={formatCurrency}
+              />
             )}
             {docTotal != null && docTotal !== 0 && (
-              <Row label="Total da nota (vNF)" value={docTotal} formatCurrency={formatCurrency} />
+              <Row
+                label="Total da nota (vNF)"
+                value={docTotal}
+                formatCurrency={formatCurrency}
+              />
             )}
             {delta != null && delta !== 0 && (
               <Row

@@ -1,6 +1,7 @@
+import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
+import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { supabase } from "@/lib/supabase";
 import { shouldKeepOnboardingPdvSync } from "@/lib/onboardingPdvDefaults";
-import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { toast } from "sonner";
 
 function coerceInvokeResponse(
@@ -100,6 +101,25 @@ export async function invokeEpocCsvSync(
   companyId: string,
   options?: InvokeEpocCsvSyncOptions,
 ): Promise<EpocSyncCsvResponse> {
+  const isDailySync = options?.sync_mode === "previous_day";
+  if (isDailySync) {
+    const { data: row, error: readErr } = await supabase
+      .from("companies")
+      .select("onboarding_pdv")
+      .eq("id", companyId)
+      .maybeSingle();
+    if (readErr) {
+      return { ok: false, error: readErr.message };
+    }
+    if (isOnboardingPdvSyncInProgress(row?.onboarding_pdv)) {
+      return {
+        ok: false,
+        error:
+          "Sincronização PDV do onboarding em curso. A rotina diária EPOC não pode executar agora.",
+      };
+    }
+  }
+
   const lockOnboardingPdv = options?.lockOnboardingPdv === true;
   const isOnboardingFlow =
     lockOnboardingPdv || options?.sync_mode === "onboarding_initial";

@@ -328,7 +328,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
           </div>
         </div>
 
-        {!awaitingSefazEstimate && (
+        {!awaitingSefazEstimate && !interpretConfirmPhase && (
           <div className={theme.progressTrack}>
             <div
               className={theme.progressFill}

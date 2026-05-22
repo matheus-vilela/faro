@@ -34,7 +34,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { getNfeExpenseValueBreakdown } from "@/lib/expenseDivergenceUi";
@@ -99,12 +98,30 @@ function BoletoLinkedBlock({
   onVerBoleto: () => void;
 }) {
   return (
-    <div className="rounded-lg border p-4 space-y-2">
+    <div
+      className="rounded-lg border p-4 space-y-2 cursor-pointer transition-colors hover:bg-muted/40"
+      role="button"
+      tabIndex={0}
+      onClick={onVerBoleto}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onVerBoleto();
+        }
+      }}
+    >
       <p className="font-medium">Boleto vinculado</p>
       <p className="text-sm text-muted-foreground">
         {boleto.description} • {formatCurrency(boleto.amount)}
       </p>
-      <Button variant="outline" size="sm" onClick={onVerBoleto}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={(e) => {
+          e.stopPropagation();
+          onVerBoleto();
+        }}
+      >
         Ver boleto
       </Button>
     </div>
@@ -828,10 +845,7 @@ export function ExpenseDetailSheet({
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
-          className={cn(
-            "overflow-y-auto sm:max-w-lg",
-            elevated && "z-[70]",
-          )}
+          className={cn("overflow-y-auto sm:max-w-lg", elevated && "z-[70]")}
           overlayClassName={elevated ? "z-[70]" : undefined}
         >
           {loading && (
@@ -870,7 +884,23 @@ export function ExpenseDetailSheet({
                       "Sem fornecedor"}
                   </span>
                   {linkedBoletoForDetail ? (
-                    <Badge variant="default" className="bg-green-600 shrink-0">
+                    <Badge
+                      variant="default"
+                      className="bg-green-600 shrink-0 cursor-pointer hover:bg-green-700"
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBoletoResumo(linkedBoletoForDetail);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setBoletoResumo(linkedBoletoForDetail);
+                        }
+                      }}
+                    >
                       Boleto vinculado
                     </Badge>
                   ) : (
@@ -1188,7 +1218,7 @@ export function ExpenseDetailSheet({
                   </SheetFooter>
                 </form>
               ) : (
-                <div className="space-y-6 py-6">
+                <div className="space-y-1 pb-6">
                   <ExpenseRecordedDivergenceBanner
                     documentTotal={detailExpense.document_total}
                     sumLines={detailLineSum}
@@ -1199,7 +1229,7 @@ export function ExpenseDetailSheet({
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
 
-                  <div className="grid gap-4 text-sm">
+                  <div className="grid gap-2 text-sm">
                     <div>
                       <span className="text-muted-foreground">Tipo:</span>{" "}
                       {detailExpense.type === "nota_fiscal"
@@ -1289,7 +1319,7 @@ export function ExpenseDetailSheet({
                         ) : null}
                       </div>
                     )}
-                    <div>
+                    <div className="mt-2">
                       <span className="text-muted-foreground">Status:</span>{" "}
                       <Badge
                         variant={
@@ -1308,40 +1338,7 @@ export function ExpenseDetailSheet({
                         </span>
                       )}
                     </div>
-                    <div className="rounded-lg border border-border/80 bg-muted/20 p-3 space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Fluxo de caixa e alertas
-                      </p>
-                      <div>
-                        <span className="text-muted-foreground">
-                          Categoria:
-                        </span>{" "}
-                        <span className="text-foreground">
-                          {linkedBoletoForDetail
-                            ? formatBoletoCategoryLabel(
-                                linkedBoletoForDetail,
-                                categoriesById,
-                              )
-                            : "—"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">
-                          Vencimento:
-                        </span>{" "}
-                        <span className="text-foreground">
-                          {linkedBoletoForDetail
-                            ? formatDate(linkedBoletoForDetail.due_date)
-                            : "—"}
-                        </span>
-                      </div>
-                      {!linkedBoletoForDetail && (
-                        <p className="text-xs text-muted-foreground">
-                          Categoria e vencimento vêm do boleto vinculado. Use o
-                          ícone na lista de despesas para vincular.
-                        </p>
-                      )}
-                    </div>
+
                     {detailExpense.expense_source === "whatsapp" &&
                       detailExpense.status === "pending" &&
                       isOwner && (
@@ -1376,7 +1373,9 @@ export function ExpenseDetailSheet({
                         </div>
                       )}
                     <div>
-                      <span className="text-muted-foreground">Criada em:</span>{" "}
+                      <span className="text-muted-foreground">
+                        Cadastrada em:
+                      </span>{" "}
                       {formatDate(detailExpense.created_at)}
                     </div>
                     {detailExpense.notes && (
@@ -1562,7 +1561,7 @@ export function ExpenseDetailSheet({
                           </tbody>
                         </table>
                       </div>
-                      <p className="text-right font-medium mt-2">
+                      {/* <p className="text-right font-medium mt-2">
                         Total:{" "}
                         {formatCurrency(
                           detailExpense.expense_items!.reduce(
@@ -1571,7 +1570,7 @@ export function ExpenseDetailSheet({
                             0,
                           ),
                         )}
-                      </p>
+                      </p> */}
                     </div>
                   )}
 
@@ -1628,7 +1627,10 @@ export function ExpenseDetailSheet({
         open={!!boletoResumo}
         onOpenChange={(o) => !o && setBoletoResumo(null)}
       >
-        <SheetContent className="sm:max-w-md">
+        <SheetContent
+          className={cn("sm:max-w-md", elevated && "z-[80]")}
+          overlayClassName={elevated ? "z-[80]" : undefined}
+        >
           {boletoResumo && (
             <>
               <SheetHeader>

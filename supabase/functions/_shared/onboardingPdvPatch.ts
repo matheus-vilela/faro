@@ -38,6 +38,12 @@ export function onboardingPdvPatchAllowed(raw: unknown): boolean {
   return (raw as Record<string, unknown>).completed !== true;
 }
 
+/** `onboarding_pdv.sync === true` — onboarding PDV em curso; bloqueia rotina diária EPOC. */
+export function isOnboardingPdvSyncInProgress(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  return (raw as Record<string, unknown>).sync === true;
+}
+
 /** Import CSV de vendas ainda não terminou (fila, chunks ou linhas em falta). */
 export function isOnboardingPdvImportInProgress(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;

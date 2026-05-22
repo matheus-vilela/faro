@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import {
+  isOnboardingPdvSyncInProgress,
   patchOnboardingPdv,
   type OnboardingPdvPatch,
 } from "../_shared/onboardingPdvPatch.ts";
@@ -778,6 +779,27 @@ Deno.serve(async (req) => {
   }
   if (!integ.enabled) {
     return json({ ok: false, error: "Integração inativa" }, 400);
+  }
+
+  if (syncMode === "previous_day") {
+    const { data: companyRow, error: companyErr } = await admin
+      .from("companies")
+      .select("onboarding_pdv")
+      .eq("id", companyId)
+      .maybeSingle();
+    if (companyErr) {
+      return json({ ok: false, error: companyErr.message }, 500);
+    }
+    if (isOnboardingPdvSyncInProgress(companyRow?.onboarding_pdv)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "Sincronização PDV do onboarding em curso. A rotina diária EPOC não pode executar agora.",
+        },
+        409,
+      );
+    }
   }
 
   /** Só o fluxo `onboarding_initial` atualiza `onboarding_pdv` (card do dashboard). */
