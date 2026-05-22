@@ -1,5 +1,6 @@
 import type { ItemWithProductMatch } from "../../received-whatsapp-message/productMatch.ts";
 import { canonicalProductName } from "../productImport/canonicalName.ts";
+import { invoiceLabelMatchesMergedCatalog } from "../productImport/mergedCatalogMatch.ts";
 import type { ImportItemResolutionStatus } from "../productImport/resolutionStatus.ts";
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
 import { appendProductUnitConversionOnProduct } from "../productUnitConversionsOnProduct.ts";
@@ -12,6 +13,45 @@ import type { NfeCatalogLineResolution } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
+
+/** Evita duplicar cadastro quando o nome bate com canonical_name ou alias de merge. */
+export async function findExistingProductIdForCatalogName(
+  supabase: SupabaseClient,
+  companyId: string,
+  catalogName: string,
+): Promise<string | null> {
+  const cn = canonicalProductName(catalogName);
+  if (cn) {
+    const { data: dup } = await supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("canonical_name", cn)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (dup?.id) return String(dup.id);
+  }
+
+  const { data: rows, error } = await supabase
+    .from("products")
+    .select("id, merged_catalog_names")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .not("merged_catalog_names", "eq", "{}");
+
+  if (error) {
+    console.error("[nfeExpenseMotor] merged catalog lookup:", error.message);
+    return null;
+  }
+
+  for (const row of rows ?? []) {
+    const merged = row.merged_catalog_names as string[] | null;
+    if (invoiceLabelMatchesMergedCatalog(catalogName, merged)) {
+      return String(row.id);
+    }
+  }
+  return null;
+}
 
 export function mapResolution(
   pm: NonNullable<ItemWithProductMatch["productMatch"]> | undefined,
@@ -58,18 +98,14 @@ export async function ensureProductForLine(
   const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
-  const cn = canonicalProductName(name);
-  if (cn) {
-    const { data: dup } = await supabase
-      .from("products")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("canonical_name", cn)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (dup?.id) return { productId: String(dup.id), created: false };
-  }
+  const existingId = await findExistingProductIdForCatalogName(
+    supabase,
+    companyId,
+    name,
+  );
+  if (existingId) return { productId: existingId, created: false };
 
+  const cn = canonicalProductName(name);
   const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
     item,
     pm,
@@ -127,22 +163,18 @@ export async function createProductAutoWhenNoReviewQueue(
   const name = catalogRegistrationNameFromNfeLine(item, pm);
   if (!name) return { productId: null, created: false };
 
+  const existingId = await findExistingProductIdForCatalogName(
+    supabase,
+    companyId,
+    name,
+  );
+  if (existingId) return { productId: existingId, created: false };
+
+  const cn = canonicalProductName(name);
   const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
     item,
     pm,
   );
-  const cn = canonicalProductName(name);
-  if (cn) {
-    const { data: dup } = await supabase
-      .from("products")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("canonical_name", cn)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (dup?.id) return { productId: String(dup.id), created: false };
-  }
-
   const insertRow: Record<string, unknown> = {
     company_id: companyId,
     name,

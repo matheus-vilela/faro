@@ -3,7 +3,7 @@ import {
   applySecondarySignals,
   digitsOnly,
   isFlavorOnlyCatalogInsideCompositeInvoice,
-  scoreNameMatch,
+  scoreNameMatchIncludingMergedAliases,
 } from "../_shared/productImport/matchingScore.ts";
 import { beverageSkuVolumeConflict } from "../_shared/productImport/beverageSkuIdentity.ts";
 import {
@@ -62,6 +62,7 @@ export type ProductRow = {
   unit: string | null;
   barcode?: string | null;
   ncm?: string | null;
+  merged_catalog_names?: string[] | null;
 };
 
 export type ItemWithProductMatch = ExtractedExpenseItem & {
@@ -688,7 +689,7 @@ export async function resolveProductMatches(
 
   const { data: prodRows, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, unit, barcode, ncm")
+    .select("id, name, unit, barcode, ncm, merged_catalog_names")
     .eq("company_id", companyId)
     .eq("is_active", true);
 
@@ -970,7 +971,11 @@ export async function resolveProductMatches(
     const scoredList: Scored[] = [];
 
     for (const p of products) {
-      let sc = scoreNameMatch(name, p.name);
+      let sc = scoreNameMatchIncludingMergedAliases(
+        name,
+        p.name,
+        p.merged_catalog_names,
+      );
       const sec = applySecondarySignals({
         baseScore: sc,
         invoiceNcm: itemNcm,
@@ -1132,7 +1137,11 @@ export async function resolveProductMatches(
     const LLM_LINK_MIN_SCORE = 52;
     const LLM_LINK_MIN_NAME_SCORE = 42;
     const safeForLink = (s: Scored) => {
-      const nameOnly = scoreNameMatch(name, s.product.name);
+      const nameOnly = scoreNameMatchIncludingMergedAliases(
+        name,
+        s.product.name,
+        s.product.merged_catalog_names,
+      );
       return (
         s.score >= LLM_LINK_MIN_SCORE &&
         nameOnly >= LLM_LINK_MIN_NAME_SCORE &&

@@ -95,6 +95,13 @@ export function ProductIdentificationSummary({
         <CompactField label="Código de barras">
           <BarcodeDetail product={product} />
         </CompactField>
+        {product.ncm?.trim() ? (
+          <CompactField label="NCM">
+            <span className="block font-mono text-xs font-medium text-foreground">
+              {product.ncm.trim()}
+            </span>
+          </CompactField>
+        ) : null}
         <CompactField label="CMV">
           <Badge
             variant="secondary"
@@ -114,6 +121,12 @@ export function ProductIdentificationSummary({
           </span>
         </CompactField>
       </div>
+      {(product.merged_catalog_names?.length ?? 0) > 0 ? (
+        <p className="mt-2 text-[0.65rem] leading-snug text-muted-foreground">
+          Também reconhecido como:{" "}
+          {product.merged_catalog_names!.join(" · ")}
+        </p>
+      ) : null}
     </div>
   );
 }

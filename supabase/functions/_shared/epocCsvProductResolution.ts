@@ -13,6 +13,7 @@ import {
   canonicalProductName,
   sanitizeCatalogProductName,
 } from "./productImport/canonicalName.ts";
+import { invoiceLabelMatchesMergedCatalog } from "./productImport/mergedCatalogMatch.ts";
 
 /** Score mínimo (0–100) para match fuzzy legado (não usado no fluxo EPOC). */
 export const EPOC_FUZZY_MATCH_MIN_SCORE = 82;
@@ -302,7 +303,35 @@ export async function lookupActiveProductIdByCanonical(
     );
     return null;
   }
-  return data?.id ? String(data.id) : null;
+  if (data?.id) return String(data.id);
+
+  const { data: mergedRows, error: mergedErr } = await admin
+    .from("products")
+    .select("id, merged_catalog_names")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .not("merged_catalog_names", "eq", "{}");
+
+  if (mergedErr) {
+    console.error(
+      "[epocCsvProductResolution] merged catalog lookup:",
+      mergedErr.message,
+    );
+    return null;
+  }
+
+  const label = catalogName || rawName;
+  for (const row of mergedRows ?? []) {
+    if (
+      invoiceLabelMatchesMergedCatalog(
+        label,
+        row.merged_catalog_names as string[] | null,
+      )
+    ) {
+      return String(row.id);
+    }
+  }
+  return null;
 }
 
 export function productIdCacheToMetadata(

@@ -89,6 +89,8 @@ function levenshtein(a: string, b: string): number {
   return dp[m]![n]!
 }
 
+export { scoreNameMatchIncludingMergedAliases } from "./mergedCatalogMatch.ts"
+
 /** 0–100 — compara nomes (rótulo + canônico + Levenshtein). */
 export function scoreNameMatch(
   invoiceLine: string | null | undefined,

@@ -36,4 +36,10 @@ export interface Product {
   import_unit_needs_review?: boolean
   /** Conversões entre unidade de estoque e unidades secundárias (JSON no produto). */
   unit_conversions?: unknown
+  /** Nomes de produtos unificados neste cadastro (importação automática). */
+  merged_catalog_names?: string[]
+  ncm?: string | null
+  cfop?: string | null
+  csosn?: string | null
+  canonical_name?: string | null
 }

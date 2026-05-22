@@ -12,6 +12,7 @@ import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
+import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
   PRODUCT_SHEET_INPUT,
   PRODUCT_SHEET_SECTION,
@@ -19,6 +20,7 @@ import {
   PRODUCT_SHEET_TILE,
 } from "@/components/products/productSheetStyles";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
+import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
 import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
@@ -113,7 +115,9 @@ import {
   Download,
   FileSpreadsheet,
   History,
+  Truck,
   LayoutGrid,
+  Merge,
   Package,
   Pencil,
   Plus,
@@ -419,7 +423,7 @@ export function Produtos() {
   );
   /** Abas dentro do detalhe do produto (vista resumo). */
   const [productDetailTab, setProductDetailTab] = useState<
-    "resumo" | "historico"
+    "resumo" | "historico" | "fornecedores"
   >("resumo");
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
@@ -489,6 +493,7 @@ export function Produtos() {
   >({});
   const [stockSaving, setStockSaving] = useState(false);
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
+  const [productMergeOpen, setProductMergeOpen] = useState(false);
   const [stockDeleting, setStockDeleting] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
@@ -2396,7 +2401,16 @@ export function Produtos() {
               {stockProduct && productSheetView === "summary" && (
                 <>
                   <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
-                    <div className="mb-4 flex justify-end">
+                    <div className="mb-4 flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setProductMergeOpen(true)}
+                      >
+                        <Merge className="h-4 w-4 mr-2" />
+                        Unificar com outro
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
@@ -2525,6 +2539,21 @@ export function Produtos() {
                     >
                       <History className="h-4 w-4 shrink-0" />
                       Histórico
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={productDetailTab === "fornecedores"}
+                      onClick={() => setProductDetailTab("fornecedores")}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                        productDetailTab === "fornecedores"
+                          ? "border-primary text-foreground"
+                          : "border-transparent text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Truck className="h-4 w-4 shrink-0" />
+                      Fornecedores
                     </button>
                   </div>
 
@@ -2681,7 +2710,7 @@ export function Produtos() {
                             </div>
                           )}
                       </div>
-                    ) : (
+                    ) : productDetailTab === "historico" ? (
                       <div className="space-y-4 p-6">
                         <ProductStockMovementHistorySection
                           productId={stockProduct.id}
@@ -2689,6 +2718,21 @@ export function Produtos() {
                           active={productDetailTab === "historico"}
                           className={SHEET_SECTION}
                         />
+                      </div>
+                    ) : (
+                      <div className="space-y-4 p-6">
+                        {currentCompany?.id ? (
+                          <ProductSuppliersSection
+                            productId={stockProduct.id}
+                            companyId={currentCompany.id}
+                            active={productDetailTab === "fornecedores"}
+                            className={SHEET_SECTION}
+                          />
+                        ) : (
+                          <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
+                            Selecione uma empresa para ver os fornecedores.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -3272,6 +3316,29 @@ export function Produtos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {currentCompany?.id && stockProduct ? (
+        <ProductMergeDialog
+          open={productMergeOpen}
+          onOpenChange={setProductMergeOpen}
+          companyId={currentCompany.id}
+          sourceProduct={stockProduct}
+          formatCurrency={formatCurrency}
+          onMerged={async (winnerId) => {
+            await fetchProducts();
+            const { data } = await supabase
+              .from("products")
+              .select("*")
+              .eq("id", winnerId)
+              .maybeSingle();
+            if (data) {
+              openStockSheet(data as Product);
+            } else {
+              closeStockSheet();
+            }
+          }}
+        />
+      ) : null}
     </PageShell>
   );
 }
