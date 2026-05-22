@@ -117,6 +117,90 @@ const EXPENSE_SELECT = `
   suppliers (id, name, document, sales_contact_name, sales_whatsapp, commercial_manager)
 `;
 
+type ExpenseItemStockRow = {
+  id?: string;
+  product_id?: string | null;
+  stock_added?: boolean;
+  quantity: number;
+  stock_quantity?: number | null;
+  unit_value?: number;
+};
+
+function expenseItemStockQty(it: ExpenseItemStockRow): number {
+  const sq = it.stock_quantity;
+  if (sq != null && Number(sq) > 0) return Number(sq);
+  return Number(it.quantity);
+}
+
+async function reverseExpenseItemStock(it: ExpenseItemStockRow): Promise<void> {
+  if (!it.product_id) return;
+  await supabase.rpc("adjust_product_stock", {
+    p_product_id: it.product_id,
+    p_delta: -expenseItemStockQty(it),
+    p_type: "out",
+    p_reference_type: "expense_item",
+    p_reference_id: it.id ?? null,
+  });
+}
+
+async function applyExpenseItemStockIn(it: ExpenseItemStockRow): Promise<void> {
+  if (!it.product_id) return;
+  const delta = expenseItemStockQty(it);
+  if (delta <= 0) return;
+  await supabase.rpc("adjust_product_stock", {
+    p_product_id: it.product_id,
+    p_delta: delta,
+    p_type: "in",
+    p_reference_type: "expense_item",
+    p_reference_id: it.id ?? null,
+    p_unit_value:
+      it.unit_value != null && Number(it.unit_value) >= 0
+        ? Number(it.unit_value)
+        : null,
+  });
+}
+
+/** Transfere estoque entre produtos ou ajusta quantidade só na linha alterada. */
+async function syncExpenseItemStockOnEdit(
+  old: ExpenseItemStockRow,
+  it: {
+    id?: string;
+    product_id?: string | null;
+    quantity: number;
+    unit_value: number;
+    stock_quantity?: number | null;
+  },
+): Promise<boolean> {
+  const oldPid = old.product_id ?? null;
+  const newPid = it.product_id || null;
+  const productChanged = oldPid !== newPid;
+  const qtyChanged = Number(old.quantity) !== Number(it.quantity);
+  const hadStock = !!(old.product_id && old.stock_added);
+
+  if (!hadStock) {
+    return !!(old.stock_added && !productChanged && !qtyChanged);
+  }
+
+  if (!productChanged && !qtyChanged) {
+    return true;
+  }
+
+  await reverseExpenseItemStock(old);
+
+  if (!newPid) {
+    return false;
+  }
+
+  await applyExpenseItemStockIn({
+    id: it.id,
+    product_id: newPid,
+    quantity: it.quantity,
+    stock_quantity: qtyChanged ? undefined : old.stock_quantity,
+    unit_value: it.unit_value,
+  });
+  return true;
+}
+
 type ExpenseDetailSheetProps = {
   expenseId: string | null;
   onClose: () => void;
@@ -348,9 +432,36 @@ export function ExpenseDetailSheet({
   const handleLinkItemSave = async () => {
     if (!linkItem?.id || !linkProductId) return;
     setLinkSaving(true);
+    const oldItem = detailExpense?.expense_items?.find(
+      (i) => i.id === linkItem.id,
+    );
+    const oldPid = oldItem?.product_id ?? null;
+    const hadStock = !!(oldPid && oldItem?.stock_added);
+
+    if (hadStock && oldPid !== linkProductId) {
+      await reverseExpenseItemStock({
+        id: linkItem.id,
+        product_id: oldPid,
+        stock_added: true,
+        quantity: Number(oldItem!.quantity),
+        stock_quantity: oldItem!.stock_quantity ?? undefined,
+        unit_value: Number(oldItem!.unit_value),
+      });
+      await applyExpenseItemStockIn({
+        id: linkItem.id,
+        product_id: linkProductId,
+        quantity: Number(linkItem.quantity),
+        stock_quantity: oldItem!.stock_quantity ?? undefined,
+        unit_value: Number(linkItem.unit_value),
+      });
+    }
+
     const { error } = await supabase
       .from("expense_items")
-      .update({ product_id: linkProductId, stock_added: false })
+      .update({
+        product_id: linkProductId,
+        stock_added: hadStock,
+      })
       .eq("id", linkItem.id);
     setLinkSaving(false);
     if (error) {
@@ -482,6 +593,7 @@ export function ExpenseDetailSheet({
             id: it.id,
             product_id: it.product_id ?? undefined,
             stock_added: it.stock_added ?? false,
+            stock_quantity: it.stock_quantity ?? undefined,
             product_name: it.product_name ?? "",
             quantity: Number(it.quantity),
             unit_value: Number(it.unit_value),
@@ -604,47 +716,77 @@ export function ExpenseDetailSheet({
       return;
     }
 
-    const oldItems = (detailExpense.expense_items ?? []) as Array<{
-      id?: string;
-      product_id?: string | null;
-      stock_added?: boolean;
-      quantity: number;
-    }>;
-
-    for (const it of oldItems) {
-      if (it.product_id && it.stock_added) {
-        const qty = Number(it.quantity);
-        await supabase.rpc("adjust_product_stock", {
-          p_product_id: it.product_id,
-          p_delta: -qty,
-          p_type: "out",
-          p_reference_type: "expense_item",
-          p_reference_id: it.id ?? null,
-        });
-      }
-    }
-
-    await supabase
-      .from("expense_items")
-      .delete()
-      .eq("expense_id", detailExpense.id);
+    const oldItems: ExpenseItemStockRow[] = (
+      detailExpense.expense_items ?? []
+    ).map((row) => ({
+      id: row.id,
+      product_id: row.product_id,
+      stock_added: row.stock_added,
+      quantity: Number(row.quantity),
+      stock_quantity: row.stock_quantity,
+      unit_value: Number(row.unit_value),
+    }));
+    const oldById = new Map(
+      oldItems.filter((it) => it.id).map((it) => [it.id as string, it]),
+    );
+    const keptEditIds = new Set<string>();
 
     for (const it of editItems) {
       const productId = it.product_id || null;
-      const { data: inserted } = await supabase
-        .from("expense_items")
-        .insert({
-          company_id: detailExpense.company_id,
-          expense_id: detailExpense.id,
-          product_name: it.product_name,
+
+      if (it.id && oldById.has(it.id)) {
+        keptEditIds.add(it.id);
+        const old = oldById.get(it.id)!;
+        const stockAdded = await syncExpenseItemStockOnEdit(old, {
+          id: it.id,
+          product_id: productId,
           quantity: it.quantity,
           unit_value: it.unit_value,
-          product_id: productId,
-          stock_added: false,
-        })
-        .select("id")
-        .single();
-      void inserted;
+          stock_quantity: it.stock_quantity,
+        });
+
+        const { error: itemErr } = await supabase
+          .from("expense_items")
+          .update({
+            product_name: it.product_name,
+            quantity: it.quantity,
+            unit_value: it.unit_value,
+            product_id: productId,
+            stock_added: stockAdded,
+          })
+          .eq("id", it.id);
+        if (itemErr) {
+          console.error(itemErr);
+          toast.error(itemErr.message ?? "Não foi possível atualizar um item.");
+          setEditSaving(false);
+          return;
+        }
+        continue;
+      }
+
+      const { error: insErr } = await supabase.from("expense_items").insert({
+        company_id: detailExpense.company_id,
+        expense_id: detailExpense.id,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_value: it.unit_value,
+        product_id: productId,
+        stock_added: false,
+      });
+      if (insErr) {
+        console.error(insErr);
+        toast.error(insErr.message ?? "Não foi possível adicionar um item.");
+        setEditSaving(false);
+        return;
+      }
+    }
+
+    for (const old of oldItems) {
+      if (!old.id || keptEditIds.has(old.id)) continue;
+      if (old.product_id && old.stock_added) {
+        await reverseExpenseItemStock(old);
+      }
+      await supabase.from("expense_items").delete().eq("id", old.id);
     }
 
     const { data: updated } = await supabase

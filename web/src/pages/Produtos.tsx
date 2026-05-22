@@ -2577,75 +2577,20 @@ export function Produtos() {
                             </div>
                             <div className={SHEET_TILE}>
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                {stockPricePresentation.average != null &&
-                                stockPricePresentation.last != null
-                                  ? "Custos"
-                                  : stockPricePresentation.average != null
-                                    ? "Preço médio"
-                                    : stockPricePresentation.last != null
-                                      ? "Último preço"
-                                      : "Preço"}
+                                Último preço
                               </p>
                               <div className="mt-2 space-y-2.5 text-base font-semibold tabular-nums leading-snug text-foreground sm:text-lg">
-                                {stockPricePresentation.average != null &&
-                                stockPricePresentation.last != null ? (
-                                  <>
-                                    <div>
-                                      <p className="text-xs font-normal text-muted-foreground">
-                                        Preço médio
-                                      </p>
-                                      <p>
-                                        {formatCurrency(
-                                          stockPricePresentation.average,
-                                        )}
-                                        <span className="text-xs font-normal text-muted-foreground">
-                                          {" "}
-                                          por {stockProduct.unit}
-                                        </span>
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-normal text-muted-foreground">
-                                        Último preço
-                                      </p>
-                                      <p>
-                                        {formatCurrency(
-                                          stockPricePresentation.last,
-                                        )}
-                                        <span className="text-xs font-normal text-muted-foreground">
-                                          {" "}
-                                          por{" "}
-                                          {stockPricePresentation.lastUnitCode ??
-                                            stockProduct.unit}
-                                        </span>
-                                      </p>
-                                    </div>
-                                  </>
-                                ) : stockPricePresentation.average != null ? (
-                                  <p>
-                                    {formatCurrency(
-                                      stockPricePresentation.average,
-                                    )}
-                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
-                                      por {stockProduct.unit}
-                                    </span>
-                                  </p>
-                                ) : stockPricePresentation.last != null ? (
-                                  <p>
-                                    {formatCurrency(
-                                      stockPricePresentation.last,
-                                    )}
-                                    <span className="block text-xs font-normal text-muted-foreground sm:inline sm:ml-1">
-                                      por{" "}
-                                      {stockPricePresentation.lastUnitCode ??
-                                        stockProduct.unit}
-                                    </span>
-                                  </p>
-                                ) : (
-                                  <span className="text-muted-foreground">
-                                    —
+                                <p>
+                                  {formatCurrency(
+                                    stockPricePresentation.last ?? 0,
+                                  )}
+                                  <span className="text-xs font-normal text-muted-foreground">
+                                    {" "}
+                                    por{" "}
+                                    {stockPricePresentation.lastUnitCode ??
+                                      stockProduct.unit}
                                   </span>
-                                )}
+                                </p>
                               </div>
                             </div>
                             <div

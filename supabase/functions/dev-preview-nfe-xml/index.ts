@@ -1,5 +1,5 @@
 /**
- * Laboratório: pré-visualiza NF-e a partir de XML (dados do parse + valor unitário efetivo).
+ * Laboratório: pré-visualiza NF-e (parse, valor unitário, dry-run interpret staging).
  *
  * POST multipart: `company_id`, `file` (.xml). JWT + `user_companies`.
  */
@@ -83,5 +83,7 @@ Deno.serve(async (req) => {
   return handleDevPreview({
     fileName: file.name || "nota.xml",
     xmlText,
+    companyId,
+    admin: supabase,
   });
 });

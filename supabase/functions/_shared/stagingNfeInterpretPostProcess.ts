@@ -38,6 +38,189 @@ type SupabaseAdmin = any;
 
 const LOG = "[focus-get-sync-nfe-interpret-staging|post]";
 
+export type StagingInterpretPreviewPlannedProduct = {
+  preview_product_id: string;
+  name: string;
+  unit: string;
+  ncm: string;
+  cfop: string | null;
+  csosn: string | null;
+  ean: string | null;
+  conversions: Array<{
+    primary_qty: number;
+    primary_unit_code: string;
+    secondary_qty: number;
+    secondary_unit_code: string;
+    relation?: string;
+  }>;
+  registration_note: string | null;
+  estoque_entrada_preview?: Record<string, unknown>;
+  criterio_criacao: string;
+  criterio_descricao: string;
+};
+
+export type StagingInterpretPreviewLine = {
+  line_index: number;
+  nome: string;
+  codigo: string | null;
+  ncm: string | null;
+  ean: string | null;
+  cfop: string | null;
+  action:
+    | "skip_fiscal_incomplete"
+    | "reuse_chunk_dedupe"
+    | "link_ean"
+    | "link_name_key"
+    | "link_ncm_and_name"
+    | "link_sem_ncm_name"
+    | "link_llm"
+    | "link_normalized_name_after_llm"
+    | "reuse_catalog_name"
+    | "reuse_canonical_name"
+    | "create_product";
+  product_id: string | null;
+  product_name?: string | null;
+  criterio?: string;
+  llm?: Record<string, unknown>;
+  planned_product?: StagingInterpretPreviewPlannedProduct;
+};
+
+export type StagingInterpretPreviewResult = {
+  supplier: {
+    document_digits: string | null;
+    action: "invalid_document" | "link_existing" | "would_create";
+    existing_supplier_id?: string | null;
+    existing_supplier_name?: string | null;
+    planned_insert?: { name: string; document: string; notes: string };
+  };
+  products_by_line: StagingInterpretPreviewLine[];
+  expense: {
+    would_create: boolean;
+    skip_reason?: string;
+    duplicate_expense_id?: string | null;
+    supplier_id_for_expense: string | null;
+    supplier_created_for_expense: boolean;
+    document_total: number | null;
+    financial_reconciliation_json: Record<string, unknown>;
+    planned_expense: Record<string, unknown> | null;
+    planned_items: Array<Record<string, unknown>>;
+    would_finalize_recebimento_and_stock: boolean;
+  };
+  boletos: Array<Record<string, unknown>>;
+  meta: {
+    catalog_size: number;
+    openai_configured: boolean;
+    catalog_fetch_error: string | null;
+    unified_catalog_note: string;
+  };
+};
+
+export type StagingInterpretPreviewSink = {
+  readonly isPreview: true;
+  lines: StagingInterpretPreviewLine[];
+  supplier: StagingInterpretPreviewResult["supplier"] | null;
+  expense: StagingInterpretPreviewResult["expense"] | null;
+  boletos: StagingInterpretPreviewResult["boletos"];
+  catalog_size: number;
+  openai_configured: boolean;
+  catalog_fetch_error: string | null;
+};
+
+export function createStagingInterpretPreviewSink(
+  catalogSize: number,
+  openaiConfigured: boolean,
+  catalogFetchError: string | null,
+): StagingInterpretPreviewSink {
+  return {
+    isPreview: true,
+    lines: [],
+    supplier: null,
+    expense: null,
+    boletos: [],
+    catalog_size: catalogSize,
+    openai_configured: openaiConfigured,
+    catalog_fetch_error: catalogFetchError,
+  };
+}
+
+function previewLineBase(
+  lineIndex: number,
+  line: StagingNfeInterpretLog["produtos"][number],
+): Pick<
+  StagingInterpretPreviewLine,
+  "line_index" | "nome" | "codigo" | "ncm" | "ean" | "cfop"
+> {
+  return {
+    line_index: lineIndex,
+    nome: String(line.nome ?? "").trim() || "Item",
+    codigo: null,
+    ncm: line.ncm ?? null,
+    ean: line.ean ?? null,
+    cfop: line.cfop ?? null,
+  };
+}
+
+function recordPreviewLine(
+  sink: StagingInterpretPreviewSink,
+  lineIndex: number,
+  line: StagingNfeInterpretLog["produtos"][number],
+  rest: Omit<
+    StagingInterpretPreviewLine,
+    keyof ReturnType<typeof previewLineBase>
+  >,
+): void {
+  sink.lines[lineIndex] = { ...previewLineBase(lineIndex, line), ...rest };
+}
+
+function llmResultToPreview(arb: StagingNfeLineStockMatchResult): Record<string, unknown> {
+  if (arb.kind === "LINK" || arb.kind === "NEW_PRODUCT") {
+    return {
+      kind: arb.kind,
+      product_id: arb.kind === "LINK" ? arb.product_id : null,
+      normalized_product_name: arb.normalized_product_name ?? null,
+      suggested_catalog_name:
+        arb.kind === "NEW_PRODUCT" ? arb.suggested_catalog_name : null,
+      rationale: arb.rationale,
+      stock_quantity: arb.stock_quantity,
+      stock_unit_value: arb.stock_unit_value,
+      uses_packaging_from_description: arb.uses_packaging_from_description,
+      stock_recalibrated_from_xml: arb.stock_recalibrated_from_xml,
+    };
+  }
+  return { kind: arb.kind, rationale: "rationale" in arb ? arb.rationale : null, message: "message" in arb ? arb.message : null };
+}
+
+function plannedProductFromBuilt(
+  previewId: string,
+  built: NonNullable<ReturnType<typeof productInsertPayload>>,
+  contexto: string,
+): StagingInterpretPreviewPlannedProduct {
+  const p = built.payload;
+  return {
+    preview_product_id: previewId,
+    name: String(p.name ?? ""),
+    unit: String(p.unit ?? "un"),
+    ncm: String(p.ncm ?? ""),
+    cfop: p.cfop != null ? String(p.cfop) : null,
+    csosn: p.csosn != null ? String(p.csosn) : null,
+    ean: p.ean != null ? String(p.ean) : null,
+    conversions: built.conversions.map((c) => ({
+      primary_qty: c.primary_qty,
+      primary_unit_code: c.primary_unit_code,
+      secondary_qty: c.secondary_qty,
+      secondary_unit_code: c.secondary_unit_code,
+    })),
+    registration_note: built.registrationNote,
+    estoque_entrada_preview:
+      p.estoque_entrada_preview != null &&
+      typeof p.estoque_entrada_preview === "object"
+        ? (p.estoque_entrada_preview as Record<string, unknown>)
+        : undefined,
+    criterio_criacao: contexto,
+    criterio_descricao: criterioProdutoCriadoLabel(contexto),
+  };
+}
+
 /** NCM com 8 dígitos: 2–7 dígitos recebem zeros à esquerda; 1 dígito ou vazio = inválido. */
 function normalizeNcm8(ncm: string | null | undefined): string | null {
   const d = String(ncm ?? "").replace(/\D/g, "");
@@ -346,6 +529,12 @@ async function stagingInterpretCreateProduct(
   dedupeKey: string,
   built: ReturnType<typeof productInsertPayload>,
   contexto: string,
+  preview?: {
+    sink: StagingInterpretPreviewSink;
+    lineIndex: number;
+    line: StagingNfeInterpretLog["produtos"][number];
+    llm?: Record<string, unknown>;
+  },
 ): Promise<string | null> {
   if (!built) return null;
   const nomeProduto = String(built.payload.name ?? "").trim() || "—";
@@ -353,15 +542,25 @@ async function stagingInterpretCreateProduct(
   const existingInCatalog = findCatalogProductByNameKey(catalog, nomeProduto);
   if (existingInCatalog) {
     chunkProductDedupeByKey.set(dedupeKey, existingInCatalog.id);
-    console.log(
-      LOG,
-      "produto_reutilizado_por_nome",
-      JSON.stringify({
+    if (preview) {
+      recordPreviewLine(preview.sink, preview.lineIndex, preview.line, {
+        action: "reuse_catalog_name",
         product_id: existingInCatalog.id,
-        nome: nomeProduto,
+        product_name: existingInCatalog.name,
         criterio: contexto,
-      }),
-    );
+        llm: preview.llm,
+      });
+    } else {
+      console.log(
+        LOG,
+        "produto_reutilizado_por_nome",
+        JSON.stringify({
+          product_id: existingInCatalog.id,
+          nome: nomeProduto,
+          criterio: contexto,
+        }),
+      );
+    }
     return existingInCatalog.id;
   }
 
@@ -385,17 +584,43 @@ async function stagingInterpretCreateProduct(
       });
       registerNewProductInStagingCatalog(catalog, ncmBuckets, row);
       chunkProductDedupeByKey.set(dedupeKey, row.id);
-      console.log(
-        LOG,
-        "produto_reutilizado_por_canonical_name",
-        JSON.stringify({
+      if (preview) {
+        recordPreviewLine(preview.sink, preview.lineIndex, preview.line, {
+          action: "reuse_canonical_name",
           product_id: row.id,
-          canonical_name: cn,
+          product_name: row.name,
           criterio: contexto,
-        }),
-      );
+          llm: preview.llm,
+        });
+      } else {
+        console.log(
+          LOG,
+          "produto_reutilizado_por_canonical_name",
+          JSON.stringify({
+            product_id: row.id,
+            canonical_name: cn,
+            criterio: contexto,
+          }),
+        );
+      }
       return row.id;
     }
+  }
+
+  if (preview) {
+    const previewId = `preview:${dedupeKey}`;
+    const row = catalogRowFromStagingInsert(previewId, built.payload);
+    registerNewProductInStagingCatalog(catalog, ncmBuckets, row);
+    chunkProductDedupeByKey.set(dedupeKey, previewId);
+    recordPreviewLine(preview.sink, preview.lineIndex, preview.line, {
+      action: "create_product",
+      product_id: previewId,
+      product_name: row.name,
+      criterio: contexto,
+      llm: preview.llm,
+      planned_product: plannedProductFromBuilt(previewId, built, contexto),
+    });
+    return previewId;
   }
 
   const newId = await insertProductFromStagingInterpret(
@@ -435,13 +660,22 @@ export async function ensureSupplierForInterpretLog(
   admin: SupabaseAdmin,
   companyId: string,
   interpret: StagingNfeInterpretLog,
+  previewSink?: StagingInterpretPreviewSink,
 ): Promise<void> {
   if (!interpret.parse_ok) return;
 
   const digits = normalizeTaxIdForSupplierDocument(
     interpret.fornecedor.documento,
   );
-  if (!digits || (digits.length !== 11 && digits.length !== 14)) return;
+  if (!digits || (digits.length !== 11 && digits.length !== 14)) {
+    if (previewSink) {
+      previewSink.supplier = {
+        document_digits: digits || null,
+        action: "invalid_document",
+      };
+    }
+    return;
+  }
 
   const { data: rows, error } = await admin
     .from("suppliers")
@@ -450,14 +684,44 @@ export async function ensureSupplierForInterpretLog(
 
   if (error) {
     console.error(LOG, "fornecedor_list_err", error.message);
+    if (previewSink) {
+      previewSink.supplier = {
+        document_digits: digits,
+        action: "invalid_document",
+      };
+    }
     return;
   }
 
   const list = Array.isArray(rows) ? rows : [];
   const found = list.find(
-    (r: { document: string | null }) =>
+    (r: { document: string | null; id?: string; name?: string }) =>
       normalizeTaxIdForSupplierDocument(r.document) === digits,
   );
+
+  if (previewSink) {
+    if (found) {
+      previewSink.supplier = {
+        document_digits: digits,
+        action: "link_existing",
+        existing_supplier_id: found.id != null ? String(found.id) : null,
+        existing_supplier_name: found.name != null ? String(found.name) : null,
+      };
+    } else {
+      previewSink.supplier = {
+        document_digits: digits,
+        action: "would_create",
+        planned_insert: {
+          name:
+            (interpret.fornecedor.nome ?? "").trim() ||
+            "Fornecedor (NF-e staging)",
+          document: digits,
+          notes: "Cadastrado automaticamente",
+        },
+      };
+    }
+    return;
+  }
 
   if (found) return;
 
@@ -543,6 +807,7 @@ export async function resolveProductsForInterpretLog(
   productCatalog: StagingInterpretProductCatalogRow[],
   productIdByLineIndex: Map<number, string>,
   chunkProductDedupeByKey: Map<string, string>,
+  previewSink?: StagingInterpretPreviewSink,
 ): Promise<void> {
   if (!interpret.parse_ok) return;
 
@@ -565,6 +830,13 @@ export async function resolveProductsForInterpretLog(
     if (chunkReuseId) {
       productIdByLineIndex.set(lineIndex, chunkReuseId);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, chunkReuseId);
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "reuse_chunk_dedupe",
+          product_id: chunkReuseId,
+          criterio: "dedupe_chunk",
+        });
+      }
       continue;
     }
 
@@ -582,6 +854,13 @@ export async function resolveProductsForInterpretLog(
       productIdByLineIndex.set(lineIndex, hit.id);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
       chunkProductDedupeByKey.set(dedupeKey, hit.id);
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "link_ean",
+          product_id: hit.id,
+          product_name: hit.name,
+        });
+      }
       continue;
     }
 
@@ -593,6 +872,13 @@ export async function resolveProductsForInterpretLog(
       productIdByLineIndex.set(lineIndex, byName.id);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, byName.id);
       chunkProductDedupeByKey.set(dedupeKey, byName.id);
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "link_name_key",
+          product_id: byName.id,
+          product_name: byName.name,
+        });
+      }
       continue;
     }
 
@@ -614,6 +900,13 @@ export async function resolveProductsForInterpretLog(
     const reuseId = invoiceResolvedProductByDedupeKey.get(dedupeKey);
     if (reuseId) {
       productIdByLineIndex.set(lineIndex, reuseId);
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "reuse_chunk_dedupe",
+          product_id: reuseId,
+          criterio: "dedupe_nota",
+        });
+      }
       continue;
     }
 
@@ -626,6 +919,13 @@ export async function resolveProductsForInterpretLog(
       productIdByLineIndex.set(lineIndex, directNcmName.id);
       invoiceResolvedProductByDedupeKey.set(dedupeKey, directNcmName.id);
       chunkProductDedupeByKey.set(dedupeKey, directNcmName.id);
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "link_ncm_and_name",
+          product_id: directNcmName.id,
+          product_name: directNcmName.name,
+        });
+      }
       continue;
     }
 
@@ -635,18 +935,41 @@ export async function resolveProductsForInterpretLog(
         productIdByLineIndex.set(lineIndex, catalogHit.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, catalogHit.id);
         chunkProductDedupeByKey.set(dedupeKey, catalogHit.id);
+        if (previewSink) {
+          recordPreviewLine(previewSink, lineIndex, line, {
+            action: "link_sem_ncm_name",
+            product_id: catalogHit.id,
+            product_name: catalogHit.name,
+          });
+        }
         continue;
       }
     }
 
     const llmCatalog = buildLlmCatalogForInvoiceLine(activeCatalog, line.ncm);
 
+    const previewCtx = previewSink
+      ? { sink: previewSink, lineIndex, line }
+      : undefined;
+
     if (!openaiKey || llmCatalog.length === 0) {
       const built = productInsertPayload(companyId, line);
       if (!built) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+        if (previewSink) {
+          recordPreviewLine(previewSink, lineIndex, line, {
+            action: "skip_fiscal_incomplete",
+            product_id: null,
+            criterio: "ncm_ausente_ou_invalido",
+          });
+        }
         continue;
       }
+      const ctx = !openaiKey
+        ? "sem_openai"
+        : llmCatalog.length === 0
+          ? "sem_candidatos_ncm"
+          : "sem_openai";
       const newId = await stagingInterpretCreateProduct(
         admin,
         companyId,
@@ -655,11 +978,8 @@ export async function resolveProductsForInterpretLog(
         chunkProductDedupeByKey,
         dedupeKey,
         built,
-        !openaiKey
-          ? "sem_openai"
-          : llmCatalog.length === 0
-            ? "sem_candidatos_ncm"
-            : "sem_openai",
+        ctx,
+        previewCtx,
       );
       if (newId) {
         productIdByLineIndex.set(lineIndex, newId);
@@ -683,6 +1003,7 @@ export async function resolveProductsForInterpretLog(
       openaiModel,
       { line, candidates },
     );
+    const llmPreview = llmResultToPreview(arb);
 
     if (arb.kind === "LINK") {
       const hit = activeCatalog.find((c) => c.id === arb.product_id);
@@ -690,6 +1011,14 @@ export async function resolveProductsForInterpretLog(
         productIdByLineIndex.set(lineIndex, hit.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, hit.id);
         chunkProductDedupeByKey.set(dedupeKey, hit.id);
+        if (previewSink) {
+          recordPreviewLine(previewSink, lineIndex, line, {
+            action: "link_llm",
+            product_id: hit.id,
+            product_name: hit.name,
+            llm: llmPreview,
+          });
+        }
       }
       continue;
     }
@@ -704,30 +1033,48 @@ export async function resolveProductsForInterpretLog(
         nomeCadastro,
       );
       if (existingByNorm) {
-        console.log(
-          LOG,
-          "produto_vinculado_por_nome_normalizado",
-          JSON.stringify({
-            product_id: existingByNorm.id,
-            nome_cadastro: nomeCadastro,
-            nome_catalogo: existingByNorm.name,
-            linha_nota: String(line.nome ?? "").trim(),
-          }),
-        );
+        if (!previewSink) {
+          console.log(
+            LOG,
+            "produto_vinculado_por_nome_normalizado",
+            JSON.stringify({
+              product_id: existingByNorm.id,
+              nome_cadastro: nomeCadastro,
+              nome_catalogo: existingByNorm.name,
+              linha_nota: String(line.nome ?? "").trim(),
+            }),
+          );
+        }
         productIdByLineIndex.set(lineIndex, existingByNorm.id);
         invoiceResolvedProductByDedupeKey.set(dedupeKey, existingByNorm.id);
         chunkProductDedupeByKey.set(dedupeKey, existingByNorm.id);
+        if (previewSink) {
+          recordPreviewLine(previewSink, lineIndex, line, {
+            action: "link_normalized_name_after_llm",
+            product_id: existingByNorm.id,
+            product_name: existingByNorm.name,
+            llm: llmPreview,
+          });
+        }
         continue;
       }
-      const preview = stockEntradaPreviewFromLlm(line, arb);
+      const estoquePreview = stockEntradaPreviewFromLlm(line, arb);
       const built = productInsertPayload(
         companyId,
         line,
         nomeCadastro,
-        preview,
+        estoquePreview,
       );
       if (!built) {
         logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+        if (previewSink) {
+          recordPreviewLine(previewSink, lineIndex, line, {
+            action: "skip_fiscal_incomplete",
+            product_id: null,
+            criterio: "ncm_ausente_ou_invalido",
+            llm: llmPreview,
+          });
+        }
         continue;
       }
       const newId = await stagingInterpretCreateProduct(
@@ -739,6 +1086,7 @@ export async function resolveProductsForInterpretLog(
         dedupeKey,
         built,
         "llm_new_product",
+        previewCtx ? { ...previewCtx, llm: llmPreview } : undefined,
       );
       if (newId) {
         productIdByLineIndex.set(lineIndex, newId);
@@ -750,6 +1098,14 @@ export async function resolveProductsForInterpretLog(
     const built = productInsertPayload(companyId, line);
     if (!built) {
       logProductSkipFiscalIncomplete(line, "ncm_ausente_ou_invalido");
+      if (previewSink) {
+        recordPreviewLine(previewSink, lineIndex, line, {
+          action: "skip_fiscal_incomplete",
+          product_id: null,
+          criterio: "ncm_ausente_ou_invalido",
+          llm: llmPreview,
+        });
+      }
       continue;
     }
     const newId = await stagingInterpretCreateProduct(
@@ -761,6 +1117,7 @@ export async function resolveProductsForInterpretLog(
       dedupeKey,
       built,
       "llm_skip_fallback",
+      previewCtx ? { ...previewCtx, llm: llmPreview } : undefined,
     );
     if (newId) {
       productIdByLineIndex.set(lineIndex, newId);
@@ -995,11 +1352,27 @@ export async function persistStagingInterpretExpenseAndBoletos(
   companyId: string,
   interpret: StagingNfeInterpretLog,
   productIdByLineIndex: ReadonlyMap<number, string>,
+  previewSink?: StagingInterpretPreviewSink,
 ): Promise<void> {
   if (!interpret.parse_ok) return;
 
   const produtos = interpret.produtos ?? [];
-  if (produtos.length === 0) return;
+  if (produtos.length === 0) {
+    if (previewSink) {
+      previewSink.expense = {
+        would_create: false,
+        skip_reason: "sem_produtos",
+        supplier_id_for_expense: null,
+        supplier_created_for_expense: false,
+        document_total: null,
+        financial_reconciliation_json: {},
+        planned_expense: null,
+        planned_items: [],
+        would_finalize_recebimento_and_stock: false,
+      };
+    }
+    return;
+  }
 
   const numTrim =
     interpret.numero_nota != null ? String(interpret.numero_nota).trim() : "";
@@ -1018,30 +1391,57 @@ export async function persistStagingInterpretExpenseAndBoletos(
       ? docDigits
       : (interpret.fornecedor.documento ?? "").trim() || null;
 
-  const { supplierId } = await ensureSupplierFromExtracted(
-    admin,
-    companyId,
-    extractedFromStagingInterpret(interpret),
-    "Cadastrado automaticamente — importação NF-e staging",
-  );
+  let supplierId: string | null = null;
+  let supplierCreatedForExpense = false;
+  if (previewSink) {
+    const taxDigits = normalizeTaxIdForSupplierDocument(
+      interpret.fornecedor.documento,
+    );
+    if (taxDigits && (taxDigits.length === 11 || taxDigits.length === 14)) {
+      const { data: supRows } = await admin
+        .from("suppliers")
+        .select("id")
+        .eq("company_id", companyId);
+      const found = (Array.isArray(supRows) ? supRows : []).find(
+        (r: { document?: string | null; id?: string }) =>
+          normalizeTaxIdForSupplierDocument(r.document) === taxDigits,
+      );
+      if (found?.id) {
+        supplierId = String(found.id);
+      } else {
+        supplierCreatedForExpense = true;
+        supplierId =
+          previewSink.supplier?.action === "link_existing" &&
+          previewSink.supplier.existing_supplier_id
+            ? String(previewSink.supplier.existing_supplier_id)
+            : "preview:supplier_new";
+      }
+    }
+  } else {
+    const ensured = await ensureSupplierFromExtracted(
+      admin,
+      companyId,
+      extractedFromStagingInterpret(interpret),
+      "Cadastrado automaticamente — importação NF-e staging",
+    );
+    supplierId = ensured.supplierId;
+    supplierCreatedForExpense = ensured.createdNew;
+  }
+
+  const dupSupplierId =
+    supplierId === "preview:supplier_new" ? null : supplierId;
 
   const { data: dupRow, error: dupErr } = await admin.rpc(
     "expense_find_duplicate_by_supplier_document",
     {
       p_company_id: companyId,
-      p_supplier_id: supplierId,
+      p_supplier_id: dupSupplierId,
       p_supplier_document: supplierDocDisplay ?? "",
       p_invoice_number: invoiceNumber,
       p_invoice_series: invoiceSeries,
       p_exclude_expense_id: null,
     },
   );
-
-  if (dupErr) {
-    console.error(LOG, "despesa_dup_check_err", dupErr.message);
-  } else if (dupRow != null && String(dupRow).length > 0) {
-    return;
-  }
 
   const supplierName =
     (interpret.fornecedor.nome ?? "").trim() || "Fornecedor (NF-e staging)";
@@ -1084,6 +1484,76 @@ export async function persistStagingInterpretExpenseAndBoletos(
     financial_reconciliation_json: financialReconciliation,
   };
 
+  const itemRows = produtos.map((line, i) => {
+    const q = Math.max(0.0001, Number(line.quantidade) || 0);
+    const uv = Math.round((Number(line.valor_unitario) || 0) * 100) / 100;
+    const pid = productIdByLineIndex.get(i);
+    const row: Record<string, unknown> = {
+      company_id: companyId,
+      expense_id: "preview:expense",
+      product_name: (line.nome ?? "").trim() || "Item",
+      quantity: q,
+      unit_value: uv,
+      product_id: pid ?? null,
+    };
+    if (pid) {
+      row.stock_quantity = q;
+    }
+    const u =
+      line.unidade_comercial != null
+        ? String(line.unidade_comercial).trim()
+        : "";
+    if (u) row.invoice_unit = u;
+    return row;
+  });
+
+  const dups = interpret.cobranca_boletos ?? [];
+  const descBase =
+    (interpret.numero_nota != null ? `NF ${interpret.numero_nota}` : "NF-e") +
+    (interpret.serie != null ? ` série ${interpret.serie}` : "");
+
+  const boletoRows = dups.map((dup) => ({
+    company_id: companyId,
+    expense_id: "preview:expense",
+    description: `${descBase} — dup. ${dup.numero_duplicata ?? "?"}`,
+    due_date: dup.vencimento,
+    amount: dup.valor,
+    payment_type: "boleto",
+    status: "pending",
+    provider: interpret.fornecedor.nome ?? null,
+    category: "fornecedores",
+    flow_type: "payable",
+  }));
+
+  if (previewSink) {
+    const duplicateId =
+      dupRow != null && String(dupRow).length > 0 ? String(dupRow) : null;
+    previewSink.expense = {
+      would_create: !duplicateId,
+      skip_reason: duplicateId
+        ? "despesa_duplicada"
+        : dupErr
+          ? `dup_check_err:${dupErr.message}`
+          : undefined,
+      duplicate_expense_id: duplicateId,
+      supplier_id_for_expense: supplierId,
+      supplier_created_for_expense: supplierCreatedForExpense,
+      document_total: documentTotalResolved,
+      financial_reconciliation_json: financialReconciliation,
+      planned_expense: duplicateId ? null : expenseRow,
+      planned_items: duplicateId ? [] : itemRows,
+      would_finalize_recebimento_and_stock: !duplicateId,
+    };
+    previewSink.boletos = duplicateId ? [] : boletoRows;
+    return;
+  }
+
+  if (dupErr) {
+    console.error(LOG, "despesa_dup_check_err", dupErr.message);
+  } else if (dupRow != null && String(dupRow).length > 0) {
+    return;
+  }
+
   const { data: expenseIns, error: expErr } = await admin
     .from("expenses")
     .insert(expenseRow)
@@ -1108,57 +1578,24 @@ export async function persistStagingInterpretExpenseAndBoletos(
     return;
   }
 
-  const itemRows = produtos.map((line, i) => {
-    const q = Math.max(0.0001, Number(line.quantidade) || 0);
-    const uv = Math.round((Number(line.valor_unitario) || 0) * 100) / 100;
-    const pid = productIdByLineIndex.get(i);
-    const row: Record<string, unknown> = {
-      company_id: companyId,
-      expense_id: expenseId,
-      product_name: (line.nome ?? "").trim() || "Item",
-      quantity: q,
-      unit_value: uv,
-      product_id: pid ?? null,
-    };
-    if (pid) {
-      row.stock_quantity = q;
-    }
-    const u =
-      line.unidade_comercial != null
-        ? String(line.unidade_comercial).trim()
-        : "";
-    if (u) row.invoice_unit = u;
-    return row;
-  });
+  const persistedItemRows = itemRows.map((row) => ({
+    ...row,
+    expense_id: expenseId,
+  }));
 
   const { error: itemsErr } = await admin
     .from("expense_items")
-    .insert(itemRows);
+    .insert(persistedItemRows);
   if (itemsErr) {
     console.error(LOG, "despesa_itens_insert_err", itemsErr.message);
     await admin.from("expenses").delete().eq("id", expenseId);
     return;
   }
 
-  const dups = interpret.cobranca_boletos ?? [];
-  const descBase =
-    (interpret.numero_nota != null ? `NF ${interpret.numero_nota}` : "NF-e") +
-    (interpret.serie != null ? ` série ${interpret.serie}` : "");
-
-  for (const dup of dups) {
-    const boletoRow: Record<string, unknown> = {
-      company_id: companyId,
-      expense_id: expenseId,
-      description: `${descBase} — dup. ${dup.numero_duplicata ?? "?"}`,
-      due_date: dup.vencimento,
-      amount: dup.valor,
-      payment_type: "boleto",
-      status: "pending",
-      provider: interpret.fornecedor.nome ?? null,
-      category: "fornecedores",
-      flow_type: "payable",
-    };
-
+  for (const boletoRow of boletoRows.map((row) => ({
+    ...row,
+    expense_id: expenseId,
+  }))) {
     const { error: bolErr } = await admin.from("boletos").insert(boletoRow);
     if (bolErr) {
       console.error(
@@ -1171,4 +1608,90 @@ export async function persistStagingInterpretExpenseAndBoletos(
   }
 
   await finalizeStagingRecebimentoEStock(admin, expenseId, companyId);
+}
+
+/** Dry-run completo da interpretação staging (sem inserts). */
+export async function buildStagingInterpretPreviewFromLog(
+  admin: SupabaseAdmin,
+  companyId: string,
+  interpret: StagingNfeInterpretLog,
+): Promise<StagingInterpretPreviewResult> {
+  const openaiConfigured = !!(Deno.env.get("OPENAI_API_KEY") ?? "").trim();
+  const { catalog, error: catalogFetchErr } =
+    await fetchProductCatalogForStagingInterpret(admin, companyId);
+
+  const sink = createStagingInterpretPreviewSink(
+    catalog.length,
+    openaiConfigured,
+    catalogFetchErr,
+  );
+
+  const productIdByLineIndex = new Map<number, string>();
+  const chunkProductDedupeByKey = new Map<string, string>();
+
+  await Promise.all([
+    ensureSupplierForInterpretLog(admin, companyId, interpret, sink),
+    resolveProductsForInterpretLog(
+      admin,
+      companyId,
+      interpret,
+      catalog,
+      productIdByLineIndex,
+      chunkProductDedupeByKey,
+      sink,
+    ),
+  ]);
+
+  await persistStagingInterpretExpenseAndBoletos(
+    admin,
+    companyId,
+    interpret,
+    productIdByLineIndex,
+    sink,
+  );
+
+  const products_by_line: StagingInterpretPreviewLine[] = [];
+  for (let i = 0; i < interpret.produtos.length; i++) {
+    const recorded = sink.lines[i];
+    if (recorded) {
+      products_by_line.push(recorded);
+      continue;
+    }
+    const line = interpret.produtos[i]!;
+    products_by_line.push({
+      ...previewLineBase(i, line),
+      action: "skip_fiscal_incomplete",
+      product_id: productIdByLineIndex.get(i) ?? null,
+      criterio: "linha_sem_decisao_registrada",
+    });
+  }
+
+  return {
+    supplier: sink.supplier ?? {
+      document_digits: normalizeTaxIdForSupplierDocument(
+        interpret.fornecedor.documento,
+      ),
+      action: "invalid_document",
+    },
+    products_by_line,
+    expense: sink.expense ?? {
+      would_create: false,
+      skip_reason: "expense_preview_nao_gerada",
+      supplier_id_for_expense: null,
+      supplier_created_for_expense: false,
+      document_total: null,
+      financial_reconciliation_json: {},
+      planned_expense: null,
+      planned_items: [],
+      would_finalize_recebimento_and_stock: false,
+    },
+    boletos: sink.boletos,
+    meta: {
+      catalog_size: sink.catalog_size,
+      openai_configured: sink.openai_configured,
+      catalog_fetch_error: sink.catalog_fetch_error,
+      unified_catalog_note:
+        "Catálogo global unified_supplier_* não é simulado no preview (só na interpretação real).",
+    },
+  };
 }

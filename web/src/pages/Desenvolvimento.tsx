@@ -1,4 +1,8 @@
 import {
+  NfeStagingInterpretPreviewCard,
+  type StagingInterpretPreviewResult,
+} from "@/components/desenvolvimento/NfeStagingInterpretPreviewCard";
+import {
   NfeXmlDataPreviewCard,
   type NfeXmlDataPreview,
 } from "@/components/desenvolvimento/NfeXmlDataPreviewCard";
@@ -48,6 +52,8 @@ type PreviewOkResponse = {
   xml_data: NfeXmlDataPreview;
   unit_price_preview: NfeUnitPricePreviewResult | null;
   det_lines: NfeXmlDetLinePreview[];
+  staging_interpret: StagingInterpretPreviewResult | null;
+  staging_interpret_error?: string | null;
 };
 
 type FocusGetSyncNfeDetailRow = {
@@ -515,9 +521,9 @@ export function Desenvolvimento() {
               <span className="font-medium text-foreground">
                 {companyLabel}
               </span>
-              . Exibe os dados lidos do XML e o passo a passo do{" "}
-              <strong className="text-foreground">valor unitário efetivo</strong>{" "}
-              de cada produto (mesma regra do catálogo global).
+              . Exibe os dados do XML, o valor unitário efetivo e a simulação
+              completa da interpretação staging (fornecedor, produtos,
+              conversões, despesa e boletos) — sem gravar no banco.
             </CardDescription>
           </CardHeader>
           <CardContent className="min-w-0 space-y-6">
@@ -566,6 +572,11 @@ export function Desenvolvimento() {
 
                 <NfeUnitPriceBreakdownCard
                   preview={previewResult.unit_price_preview}
+                />
+
+                <NfeStagingInterpretPreviewCard
+                  preview={previewResult.staging_interpret}
+                  error={previewResult.staging_interpret_error}
                 />
 
                 <details className="rounded-md border">

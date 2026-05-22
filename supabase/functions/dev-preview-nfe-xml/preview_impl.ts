@@ -16,8 +16,14 @@ function json(body: unknown, status = 200): Response {
 export async function handleDevPreview(input: {
   fileName: string;
   xmlText: string;
+  companyId?: string;
+  // deno-lint-ignore no-explicit-any
+  admin?: any;
 }): Promise<Response> {
-  const result = buildDevNfeXmlPreview(input.xmlText, input.fileName);
+  const result = await buildDevNfeXmlPreview(input.xmlText, input.fileName, {
+    admin: input.admin,
+    companyId: input.companyId,
+  });
   if (!result.ok) return json(result, 422);
   return json(result);
 }
