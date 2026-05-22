@@ -4,15 +4,24 @@ export type MergeProductsResult =
   | { ok: true; winnerId: string; mergedNames: string[] }
   | { ok: false; error: string };
 
+export type MergeCompanyProductsOptions = {
+  /** qty na unidade do vencedor = qty na unidade do removido × fator */
+  loserToWinnerFactor: number;
+  mergedUnitConversions?: unknown;
+};
+
 export async function mergeCompanyProducts(
   companyId: string,
   winnerId: string,
   loserId: string,
+  options: MergeCompanyProductsOptions,
 ): Promise<MergeProductsResult> {
   const { data, error } = await supabase.rpc("merge_company_products", {
     p_company_id: companyId,
     p_winner_id: winnerId,
     p_loser_id: loserId,
+    p_loser_to_winner_factor: options.loserToWinnerFactor,
+    p_merged_unit_conversions: options.mergedUnitConversions ?? null,
   });
 
   if (error) {
@@ -35,6 +44,9 @@ export async function mergeCompanyProducts(
       forbidden: "Sem permissão para unificar produtos nesta unidade.",
       product_not_found: "Produto não encontrado.",
       company_mismatch: "Os produtos não pertencem à mesma unidade.",
+      unit_conversion_required:
+        "Informe a proporção entre as unidades de estoque dos dois produtos.",
+      invalid_unit_factor: "Proporção entre unidades inválida.",
     };
     return {
       ok: false,

@@ -1,4 +1,5 @@
 import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +17,7 @@ const STOCK_REF_LABEL: Record<string, string> = {
   waste: "Perda",
   adjustment: "Ajuste",
   purchase_order: "Compra",
+  technical_sheet_backfill: "Ficha técnica (histórico)",
 };
 
 function stockRefLabel(type: string | null): string {
@@ -48,7 +50,7 @@ type Props = {
   unit: string;
   /** Só busca quando a aba Histórico está visível. */
   active?: boolean;
-  limit?: number;
+  pageSize?: number;
   className?: string;
 };
 
@@ -56,30 +58,41 @@ export function ProductStockMovementHistorySection({
   productId,
   unit,
   active = true,
-  limit = 20,
+  pageSize = PAGE_SIZE,
   className,
 }: Props) {
   const [rows, setRows] = useState<MovementRow[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setPage(1);
+  }, [productId]);
 
   const load = useCallback(async () => {
     if (!productId) {
       setRows([]);
+      setTotalCount(0);
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error, count } = await supabase
       .from("stock_movements")
       .select(
         "id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json",
+        { count: "exact" },
       )
       .eq("product_id", productId)
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(from, to);
 
     if (error) {
       console.error(error);
       setRows([]);
+      setTotalCount(0);
       setLoading(false);
       return;
     }
@@ -88,8 +101,9 @@ export function ProductStockMovementHistorySection({
       (data ?? []) as Omit<MovementRow, "expense_id">[],
     );
     setRows(enriched);
+    setTotalCount(count ?? 0);
     setLoading(false);
-  }, [productId, limit]);
+  }, [productId, page, pageSize]);
 
   useEffect(() => {
     if (!active) return;
@@ -104,14 +118,9 @@ export function ProductStockMovementHistorySection({
 
   return (
     <section className={cn(className)}>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-          Histórico de movimentação
-        </p>
-        <span className="text-xs text-muted-foreground">
-          Últimos {limit} registros
-        </span>
-      </div>
+      <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        Histórico de movimentação
+      </p>
       {loading ? (
         <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -122,67 +131,77 @@ export function ProductStockMovementHistorySection({
           Nenhuma movimentação registrada para este produto.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-background shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Data</th>
-                <th className="px-3 py-2 font-medium">Tipo</th>
-                <th className="px-3 py-2 font-medium">Quantidade</th>
-                <th className="px-3 py-2 font-medium">Origem</th>
-                <th className="px-3 py-2 font-medium">Custo un.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const isIn = row.type === "in";
-                return (
-                  <tr
-                    key={row.id}
-                    className="border-b border-border/60 last:border-b-0"
-                  >
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                      {new Date(row.created_at).toLocaleString("pt-BR", {
-                        day: "2-digit",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge
-                        variant={isIn ? "secondary" : "outline"}
-                        className="gap-1 font-normal"
-                      >
-                        {isIn ? (
-                          <ArrowDownLeft className="h-3 w-3" />
-                        ) : (
-                          <ArrowUpRight className="h-3 w-3" />
-                        )}
-                        {isIn ? "Entrada" : "Saída"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 tabular-nums">
-                      {Number(row.quantity).toLocaleString("pt-BR")}{" "}
-                      {movementQuantityUnit(row, unit)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <StockMovementOriginCell
-                        referenceType={row.reference_type}
-                        expenseId={row.expense_id}
-                        label={stockRefLabel(row.reference_type)}
-                      />
-                    </td>
-                    <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                      {row.unit_cost != null
-                        ? formatCurrency(Number(row.unit_cost))
-                        : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-xl border border-border bg-background shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">Data</th>
+                  <th className="px-3 py-2 font-medium">Tipo</th>
+                  <th className="px-3 py-2 font-medium">Quantidade</th>
+                  <th className="px-3 py-2 font-medium">Origem</th>
+                  <th className="px-3 py-2 font-medium">Custo un.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const isIn = row.type === "in";
+                  return (
+                    <tr
+                      key={row.id}
+                      className="border-b border-border/60 last:border-b-0"
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                        {new Date(row.created_at).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          variant={isIn ? "secondary" : "outline"}
+                          className="gap-1 font-normal"
+                        >
+                          {isIn ? (
+                            <ArrowDownLeft className="h-3 w-3" />
+                          ) : (
+                            <ArrowUpRight className="h-3 w-3" />
+                          )}
+                          {isIn ? "Entrada" : "Saída"}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {Number(row.quantity).toLocaleString("pt-BR")}{" "}
+                        {movementQuantityUnit(row, unit)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <StockMovementOriginCell
+                          referenceType={row.reference_type}
+                          expenseId={row.expense_id}
+                          label={stockRefLabel(row.reference_type)}
+                        />
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                        {row.unit_cost != null
+                          ? formatCurrency(Number(row.unit_cost))
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {totalCount > pageSize ? (
+            <Pagination
+              page={page}
+              totalCount={totalCount}
+              pageSize={pageSize}
+              onPageChange={setPage}
+            />
+          ) : null}
         </div>
       )}
     </section>

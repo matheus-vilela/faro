@@ -23,6 +23,8 @@ export interface Product {
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
   ean?: string | null
   is_active?: boolean
+  /** false = prato de ficha técnica (oculto na listagem de Produtos). */
+  listed_in_product_catalog?: boolean
   created_at: string
   updated_at: string
   /** Colunas geradas (migração stock alert) — opcionais até o banco atualizar */

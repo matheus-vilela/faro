@@ -10,16 +10,29 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDebounce } from "@/hooks/useDebounce";
+import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { mergeCompanyProducts } from "@/lib/mergeProducts";
+import {
+  buildMergedUnitConversionsForMerge,
+  convertLoserQuantityToWinner,
+  draftsToConversionRows,
+  mergedConversionsToJson,
+  resolveMergeUnitFactor,
+} from "@/lib/mergeProductUnits";
+import {
+  loadProductUnitConversions,
+} from "@/lib/productUnitConversionsService";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   ArrowLeftRight,
   ArrowRight,
   Check,
   Loader2,
   Package,
+  Scale,
   Search,
   Trash2,
 } from "lucide-react";
@@ -34,6 +47,12 @@ type ProductMergeDialogProps = {
   formatCurrency: (v: number) => string;
   onMerged: (winnerId: string) => void;
 };
+
+function unitLabel(code: string) {
+  const c = code.trim().toLowerCase();
+  const label = systemUnitLabel(c);
+  return label !== c ? `${label} (${c})` : c;
+}
 
 function productMetaLine(p: Product, formatCurrency: (v: number) => string) {
   const parts: string[] = [
@@ -126,10 +145,18 @@ export function ProductMergeDialog({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [partner, setPartner] = useState<Product | null>(null);
   const [partnerId, setPartnerId] = useState<string | null>(null);
-  /** true = produto aberto permanece; false = parceiro permanece (padrão). */
   const [survivorIsSource, setSurvivorIsSource] = useState(false);
   const [step, setStep] = useState<"pick" | "confirm">("pick");
   const [merging, setMerging] = useState(false);
+  const [winnerConversions, setWinnerConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
+  const [loserConversions, setLoserConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
+  const [conversionsLoading, setConversionsLoading] = useState(false);
+  const [manualLoserQty, setManualLoserQty] = useState("1");
+  const [manualWinnerQty, setManualWinnerQty] = useState("1");
 
   useEffect(() => {
     if (!open || !companyId) return;
@@ -198,6 +225,73 @@ export function ProductMergeDialog({
     [survivorIsSource, sourceProduct, partner],
   );
 
+  useEffect(() => {
+    if (!open || step !== "confirm" || !winner || !loser) return;
+    let cancelled = false;
+    void (async () => {
+      setConversionsLoading(true);
+      const [w, l] = await Promise.all([
+        loadProductUnitConversions(companyId, winner.id),
+        loadProductUnitConversions(companyId, loser.id),
+      ]);
+      if (cancelled) return;
+      setWinnerConversions(w.rows);
+      setLoserConversions(l.rows);
+      setConversionsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, step, companyId, winner?.id, loser?.id]);
+
+  const unitResolution = useMemo(() => {
+    if (!winner || !loser) return null;
+    return resolveMergeUnitFactor({
+      winnerHub: winner.unit,
+      winnerConversions: draftsToConversionRows(winnerConversions),
+      loserHub: loser.unit,
+      loserConversions: draftsToConversionRows(loserConversions),
+    });
+  }, [winner, loser, winnerConversions, loserConversions]);
+
+  const manualFactor = useMemo(() => {
+    const a = parseFloat(manualLoserQty.replace(/\s/g, "").replace(",", "."));
+    const b = parseFloat(manualWinnerQty.replace(/\s/g, "").replace(",", "."));
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) {
+      return null;
+    }
+    return b / a;
+  }, [manualLoserQty, manualWinnerQty]);
+
+  const effectiveFactor = useMemo(() => {
+    if (!unitResolution) return null;
+    if (unitResolution.kind === "same") return 1;
+    if (unitResolution.kind === "auto") return unitResolution.factor;
+    return manualFactor;
+  }, [unitResolution, manualFactor]);
+
+  const stockPreview = useMemo(() => {
+    if (!winner || !loser || effectiveFactor == null) return null;
+    const loserAdj = convertLoserQuantityToWinner(
+      Number(loser.current_quantity),
+      effectiveFactor,
+    );
+    if (loserAdj == null) return null;
+    const total = Number(winner.current_quantity) + loserAdj;
+    return { loserAdj, total };
+  }, [winner, loser, effectiveFactor]);
+
+  const needsManualUnit =
+    unitResolution?.kind === "manual" || unitResolution?.kind === "ambiguous";
+
+  const canConfirm =
+    !!winner &&
+    !!loser &&
+    !conversionsLoading &&
+    effectiveFactor != null &&
+    effectiveFactor > 0 &&
+    (!needsManualUnit || manualFactor != null);
+
   const reset = () => {
     setSearch("");
     setPartnerId(null);
@@ -206,6 +300,11 @@ export function ProductMergeDialog({
     setSurvivorIsSource(false);
     setStep("pick");
     setMerging(false);
+    setWinnerConversions([]);
+    setLoserConversions([]);
+    setConversionsLoading(false);
+    setManualLoserQty("1");
+    setManualWinnerQty("1");
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -214,9 +313,19 @@ export function ProductMergeDialog({
   };
 
   const handleConfirm = async () => {
-    if (!winner || !loser) return;
+    if (!winner || !loser || effectiveFactor == null) return;
     setMerging(true);
-    const result = await mergeCompanyProducts(companyId, winner.id, loser.id);
+    const mergedConversions = buildMergedUnitConversionsForMerge({
+      winnerHub: winner.unit,
+      winnerConversions: draftsToConversionRows(winnerConversions),
+      loserHub: loser.unit,
+      loserConversions: draftsToConversionRows(loserConversions),
+      loserToWinnerFactor: effectiveFactor,
+    });
+    const result = await mergeCompanyProducts(companyId, winner.id, loser.id, {
+      loserToWinnerFactor: effectiveFactor,
+      mergedUnitConversions: mergedConversionsToJson(mergedConversions),
+    });
     setMerging(false);
     if (!result.ok) {
       toast.error(result.error);
@@ -324,13 +433,124 @@ export function ProductMergeDialog({
               variant="outline"
               size="sm"
               className="w-full"
-              onClick={() => setSurvivorIsSource((v) => !v)}
+              onClick={() => {
+                setSurvivorIsSource((v) => !v);
+                setManualLoserQty("1");
+                setManualWinnerQty("1");
+              }}
             >
               <ArrowLeftRight className="mr-2 h-4 w-4" />
               Trocar qual produto permanece
             </Button>
+
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Scale className="h-4 w-4 text-muted-foreground" />
+                Conversão de unidades
+              </div>
+              {conversionsLoading ? (
+                <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Analisando conversões…
+                </p>
+              ) : unitResolution?.kind === "same" ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Ambos usam {unitLabel(winner.unit)} como unidade de estoque. As
+                  quantidades serão somadas diretamente.
+                </p>
+              ) : unitResolution?.kind === "auto" ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Proporção calculada via {unitLabel(unitResolution.bridgeUnit)}:{" "}
+                  <span className="font-medium text-foreground">
+                    1 {unitLabel(loser.unit)} ={" "}
+                    {unitResolution.factor.toLocaleString("pt-BR", {
+                      maximumFractionDigits: 8,
+                    })}{" "}
+                    {unitLabel(winner.unit)}
+                  </span>
+                  . Estoque e movimentações do removido serão convertidos para a
+                  unidade padrão do produto que permanece.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {unitResolution?.kind === "ambiguous" ? (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      Há mais de uma forma de relacionar as unidades. Informe a
+                      proporção que deseja usar.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Não foi possível calcular a proporção pelas conversões
+                      cadastradas. Informe a equivalência entre as unidades de
+                      estoque.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="merge-manual-loser" className="text-xs">
+                        Quantidade ({loser.unit})
+                      </Label>
+                      <Input
+                        id="merge-manual-loser"
+                        className="w-24"
+                        inputMode="decimal"
+                        value={manualLoserQty}
+                        onChange={(e) => setManualLoserQty(e.target.value)}
+                      />
+                    </div>
+                    <span className="pb-2 text-sm text-muted-foreground">
+                      {unitLabel(loser.unit)} =
+                    </span>
+                    <div className="space-y-1">
+                      <Label htmlFor="merge-manual-winner" className="text-xs">
+                        Quantidade ({winner.unit})
+                      </Label>
+                      <Input
+                        id="merge-manual-winner"
+                        className="w-24"
+                        inputMode="decimal"
+                        value={manualWinnerQty}
+                        onChange={(e) => setManualWinnerQty(e.target.value)}
+                      />
+                    </div>
+                    <span className="pb-2 text-sm text-muted-foreground">
+                      {unitLabel(winner.unit)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {stockPreview && effectiveFactor != null ? (
+                <p className="mt-3 rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-muted-foreground">
+                  Estoque após unificação:{" "}
+                  <span className="font-medium text-foreground">
+                    {Number(winner.current_quantity).toLocaleString("pt-BR")}{" "}
+                    {winner.unit}
+                  </span>
+                  {" + "}
+                  <span className="font-medium text-foreground">
+                    {Number(loser.current_quantity).toLocaleString("pt-BR")}{" "}
+                    {loser.unit}
+                  </span>
+                  {" → "}
+                  <span className="font-medium text-foreground">
+                    {stockPreview.loserAdj.toLocaleString("pt-BR", {
+                      maximumFractionDigits: 4,
+                    })}{" "}
+                    {winner.unit}
+                  </span>
+                  {" = "}
+                  <span className="font-semibold text-foreground">
+                    {stockPreview.total.toLocaleString("pt-BR", {
+                      maximumFractionDigits: 4,
+                    })}{" "}
+                    {winner.unit}
+                  </span>
+                </p>
+              ) : null}
+            </div>
+
             <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-              <li>Soma as quantidades em estoque</li>
+              <li>Soma as quantidades em estoque (com conversão se necessário)</li>
               <li>Move entradas, saídas e vínculos em despesas / notas</li>
               <li>Guarda o nome removido para a próxima importação automática</li>
               <li>Preenche EAN, NCM e similares no cadastro final se estiverem vazios</li>
@@ -370,7 +590,7 @@ export function ProductMergeDialog({
               type="button"
               variant="default"
               className="bg-emerald-600 hover:bg-emerald-700"
-              disabled={merging || !winner || !loser}
+              disabled={merging || !canConfirm}
               onClick={() => void handleConfirm()}
             >
               {merging ? (

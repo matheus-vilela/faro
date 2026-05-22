@@ -13,6 +13,7 @@ import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
+import { ProductTechnicalSheetDialog } from "@/components/products/ProductTechnicalSheetDialog";
 import {
   PRODUCT_SHEET_INPUT,
   PRODUCT_SHEET_SECTION,
@@ -21,7 +22,6 @@ import {
 } from "@/components/products/productSheetStyles";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
-import { ProductUnitConversionsReadOnly } from "@/components/products/ProductUnitConversionsReadOnly";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
   AlertDialog,
@@ -77,6 +77,10 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import {
+  fetchProductTechnicalSheet,
+  technicalSheetErrorMessage,
+} from "@/lib/productTechnicalSheet";
 import {
   convertUnitPriceForProduct,
   getLockedSystemSecondaryQty,
@@ -494,6 +498,10 @@ export function Produtos() {
   const [stockSaving, setStockSaving] = useState(false);
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
   const [productMergeOpen, setProductMergeOpen] = useState(false);
+  const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
+  const [outputTechnicalSheetRecipeId, setOutputTechnicalSheetRecipeId] = useState<
+    string | null
+  >(null);
   const [stockDeleting, setStockDeleting] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
@@ -502,6 +510,7 @@ export function Produtos() {
     useState<ProductUnitConversionDraft[]>([]);
   const [stockProductConversionsLoading, setStockProductConversionsLoading] =
     useState(false);
+  const [stockConversionsSaving, setStockConversionsSaving] = useState(false);
   type EstoqueTab =
     | "catalogo"
     | "movimentos"
@@ -544,14 +553,28 @@ export function Produtos() {
     return base.filter((o) => allowed.has(o.value));
   }, [stockLastUnitValueUnitCode, stockProductConversions, stockUnit]);
 
-  const handleStockUnitChange = (next: string) => {
-    const prev = stockUnit;
-    if (prev === next) return;
-    const q = parseFloat(stockQuantity.replace(/\s/g, "").replace(",", "."));
-    const m = parseFloat(stockMinQuantity.replace(/\s/g, "").replace(",", "."));
+  const computeStockUnitHubChange = (
+    prev: string,
+    next: string,
+    input: {
+      quantityStr: string;
+      minQuantityStr: string;
+      conversions: ProductUnitConversionDraft[];
+      lastUnitValueStr: string;
+      lastUnitValueUnitCode: string;
+      companyId: string;
+    },
+  ) => {
+    if (prev.trim().toLowerCase() === next.trim().toLowerCase()) return null;
+    const q = parseFloat(
+      input.quantityStr.replace(/\s/g, "").replace(",", "."),
+    );
+    const m = parseFloat(
+      input.minQuantityStr.replace(/\s/g, "").replace(",", "."),
+    );
     const qOk = Number.isFinite(q);
     const mOk = Number.isFinite(m);
-    const convRows = stockProductConversions.map((r) => ({
+    const convRows = input.conversions.map((r) => ({
       primary_unit_code: r.primary_unit_code,
       secondary_unit_code: r.secondary_unit_code,
       primary_qty: Number(r.primary_qty),
@@ -580,20 +603,15 @@ export function Produtos() {
           rebasedConversions,
         )
       : null;
-    setStockUnit(next);
-    setStockProductConversions(
-      rebasedConversions.map((r) => ({
-        ...r,
-        company_id: currentCompany?.id ?? "",
-      })),
-    );
     const prevPriceUnit = (
-      stockLastUnitValueUnitCode.trim() || prev
+      input.lastUnitValueUnitCode.trim() || prev
     ).toLowerCase();
+    let nextLastUnitValueStr: string | null = null;
+    let nextLastUnitValueUnitCode: string | null = null;
     if (prevPriceUnit === prev.trim().toLowerCase()) {
-      setStockLastUnitValueUnitCode(next);
+      nextLastUnitValueUnitCode = next;
     }
-    const parsedLast = parseCurrencyInput(stockLastUnitValue);
+    const parsedLast = parseCurrencyInput(input.lastUnitValueStr);
     if (
       parsedLast != null &&
       Number.isFinite(parsedLast) &&
@@ -604,35 +622,269 @@ export function Produtos() {
     ) {
       const nextPrice = (parsedLast * q) / cq;
       if (Number.isFinite(nextPrice)) {
-        setStockLastUnitValue(
-          new Intl.NumberFormat("pt-BR", {
-            style: "currency",
-            currency: "BRL",
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          }).format(nextPrice),
-        );
+        nextLastUnitValueStr = new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(nextPrice);
       }
     }
-    if (cq != null) {
-      setStockQuantity(String(cq));
-    } else if (qOk) {
-      toast.message(
+    const messages: string[] = [];
+    if (qOk && cq == null) {
+      messages.push(
         "Sem conversão entre essas unidades; ajuste o estoque manualmente se necessário.",
       );
     }
-    if (cm != null) {
-      setStockMinQuantity(String(cm));
-    }
-    if (stockProductConversions.length > 0 && rebasedConversions.length === 0) {
-      toast.message(
+    if (input.conversions.length > 0 && rebasedConversions.length === 0) {
+      messages.push(
         "Não foi possível reaproveitar as conversões com a nova unidade.",
       );
-    } else if (cq != null || cm != null) {
+    }
+    return {
+      nextUnit: next,
+      conversions: rebasedConversions.map((r) => ({
+        ...r,
+        company_id: input.companyId,
+      })),
+      quantityStr: cq != null ? String(cq) : null,
+      minQuantityStr: cm != null ? String(cm) : null,
+      lastUnitValueStr: nextLastUnitValueStr,
+      lastUnitValueUnitCode: nextLastUnitValueUnitCode,
+      numericQuantity: cq,
+      numericMinQuantity: cm,
+      messages,
+    };
+  };
+
+  const applyStockUnitHubChangeToForm = (
+    effects: NonNullable<ReturnType<typeof computeStockUnitHubChange>>,
+    opts?: { persistHint?: boolean },
+  ) => {
+    setStockUnit(effects.nextUnit);
+    setStockProductConversions(effects.conversions);
+    if (effects.lastUnitValueUnitCode != null) {
+      setStockLastUnitValueUnitCode(effects.lastUnitValueUnitCode);
+    }
+    if (effects.lastUnitValueStr != null) {
+      setStockLastUnitValue(effects.lastUnitValueStr);
+    }
+    if (effects.quantityStr != null) {
+      setStockQuantity(effects.quantityStr);
+    }
+    if (effects.minQuantityStr != null) {
+      setStockMinQuantity(effects.minQuantityStr);
+    }
+    for (const msg of effects.messages) {
+      toast.message(msg);
+    }
+    if (
+      opts?.persistHint &&
+      (effects.quantityStr != null || effects.minQuantityStr != null)
+    ) {
       toast.message(
         "Unidade de estoque atualizada no formulário. Salve para persistir.",
       );
     }
+  };
+
+  const handleStockUnitChange = (next: string) => {
+    if (!currentCompany?.id) return;
+    const effects = computeStockUnitHubChange(stockUnit, next, {
+      quantityStr: stockQuantity,
+      minQuantityStr: stockMinQuantity,
+      conversions: stockProductConversions,
+      lastUnitValueStr: stockLastUnitValue,
+      lastUnitValueUnitCode: stockLastUnitValueUnitCode,
+      companyId: currentCompany.id,
+    });
+    if (!effects) return;
+    applyStockUnitHubChangeToForm(effects, { persistHint: true });
+  };
+
+  const reloadStockConversionsAfterPersist = async () => {
+    if (!currentCompany?.id || !stockProduct) return;
+    const { rows } = await loadProductUnitConversions(
+      currentCompany.id,
+      stockProduct.id,
+    );
+    setStockProductConversions(rows);
+    setInitialStockProductConversions([...rows]);
+    setProductConversionMap((prev) => ({
+      ...prev,
+      [stockProduct.id]: rows.map((c) => ({
+        primary_qty: Number(c.primary_qty),
+        primary_unit_code: c.primary_unit_code,
+        secondary_qty: Number(c.secondary_qty),
+        secondary_unit_code: c.secondary_unit_code,
+      })),
+    }));
+  };
+
+  const handleSummaryConversionsChange = async (
+    next: ProductUnitConversionDraft[],
+  ) => {
+    if (!currentCompany?.id || !stockProduct) return;
+    setStockConversionsSaving(true);
+    const withMeta = next.map((r) => ({
+      ...r,
+      company_id: currentCompany.id,
+      product_id: stockProduct.id,
+    }));
+    const convResult = await persistProductUnitConversions(
+      currentCompany.id,
+      stockProduct.id,
+      withMeta,
+    );
+    if (!convResult.ok) {
+      toast.error(convResult.error ?? "Falha ao salvar conversões.");
+      setStockConversionsSaving(false);
+      return;
+    }
+    await reloadStockConversionsAfterPersist();
+    setStockConversionsSaving(false);
+    toast.success("Conversões atualizadas.");
+  };
+
+  const handleSummaryPromoteStockUnit = async (secondaryCode: string) => {
+    if (!currentCompany?.id || !stockProduct) return;
+    const effects = computeStockUnitHubChange(stockUnit, secondaryCode.trim(), {
+      quantityStr: stockQuantity,
+      minQuantityStr: stockMinQuantity,
+      conversions: stockProductConversions,
+      lastUnitValueStr: stockLastUnitValue,
+      lastUnitValueUnitCode: stockLastUnitValueUnitCode,
+      companyId: currentCompany.id,
+    });
+    if (!effects) return;
+    setStockConversionsSaving(true);
+    applyStockUnitHubChangeToForm(effects);
+
+    const currentQty = parseFloat(
+      stockQuantity.replace(/\s/g, "").replace(",", "."),
+    );
+    const newQty =
+      effects.numericQuantity ??
+      (Number.isFinite(currentQty) ? currentQty : stockProduct.current_quantity);
+    const newMin =
+      effects.numericMinQuantity ??
+      parseFloat(stockMinQuantity.replace(/\s/g, "").replace(",", ".")) ??
+      stockProduct.min_quantity;
+
+    const updates: {
+      unit: string;
+      current_quantity: number;
+      min_quantity: number;
+      last_unit_value_stock?: number | null;
+      average_cost?: number | null;
+      last_unit_value_unit_code?: string | null;
+    } = {
+      unit: effects.nextUnit.trim().toLowerCase(),
+      current_quantity: newQty,
+      min_quantity: Number.isFinite(newMin) ? newMin : stockProduct.min_quantity,
+    };
+
+    if (effects.lastUnitValueUnitCode != null) {
+      updates.last_unit_value_unit_code = effects.lastUnitValueUnitCode;
+    }
+
+    const currentAverageCost =
+      stockProduct.average_cost != null &&
+      Number.isFinite(Number(stockProduct.average_cost))
+        ? Number(stockProduct.average_cost)
+        : null;
+    if (
+      currentAverageCost != null &&
+      Number.isFinite(currentQty) &&
+      currentQty > 0 &&
+      Number.isFinite(newQty) &&
+      newQty > 0
+    ) {
+      updates.average_cost = roundUnitPrice(
+        (currentQty * currentAverageCost) / newQty,
+      );
+    }
+    const currentStockLast =
+      stockProduct.last_unit_value_stock != null &&
+      Number.isFinite(Number(stockProduct.last_unit_value_stock))
+        ? Number(stockProduct.last_unit_value_stock)
+        : stockProduct.last_unit_value != null &&
+            Number.isFinite(Number(stockProduct.last_unit_value))
+          ? Number(stockProduct.last_unit_value)
+          : null;
+    if (
+      currentStockLast != null &&
+      Number.isFinite(currentQty) &&
+      currentQty > 0 &&
+      Number.isFinite(newQty) &&
+      newQty > 0
+    ) {
+      updates.last_unit_value_stock = roundUnitPrice(
+        (currentQty * currentStockLast) / newQty,
+      );
+    }
+
+    const { error: unitError } = await supabase
+      .from("products")
+      .update(updates)
+      .eq("company_id", currentCompany.id)
+      .eq("id", stockProduct.id);
+    if (unitError) {
+      toast.error(unitError.message);
+      setStockConversionsSaving(false);
+      return;
+    }
+
+    const convResult = await persistProductUnitConversions(
+      currentCompany.id,
+      stockProduct.id,
+      effects.conversions.map((r) => ({
+        ...r,
+        product_id: stockProduct.id,
+      })),
+    );
+    if (!convResult.ok) {
+      toast.error(convResult.error ?? "Falha ao salvar conversões.");
+      setStockConversionsSaving(false);
+      return;
+    }
+
+    await reloadStockConversionsAfterPersist();
+    setStockProduct((prev) =>
+      prev
+        ? {
+            ...prev,
+            unit: updates.unit,
+            current_quantity: updates.current_quantity,
+            min_quantity: updates.min_quantity,
+            last_unit_value_unit_code:
+              updates.last_unit_value_unit_code ?? prev.last_unit_value_unit_code,
+            last_unit_value_stock:
+              updates.last_unit_value_stock ?? prev.last_unit_value_stock,
+            average_cost: updates.average_cost ?? prev.average_cost,
+          }
+        : prev,
+    );
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === stockProduct.id
+          ? {
+              ...p,
+              unit: updates.unit,
+              current_quantity: updates.current_quantity,
+              min_quantity: updates.min_quantity,
+              last_unit_value_unit_code:
+                updates.last_unit_value_unit_code ??
+                p.last_unit_value_unit_code,
+              last_unit_value_stock:
+                updates.last_unit_value_stock ?? p.last_unit_value_stock,
+              average_cost: updates.average_cost ?? p.average_cost,
+            }
+          : p,
+      ),
+    );
+    setStockConversionsSaving(false);
+    toast.success("Unidade padrão atualizada.");
   };
 
   const normalizeCustomUnitCode = (raw: string): string => {
@@ -884,6 +1136,7 @@ export function Produtos() {
           .from("products")
           .select("*", { count: "exact" })
           .eq("company_id", currentCompany.id)
+          .eq("listed_in_product_catalog", true)
           .order("name");
         if (categoryProductIds) {
           q = q.in("id", categoryProductIds);
@@ -1246,6 +1499,13 @@ export function Produtos() {
     setInitialStockProductCategoryIds([]);
     stockProductCategoryIdsRef.current = [];
     void (async () => {
+      const sheet = await fetchProductTechnicalSheet(
+        currentCompany?.id ?? p.company_id,
+        p.id,
+      );
+      if (assignmentLoadGenRef.current === gen) {
+        setOutputTechnicalSheetRecipeId(sheet.data?.recipe_id ?? null);
+      }
       const ids = await loadAssignmentsForProduct(p.id);
       if (assignmentLoadGenRef.current !== gen) return;
       setInitialStockProductCategoryIds(ids);
@@ -1276,6 +1536,7 @@ export function Produtos() {
     setInitialStockProductConversions([]);
     setStockProductConversionsLoading(false);
     setStockDeleteDialogOpen(false);
+    setOutputTechnicalSheetRecipeId(null);
   };
 
   useEffect(() => {
@@ -1411,6 +1672,7 @@ export function Produtos() {
       });
       if (error) {
         console.error(error);
+        toast.error(technicalSheetErrorMessage(error.message));
         setStockSaving(false);
         return;
       }
@@ -2406,6 +2668,17 @@ export function Produtos() {
                         type="button"
                         variant="outline"
                         size="sm"
+                        onClick={() => setTechnicalSheetOpen(true)}
+                      >
+                        <ChefHat className="h-4 w-4 mr-2" />
+                        {outputTechnicalSheetRecipeId
+                          ? "Editar ficha técnica"
+                          : "É ficha técnica"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={() => setProductMergeOpen(true)}
                       >
                         <Merge className="h-4 w-4 mr-2" />
@@ -2443,6 +2716,15 @@ export function Produtos() {
                           <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
                             {stockProduct.name}
                           </SheetTitle>
+                          {outputTechnicalSheetRecipeId ? (
+                            <Badge
+                              variant="secondary"
+                              className="gap-1 border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100"
+                            >
+                              <ChefHat className="h-3 w-3" />
+                              Ficha técnica
+                            </Badge>
+                          ) : null}
                           {stockProduct.is_active === false ? (
                             <Badge variant="secondary" className="gap-1">
                               <PowerOff className="h-3 w-3" />
@@ -2653,13 +2935,31 @@ export function Produtos() {
                         </div>
 
                         {currentCompany?.id ? (
-                          <ProductUnitConversionsReadOnly
-                            companyId={currentCompany.id}
-                            stockUnitCode={stockProduct.unit}
-                            conversions={stockProductConversions}
-                            loading={stockProductConversionsLoading}
-                            className={SHEET_SECTION}
-                          />
+                          stockProductConversionsLoading ? (
+                            <div className={SHEET_SECTION}>
+                              <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Conversões de unidade
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                Carregando conversões…
+                              </p>
+                            </div>
+                          ) : (
+                            <ProductUnitConversionsSection
+                              compact
+                              companyId={currentCompany.id}
+                              stockUnitCode={stockProduct.unit}
+                              value={stockProductConversions}
+                              onChange={(next) =>
+                                void handleSummaryConversionsChange(next)
+                              }
+                              onPromoteSecondaryToStockUnit={(code) =>
+                                void handleSummaryPromoteStockUnit(code)
+                              }
+                              disabled={stockConversionsSaving}
+                              sectionClassName={SHEET_SECTION}
+                            />
+                          )
                         ) : null}
 
                         <div
@@ -3316,6 +3616,25 @@ export function Produtos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {currentCompany?.id && stockProduct ? (
+        <ProductTechnicalSheetDialog
+          open={technicalSheetOpen}
+          onOpenChange={setTechnicalSheetOpen}
+          companyId={currentCompany.id}
+          outputProduct={stockProduct}
+          onSaved={(recipeId, backfill) => {
+            setOutputTechnicalSheetRecipeId(recipeId);
+            closeStockSheet();
+            void fetchProducts();
+            if (backfill && backfill.ingredient_movements_created > 0) {
+              toast.message(
+                `Histórico replicado: ${backfill.output_out_movements} saída(s) do prato geraram ${backfill.ingredient_movements_created} movimentação(ões) nos insumos.`,
+              );
+            }
+          }}
+        />
+      ) : null}
 
       {currentCompany?.id && stockProduct ? (
         <ProductMergeDialog

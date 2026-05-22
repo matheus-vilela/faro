@@ -10,6 +10,7 @@ import {
 } from "@/lib/companyUnits/productConversionRows";
 import { SYSTEM_PRODUCT_UNITS } from "@/lib/companyUnits/systemUnits";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import { cn } from "@/lib/utils";
 import { Plus, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -20,9 +21,13 @@ interface ProductUnitConversionsSectionProps {
   value: ProductUnitConversionDraft[];
   onChange: (next: ProductUnitConversionDraft[]) => void;
   /** Torna a unidade secundária da regra a unidade de estoque (rebase + conversão de quantidades). */
-  onPromoteSecondaryToStockUnit?: (secondaryUnitCode: string) => void;
+  onPromoteSecondaryToStockUnit?: (
+    secondaryUnitCode: string,
+  ) => void | Promise<void>;
   disabled?: boolean;
   sectionClassName?: string;
+  /** Resumo do produto: título curto, sem texto explicativo longo. */
+  compact?: boolean;
 }
 
 export function ProductUnitConversionsSection({
@@ -33,6 +38,7 @@ export function ProductUnitConversionsSection({
   onPromoteSecondaryToStockUnit,
   disabled,
   sectionClassName = PRODUCT_SHEET_SECTION,
+  compact = false,
 }: ProductUnitConversionsSectionProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -99,16 +105,23 @@ export function ProductUnitConversionsSection({
   return (
     <>
       <div className={sectionClassName}>
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          className={cn(
+            "mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between",
+            compact && "mb-3",
+          )}
+        >
           <div>
             <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-              Unidade de estoque e conversões
+              {compact ? "Conversões de unidade" : "Unidade de estoque e conversões"}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              A unidade escolhida acima é a base do estoque. Abaixo, relacione
-              com outras medidas (ex.: 1 garrafa = 750 ml). Várias regras
-              permitidas — cada produto tem a sua.
-            </p>
+            {!compact ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                A unidade escolhida acima é a base do estoque. Abaixo, relacione
+                com outras medidas (ex.: 1 garrafa = 750 ml). Várias regras
+                permitidas — cada produto tem a sua.
+              </p>
+            ) : null}
           </div>
           <Button
             type="button"
@@ -123,7 +136,7 @@ export function ProductUnitConversionsSection({
             onClick={() => setDialogOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            Nova conversão
+            Adicionar conversão
           </Button>
         </div>
 
@@ -175,7 +188,7 @@ export function ProductUnitConversionsSection({
                             }
                           >
                             <Star className="h-3.5 w-3.5" />
-                            Usar como unidade de estoque
+                            Tornar padrão
                           </Button>
                         ) : null}
                         <Button

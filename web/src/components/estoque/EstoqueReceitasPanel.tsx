@@ -48,6 +48,10 @@ import {
   persistProductUnitConversions,
   prepareProductUnitConversionsForPersist,
 } from "@/lib/productUnitConversionsService";
+import {
+  saveProductTechnicalSheet,
+  technicalSheetErrorMessage,
+} from "@/lib/productTechnicalSheet";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
@@ -533,6 +537,18 @@ export const EstoqueReceitasPanel = forwardRef<
     /** Abre esta receita no sheet após carregar o catálogo. */
     initialOpenRecipeId?: string | null;
     onSheetOpenChange?: (open: boolean) => void;
+    /**
+     * Salva via RPC de ficha técnica do produto (catálogo, backfill).
+     * Usado no diálogo «É ficha técnica» em Produtos.
+     */
+    technicalSheetOutputProductId?: string | null;
+    onTechnicalSheetSaved?: (
+      recipeId: string | null,
+      backfill?: {
+        output_out_movements: number;
+        ingredient_movements_created: number;
+      },
+    ) => void;
   }
 >(function EstoqueReceitasPanel(
   {
@@ -546,6 +562,8 @@ export const EstoqueReceitasPanel = forwardRef<
     embedInline = false,
     initialOpenRecipeId,
     onSheetOpenChange,
+    technicalSheetOutputProductId,
+    onTechnicalSheetSaved,
   },
   ref,
 ) {
@@ -589,7 +607,26 @@ export const EstoqueReceitasPanel = forwardRef<
 
   useEffect(() => {
     prefillHandledRef.current = false;
-  }, [companyId, prefillNewRecipeOutputProductId, initialOpenRecipeId]);
+  }, [
+    companyId,
+    prefillNewRecipeOutputProductId,
+    initialOpenRecipeId,
+    technicalSheetOutputProductId,
+  ]);
+
+  const technicalSheetPid = technicalSheetOutputProductId?.trim() ?? "";
+
+  useEffect(() => {
+    if (!technicalSheetPid || loading || initialOpenRecipeId?.trim()) return;
+    const match = products.find((p) => p.id === technicalSheetPid);
+    if (!match) return;
+    const base = match.name.trim();
+    setName(base ? `${base} — ficha técnica` : "Ficha técnica");
+    setBatchYield("1");
+    setOutputId(technicalSheetPid);
+    setIngs([]);
+    setSavedIngsSnapshot([]);
+  }, [technicalSheetPid, loading, initialOpenRecipeId, products]);
 
   useEffect(() => {
     const pid = prefillNewRecipeOutputProductId?.trim();
@@ -904,6 +941,63 @@ export const EstoqueReceitasPanel = forwardRef<
   }, [load]);
 
   const saveRecipe = async (): Promise<boolean> => {
+    const validIngs = ings.filter(
+      (x) => x.product_id && x.unit_code && x.quantity.trim() !== "",
+    );
+    if (validIngs.length === 0) {
+      toast.error("Adicione ao menos um ingrediente.");
+      return false;
+    }
+
+    if (technicalSheetPid) {
+      const rpcIngredients: Array<{
+        product_id: string;
+        input_quantity: number;
+        input_unit_code: string;
+      }> = [];
+
+      for (const x of validIngs) {
+        const parsed = parseFloat(x.quantity.replace(",", "."));
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          toast.error("Quantidade do ingrediente inválida.");
+          return false;
+        }
+        const allowedUnits = allowedUnitsForProduct(x.product_id).map((u) =>
+          u.trim().toLowerCase(),
+        );
+        const unit = x.unit_code.trim().toLowerCase();
+        if (!allowedUnits.includes(unit)) {
+          toast.error("Selecione uma unidade válida para o ingrediente.");
+          return false;
+        }
+        rpcIngredients.push({
+          product_id: x.product_id,
+          input_quantity: parsed,
+          input_unit_code: unit,
+        });
+      }
+
+      setSaving(true);
+      const res = await saveProductTechnicalSheet(
+        companyId,
+        technicalSheetPid,
+        rpcIngredients,
+        1,
+      );
+      setSaving(false);
+      if (!res.ok) {
+        toast.error(technicalSheetErrorMessage(res.error));
+        return false;
+      }
+      toast.success(
+        "Ficha técnica salva. O prato sai do catálogo de produtos; novas saídas baixam os insumos na proporção informada.",
+      );
+      setSavedIngsSnapshot(normalizeIngsForCompare(validIngs));
+      onTechnicalSheetSaved?.(res.recipe_id ?? null, res.backfill);
+      onStockChanged?.();
+      return true;
+    }
+
     const t = name.trim();
     if (!t) {
       toast.error("Informe o nome da receita.");
@@ -912,13 +1006,6 @@ export const EstoqueReceitasPanel = forwardRef<
     const y = parseFloat(batchYield);
     if (Number.isNaN(y) || y <= 0) {
       toast.error("Rendimento da receita inválido.");
-      return false;
-    }
-    const validIngs = ings.filter(
-      (x) => x.product_id && x.unit_code && x.quantity.trim() !== "",
-    );
-    if (validIngs.length === 0) {
-      toast.error("Adicione ao menos um ingrediente.");
       return false;
     }
 
@@ -1344,12 +1431,12 @@ export const EstoqueReceitasPanel = forwardRef<
 
       {embedInline ? (
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/80 bg-background shadow-sm">
-          {loading && !editingRecipeId ? (
+          {loading && !editingRecipeId && !technicalSheetPid ? (
             <div className="flex flex-1 items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Carregando ficha…
             </div>
-          ) : editingRecipeId ? (
+          ) : editingRecipeId || (ingredientsOnly && technicalSheetPid) ? (
             <>
               <div className="shrink-0 border-b border-border bg-card px-4 py-3 text-left">
                 <div className="flex items-center justify-between gap-3">
