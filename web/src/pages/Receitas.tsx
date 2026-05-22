@@ -1,18 +1,19 @@
 import { type MonthYear } from "@/components/MonthSelector";
-import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { PAGE_SIZE } from "@/components/Pagination";
 import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  RevenueEntriesCalendar,
+  type RevenueCalendarDayListPayload,
+} from "@/components/revenue/RevenueEntriesCalendar";
+import { RevenueDaySaleListCard } from "@/components/revenue/RevenueDaySaleListCard";
+import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
+import {
+  RevenueSalesList,
+  type RevenuePeriodSummary,
+} from "@/components/revenue/RevenueSalesList";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -39,41 +40,36 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import {
-  convertQuantityForProduct,
-  getLockedSystemSecondaryQty,
-} from "@/lib/companyUnits/convert";
-import {
   buildChildrenMap,
   categoryPathLabel,
   isLeafCategory,
-  tipoBadge,
 } from "@/lib/companyCategoryLabels";
-import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
-import type { CompanyCategory } from "@/types/category";
-import type { RecipeListItem } from "@/types/recipe";
-import type { Product } from "@/types/product";
-import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
-import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
-  computeRevenueTaxDeduction,
-  type RevenueEntry,
-  type RevenueTaxType,
-} from "@/types/revenue";
+  convertQuantityForProduct,
+  getLockedSystemSecondaryQty,
+} from "@/lib/companyUnits/convert";
 import {
   parseSaleQuantity,
   quantityInputPropsForSaleUnit,
   roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
+import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
-import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import type { CompanyCategory } from "@/types/category";
+import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import type { RecipeListItem } from "@/types/recipe";
 import {
-  ChevronsUpDown,
-  CircleDollarSign,
-  FileText,
-  Plus,
-  Search,
-} from "lucide-react";
+  computeRevenueTaxDeduction,
+  type RevenueEntry,
+  type RevenueTaxType,
+} from "@/types/revenue";
+import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
+import { ChevronsUpDown, CircleDollarSign, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -165,9 +161,7 @@ function PontualProductRecipePicker({
       ? products.find((p) => p.id === parsed.id)
       : null;
   const selectedRecipe =
-    parsed?.kind === "recipe"
-      ? recipes.find((r) => r.id === parsed.id)
-      : null;
+    parsed?.kind === "recipe" ? recipes.find((r) => r.id === parsed.id) : null;
 
   const triggerLabel = !parsed
     ? "Selecione produto ou receita"
@@ -258,10 +252,7 @@ function PontualProductRecipePicker({
             />
           </div>
         </div>
-        <div
-          ref={listRef}
-          className="max-h-64 overflow-y-auto p-1"
-        >
+        <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
           <button
             type="button"
             className="w-full rounded-sm px-2 py-2 text-left text-sm text-muted-foreground hover:bg-accent"
@@ -354,6 +345,11 @@ export function Receitas() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
+  const [entryModeFilter, setEntryModeFilter] = useState("all");
+  const [revenueTypeFilter, setRevenueTypeFilter] = useState("all");
+  const [periodSummary, setPeriodSummary] =
+    useState<RevenuePeriodSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
   );
@@ -365,6 +361,10 @@ export function Receitas() {
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [detailRevenueId, setDetailRevenueId] = useState<string | null>(null);
+  const [calendarEntries, setCalendarEntries] = useState<RevenueEntry[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [revenueCalendarDayList, setRevenueCalendarDayList] =
+    useState<RevenueCalendarDayListPayload | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [baseMode, setBaseMode] = useState<LaunchMode>("manual");
@@ -386,7 +386,10 @@ export function Receitas() {
   const [taxValue, setTaxValue] = useState<string>("0");
   /** Taxas salvas em Configurações (por folha de receita). */
   const [categoryTaxSettings, setCategoryTaxSettings] = useState<
-    Pick<CompanyRevenueCategoryTaxSetting, "category_id" | "tax_type" | "tax_value">[]
+    Pick<
+      CompanyRevenueCategoryTaxSetting,
+      "category_id" | "tax_type" | "tax_value"
+    >[]
   >([]);
 
   const categoriesById = useMemo(
@@ -442,7 +445,10 @@ export function Receitas() {
       const allowed = new Set<string>([base]);
       const convs = conversionsByProduct.get(pid) ?? [];
       for (const c of convs) {
-        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+        if (
+          c.primary_unit_code?.trim().toLowerCase() ===
+          base.trim().toLowerCase()
+        ) {
           allowed.add(c.secondary_unit_code);
         }
       }
@@ -523,12 +529,16 @@ export function Receitas() {
         const isRecipeSale = parsed?.kind === "recipe";
         const productId = isProductSale ? parsed.id : "";
         const recipeId = isRecipeSale ? parsed.id : "";
-        const selectedProduct = productId ? productById.get(productId) : undefined;
+        const selectedProduct = productId
+          ? productById.get(productId)
+          : undefined;
         const selectedRecipe = recipeId
           ? recipes.find((r) => r.id === recipeId)
           : undefined;
         const quantityFieldProps = quantityInputPropsForSaleUnit(
-          isProductSale ? item.saleUnitCode || selectedProduct?.unit : undefined,
+          isProductSale
+            ? item.saleUnitCode || selectedProduct?.unit
+            : undefined,
           selectedProduct?.unit,
         );
         const qtyNum = isRecipeSale
@@ -547,7 +557,9 @@ export function Receitas() {
         const unitNum = parseFloat(item.unitValue.replace(",", ".")) || 0;
         const grossNumItem = parseFloat(item.grossInput.replace(",", ".")) || 0;
         const computedGross =
-          item.pricingMode === "unit" ? Math.round(qtyNum * unitNum * 100) / 100 : 0;
+          item.pricingMode === "unit"
+            ? Math.round(qtyNum * unitNum * 100) / 100
+            : 0;
         const effectiveGross =
           item.pricingMode === "unit" ? computedGross : grossNumItem;
         const title =
@@ -595,30 +607,70 @@ export function Receitas() {
     taxValue: taxValNum,
   });
 
+  const applyRevenueListFilters = useCallback(
+    (
+      // PostgrestFilterBuilder após .select(); tipagem do client é instável aqui.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      q: any,
+      opts: { startD: string; endD: string; companyId: string },
+    ) => {
+      let filtered = q
+        .eq("company_id", opts.companyId)
+        .gte("entry_date", opts.startD)
+        .lte("entry_date", opts.endD);
+      if (debouncedSearch.trim()) {
+        const term = `%${debouncedSearch.trim()}%`;
+        filtered = filtered.ilike("title", term);
+      }
+      if (entryModeFilter !== "all") {
+        filtered = filtered.eq("entry_mode", entryModeFilter);
+      }
+      if (revenueTypeFilter !== "all") {
+        filtered = filtered.eq("revenue_type", revenueTypeFilter);
+      }
+      return filtered;
+    },
+    [debouncedSearch, entryModeFilter, revenueTypeFilter],
+  );
+
   const fetchData = useCallback(async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
+    setSummaryLoading(true);
     const startD = startOfMonthDate(period.month, period.year);
     const endD = endOfMonthDate(period.month, period.year);
 
-    let q = supabase
-      .from("revenue_entries")
-      .select("*", { count: "exact" })
-      .eq("company_id", currentCompany.id)
-      .gte("entry_date", startD)
-      .lte("entry_date", endD)
+    const q = applyRevenueListFilters(
+      supabase.from("revenue_entries").select("*", { count: "exact" }),
+      { startD, endD, companyId: currentCompany.id },
+    )
       .order("entry_date", { ascending: false })
       .order("created_at", { ascending: false });
 
-    if (debouncedSearch.trim()) {
-      const term = `%${debouncedSearch.trim()}%`;
-      q = q.ilike("title", term);
-    }
-
-    const { data, count, error } = await q.range(
-      (page - 1) * PAGE_SIZE,
-      page * PAGE_SIZE - 1,
+    const summaryQ = applyRevenueListFilters(
+      supabase
+        .from("revenue_entries")
+        .select("gross_amount, tax_amount, net_amount"),
+      { startD, endD, companyId: currentCompany.id },
     );
+
+    const [{ data, count, error }, summaryResult] = await Promise.all([
+      q.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1),
+      fetchAllInRange<
+        Pick<RevenueEntry, "gross_amount" | "tax_amount" | "net_amount">
+      >(summaryQ).then(
+        (rows) => ({ data: rows, error: null as null }),
+        (err) => ({
+          data: null as Pick<
+            RevenueEntry,
+            "gross_amount" | "tax_amount" | "net_amount"
+          >[] | null,
+          error: err as { message?: string },
+        }),
+      ),
+    ]);
+    const summaryRows = summaryResult.data;
+    const summaryError = summaryResult.error;
 
     const { data: catRows } = await supabase
       .from("company_categories")
@@ -658,26 +710,91 @@ export function Receitas() {
       >[],
     );
     setLoading(false);
+    setSummaryLoading(false);
 
     if (error) {
       console.error(error);
       toast.error("Não foi possível carregar as vendas.");
       setRows([]);
       setTotalCount(0);
+      setPeriodSummary(null);
       return;
+    }
+
+    if (summaryError) {
+      console.error(summaryError);
+      setPeriodSummary(null);
+    } else {
+      const entries = (summaryRows ?? []) as Pick<
+        RevenueEntry,
+        "gross_amount" | "tax_amount" | "net_amount"
+      >[];
+      setPeriodSummary({
+        count: count ?? 0,
+        gross: entries.reduce((s, r) => s + Number(r.gross_amount), 0),
+        tax: entries.reduce((s, r) => s + Number(r.tax_amount), 0),
+        net: entries.reduce((s, r) => s + Number(r.net_amount), 0),
+      });
     }
 
     setRows((data as RevenueEntry[]) ?? []);
     setTotalCount(count ?? 0);
-  }, [currentCompany, period.month, period.year, debouncedSearch, page]);
+  }, [
+    currentCompany,
+    period.month,
+    period.year,
+    debouncedSearch,
+    page,
+    applyRevenueListFilters,
+  ]);
 
   useEffect(() => {
     queueMicrotask(() => setPage(1));
-  }, [debouncedSearch, period.month, period.year]);
+  }, [
+    debouncedSearch,
+    period.month,
+    period.year,
+    entryModeFilter,
+    revenueTypeFilter,
+  ]);
+
+  const fetchCalendarEntries = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    setCalendarLoading(true);
+    const { startIso, endIso } = getCalendarGridDateRange(
+      period.month,
+      period.year,
+    );
+    try {
+      const data = await fetchAllInRange<RevenueEntry>(
+        applyRevenueListFilters(
+          supabase.from("revenue_entries").select("*"),
+          { startD: startIso, endD: endIso, companyId: currentCompany.id },
+        )
+          .order("entry_date", { ascending: true })
+          .order("created_at", { ascending: true }),
+      );
+      setCalendarEntries(data);
+    } catch (e) {
+      console.error(e);
+      toast.error("Não foi possível carregar o calendário de vendas.");
+      setCalendarEntries([]);
+    }
+    setCalendarLoading(false);
+  }, [
+    currentCompany?.id,
+    period.month,
+    period.year,
+    applyRevenueListFilters,
+  ]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchData());
   }, [fetchData]);
+
+  useEffect(() => {
+    queueMicrotask(() => void fetchCalendarEntries());
+  }, [fetchCalendarEntries]);
 
   useEffect(() => {
     if (!sheetOpen) return;
@@ -736,17 +853,22 @@ export function Receitas() {
         if (!item.parsed) return false;
         if (item.effectiveGross <= 0) return false;
         if (item.isProductSale) {
-          if (!item.productId || item.qtyNum <= 0 || !item.saleUnitCode) return false;
-          if (toStockQty(item.productId, item.qtyNum, item.saleUnitCode) == null) {
+          if (!item.productId || item.qtyNum <= 0 || !item.saleUnitCode)
+            return false;
+          if (
+            toStockQty(item.productId, item.qtyNum, item.saleUnitCode) == null
+          ) {
             return false;
           }
           if (item.pricingMode === "unit" && item.unitNum < 0) return false;
-          if (item.pricingMode === "total" && item.grossNumItem <= 0) return false;
+          if (item.pricingMode === "total" && item.grossNumItem <= 0)
+            return false;
         }
         if (item.isRecipeSale) {
           if (!item.recipeId) return false;
           if (item.pricingMode === "unit" && item.unitNum < 0) return false;
-          if (item.pricingMode === "total" && item.grossNumItem <= 0) return false;
+          if (item.pricingMode === "total" && item.grossNumItem <= 0)
+            return false;
         }
       }
       return true;
@@ -816,10 +938,10 @@ export function Receitas() {
           gross_amount: item.effectiveGross,
           product_id: item.isProductSale ? item.productId : null,
           recipe_id: item.isRecipeSale ? item.recipeId : null,
-          quantity: item.isProductSale
-            ? (toStockQty(item.productId, item.qtyNum, item.saleUnitCode) ??
-              item.qtyNum)
-            : 1,
+          quantity: item.qtyNum,
+          sale_unit_code: item.isProductSale
+            ? item.saleUnitCode || item.selectedProduct?.unit || "un"
+            : undefined,
           pricing_mode: item.pricingMode,
           unit_value: item.pricingMode === "unit" ? item.unitNum : null,
         };
@@ -841,14 +963,13 @@ export function Receitas() {
       }
       setSaving(false);
       toast.success(
-        createdCount > 1
-          ? `${createdCount} vendas criadas.`
-          : "Venda criada.",
+        createdCount > 1 ? `${createdCount} vendas criadas.` : "Venda criada.",
       );
     }
     setSheetOpen(false);
     resetForm();
-    fetchData();
+    void fetchData();
+    void fetchCalendarEntries();
   };
 
   const formatCurrency = (v: number) =>
@@ -873,7 +994,7 @@ export function Receitas() {
   const displayNet = isPontual ? summaryTaxNet.netAmount : netAmount;
 
   return (
-    <PageShell className="space-y-8 pb-0" narrow>
+    <PageShell className="space-y-8 pb-0">
       <PageHeader
         title="Vendas"
         description="Vendas manuais e por produto: a taxa sobre o bruto vem de Configurações › Impostos na receita (por categoria) e pode gerar conta a pagar de dedução no fluxo."
@@ -893,8 +1014,50 @@ export function Receitas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pela data da venda (competência)"
+        description="Calendário e lista usam a data da venda (competência); filtros abaixo aplicam aos dois."
       />
+
+      <RevenueEntriesCalendar
+        month={period.month}
+        year={period.year}
+        entries={calendarEntries}
+        loading={calendarLoading}
+        onDayListOpen={setRevenueCalendarDayList}
+        formatCurrency={formatCurrency}
+      />
+
+      <Sheet
+        open={!!revenueCalendarDayList}
+        onOpenChange={(o) => !o && setRevenueCalendarDayList(null)}
+      >
+        <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+            <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
+            <SheetDescription className="capitalize">
+              {revenueCalendarDayList?.title}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
+            {revenueCalendarDayList &&
+              revenueCalendarDayList.items.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma venda neste dia.
+                </p>
+              )}
+            {(revenueCalendarDayList?.items ?? []).map((e) => (
+              <RevenueDaySaleListCard
+                key={e.id}
+                entry={e}
+                formatCurrency={formatCurrency}
+                onClick={() => {
+                  setRevenueCalendarDayList(null);
+                  setDetailRevenueId(e.id);
+                }}
+              />
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={sheetOpen} onOpenChange={handleOpenSheet}>
         <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-xl">
@@ -908,248 +1071,318 @@ export function Receitas() {
                   Nova venda
                 </SheetTitle>
                 <SheetDescription>
-                  Lançamento por período ou venda pontual com estoque, impostos e
-                  DRE.
+                  Lançamento por período ou venda pontual com estoque, impostos
+                  e DRE.
                 </SheetDescription>
               </div>
             </div>
           </SheetHeader>
-          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <form
+            onSubmit={handleSubmit}
+            className="flex min-h-0 flex-1 flex-col"
+          >
             <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
               <div className="space-y-4 p-6">
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
-              <div>
-              <Label>Modo de lançamento</Label>
-              <Select
-                value={baseMode}
-                onValueChange={(v) => {
-                  const m = v as LaunchMode;
-                  setBaseMode(m);
-                  if (m === "manual") setPontualItems([createPontualSaleDraft()]);
-                  if (m === "pontual" && pontualItems.length === 0) {
-                    setPontualItems([createPontualSaleDraft()]);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manual">Lançamento por período</SelectItem>
-                  <SelectItem value="pontual">Venda pontual</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {baseMode === "manual" && (
-              <div>
-                <Label>Tipo da receita</Label>
-                <Select
-                  value={revenueType}
-                  onValueChange={(v) =>
-                    setRevenueType(v as "operational" | "non_operational")
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="operational">Operacional</SelectItem>
-                    <SelectItem value="non_operational">
-                      Não operacional
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div>
-              <Label>Data da receita</Label>
-              <Input
-                type="date"
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-                required
-              />
-            </div>
-            </div>
-
-            {baseMode === "manual" && (
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
-                <div>
-                  <Label>Título</Label>
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Ex.: Vendas do fim de semana"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label>Categoria</Label>
-                  <Select
-                    value={categoryLeafId || "__none__"}
-                    onValueChange={(v) =>
-                      setCategoryLeafId(v === "__none__" ? "" : v)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione a categoria" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Selecione</SelectItem>
-                      {leafCategoryOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {categoryPathLabel(c.id, categoriesById)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {leafCategoryOptions.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Cadastre categorias de receita em Configurações ›
-                      Categorias.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {isPontual && (
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
-                <div>
-                  <Label>Categoria da venda *</Label>
-                  <Select
-                    value={categoryLeafId || "__none__"}
-                    onValueChange={(v) =>
-                      setCategoryLeafId(v === "__none__" ? "" : v)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione a categoria da receita" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Selecione</SelectItem>
-                      {leafCategoryOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {categoryPathLabel(c.id, categoriesById)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {leafCategoryOptions.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Cadastre categorias de receita operacional em Configurações ›
-                      Categorias.
-                    </p>
-                  )}
-                </div>
-
-                {pontualItemStates.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-border/70 bg-muted/20 p-3 space-y-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Label>Produto ou receita (ficha) #{index + 1}</Label>
-                      {pontualItems.length > 1 ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            setPontualItems((prev) =>
-                              prev.filter((x) => x.id !== item.id),
-                            )
-                          }
-                        >
-                          Remover
-                        </Button>
-                      ) : null}
-                    </div>
-                    <PontualProductRecipePicker
-                      products={products}
-                      recipes={recipes}
-                      value={item.ref}
-                      onChange={(ref) => {
-                        const parsedRef = parsePontualRef(ref);
-                        const defaultUnit =
-                          parsedRef?.kind === "product"
-                            ? (productById.get(parsedRef.id)?.unit ?? "")
-                            : "";
-                        setPontualItems((prev) =>
-                          prev.map((x) =>
-                            x.id === item.id
-                              ? {
-                                  ...x,
-                                  ref,
-                                  quantity: "1",
-                                  saleUnitCode: defaultUnit,
-                                }
-                              : x,
-                          ),
-                        );
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+                  <div>
+                    <Label>Modo de lançamento</Label>
+                    <Select
+                      value={baseMode}
+                      onValueChange={(v) => {
+                        const m = v as LaunchMode;
+                        setBaseMode(m);
+                        if (m === "manual")
+                          setPontualItems([createPontualSaleDraft()]);
+                        if (m === "pontual" && pontualItems.length === 0) {
+                          setPontualItems([createPontualSaleDraft()]);
+                        }
                       }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">
+                          Lançamento por período
+                        </SelectItem>
+                        <SelectItem value="pontual">Venda pontual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {baseMode === "manual" && (
+                    <div>
+                      <Label>Tipo da receita</Label>
+                      <Select
+                        value={revenueType}
+                        onValueChange={(v) =>
+                          setRevenueType(v as "operational" | "non_operational")
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="operational">
+                            Operacional
+                          </SelectItem>
+                          <SelectItem value="non_operational">
+                            Não operacional
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div>
+                    <Label>Data da receita</Label>
+                    <Input
+                      type="date"
+                      value={entryDate}
+                      onChange={(e) => setEntryDate(e.target.value)}
+                      required
                     />
+                  </div>
+                </div>
 
-                    {item.isRecipeSale && (
-                      <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
-                        <span className="font-medium text-foreground">1 porção</span>{" "}
-                        neste lançamento. Os ingredientes são baixados conforme as
-                        quantidades da ficha
-                        {item.selectedRecipe?.batch_yield != null
-                          ? ` (rendimento ${item.selectedRecipe.batch_yield}).`
-                          : "."}
-                      </p>
-                    )}
+                {baseMode === "manual" && (
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+                    <div>
+                      <Label>Título</Label>
+                      <Input
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Ex.: Vendas do fim de semana"
+                        required
+                      />
+                    </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      {item.isProductSale ? (
-                        <>
-                          <div>
-                            <Label>Quantidade</Label>
-                            <Input
-                              type="number"
-                              step={item.quantityFieldProps.step}
-                              min={item.quantityFieldProps.min}
-                              value={item.quantity}
-                              onChange={(e) =>
+                    <div>
+                      <Label>Categoria</Label>
+                      <Select
+                        value={categoryLeafId || "__none__"}
+                        onValueChange={(v) =>
+                          setCategoryLeafId(v === "__none__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a categoria" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Selecione</SelectItem>
+                          {leafCategoryOptions.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {categoryPathLabel(c.id, categoriesById)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {leafCategoryOptions.length === 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Cadastre categorias de receita em Configurações ›
+                          Categorias.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {isPontual && (
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
+                    <div>
+                      <Label>Categoria da venda *</Label>
+                      <Select
+                        value={categoryLeafId || "__none__"}
+                        onValueChange={(v) =>
+                          setCategoryLeafId(v === "__none__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a categoria da receita" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Selecione</SelectItem>
+                          {leafCategoryOptions.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {categoryPathLabel(c.id, categoriesById)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {leafCategoryOptions.length === 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Cadastre categorias de receita operacional em
+                          Configurações › Categorias.
+                        </p>
+                      )}
+                    </div>
+
+                    {pontualItemStates.map((item, index) => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl border border-border/70 bg-muted/20 p-3 space-y-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Produto ou receita (ficha) #{index + 1}</Label>
+                          {pontualItems.length > 1 ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
                                 setPontualItems((prev) =>
-                                  prev.map((x) =>
-                                    x.id === item.id
-                                      ? { ...x, quantity: e.target.value }
-                                      : x,
-                                  ),
+                                  prev.filter((x) => x.id !== item.id),
                                 )
                               }
-                              onBlur={() => {
-                                if (!item.quantityFieldProps.integerOnly) return;
-                                const n = Math.max(
-                                  1,
-                                  Math.round(parseFloat(item.quantity) || 0),
-                                );
-                                setPontualItems((prev) =>
-                                  prev.map((x) =>
-                                    x.id === item.id
-                                      ? { ...x, quantity: String(n) }
-                                      : x,
-                                  ),
-                                );
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <Label>Unidade</Label>
+                            >
+                              Remover
+                            </Button>
+                          ) : null}
+                        </div>
+                        <PontualProductRecipePicker
+                          products={products}
+                          recipes={recipes}
+                          value={item.ref}
+                          onChange={(ref) => {
+                            const parsedRef = parsePontualRef(ref);
+                            const defaultUnit =
+                              parsedRef?.kind === "product"
+                                ? (productById.get(parsedRef.id)?.unit ?? "")
+                                : "";
+                            setPontualItems((prev) =>
+                              prev.map((x) =>
+                                x.id === item.id
+                                  ? {
+                                      ...x,
+                                      ref,
+                                      quantity: "1",
+                                      saleUnitCode: defaultUnit,
+                                    }
+                                  : x,
+                              ),
+                            );
+                          }}
+                        />
+
+                        {item.isRecipeSale && (
+                          <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
+                            <span className="font-medium text-foreground">
+                              1 unidade
+                            </span>{" "}
+                            neste lançamento. Os ingredientes são baixados
+                            conforme as quantidades da ficha
+                            {item.selectedRecipe?.batch_yield != null
+                              ? ` (rendimento ${item.selectedRecipe.batch_yield}).`
+                              : "."}
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {item.isProductSale ? (
+                            <>
+                              <div>
+                                <Label>Quantidade</Label>
+                                <Input
+                                  type="number"
+                                  step={item.quantityFieldProps.step}
+                                  min={item.quantityFieldProps.min}
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    setPontualItems((prev) =>
+                                      prev.map((x) =>
+                                        x.id === item.id
+                                          ? { ...x, quantity: e.target.value }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                  onBlur={() => {
+                                    if (!item.quantityFieldProps.integerOnly)
+                                      return;
+                                    const n = Math.max(
+                                      1,
+                                      Math.round(
+                                        parseFloat(item.quantity) || 0,
+                                      ),
+                                    );
+                                    setPontualItems((prev) =>
+                                      prev.map((x) =>
+                                        x.id === item.id
+                                          ? { ...x, quantity: String(n) }
+                                          : x,
+                                      ),
+                                    );
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <Label>Unidade</Label>
+                                <Select
+                                  value={item.saleUnitCode || "__none__"}
+                                  onValueChange={(v) =>
+                                    setPontualItems((prev) =>
+                                      prev.map((x) =>
+                                        x.id === item.id
+                                          ? {
+                                              ...x,
+                                              saleUnitCode:
+                                                v === "__none__" ? "" : v,
+                                            }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Unidade" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">
+                                      Selecione
+                                    </SelectItem>
+                                    {item.productId
+                                      ? allowedUnitsForProduct(
+                                          item.productId,
+                                        ).map((u) => (
+                                          <SelectItem
+                                            key={`${item.productId}-${u}`}
+                                            value={u}
+                                          >
+                                            {u}
+                                          </SelectItem>
+                                        ))
+                                      : null}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </>
+                          ) : item.isRecipeSale ? (
+                            <div className="col-span-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2 sm:col-span-1">
+                              <p className="text-xs text-muted-foreground">
+                                Quantidade
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                1 unidade
+                              </p>
+                            </div>
+                          ) : null}
+                          <div
+                            className={
+                              item.isRecipeSale
+                                ? "col-span-2 sm:col-span-1"
+                                : undefined
+                            }
+                          >
+                            <Label>Preço</Label>
                             <Select
-                              value={item.saleUnitCode || "__none__"}
+                              value={item.pricingMode}
                               onValueChange={(v) =>
                                 setPontualItems((prev) =>
                                   prev.map((x) =>
                                     x.id === item.id
                                       ? {
                                           ...x,
-                                          saleUnitCode: v === "__none__" ? "" : v,
+                                          pricingMode: v as "unit" | "total",
                                         }
                                       : x,
                                   ),
@@ -1157,188 +1390,158 @@ export function Receitas() {
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue placeholder="Unidade" />
+                                <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">Selecione</SelectItem>
-                                {item.productId
-                                  ? allowedUnitsForProduct(item.productId).map((u) => (
-                                      <SelectItem
-                                        key={`${item.productId}-${u}`}
-                                        value={u}
-                                      >
-                                        {u}
-                                      </SelectItem>
-                                    ))
-                                  : null}
+                                <SelectItem value="unit">
+                                  {item.isRecipeSale
+                                    ? "Valor por porção"
+                                    : "Valor unitário"}
+                                </SelectItem>
+                                <SelectItem value="total">
+                                  Valor total
+                                </SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
-                        </>
-                      ) : item.isRecipeSale ? (
-                        <div className="col-span-2 rounded-md border border-border/80 bg-muted/20 px-3 py-2 sm:col-span-1">
-                          <p className="text-xs text-muted-foreground">Quantidade</p>
-                          <p className="text-sm font-medium text-foreground">
-                            1 porção
-                          </p>
                         </div>
-                      ) : null}
-                      <div className={item.isRecipeSale ? "col-span-2 sm:col-span-1" : undefined}>
-                        <Label>Preço</Label>
-                        <Select
-                          value={item.pricingMode}
-                          onValueChange={(v) =>
-                            setPontualItems((prev) =>
-                              prev.map((x) =>
-                                x.id === item.id
-                                  ? { ...x, pricingMode: v as "unit" | "total" }
-                                  : x,
-                              ),
-                            )
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="unit">
-                              {item.isRecipeSale ? "Valor por porção" : "Valor unitário"}
-                            </SelectItem>
-                            <SelectItem value="total">Valor total</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
 
-                    {item.pricingMode === "unit" ? (
-                      <div>
-                        <Label>
-                          {item.isRecipeSale
-                            ? "Valor por porção (R$)"
-                            : "Valor unitário (R$)"}
-                        </Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.unitValue}
-                          onChange={(e) =>
-                            setPontualItems((prev) =>
-                              prev.map((x) =>
-                                x.id === item.id
-                                  ? { ...x, unitValue: e.target.value }
-                                  : x,
-                              ),
-                            )
-                          }
-                          placeholder="0,00"
-                        />
+                        {item.pricingMode === "unit" ? (
+                          <div>
+                            <Label>
+                              {item.isRecipeSale
+                                ? "Valor por porção (R$)"
+                                : "Valor unitário (R$)"}
+                            </Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.unitValue}
+                              onChange={(e) =>
+                                setPontualItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id
+                                      ? { ...x, unitValue: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              placeholder="0,00"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <Label>Valor total da venda (R$)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.grossInput}
+                              onChange={(e) =>
+                                setPontualItems((prev) =>
+                                  prev.map((x) =>
+                                    x.id === item.id
+                                      ? { ...x, grossInput: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              placeholder="0,00"
+                            />
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div>
-                        <Label>Valor total da venda (R$)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.grossInput}
-                          onChange={(e) =>
-                            setPontualItems((prev) =>
-                              prev.map((x) =>
-                                x.id === item.id
-                                  ? { ...x, grossInput: e.target.value }
-                                  : x,
-                              ),
-                            )
-                          }
-                          placeholder="0,00"
-                        />
-                      </div>
-                    )}
+                    ))}
 
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        setPontualItems((prev) => [
+                          ...prev,
+                          createPontualSaleDraft(),
+                        ])
+                      }
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Adicionar produto ou receita
+                    </Button>
                   </div>
-                ))}
+                )}
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() =>
-                    setPontualItems((prev) => [...prev, createPontualSaleDraft()])
-                  }
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Adicionar produto ou receita
-                </Button>
-              </div>
-            )}
+                {baseMode === "manual" && (
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                    <Label>Valor bruto (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={grossInput}
+                      onChange={(e) => setGrossInput(e.target.value)}
+                      placeholder="0,00"
+                      required
+                    />
+                  </div>
+                )}
 
-            {baseMode === "manual" && (
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                <Label>Valor bruto (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={grossInput}
-                  onChange={(e) => setGrossInput(e.target.value)}
-                  placeholder="0,00"
-                  required
-                />
-              </div>
-            )}
+                <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">
+                      Taxa / imposto (por categoria)
+                    </span>
+                    <Link
+                      to="/app/configuracoes/impostos-receita"
+                      className="text-xs text-primary underline-offset-2 hover:underline"
+                    >
+                      Configurar
+                    </Link>
+                  </div>
+                  {categoryLeafId ? (
+                    <p className="text-muted-foreground">
+                      {taxSummaryLabel}
+                      {taxPresetByCategory.has(categoryLeafId)
+                        ? " — definido para esta categoria."
+                        : " — sem configuração específica; será usado 0% até você definir em Configurações."}
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Selecione a categoria de receita para exibir a taxa
+                      aplicável.
+                    </p>
+                  )}
+                </div>
 
-            <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-foreground">
-                  Taxa / imposto (por categoria)
-                </span>
-                <Link
-                  to="/app/configuracoes/impostos-receita"
-                  className="text-xs text-primary underline-offset-2 hover:underline"
-                >
-                  Configurar
-                </Link>
-              </div>
-              {categoryLeafId ? (
-                <p className="text-muted-foreground">
-                  {taxSummaryLabel}
-                  {taxPresetByCategory.has(categoryLeafId)
-                    ? " — definido para esta categoria."
-                    : " — sem configuração específica; será usado 0% até você definir em Configurações."}
-                </p>
-              ) : (
-                <p className="text-muted-foreground">
-                  Selecione a categoria de receita para exibir a taxa aplicável.
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-1.5">
-              <p className="font-medium text-foreground">Resumo financeiro</p>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Valor bruto</span>
-                <span>{formatCurrency(effectiveGross)}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">{taxSummaryLabel}</span>
-                <span>- {formatCurrency(displayTax)}</span>
-              </div>
-              <div className="flex justify-between gap-2 font-medium">
-                <span>Valor líquido</span>
-                <span>{formatCurrency(displayNet)}</span>
-              </div>
-              <div className="flex justify-between gap-2 pt-1 border-t border-border/60">
-                <span className="text-muted-foreground">Faturamento</span>
-                <span>{formatCurrency(effectiveGross)}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">
-                  {ptBrUi.receitas.deducoesFaturamento}
-                </span>
-                <span>{formatCurrency(displayTax)}</span>
-              </div>
-            </div>
+                <div className="rounded-2xl border border-border bg-card p-4 text-sm shadow-sm space-y-1.5">
+                  <p className="font-medium text-foreground">
+                    Resumo financeiro
+                  </p>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Valor bruto</span>
+                    <span>{formatCurrency(effectiveGross)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {taxSummaryLabel}
+                    </span>
+                    <span>- {formatCurrency(displayTax)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 font-medium">
+                    <span>Valor líquido</span>
+                    <span>{formatCurrency(displayNet)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 pt-1 border-t border-border/60">
+                    <span className="text-muted-foreground">Faturamento</span>
+                    <span>{formatCurrency(effectiveGross)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {ptBrUi.receitas.deducoesFaturamento}
+                    </span>
+                    <span>{formatCurrency(displayTax)}</span>
+                  </div>
+                </div>
               </div>
             </div>
             <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
@@ -1362,115 +1565,38 @@ export function Receitas() {
         </SheetContent>
       </Sheet>
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Vendas no período
-            </CardTitle>
-            <CardDescription>
-              Data da venda, classificação, valores e origem do lançamento
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4">
-            <Input
-              placeholder="Filtrar por título..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
-          {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : rows.length === 0 ? (
-            <p className="text-muted-foreground">
-              Nenhuma venda neste período.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {rows.map((r) => {
-                const catLabel = categoryPathLabel(
-                  r.subcategory_id,
-                  categoriesById,
-                );
-                return (
-                  <div
-                    key={r.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDetailRevenueId(r.id)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && setDetailRevenueId(r.id)
-                    }
-                    className="flex flex-col gap-2 rounded-lg border p-4 transition-colors hover:bg-muted/50 cursor-pointer sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="font-medium truncate">{r.title}</p>
-                      {r.entry_mode === "product_sale" && r.product_id ? (
-                        <p className="text-xs text-muted-foreground truncate">
-                          Produto:{" "}
-                          {productNameById.get(r.product_id) ?? r.product_id}
-                        </p>
-                      ) : null}
-                      {r.entry_mode === "recipe_sale" && r.recipe_id ? (
-                        <p className="text-xs text-muted-foreground truncate">
-                          Receita (ficha):{" "}
-                          {recipeNameById.get(r.recipe_id) ?? r.recipe_id}
-                        </p>
-                      ) : null}
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        <span>{formatDate(r.entry_date)}</span>
-                        <span>
-                          {REVENUE_TYPE_LABEL[r.revenue_type] ?? r.revenue_type}
-                        </span>
-                        <span className="truncate max-w-[220px]">{catLabel}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <Badge variant="secondary">
-                          {ENTRY_MODE_LABEL[r.entry_mode] ?? r.entry_mode}
-                        </Badge>
-                        {categoriesById.get(r.subcategory_id) ? (
-                          <Badge variant="outline">
-                            {tipoBadge(categoriesById.get(r.subcategory_id)!)}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right text-sm space-y-0.5 sm:pl-4">
-                      <p>
-                        <span className="text-muted-foreground">Bruto: </span>
-                        {formatCurrency(Number(r.gross_amount))}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Taxa: </span>
-                        {formatCurrency(Number(r.tax_amount))}
-                      </p>
-                      <p className="font-medium">
-                        Líquido: {formatCurrency(Number(r.net_amount))}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {!loading && (
-            <Pagination
-              page={page}
-              totalCount={totalCount}
-              onPageChange={setPage}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <RevenueSalesList
+        rows={rows}
+        totalCount={totalCount}
+        page={page}
+        onPageChange={setPage}
+        loading={loading}
+        search={search}
+        onSearchChange={setSearch}
+        entryModeFilter={entryModeFilter}
+        onEntryModeFilterChange={setEntryModeFilter}
+        revenueTypeFilter={revenueTypeFilter}
+        onRevenueTypeFilterChange={setRevenueTypeFilter}
+        periodSummary={periodSummary}
+        summaryLoading={summaryLoading}
+        categoriesById={categoriesById}
+        categoryPathLabel={categoryPathLabel}
+        productNameById={productNameById}
+        recipeNameById={recipeNameById}
+        formatCurrency={formatCurrency}
+        formatDate={formatDate}
+        revenueTypeLabels={REVENUE_TYPE_LABEL}
+        entryModeLabels={ENTRY_MODE_LABEL}
+        onSelectEntry={setDetailRevenueId}
+      />
 
       <RevenueDetailSheet
         revenueEntryId={detailRevenueId}
         onClose={() => setDetailRevenueId(null)}
-        onRefresh={fetchData}
+        onRefresh={() => {
+          void fetchData();
+          void fetchCalendarEntries();
+        }}
       />
     </PageShell>
   );

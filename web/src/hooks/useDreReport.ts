@@ -6,19 +6,35 @@ import {
   type DreComputed,
   type CategoryTotals,
 } from "@/lib/dre/computeDre";
+import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto } from "@/types/expense";
+import { isBoletoPayable } from "@/types/expense";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
+/** Boleto do período DRE com campos para listagem de sem categoria. */
+export type DreSemCategoriaBoleto = Pick<
+  Boleto,
+  | "id"
+  | "description"
+  | "amount"
+  | "due_date"
+  | "flow_type"
+  | "company_category_id"
+  | "status"
+  | "revenue_entry_id"
+  | "expense_id"
+  | "category"
+>;
 
 export interface UseDreReportState {
   loading: boolean;
   error: string | null;
   categories: CompanyCategory[];
-  boletosInPeriod: Pick<
-    Boleto,
-    "id" | "amount" | "due_date" | "flow_type" | "company_category_id" | "status"
-  >[];
+  boletosInPeriod: DreSemCategoriaBoleto[];
+  boletosSemCategoria: DreSemCategoriaBoleto[];
+  salesCmvInPeriod: number;
   categoryTotals: CategoryTotals;
   computed: DreComputed | null;
   periodLabel: string;
@@ -51,16 +67,15 @@ export function useDreReport(
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<CompanyCategory[]>([]);
   const [boletosInPeriod, setBoletosInPeriod] = useState<
-    Pick<
-      Boleto,
-      "id" | "amount" | "due_date" | "flow_type" | "company_category_id" | "status"
-    >[]
+    UseDreReportState["boletosInPeriod"]
   >([]);
+  const [salesCmvInPeriod, setSalesCmvInPeriod] = useState(0);
 
   const load = useCallback(async () => {
     if (!companyId) {
       setCategories([]);
       setBoletosInPeriod([]);
+      setSalesCmvInPeriod(0);
       setLoading(false);
       setError(null);
       return;
@@ -71,7 +86,7 @@ export function useDreReport(
     const startDate = start.slice(0, 10);
     const endDate = end.slice(0, 10);
 
-    const [catRes, bolRes] = await Promise.all([
+    const [catRes, bolRes, revCmvRes] = await Promise.all([
       supabase
         .from("company_categories")
         .select("*")
@@ -80,16 +95,28 @@ export function useDreReport(
         .order("name", { ascending: true }),
       supabase
         .from("boletos")
-        .select("id, amount, due_date, flow_type, company_category_id, status")
+        .select(
+          "id, description, amount, due_date, flow_type, company_category_id, status, revenue_entry_id, expense_id, category",
+        )
         .eq("company_id", companyId)
         .gte("due_date", startDate)
-        .lte("due_date", endDate),
+        .lte("due_date", endDate)
+        .order("due_date", { ascending: true })
+        .order("amount", { ascending: false }),
+      supabase
+        .from("revenue_entries")
+        .select("cmv_amount")
+        .eq("company_id", companyId)
+        .in("entry_mode", ["product_sale", "recipe_sale"])
+        .gte("entry_date", startDate)
+        .lte("entry_date", endDate),
     ]);
 
     if (catRes.error) {
       setError(catRes.error.message);
       setCategories([]);
       setBoletosInPeriod([]);
+      setSalesCmvInPeriod(0);
       setLoading(false);
       return;
     }
@@ -97,12 +124,26 @@ export function useDreReport(
       setError(bolRes.error.message);
       setCategories([]);
       setBoletosInPeriod([]);
+      setSalesCmvInPeriod(0);
+      setLoading(false);
+      return;
+    }
+    if (revCmvRes.error) {
+      setError(revCmvRes.error.message);
+      setCategories([]);
+      setBoletosInPeriod([]);
+      setSalesCmvInPeriod(0);
       setLoading(false);
       return;
     }
 
     setCategories((catRes.data ?? []) as CompanyCategory[]);
-    setBoletosInPeriod((bolRes.data ?? []) as UseDreReportState["boletosInPeriod"]);
+    setBoletosInPeriod((bolRes.data ?? []) as DreSemCategoriaBoleto[]);
+    const salesCmv = (revCmvRes.data ?? []).reduce(
+      (s, row) => s + Math.max(0, Number((row as { cmv_amount?: number }).cmv_amount) || 0),
+      0,
+    );
+    setSalesCmvInPeriod(salesCmv);
     setLoading(false);
   }, [companyId, period.month, period.year]);
 
@@ -115,20 +156,46 @@ export function useDreReport(
     [categories],
   );
 
+  const boletosForDreAggregation = useMemo(() => {
+    return boletosInPeriod.filter((b) => {
+      if (!b.revenue_entry_id || !isBoletoPayable(b)) return true;
+      const cat = b.company_category_id
+        ? categoriesById.get(b.company_category_id)
+        : undefined;
+      return cat ? mapCategoryToDreBucket(cat) !== "CMV" : true;
+    });
+  }, [boletosInPeriod, categoriesById]);
+
+  const boletosSemCategoria = useMemo(() => {
+    return boletosInPeriod.filter((b) => !b.company_category_id);
+  }, [boletosInPeriod]);
+
   const categoryTotals = useMemo(() => {
     return aggregateTotalsByCategory(
-      boletosInPeriod.map((b) => ({
+      boletosForDreAggregation.map((b) => ({
         amount: Number(b.amount),
         company_category_id: b.company_category_id ?? null,
       })),
       categoriesById,
     );
-  }, [boletosInPeriod, categoriesById]);
+  }, [boletosForDreAggregation, categoriesById]);
 
   const computed = useMemo(() => {
-    if (!categories.length && !boletosInPeriod.length) return null;
-    return buildDreComputedFromMaps(categoryTotals.byCategoryId, categoriesById);
-  }, [categoryTotals.byCategoryId, categoriesById, categories.length, boletosInPeriod.length]);
+    if (!categories.length && !boletosInPeriod.length && salesCmvInPeriod <= 0) {
+      return null;
+    }
+    return buildDreComputedFromMaps(
+      categoryTotals.byCategoryId,
+      categoriesById,
+      salesCmvInPeriod,
+    );
+  }, [
+    categoryTotals.byCategoryId,
+    categoriesById,
+    categories.length,
+    boletosInPeriod.length,
+    salesCmvInPeriod,
+  ]);
 
   const periodLabel = `${MONTH_NAMES[period.month - 1]} ${period.year}`;
 
@@ -137,6 +204,8 @@ export function useDreReport(
     error,
     categories,
     boletosInPeriod,
+    boletosSemCategoria,
+    salesCmvInPeriod,
     categoryTotals,
     computed,
     periodLabel,

@@ -4,7 +4,9 @@ import {
   DreExpandableLine,
   DreHighlightBlock,
 } from "@/components/dre/DreExpandableLine";
+import { DreSemCategoriaTable } from "@/components/dre/DreSemCategoriaTable";
 import { DreTreePanel } from "@/components/dre/DreTreePanel";
+import { Button } from "@/components/ui/button";
 import {
   MonthClosingChecklist,
   MonthClosingChecklistButton,
@@ -40,6 +42,7 @@ import {
   BarChart3,
   ChevronDown,
   Coins,
+  ListX,
   PieChart,
   Scale,
 } from "lucide-react";
@@ -55,15 +58,22 @@ export function Dre() {
     year: now.getFullYear(),
   });
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [mainView, setMainView] = useState<DreMainView>("resumo");
 
   const {
     loading,
     error,
     categories,
+    boletosSemCategoria,
     categoryTotals,
     computed,
     periodLabel,
   } = useDreReport(currentCompany?.id, period);
+
+  const categoriesById = useMemo(
+    () => new Map(categories.map((c) => [c.id, c])),
+    [categories],
+  );
 
   const monthClosing = useMonthClosingChecklist(
     currentCompany?.id,
@@ -156,13 +166,14 @@ export function Dre() {
       ) : null}
 
       {(categoryTotals.semCategoriaCount > 0 || categoryTotals.unmappedCategoryIds.size > 0) &&
-      !loading ? (
+      !loading &&
+      mainView === "resumo" ? (
         <div
           role="status"
-          className="mb-6 flex gap-3 rounded-lg border border-orange-300/70 bg-orange-50/70 px-4 py-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10"
+          className="mb-6 flex flex-wrap items-start gap-3 rounded-lg border border-orange-300/70 bg-orange-50/70 px-4 py-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10"
         >
           <AlertTriangle className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-300" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-medium text-foreground">Atenção</p>
             <div className="text-muted-foreground">
               {categoryTotals.semCategoriaCount > 0 ? (
@@ -173,7 +184,14 @@ export function Dre() {
                     style: "currency",
                     currency: "BRL",
                   })}
-                  ) — não entram no resultado.
+                  ) — não entram no resultado.{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-orange-800 underline underline-offset-2 hover:no-underline dark:text-orange-200"
+                    onClick={() => setMainView("sem-categoria")}
+                  >
+                    Ver lista
+                  </button>
                 </p>
               ) : null}
               {categoryTotals.unmappedCategoryIds.size > 0 ? (
@@ -194,25 +212,61 @@ export function Dre() {
         </div>
       ) : null}
 
-      {loading ? (
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Skeleton className="h-56 w-full rounded-lg" />
-          <Skeleton className="h-56 w-full rounded-lg" />
-          <Skeleton className="h-56 w-full rounded-lg" />
-        </div>
-      ) : computed ? (
-        <DreKpiGrid computed={computed} className="mb-6" />
-      ) : null}
+      <div
+        className="mb-4 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Visualização do DRE"
+      >
+        <Button
+          type="button"
+          variant={mainView === "resumo" ? "default" : "outline"}
+          size="sm"
+          role="tab"
+          aria-selected={mainView === "resumo"}
+          onClick={() => setMainView("resumo")}
+        >
+          <BarChart3 className="h-4 w-4" />
+          Resumo
+        </Button>
+        <Button
+          type="button"
+          variant={mainView === "sem-categoria" ? "default" : "outline"}
+          size="sm"
+          role="tab"
+          aria-selected={mainView === "sem-categoria"}
+          onClick={() => setMainView("sem-categoria")}
+        >
+          <ListX className="h-4 w-4" />
+          Sem categoria
+          {categoryTotals.semCategoriaCount > 0 ? (
+            <span className="ml-1 rounded-full bg-orange-500/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-orange-800 dark:text-orange-200">
+              {categoryTotals.semCategoriaCount}
+            </span>
+          ) : null}
+        </Button>
+      </div>
 
-      <Card className="border-border/80 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Resumo analítico</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">
-            {ptBrUi.dre.resumoAnaliticoDesc}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-0 pt-0">
+      {mainView === "resumo" ? (
+        <>
           {loading ? (
+            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Skeleton className="h-56 w-full rounded-lg" />
+              <Skeleton className="h-56 w-full rounded-lg" />
+              <Skeleton className="h-56 w-full rounded-lg" />
+            </div>
+          ) : computed ? (
+            <DreKpiGrid computed={computed} className="mb-6" />
+          ) : null}
+
+          <Card className="border-border/80 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Resumo analítico</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                {ptBrUi.dre.resumoAnaliticoDesc}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-0 pt-0">
+              {loading ? (
             <div className="space-y-3 py-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
@@ -372,8 +426,29 @@ export function Dre() {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Lançamentos sem categoria</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">
+              Boletos com vencimento em {periodLabel} sem categoria do plano — fora do
+              resultado do DRE.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <DreSemCategoriaTable
+              rows={boletosSemCategoria}
+              totalAmount={categoryTotals.semCategoriaTotal}
+              periodLabel={periodLabel}
+              loading={loading}
+              categoriesById={categoriesById}
+            />
+          </CardContent>
+        </Card>
+      )}
     </PageShell>
   );
 }

@@ -94,6 +94,9 @@ export interface Boleto {
   account: string | null
   account_type: string | null
   status: BoletoStatus
+  /** Taxas/deduções de receita: só DRE, fora do calendário e do fluxo. */
+  exclude_from_fluxo?: boolean
+  revenue_entry_id?: string | null
   created_at: string
   updated_at: string
 }

@@ -85,6 +85,7 @@ export function Dashboard() {
       .select("id, description, due_date, amount, status")
       .eq("company_id", companyId)
       .eq("flow_type", "payable")
+      .eq("exclude_from_fluxo", false)
       .in("due_date", [todayStr, tomorrowStr])
       .eq("status", "pending")
       .order("due_date", { ascending: true })

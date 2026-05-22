@@ -42,7 +42,14 @@ import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import {
+  RevenueEntriesCalendar,
+  type RevenueCalendarDayListPayload,
+} from "@/components/revenue/RevenueEntriesCalendar";
+import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
+import type { RevenueEntry } from "@/types/revenue";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
@@ -105,7 +112,11 @@ export function FluxoBoletosPage({
     year: now.getFullYear(),
   });
   const [calendarBoletos, setCalendarBoletos] = useState<Boleto[]>([]);
+  const [calendarRevenueEntries, setCalendarRevenueEntries] = useState<
+    RevenueEntry[]
+  >([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const isReceivableFlow = flowType === "receivable";
 
   const [boletosList, setBoletosList] = useState<Boleto[]>([]);
   const [boletosListCount, setBoletosListCount] = useState(0);
@@ -120,6 +131,9 @@ export function FluxoBoletosPage({
   >(undefined);
   const [calendarDayList, setCalendarDayList] =
     useState<CalendarDayListPayload | null>(null);
+  const [revenueCalendarDayList, setRevenueCalendarDayList] =
+    useState<RevenueCalendarDayListPayload | null>(null);
+  const [detailRevenueId, setDetailRevenueId] = useState<string | null>(null);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
@@ -155,23 +169,59 @@ export function FluxoBoletosPage({
   }, [companyId]);
 
   const fetchCalendarBoletos = useCallback(async () => {
-    if (!companyId) return;
+    if (!companyId || isReceivableFlow) return;
     setCalendarLoading(true);
     const { startIso, endIso } = getCalendarGridDateRange(
       period.month,
       period.year,
     );
-    const { data } = await supabase
-      .from("boletos")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("flow_type", flowType)
-      .gte("due_date", startIso)
-      .lte("due_date", endIso)
-      .order("due_date", { ascending: true });
-    setCalendarBoletos((data as Boleto[]) ?? []);
+    try {
+      const data = await fetchAllInRange<Boleto>(
+        supabase
+          .from("boletos")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("flow_type", flowType)
+          .eq("exclude_from_fluxo", false)
+          .gte("due_date", startIso)
+          .lte("due_date", endIso)
+          .order("due_date", { ascending: true }),
+      );
+      setCalendarBoletos(data);
+    } catch (e) {
+      console.error(e);
+      toast.error("Não foi possível carregar o calendário.");
+      setCalendarBoletos([]);
+    }
     setCalendarLoading(false);
-  }, [companyId, period.month, period.year, flowType]);
+  }, [companyId, period.month, period.year, flowType, isReceivableFlow]);
+
+  const fetchCalendarRevenueEntries = useCallback(async () => {
+    if (!companyId || !isReceivableFlow) return;
+    setCalendarLoading(true);
+    const { startIso, endIso } = getCalendarGridDateRange(
+      period.month,
+      period.year,
+    );
+    try {
+      const data = await fetchAllInRange<RevenueEntry>(
+        supabase
+          .from("revenue_entries")
+          .select("*")
+          .eq("company_id", companyId)
+          .gte("entry_date", startIso)
+          .lte("entry_date", endIso)
+          .order("entry_date", { ascending: true })
+          .order("created_at", { ascending: true }),
+      );
+      setCalendarRevenueEntries(data);
+    } catch (e) {
+      console.error(e);
+      toast.error("Não foi possível carregar o calendário de vendas.");
+      setCalendarRevenueEntries([]);
+    }
+    setCalendarLoading(false);
+  }, [companyId, period.month, period.year, isReceivableFlow]);
 
   const fetchBoletosList = useCallback(async () => {
     if (!companyId) return;
@@ -182,6 +232,7 @@ export function FluxoBoletosPage({
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
       .eq("flow_type", flowType)
+      .eq("exclude_from_fluxo", false)
       .gte("due_date", start.slice(0, 10))
       .lte("due_date", end.slice(0, 10))
       .order("due_date", { ascending: true });
@@ -203,8 +254,11 @@ export function FluxoBoletosPage({
   }, [debouncedSearch, period.month, period.year]);
 
   useEffect(() => {
-    queueMicrotask(() => void fetchCalendarBoletos());
-  }, [fetchCalendarBoletos]);
+    queueMicrotask(() => {
+      if (isReceivableFlow) void fetchCalendarRevenueEntries();
+      else void fetchCalendarBoletos();
+    });
+  }, [fetchCalendarBoletos, fetchCalendarRevenueEntries, isReceivableFlow]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchBoletosList());
@@ -219,9 +273,15 @@ export function FluxoBoletosPage({
   }, [boletoResumo?.id]);
 
   const refreshAll = useCallback(() => {
-    void fetchCalendarBoletos();
+    if (isReceivableFlow) void fetchCalendarRevenueEntries();
+    else void fetchCalendarBoletos();
     void fetchBoletosList();
-  }, [fetchCalendarBoletos, fetchBoletosList]);
+  }, [
+    fetchCalendarBoletos,
+    fetchCalendarRevenueEntries,
+    fetchBoletosList,
+    isReceivableFlow,
+  ]);
 
   const refreshBoletoResumo = useCallback(async () => {
     if (!boletoResumo?.id || !companyId) return;
@@ -437,6 +497,29 @@ export function FluxoBoletosPage({
   };
 
   const calendarDayItems = calendarDayList?.items ?? [];
+  const revenueCalendarDayItems = revenueCalendarDayList?.items ?? [];
+
+  const renderRevenueCalendarDayCompactCard = (e: RevenueEntry) => (
+    <button
+      key={e.id}
+      type="button"
+      onClick={() => {
+        setRevenueCalendarDayList(null);
+        setDetailRevenueId(e.id);
+      }}
+      className="flex w-full flex-col gap-1.5 rounded-lg border border-emerald-600/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 dark:border-emerald-500/35"
+    >
+      <p className="text-sm font-medium leading-snug">{e.title}</p>
+      <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
+        <span className="text-xs text-muted-foreground">
+          {formatDate(e.entry_date)}
+        </span>
+        <p className="text-base font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+          {formatCurrency(Number(e.net_amount))}
+        </p>
+      </div>
+    </button>
+  );
 
   return (
     <PageShell>
@@ -483,15 +566,26 @@ export function FluxoBoletosPage({
           }}
         />
       )}
-      <BoletosCalendar
-        month={period.month}
-        year={period.year}
-        boletos={calendarBoletos}
-        loading={calendarLoading}
-        viewMode={calendarViewMode}
-        onDayListOpen={setCalendarDayList}
-        formatCurrency={formatCurrency}
-      />
+      {isReceivableFlow ? (
+        <RevenueEntriesCalendar
+          month={period.month}
+          year={period.year}
+          entries={calendarRevenueEntries}
+          loading={calendarLoading}
+          onDayListOpen={setRevenueCalendarDayList}
+          formatCurrency={formatCurrency}
+        />
+      ) : (
+        <BoletosCalendar
+          month={period.month}
+          year={period.year}
+          boletos={calendarBoletos}
+          loading={calendarLoading}
+          viewMode={calendarViewMode}
+          onDayListOpen={setCalendarDayList}
+          formatCurrency={formatCurrency}
+        />
+      )}
 
       <Card>
         <CardHeader className="flex flex-col gap-5 space-y-0">
@@ -529,48 +623,89 @@ export function FluxoBoletosPage({
         </CardContent>
       </Card>
 
-      <Sheet
-        open={!!calendarDayList}
-        onOpenChange={(o) => !o && setCalendarDayList(null)}
-      >
-        <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-          <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
-            <SheetTitle className="capitalize">
-              Lançamentos neste dia
-            </SheetTitle>
-            <SheetDescription className="capitalize">
-              {calendarDayList?.title}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
-            {calendarDayList && calendarDayList.items.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Nenhum lançamento com vencimento neste dia.
-              </p>
-            )}
-            {calendarDayItems.length > 0 && (
-              <div className="space-y-2">
-                {calendarDayItems.map((b) => renderCalendarDayCompactCard(b))}
-              </div>
-            )}
-          </div>
-          <SheetFooter className="shrink-0 border-t px-6 py-4">
-            <Button
-              className="w-full"
-              onClick={() => {
-                if (!calendarDayList) return;
-                const dk = calendarDayList.dateKey;
-                setCalendarDayList(null);
-                setCreateBoletoDefaultDueDate(dk);
-                setBoletoSheetOpen(true);
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Adicionar conta neste dia
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+      {!isReceivableFlow && (
+        <Sheet
+          open={!!calendarDayList}
+          onOpenChange={(o) => !o && setCalendarDayList(null)}
+        >
+          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+              <SheetTitle className="capitalize">
+                Lançamentos neste dia
+              </SheetTitle>
+              <SheetDescription className="capitalize">
+                {calendarDayList?.title}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
+              {calendarDayList && calendarDayList.items.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Nenhum lançamento com vencimento neste dia.
+                </p>
+              )}
+              {calendarDayItems.length > 0 && (
+                <div className="space-y-2">
+                  {calendarDayItems.map((b) => renderCalendarDayCompactCard(b))}
+                </div>
+              )}
+            </div>
+            <SheetFooter className="shrink-0 border-t px-6 py-4">
+              <Button
+                className="w-full"
+                onClick={() => {
+                  if (!calendarDayList) return;
+                  const dk = calendarDayList.dateKey;
+                  setCalendarDayList(null);
+                  setCreateBoletoDefaultDueDate(dk);
+                  setBoletoSheetOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Adicionar conta neste dia
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {isReceivableFlow && (
+        <Sheet
+          open={!!revenueCalendarDayList}
+          onOpenChange={(o) => !o && setRevenueCalendarDayList(null)}
+        >
+          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+              <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
+              <SheetDescription className="capitalize">
+                {revenueCalendarDayList?.title}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
+              {revenueCalendarDayList &&
+                revenueCalendarDayList.items.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma venda neste dia.
+                  </p>
+                )}
+              {revenueCalendarDayItems.length > 0 && (
+                <div className="space-y-2">
+                  {revenueCalendarDayItems.map((e) =>
+                    renderRevenueCalendarDayCompactCard(e),
+                  )}
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {isReceivableFlow && (
+        <RevenueDetailSheet
+          revenueEntryId={detailRevenueId}
+          onClose={() => setDetailRevenueId(null)}
+          onRefresh={refreshAll}
+        />
+      )}
 
       <Sheet
         open={!!boletoResumo}

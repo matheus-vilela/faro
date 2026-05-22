@@ -41,11 +41,11 @@ import {
   quantityInputPropsForSaleUnit,
   roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Product } from "@/types/product";
-import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { RecipeListItem } from "@/types/recipe";
 import {
@@ -53,6 +53,7 @@ import {
   type RevenueEntry,
   type RevenueTaxType,
 } from "@/types/revenue";
+import { parseRevenueCmvLines } from "@/types/revenueCmv";
 import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
 import { CircleDollarSign, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -502,17 +503,17 @@ export function RevenueDetailSheet({
       payload.pricing_mode = null;
       payload.unit_value = null;
     } else if (entryMode === "product_sale") {
-      const hubQty = toStockQty(productId, qtyNum, saleUnitCode);
-      if (hubQty == null) return;
+      if (toStockQty(productId, qtyNum, saleUnitCode) == null) return;
       payload.product_id = productId;
       payload.recipe_id = null;
-      payload.quantity = hubQty;
+      payload.quantity = qtyNum;
+      payload.sale_unit_code = saleUnitCode || productById.get(productId)?.unit || "un";
       payload.pricing_mode = pricingMode;
       payload.unit_value = pricingMode === "unit" ? unitNum : null;
     } else {
       payload.product_id = null;
       payload.recipe_id = recipeId;
-      payload.quantity = 1;
+      payload.quantity = qtyNum > 0 ? qtyNum : 1;
       payload.pricing_mode = pricingMode;
       payload.unit_value = pricingMode === "unit" ? unitNum : null;
     }
@@ -730,7 +731,7 @@ export function RevenueDetailSheet({
                       ) : (
                         <>
                           A receita (ficha) baixa os ingredientes; quantidade
-                          fixa em 1 porção.
+                          fixa em 1 unidade.
                         </>
                       )}
                     </p>
@@ -993,9 +994,9 @@ export function RevenueDetailSheet({
                       </div>
                       <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
                         <span className="font-medium text-foreground">
-                          1 porção
+                          1 unidade
                         </span>{" "}
-                        — ingredientes conforme a ficha
+                        — produtos conforme a ficha
                         {selectedRecipe?.batch_yield != null
                           ? ` (rendimento ${selectedRecipe.batch_yield}).`
                           : "."}
@@ -1193,7 +1194,7 @@ export function RevenueDetailSheet({
                           detail.recipe_id}
                         <span className="text-muted-foreground">
                           {" "}
-                          · 1 porção
+                          · 1 unidade
                         </span>
                       </div>
                     ) : null}
@@ -1223,13 +1224,48 @@ export function RevenueDetailSheet({
                       <span>Valor líquido</span>
                       <span>{formatCurrency(Number(detail.net_amount))}</span>
                     </div>
+                    {(detail.entry_mode === "product_sale" ||
+                      detail.entry_mode === "recipe_sale") && (
+                      <>
+                        <div className="flex justify-between gap-2 border-t border-border/60 pt-2">
+                          <span className="text-muted-foreground">CMV (na venda)</span>
+                          <span>
+                            {formatCurrency(Number(detail.cmv_amount ?? 0))}
+                            {detail.cmv_needs_backfill ? (
+                              <span className="ml-1 text-xs text-orange-600 dark:text-orange-400">
+                                (custo pendente)
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+                        {parseRevenueCmvLines(detail.cmv_lines).length > 0 ? (
+                          <ul className="space-y-1 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                            {parseRevenueCmvLines(detail.cmv_lines).map((line) => (
+                              <li
+                                key={`${line.product_id}-${line.quantity}-${line.unit_code}`}
+                                className="flex justify-between gap-2"
+                              >
+                                <span className="truncate">
+                                  {line.product_name ?? "Produto"}{" "}
+                                  · {line.quantity.toLocaleString("pt-BR")}{" "}
+                                  {line.unit_code}
+                                </span>
+                                <span className="shrink-0 tabular-nums">
+                                  {formatCurrency(line.amount)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <CircleDollarSign className="h-4 w-4 shrink-0" />
                     <span>
-                      Lançamento reconhecido no DRE pelos boletos a receber
-                      vinculados (competência pela data da receita).
+                      Receita e CMV entram no DRE pela data da venda (
+                      {formatDate(detail.entry_date)}).
                     </span>
                   </div>
                 </div>

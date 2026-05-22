@@ -101,6 +101,7 @@ export async function computeExpectedCompanyAlerts(
     .select("id, description, due_date, amount, expense_id")
     .eq("company_id", companyId)
     .eq("flow_type", "payable")
+    .eq("exclude_from_fluxo", false)
     .eq("status", "pending");
 
   const money = (n: number) =>

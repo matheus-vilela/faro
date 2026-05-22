@@ -1,10 +1,27 @@
 import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
-import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  isExpenseStockMovementReference,
+  resolveExpenseIdsForStockMovements,
+} from "@/lib/stockMovementExpenseLink";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { ArrowDownLeft, ArrowUpRight, Loader2 } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  FileText,
+  Loader2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 const STOCK_REF_LABEL: Record<string, string> = {
@@ -65,6 +82,10 @@ export function ProductStockMovementHistorySection({
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [selectedMovement, setSelectedMovement] = useState<MovementRow | null>(
+    null,
+  );
+  const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
 
   useEffect(() => {
     setPage(1);
@@ -116,8 +137,124 @@ export function ProductStockMovementHistorySection({
       currency: "BRL",
     }).format(v);
 
+  const formatDateTime = (iso: string) =>
+    new Date(iso).toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const openExpenseDetail = (expenseId: string) => {
+    setExpenseDetailId(expenseId);
+  };
+
+  const selectedHasExpense =
+    selectedMovement?.expense_id != null &&
+    isExpenseStockMovementReference(selectedMovement.reference_type);
+
   return (
     <section className={cn(className)}>
+      <ExpenseDetailSheet
+        expenseId={expenseDetailId}
+        onClose={() => setExpenseDetailId(null)}
+        onRefresh={() => void load()}
+        elevated
+      />
+
+      <Sheet
+        open={selectedMovement != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedMovement(null);
+        }}
+      >
+        <SheetContent
+          className="z-[60] flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
+          overlayClassName="z-[60]"
+        >
+          {selectedMovement ? (
+            <>
+              <SheetHeader className="border-b border-border px-6 py-5 text-left">
+                <SheetTitle>Movimentação de estoque</SheetTitle>
+                <SheetDescription>
+                  {formatDateTime(selectedMovement.created_at)}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="space-y-4 overflow-y-auto px-6 py-5">
+                <dl className="grid gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Tipo</dt>
+                    <dd className="mt-1">
+                      <Badge
+                        variant={
+                          selectedMovement.type === "in"
+                            ? "secondary"
+                            : "outline"
+                        }
+                        className="gap-1 font-normal"
+                      >
+                        {selectedMovement.type === "in" ? (
+                          <ArrowDownLeft className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpRight className="h-3 w-3" />
+                        )}
+                        {selectedMovement.type === "in" ? "Entrada" : "Saída"}
+                      </Badge>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      Quantidade
+                    </dt>
+                    <dd className="mt-1 font-medium tabular-nums">
+                      {Number(selectedMovement.quantity).toLocaleString(
+                        "pt-BR",
+                      )}{" "}
+                      {movementQuantityUnit(selectedMovement, unit)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Origem</dt>
+                    <dd className="mt-1">
+                      <StockMovementOriginCell
+                        referenceType={selectedMovement.reference_type}
+                        expenseId={selectedMovement.expense_id}
+                        label={stockRefLabel(selectedMovement.reference_type)}
+                        onOpenExpense={openExpenseDetail}
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      Custo unitário
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      {selectedMovement.unit_cost != null
+                        ? formatCurrency(Number(selectedMovement.unit_cost))
+                        : "—"}
+                    </dd>
+                  </div>
+                </dl>
+
+                {selectedHasExpense ? (
+                  <Button
+                    type="button"
+                    className="w-full gap-2"
+                    onClick={() =>
+                      openExpenseDetail(selectedMovement.expense_id!)
+                    }
+                  >
+                    <FileText className="h-4 w-4" />
+                    Visualizar despesa / nota
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
       <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
         Histórico de movimentação
       </p>
@@ -149,7 +286,17 @@ export function ProductStockMovementHistorySection({
                   return (
                     <tr
                       key={row.id}
-                      className="border-b border-border/60 last:border-b-0"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedMovement(row)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && setSelectedMovement(row)
+                      }
+                      className={cn(
+                        "cursor-pointer border-b border-border/60 transition-colors last:border-b-0",
+                        "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                        selectedMovement?.id === row.id && "bg-muted/50",
+                      )}
                     >
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                         {new Date(row.created_at).toLocaleString("pt-BR", {
@@ -181,6 +328,7 @@ export function ProductStockMovementHistorySection({
                           referenceType={row.reference_type}
                           expenseId={row.expense_id}
                           label={stockRefLabel(row.reference_type)}
+                          onOpenExpense={openExpenseDetail}
                         />
                       </td>
                       <td className="px-3 py-2 tabular-nums text-muted-foreground">
