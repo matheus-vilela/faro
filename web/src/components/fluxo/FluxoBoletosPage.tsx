@@ -5,6 +5,7 @@ import {
 } from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -43,22 +44,34 @@ import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
-  RevenueEntriesCalendar,
-  type RevenueCalendarDayListPayload,
-} from "@/components/revenue/RevenueEntriesCalendar";
-import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
-import { fetchAllInRange } from "@/lib/supabaseFetchAll";
+  fetchMergedPayableBoletosInRange,
+  fetchSeriesMastersWithAnchorBoletos,
+} from "@/lib/expenseSeriesApi";
+import {
+  filterBoletosBySearch,
+  isProjectedBoleto,
+} from "@/lib/expenseSeriesProjection";
 import { supabase } from "@/lib/supabase";
-import type { RevenueEntry } from "@/types/revenue";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { isBoletoPayable } from "@/types/expense";
+import type {
+  ExpenseSeriesMaster,
+  FluxoBoletoRow,
+} from "@/types/expenseSeries";
+import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
+import {
+  type RevenueCalendarDayListPayload,
+  RevenueEntriesCalendar,
+} from "../revenue/RevenueEntriesCalendar";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -111,15 +124,19 @@ export function FluxoBoletosPage({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
-  const [calendarBoletos, setCalendarBoletos] = useState<Boleto[]>([]);
+  const [calendarBoletos, setCalendarBoletos] = useState<FluxoBoletoRow[]>([]);
   const [calendarRevenueEntries, setCalendarRevenueEntries] = useState<
     RevenueEntry[]
   >([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const isReceivableFlow = flowType === "receivable";
 
-  const [boletosList, setBoletosList] = useState<Boleto[]>([]);
+  const [boletosList, setBoletosList] = useState<FluxoBoletoRow[]>([]);
   const [boletosListCount, setBoletosListCount] = useState(0);
+  const [seriesMasters, setSeriesMasters] = useState<ExpenseSeriesMaster[]>([]);
+  const [seriesEditOpen, setSeriesEditOpen] = useState(false);
+  const [seriesEditBoleto, setSeriesEditBoleto] =
+    useState<FluxoBoletoRow | null>(null);
   const [boletosPage, setBoletosPage] = useState(1);
   const [boletosSearch, setBoletosSearch] = useState("");
   const debouncedSearch = useDebounce(boletosSearch, 300);
@@ -134,7 +151,7 @@ export function FluxoBoletosPage({
   const [revenueCalendarDayList, setRevenueCalendarDayList] =
     useState<RevenueCalendarDayListPayload | null>(null);
   const [detailRevenueId, setDetailRevenueId] = useState<string | null>(null);
-  const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
+  const [boletoResumo, setBoletoResumo] = useState<FluxoBoletoRow | null>(null);
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
@@ -176,18 +193,24 @@ export function FluxoBoletosPage({
       period.year,
     );
     try {
-      const data = await fetchAllInRange<Boleto>(
-        supabase
+      if (flowType === "payable") {
+        const merged = await fetchMergedPayableBoletosInRange(
+          companyId,
+          startIso,
+          endIso,
+        );
+        setCalendarBoletos(merged);
+      } else {
+        const { data } = await supabase
           .from("boletos")
           .select("*")
           .eq("company_id", companyId)
           .eq("flow_type", flowType)
-          .eq("exclude_from_fluxo", false)
           .gte("due_date", startIso)
           .lte("due_date", endIso)
-          .order("due_date", { ascending: true }),
-      );
-      setCalendarBoletos(data);
+          .order("due_date", { ascending: true });
+        setCalendarBoletos((data as FluxoBoletoRow[]) ?? []);
+      }
     } catch (e) {
       console.error(e);
       toast.error("Não foi possível carregar o calendário.");
@@ -227,27 +250,64 @@ export function FluxoBoletosPage({
     if (!companyId) return;
     setLoadingList(true);
     const { start, end } = getMonthRange(period.month, period.year);
-    let query = supabase
-      .from("boletos")
-      .select("*", { count: "exact" })
-      .eq("company_id", companyId)
-      .eq("flow_type", flowType)
-      .eq("exclude_from_fluxo", false)
-      .gte("due_date", start.slice(0, 10))
-      .lte("due_date", end.slice(0, 10))
-      .order("due_date", { ascending: true });
-    if (debouncedSearch.trim()) {
-      const term = `%${debouncedSearch.trim()}%`;
-      query = query.or(`description.ilike.${term},provider.ilike.${term}`);
+    const startYmd = start.slice(0, 10);
+    const endYmd = end.slice(0, 10);
+    try {
+      if (flowType === "payable") {
+        const merged = await fetchMergedPayableBoletosInRange(
+          companyId,
+          startYmd,
+          endYmd,
+        );
+        const filtered = filterBoletosBySearch(merged, debouncedSearch);
+        setBoletosListCount(filtered.length);
+        const pageStart = (boletosPage - 1) * PAGE_SIZE;
+        setBoletosList(filtered.slice(pageStart, pageStart + PAGE_SIZE));
+      } else {
+        let query = supabase
+          .from("boletos")
+          .select("*", { count: "exact" })
+          .eq("company_id", companyId)
+          .eq("flow_type", flowType)
+          .gte("due_date", startYmd)
+          .lte("due_date", endYmd)
+          .order("due_date", { ascending: true });
+        if (debouncedSearch.trim()) {
+          const term = `%${debouncedSearch.trim()}%`;
+          query = query.or(`description.ilike.${term},provider.ilike.${term}`);
+        }
+        const { data, count } = await query.range(
+          (boletosPage - 1) * PAGE_SIZE,
+          boletosPage * PAGE_SIZE - 1,
+        );
+        setBoletosList((data as FluxoBoletoRow[]) ?? []);
+        setBoletosListCount(count ?? 0);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Não foi possível carregar a lista.");
+      setBoletosList([]);
+      setBoletosListCount(0);
     }
-    const { data, count } = await query.range(
-      (boletosPage - 1) * PAGE_SIZE,
-      boletosPage * PAGE_SIZE - 1,
-    );
-    setBoletosList((data as Boleto[]) ?? []);
-    setBoletosListCount(count ?? 0);
     setLoadingList(false);
-  }, [companyId, period.month, period.year, debouncedSearch, boletosPage]);
+  }, [
+    companyId,
+    period.month,
+    period.year,
+    debouncedSearch,
+    boletosPage,
+    flowType,
+  ]);
+
+  useEffect(() => {
+    if (!companyId || flowType !== "payable") {
+      queueMicrotask(() => setSeriesMasters([]));
+      return;
+    }
+    void fetchSeriesMastersWithAnchorBoletos(companyId)
+      .then(setSeriesMasters)
+      .catch(console.error);
+  }, [companyId, flowType, boletosList, calendarBoletos]);
 
   useEffect(() => {
     queueMicrotask(() => setBoletosPage(1));
@@ -291,7 +351,7 @@ export function FluxoBoletosPage({
       .eq("id", boletoResumo.id)
       .eq("company_id", companyId)
       .maybeSingle();
-    if (data) setBoletoResumo(data as Boleto);
+    if (data) setBoletoResumo(data as FluxoBoletoRow);
   }, [boletoResumo?.id, companyId]);
 
   const closeExpenseDetail = useCallback(() => {
@@ -323,6 +383,12 @@ export function FluxoBoletosPage({
 
   const confirmMarkBoletoAsPaid = useCallback(async () => {
     if (!boletoResumo || !companyId) return;
+    if (isProjectedBoleto(boletoResumo)) {
+      toast.error(
+        "Esta ocorrência ainda é projetada. Edite e materialize antes de marcar como paga.",
+      );
+      return;
+    }
     setMarkingPaid(true);
     const { data, error } = await supabase
       .from("boletos")
@@ -339,7 +405,7 @@ export function FluxoBoletosPage({
       toast.error(error.message ?? "Não foi possível atualizar o status.");
       return;
     }
-    const updated = data as Boleto;
+    const updated = data as FluxoBoletoRow;
     setBoletoResumo(updated);
     setCalendarDayList((prev) => {
       if (!prev) return prev;
@@ -359,10 +425,24 @@ export function FluxoBoletosPage({
     );
   }, [boletoResumo, companyId, refreshAll]);
 
-  const renderListCard = (b: Boleto) => {
+  const resolveSeriesMaster = (
+    b: FluxoBoletoRow,
+  ): ExpenseSeriesMaster | null => {
+    const masterId = b.series_master_expense_id ?? b.expense_id;
+    if (!masterId) return null;
+    return seriesMasters.find((m) => m.id === masterId) ?? null;
+  };
+
+  const renderListCard = (b: FluxoBoletoRow) => {
     const payable = isBoletoPayable(b);
-    const statusLabel =
-      b.status === "pending" ? "Pendente" : payable ? "Pago" : "Recebido";
+    const projected = isProjectedBoleto(b);
+    const statusLabel = projected
+      ? "Projetada"
+      : b.status === "pending"
+        ? "Pendente"
+        : payable
+          ? "Pago"
+          : "Recebido";
     return (
       <div
         key={b.id}
@@ -380,15 +460,29 @@ export function FluxoBoletosPage({
             <span
               className={cn(
                 "text-xs font-semibold rounded-full px-2.5 py-0.5",
-                b.status === "pending"
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                  : payable
-                    ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
-                    : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
+                projected
+                  ? "bg-sky-500/15 text-sky-800 dark:text-sky-200"
+                  : b.status === "pending"
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : payable
+                      ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
               )}
             >
               {statusLabel}
             </span>
+            {projected && (
+              <Badge variant="outline" className="text-[10px]">
+                Virtual
+              </Badge>
+            )}
+            {!projected &&
+              b.series_master_expense_id &&
+              b.expense_id !== b.series_master_expense_id && (
+                <Badge variant="secondary" className="text-[10px]">
+                  Exceção
+                </Badge>
+              )}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {payable && (
@@ -558,7 +652,7 @@ export function FluxoBoletosPage({
           companyId={currentCompany.id}
           expenseId={expenseIdFromUrl}
           defaultDueDate={createBoletoDefaultDueDate}
-          defaultAccountFlow={flowType}
+          fixedAccountFlow={flowType}
           onSuccess={() => {
             refreshAll();
             void syncCompanyAlerts(currentCompany.id);
@@ -762,13 +856,22 @@ export function FluxoBoletosPage({
                         }
                       </Badge>
                     )}
-                    <Badge
-                      variant={
-                        boletoResumo.status === "paid" ? "default" : "outline"
-                      }
-                    >
-                      {STATUS_LABELS[boletoResumo.status]}
-                    </Badge>
+                    {isProjectedBoleto(boletoResumo) ? (
+                      <Badge
+                        variant="outline"
+                        className="border-sky-600/30 bg-sky-500/10 text-sky-900 dark:text-sky-100"
+                      >
+                        Ocorrência projetada
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant={
+                          boletoResumo.status === "paid" ? "default" : "outline"
+                        }
+                      >
+                        {STATUS_LABELS[boletoResumo.status]}
+                      </Badge>
+                    )}
                     {boletoResumo.provider && (
                       <span className="text-sm text-muted-foreground">
                         {boletoResumo.provider}
@@ -854,33 +957,70 @@ export function FluxoBoletosPage({
                 )}
               </div>
               <div className="flex flex-col gap-2 pt-4">
-                {boletoResumo.status === "pending" && (
-                  <Button
-                    className="w-full"
-                    onClick={() => setMarkPaidDialogOpen(true)}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    {isBoletoPayable(boletoResumo)
-                      ? "Marcar como pago"
-                      : "Marcar como recebido"}
-                  </Button>
-                )}
-                {boletoResumo.expense_id && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setExpenseDetailId(boletoResumo.expense_id)
-                    }
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Ver nota fiscal
-                  </Button>
-                )}
+                {flowType === "payable" &&
+                  (isProjectedBoleto(boletoResumo) ||
+                    !!boletoResumo.series_master_expense_id) && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        const master = resolveSeriesMaster(boletoResumo);
+                        if (!master) {
+                          toast.error("Série não encontrada.");
+                          return;
+                        }
+                        setSeriesEditBoleto(boletoResumo);
+                        setBoletoResumo(null);
+                        setSeriesEditOpen(true);
+                      }}
+                    >
+                      Editar ocorrência / série
+                    </Button>
+                  )}
+                {boletoResumo.status === "pending" &&
+                  !isProjectedBoleto(boletoResumo) && (
+                    <Button
+                      className="w-full"
+                      onClick={() => setMarkPaidDialogOpen(true)}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      {isBoletoPayable(boletoResumo)
+                        ? "Marcar como pago"
+                        : "Marcar como recebido"}
+                    </Button>
+                  )}
+                {boletoResumo.expense_id &&
+                  !isProjectedBoleto(boletoResumo) && (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setExpenseDetailId(boletoResumo.expense_id)
+                      }
+                    >
+                      <FileText className="h-4 w-4 mr-2" />
+                      Ver nota fiscal
+                    </Button>
+                  )}
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
+
+      <SeriesBoletoActionsSheet
+        open={seriesEditOpen}
+        onOpenChange={(open) => {
+          setSeriesEditOpen(open);
+          if (!open) setSeriesEditBoleto(null);
+        }}
+        boleto={seriesEditBoleto}
+        master={seriesEditBoleto ? resolveSeriesMaster(seriesEditBoleto) : null}
+        onSuccess={() => {
+          setSeriesEditOpen(false);
+          setSeriesEditBoleto(null);
+          refreshAll();
+        }}
+      />
 
       <ExpenseDetailSheet
         expenseId={expenseDetailId}

@@ -41,7 +41,6 @@ import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { CompanyCategory } from "@/types/category";
 import {
   type Boleto,
   type Expense,
@@ -258,9 +257,6 @@ export function ExpenseDetailSheet({
 
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
-  const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
-    [],
-  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -309,11 +305,6 @@ export function ExpenseDetailSheet({
   const getBoletoForExpense = (id: string) =>
     boletos.find((b) => b.expense_id === id);
 
-  const categoriesById = useMemo(
-    () => new Map(companyCategories.map((c) => [c.id, c])),
-    [companyCategories],
-  );
-
   const linkedBoletoForDetail = useMemo(() => {
     if (!detailExpense) return undefined;
     return boletos.find((b) => b.expense_id === detailExpense.id);
@@ -348,32 +339,24 @@ export function ExpenseDetailSheet({
     const shouldLoadSupportData =
       supportDataLoadedCompanyRef.current !== companyId;
     if (shouldLoadSupportData) {
-      const [{ data: bo }, { data: catRows }, { data: sup }, { data: prod }] =
-        await Promise.all([
-          supabase
-            .from("boletos")
-            .select("*")
-            .eq("company_id", companyId)
-            .eq("flow_type", "payable"),
-          supabase
-            .from("company_categories")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("sort_order", { ascending: true })
-            .order("name", { ascending: true }),
-          supabase
-            .from("suppliers")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("name"),
-          supabase
-            .from("products")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("name"),
-        ]);
+      const [{ data: bo }, { data: sup }, { data: prod }] = await Promise.all([
+        supabase
+          .from("boletos")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("flow_type", "payable"),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+      ]);
       setBoletos((bo as Boleto[]) ?? []);
-      setCompanyCategories((catRows as CompanyCategory[]) ?? []);
       setSuppliers((sup as Supplier[]) ?? []);
       setProducts((prod as Product[]) ?? []);
       supportDataLoadedCompanyRef.current = companyId;
@@ -873,15 +856,40 @@ export function ExpenseDetailSheet({
                     </div>
                   )}
                 </div>
-                {!detailEditMode && (
-                  <SheetDescription className="text-muted-foreground">
-                    {detailExpense.type === "nota_fiscal"
-                      ? "Nota fiscal"
-                      : TYPE_LABELS[
-                          detailExpense.type as keyof typeof TYPE_LABELS
-                        ]}
-                  </SheetDescription>
-                )}
+                <SheetDescription className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {detailExpense.display_name?.trim() ||
+                      detailExpense.supplier_name ||
+                      TYPE_LABELS[
+                        detailExpense.type as keyof typeof TYPE_LABELS
+                      ] ||
+                      "Sem fornecedor"}
+                  </span>
+                  {detailExpense.parent_expense_id ? (
+                    <Badge variant="secondary" className="shrink-0">
+                      Exceção de série
+                    </Badge>
+                  ) : null}
+                  {(detailExpense.series_type === "recurring" ||
+                    detailExpense.series_type === "installment") &&
+                  !detailExpense.parent_expense_id ? (
+                    <Badge variant="outline" className="shrink-0">
+                      Série ·{" "}
+                      {detailExpense.series_type === "recurring"
+                        ? "recorrente"
+                        : "parcelada"}
+                    </Badge>
+                  ) : null}
+                  {linkedBoletoForDetail ? (
+                    <Badge variant="default" className="bg-green-600 shrink-0">
+                      Boleto vinculado
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="shrink-0">
+                      Sem boleto vinculado
+                    </Badge>
+                  )}
+                </SheetDescription>
               </SheetHeader>
               {!detailEditMode && (
                 <div className="mt-4 space-y-1 border-t border-border pt-4">
@@ -891,6 +899,22 @@ export function ExpenseDetailSheet({
                   </p>
                 </div>
               )}
+              {detailExpense.parent_expense_id && !detailEditMode ? (
+                <p className="mt-3 rounded-md border border-sky-600/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
+                  Exceção materializada de um mês da série. Alterações aqui não
+                  mudam a projeção dos demais meses.
+                </p>
+              ) : null}
+              {(detailExpense.series_type === "recurring" ||
+                detailExpense.series_type === "installment") &&
+              !detailExpense.parent_expense_id &&
+              !detailEditMode ? (
+                <p className="mt-3 rounded-md border border-amber-600/25 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+                  Esta é a despesa principal da série. Excluí-la remove toda a
+                  recorrência/parcelamento e exceções vinculadas. Gerencie
+                  ocorrências futuras em Contas a pagar.
+                </p>
+              ) : null}
               {detailEditMode ? (
                 <form onSubmit={handleUpdate} className="space-y-6 py-6">
                   <div>
@@ -1706,9 +1730,22 @@ export function ExpenseDetailSheet({
           <DialogHeader>
             <DialogTitle>Excluir despesa</DialogTitle>
             <DialogDescription>
-              Tem certeza que deseja excluir esta despesa? O recebimento e
-              boleto vinculados serão excluídos. Se o recebimento já foi
-              confirmado, as quantidades serão deduzidas do estoque.
+              {detailExpense &&
+              (detailExpense.series_type === "recurring" ||
+                detailExpense.series_type === "installment") &&
+              !detailExpense.parent_expense_id ? (
+                <>
+                  Esta é a despesa principal da série. Ao excluir, toda a
+                  recorrência ou parcelamento será removida, incluindo exceções
+                  materializadas (filhas) e boletos vinculados.
+                </>
+              ) : (
+                <>
+                  Tem certeza que deseja excluir esta despesa? O recebimento e
+                  boleto vinculados serão excluídos. Se o recebimento já foi
+                  confirmado, as quantidades serão deduzidas do estoque.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
