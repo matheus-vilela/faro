@@ -34,7 +34,6 @@ import {
   BarChart3,
   Bell,
   Building2,
-  CircleDollarSign,
   FlaskConical,
   LayoutDashboard,
   ListChecks,
@@ -83,12 +82,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         icon: Wallet,
         roles: ["operador", "gestor", "owner"],
       },
-      {
-        title: "Vendas",
-        url: "/app/vendas",
-        icon: CircleDollarSign,
-        roles: ["operador", "gestor", "owner"],
-      },
+
       {
         title: "Recebimento de mercadorias",
         url: "/app/recebimento",

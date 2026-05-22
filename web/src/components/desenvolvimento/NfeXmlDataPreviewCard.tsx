@@ -1,4 +1,9 @@
 import {
+  ICMS_TOT_COLUMN_ORDER,
+  TotalsMatrixTable,
+  type TotalsMatrixRow,
+} from "@/components/nfe/TotalsMatrixTable";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -123,8 +128,14 @@ export function NfeXmlDataPreviewCard({
   detLines?: NfeXmlDetLinePreview[];
 }) {
   const imp = xmlData.impostos;
-  const taxEntries = imp
-    ? Object.entries(imp).filter(([, v]) => v != null && Number(v) !== 0)
+  const icmsTotRows: TotalsMatrixRow[] = imp
+    ? Object.entries(imp)
+        .filter(([, v]) => v != null && Number.isFinite(Number(v)))
+        .map(([key, val]) => ({
+          key,
+          label: ICMSTOT_LABELS[key] ?? key,
+          value: Number(val),
+        }))
     : [];
 
   return (
@@ -166,26 +177,13 @@ export function NfeXmlDataPreviewCard({
           <Field label="Chave NF-e" value={xmlData.chave_nfe || "—"} mono />
         </dl>
 
-        {taxEntries.length > 0 ? (
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold">ICMSTot (totais da nota)</h4>
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-sm">
-                <tbody>
-                  {taxEntries.map(([key, val]) => (
-                    <tr key={key} className="border-b border-border/60">
-                      <td className="p-2 text-muted-foreground">
-                        {ICMSTOT_LABELS[key] ?? key}
-                      </td>
-                      <td className="p-2 text-right font-mono text-xs">
-                        {money(val)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {icmsTotRows.length > 0 ? (
+          <TotalsMatrixTable
+            title="ICMSTot (totais da nota)"
+            rows={icmsTotRows}
+            formatValue={money}
+            columnOrder={ICMS_TOT_COLUMN_ORDER}
+          />
         ) : null}
 
         {xmlData.cobranca_boletos.length > 0 ? (

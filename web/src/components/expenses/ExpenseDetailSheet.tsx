@@ -36,7 +36,6 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { findExpenseDuplicateId } from "@/lib/expenseDedup";
-import { getNfeExpenseValueBreakdown } from "@/lib/expenseDivergenceUi";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
@@ -69,15 +68,16 @@ function formatDocForDisplay(doc: string | null): string {
   return maskCpfCnpj(doc);
 }
 
+function expenseChaveNfe(
+  json: Record<string, unknown> | null | undefined,
+): string {
+  if (!json || typeof json !== "object") return "";
+  return String(json.chave_nfe ?? "").trim();
+}
+
 const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
   romaneio: "Romaneio",
   recibo: "Recibo",
-};
-
-const STATUS_LABELS = {
-  pending: "Pendente",
-  approved: "Aprovada",
-  rejected: "Recusada",
 };
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
@@ -99,7 +99,7 @@ function BoletoLinkedBlock({
 }) {
   return (
     <div
-      className="rounded-lg border p-4 space-y-2 cursor-pointer transition-colors hover:bg-muted/40"
+      className="cursor-pointer rounded-xl border-2 border-green-300/60 bg-green-100/10 p-4 shadow-sm transition-colors hover:bg-green-600/15"
       role="button"
       tabIndex={0}
       onClick={onVerBoleto}
@@ -110,20 +110,38 @@ function BoletoLinkedBlock({
         }
       }}
     >
-      <p className="font-medium">Boleto vinculado</p>
-      <p className="text-sm text-muted-foreground">
-        {boleto.description} • {formatCurrency(boleto.amount)}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-green-800 dark:text-green-300">
+            Boleto vinculado
+          </p>
+          <p className="mt-1 truncate text-sm font-medium text-foreground">
+            {boleto.description}
+          </p>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-green-700 dark:text-green-400">
+            {formatCurrency(boleto.amount)}
+          </p>
+        </div>
+        <Badge className="shrink-0 bg-green-600 hover:bg-green-700">
+          Ver detalhes
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
+function BoletoUnlinkedBlock() {
+  return (
+    <div className="rounded-xl border-2 border-dashed border-border bg-muted/50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Pagamento
       </p>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={(e) => {
-          e.stopPropagation();
-          onVerBoleto();
-        }}
-      >
-        Ver boleto
-      </Button>
+      <p className="mt-1 text-lg font-semibold text-foreground">
+        Sem boleto vinculado
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Nenhum boleto associado a esta despesa.
+      </p>
     </div>
   );
 }
@@ -308,26 +326,6 @@ export function ExpenseDetailSheet({
       0,
     );
   }, [detailExpense?.expense_items]);
-
-  const nfeValBreakdown = useMemo(() => {
-    if (!detailExpense) return null;
-    return getNfeExpenseValueBreakdown({
-      documentTotal: detailExpense.document_total,
-      sumItems: detailLineSum,
-      financialReconciliationJson:
-        detailExpense.financial_reconciliation_json ?? null,
-    });
-  }, [detailExpense, detailLineSum]);
-
-  const detailNoteTotal = useMemo(() => {
-    const n = Number(detailExpense?.document_total ?? 0);
-    return Number.isFinite(n) ? n : 0;
-  }, [detailExpense?.document_total]);
-
-  const detailTotalMatches = useMemo(() => {
-    if (!nfeValBreakdown || nfeValBreakdown.documentTotal == null) return false;
-    return !nfeValBreakdown.needsAttention;
-  }, [nfeValBreakdown]);
 
   const detailUnlinkedProductRows = useMemo(() => {
     if (!detailExpense?.expense_items?.length) return 0;
@@ -845,7 +843,7 @@ export function ExpenseDetailSheet({
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
-          className={cn("overflow-y-auto sm:max-w-lg", elevated && "z-[70]")}
+          className={cn("overflow-y-auto sm:max-w-xl", elevated && "z-[70]")}
           overlayClassName={elevated ? "z-[70]" : undefined}
         >
           {loading && (
@@ -875,44 +873,24 @@ export function ExpenseDetailSheet({
                     </div>
                   )}
                 </div>
-                <SheetDescription className="flex flex-wrap items-center gap-2">
-                  <span>
-                    {detailExpense.supplier_name ||
-                      TYPE_LABELS[
-                        detailExpense.type as keyof typeof TYPE_LABELS
-                      ] ||
-                      "Sem fornecedor"}
-                  </span>
-                  {linkedBoletoForDetail ? (
-                    <Badge
-                      variant="default"
-                      className="bg-green-600 shrink-0 cursor-pointer hover:bg-green-700"
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setBoletoResumo(linkedBoletoForDetail);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setBoletoResumo(linkedBoletoForDetail);
-                        }
-                      }}
-                    >
-                      Boleto vinculado
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="shrink-0">
-                      Sem boleto vinculado
-                    </Badge>
-                  )}
-                </SheetDescription>
+                {!detailEditMode && (
+                  <SheetDescription className="text-muted-foreground">
+                    {detailExpense.type === "nota_fiscal"
+                      ? "Nota fiscal"
+                      : TYPE_LABELS[
+                          detailExpense.type as keyof typeof TYPE_LABELS
+                        ]}
+                  </SheetDescription>
+                )}
               </SheetHeader>
-              <div className="mt-4 border-t border-border pt-4">
-                <ExpenseLauncherInfo expenseId={detailExpense.id} />
-              </div>
+              {!detailEditMode && (
+                <div className="mt-4 space-y-1 border-t border-border pt-4">
+                  <ExpenseLauncherInfo expenseId={detailExpense.id} />
+                  <p className="text-sm text-muted-foreground">
+                    Cadastrada em {formatDate(detailExpense.created_at)}
+                  </p>
+                </div>
+              )}
               {detailEditMode ? (
                 <form onSubmit={handleUpdate} className="space-y-6 py-6">
                   <div>
@@ -1218,7 +1196,134 @@ export function ExpenseDetailSheet({
                   </SheetFooter>
                 </form>
               ) : (
-                <div className="space-y-1 pb-6">
+                <div className="space-y-4 pb-6 pt-4">
+                  {(() => {
+                    const supplierRecord = detailExpense.supplier_id
+                      ? suppliers.find(
+                          (x) => x.id === detailExpense.supplier_id,
+                        )
+                      : undefined;
+                    const supplierLabel =
+                      detailExpense.supplier_name?.trim() ||
+                      supplierRecord?.name?.trim() ||
+                      "Sem fornecedor";
+                    const chaveNfe = expenseChaveNfe(
+                      detailExpense.financial_reconciliation_json,
+                    );
+                    return (
+                      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Fornecedor
+                        </p>
+                        <p className="mt-1 text-xl font-semibold leading-tight text-foreground">
+                          {supplierLabel}
+                        </p>
+                        {detailExpense.supplier_document ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {formatDocForDisplay(
+                              detailExpense.supplier_document,
+                            )}
+                          </p>
+                        ) : null}
+                        {detailExpense.invoice_number || chaveNfe ? (
+                          <div className="mt-4 border-t border-border/80 pt-4">
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {detailExpense.type === "nota_fiscal"
+                                ? "Nota fiscal"
+                                : "Documento"}
+                            </p>
+                            {detailExpense.invoice_number ? (
+                              <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+                                Nº {detailExpense.invoice_number}
+                                {detailExpense.invoice_series ? (
+                                  <span className="font-medium text-muted-foreground">
+                                    {" "}
+                                    · Série {detailExpense.invoice_series}
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                            {chaveNfe ? (
+                              <div className="mt-3">
+                                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Chave NF-e
+                                </p>
+                                <div className="mt-1 flex items-start gap-2">
+                                  <p className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-foreground">
+                                    {chaveNfe}
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 shrink-0 px-2"
+                                    onClick={() => {
+                                      void navigator.clipboard.writeText(
+                                        chaveNfe,
+                                      );
+                                      toast.success("Chave copiada.");
+                                    }}
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+
+                  {(detailExpense.type === "nota_fiscal" ||
+                    detailExpense.financial_reconciliation_json) && (
+                    <Collapsible
+                      open={validationDetailsOpen}
+                      onOpenChange={setValidationDetailsOpen}
+                    >
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/40"
+                        >
+                          <span>Impostos e totais</span>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                              validationDetailsOpen && "rotate-180",
+                            )}
+                          />
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="rounded-b-lg border border-t-0 border-border bg-card px-4 pb-4 pt-3">
+                        <ExpenseFinancialReconciliationPanel
+                          data={
+                            detailExpense.financial_reconciliation_json as
+                              | Record<string, unknown>
+                              | null
+                              | undefined
+                          }
+                          formatCurrency={formatCurrency}
+                        />
+                        {!detailExpense.financial_reconciliation_json && (
+                          <p className="text-sm text-muted-foreground">
+                            Sem dados de impostos e totais para esta despesa.
+                          </p>
+                        )}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+
+                  {linkedBoletoForDetail ? (
+                    <BoletoLinkedBlock
+                      boleto={linkedBoletoForDetail}
+                      formatCurrency={formatCurrency}
+                      onVerBoleto={() => setBoletoResumo(linkedBoletoForDetail)}
+                    />
+                  ) : (
+                    <BoletoUnlinkedBlock />
+                  )}
+
                   <ExpenseRecordedDivergenceBanner
                     documentTotal={detailExpense.document_total}
                     sumLines={detailLineSum}
@@ -1229,251 +1334,11 @@ export function ExpenseDetailSheet({
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
 
-                  <div className="grid gap-2 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Tipo:</span>{" "}
-                      {detailExpense.type === "nota_fiscal"
-                        ? "Nota fiscal"
-                        : TYPE_LABELS[
-                            detailExpense.type as keyof typeof TYPE_LABELS
-                          ]}
-                    </div>
-                    {detailExpense.supplier_name && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Fornecedor:
-                        </span>{" "}
-                        {detailExpense.supplier_name}
-                      </div>
-                    )}
-                    {detailExpense.supplier_document && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Documento:
-                        </span>{" "}
-                        {formatDocForDisplay(detailExpense.supplier_document)}
-                      </div>
-                    )}
-                    {detailExpense.supplier_id &&
-                      (() => {
-                        const s = suppliers.find(
-                          (x) => x.id === detailExpense.supplier_id,
-                        );
-                        if (
-                          !s ||
-                          (!s.sales_contact_name?.trim() &&
-                            !s.sales_whatsapp?.trim() &&
-                            !s.commercial_manager?.trim())
-                        ) {
-                          return null;
-                        }
-                        return (
-                          <div className="rounded-lg border border-border/80 p-3 space-y-1.5 text-sm">
-                            <p className="font-medium flex items-center gap-2 text-muted-foreground">
-                              <UserRound className="h-4 w-4" />
-                              Contato comercial (fornecedor)
-                            </p>
-                            {s.sales_contact_name?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  Vendedor:
-                                </span>{" "}
-                                {s.sales_contact_name}
-                              </p>
-                            )}
-                            {s.sales_whatsapp?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  WhatsApp:
-                                </span>{" "}
-                                {maskPhone(s.sales_whatsapp)}
-                              </p>
-                            )}
-                            {s.commercial_manager?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  Nome do gerente comercial:
-                                </span>{" "}
-                                {s.commercial_manager}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    {detailExpense.invoice_number && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          {detailExpense.type === "nota_fiscal"
-                            ? "Nº nota:"
-                            : "Nº documento:"}
-                        </span>{" "}
-                        {detailExpense.invoice_number}
-                        {detailExpense.invoice_series ? (
-                          <>
-                            {" "}
-                            <span className="text-muted-foreground">
-                              · série:
-                            </span>{" "}
-                            {detailExpense.invoice_series}
-                          </>
-                        ) : null}
-                      </div>
-                    )}
-                    <div className="mt-2">
-                      <span className="text-muted-foreground">Status:</span>{" "}
-                      <Badge
-                        variant={
-                          detailExpense.status === "approved"
-                            ? "default"
-                            : detailExpense.status === "rejected"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {STATUS_LABELS[detailExpense.status]}
-                      </Badge>
-                      {detailExpense.expense_source === "whatsapp" && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          (WhatsApp)
-                        </span>
-                      )}
-                    </div>
-
-                    {detailExpense.expense_source === "whatsapp" &&
-                      detailExpense.status === "pending" &&
-                      isOwner && (
-                        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
-                          <p className="text-sm">
-                            Esta despesa só entra no recebimento e nos alertas
-                            depois da sua aprovação.
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={approvingWhatsapp}
-                              onClick={() =>
-                                void handleApproveWhatsappExpense()
-                              }
-                            >
-                              {approvingWhatsapp
-                                ? "Aprovando…"
-                                : "Aprovar despesa"}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={approvingWhatsapp}
-                              onClick={() => void handleRejectWhatsappExpense()}
-                            >
-                              Recusar
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    <div>
-                      <span className="text-muted-foreground">
-                        Cadastrada em:
-                      </span>{" "}
-                      {formatDate(detailExpense.created_at)}
-                    </div>
-                    {detailExpense.notes && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Observações:
-                        </span>{" "}
-                        {detailExpense.notes}
-                      </div>
-                    )}
-                  </div>
-                  <div
-                    className={
-                      detailTotalMatches
-                        ? "rounded-xl border border-border bg-muted/25 p-4"
-                        : "rounded-xl border-2 border-destructive/35 bg-destructive/5 p-4"
-                    }
-                  >
-                    <div className="flex gap-3">
-                      <div className="min-w-0 flex-1 space-y-2 text-sm">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          Validação dos valores da nota
-                        </p>
-                        <p className="font-semibold leading-snug">
-                          {detailTotalMatches
-                            ? "Conferido com a nota"
-                            : nfeValBreakdown?.documentTotal == null
-                              ? "Total da nota não informado"
-                              : "Total do documento e soma dos itens diferem"}
-                        </p>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          Total da nota:{" "}
-                          <span className="font-medium text-foreground">
-                            {formatCurrency(detailNoteTotal)}
-                          </span>
-                          {detailTotalMatches && (
-                            <span className="ml-1 text-emerald-700 dark:text-emerald-400">
-                              ✓
-                            </span>
-                          )}
-                        </p>
-                        {!detailTotalMatches &&
-                          nfeValBreakdown?.documentTotal != null &&
-                          !nfeValBreakdown.hasIcmsBreakdown && (
-                            <p className="text-xs text-muted-foreground">
-                              Sem totais ICMSTot no registro: ajuste linhas ou o
-                              total. Se a NF foi importada com XML completo, o
-                              bloco ICMSTot costuma evitar este alerta.
-                            </p>
-                          )}
-                        {!detailTotalMatches &&
-                          nfeValBreakdown?.documentTotal == null && (
-                            <p className="text-xs text-muted-foreground">
-                              Informe o total do documento ou reabra a
-                              importação para preencher automaticamente.
-                            </p>
-                          )}
-                        <Collapsible
-                          open={validationDetailsOpen}
-                          onOpenChange={setValidationDetailsOpen}
-                        >
-                          <CollapsibleTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-auto w-full justify-start gap-1.5 px-0 py-1 text-muted-foreground hover:text-foreground sm:w-auto"
-                            >
-                              <ChevronDown
-                                aria-hidden
-                                className={cn(
-                                  "size-4 shrink-0 transition-transform duration-200",
-                                  validationDetailsOpen && "rotate-180",
-                                )}
-                              />
-                              {validationDetailsOpen
-                                ? "Ocultar detalhes da conferência e impostos"
-                                : "Ver detalhes da conferência e impostos"}
-                            </Button>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="space-y-4 pt-2">
-                            <ExpenseFinancialReconciliationPanel
-                              data={
-                                detailExpense.financial_reconciliation_json as
-                                  | Record<string, unknown>
-                                  | null
-                                  | undefined
-                              }
-                              formatCurrency={formatCurrency}
-                            />
-                          </CollapsibleContent>
-                        </Collapsible>
-                      </div>
-                    </div>
-                  </div>
                   {(detailExpense.expense_items?.length ?? 0) > 0 && (
                     <div>
-                      <p className="font-medium mb-2">Itens</p>
+                      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Itens da despesa
+                      </p>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead>
@@ -1561,25 +1426,95 @@ export function ExpenseDetailSheet({
                           </tbody>
                         </table>
                       </div>
-                      {/* <p className="text-right font-medium mt-2">
-                        Total:{" "}
-                        {formatCurrency(
-                          detailExpense.expense_items!.reduce(
-                            (s, it) =>
-                              s + Number(it.quantity) * Number(it.unit_value),
-                            0,
-                          ),
-                        )}
-                      </p> */}
                     </div>
                   )}
 
-                  {linkedBoletoForDetail ? (
-                    <BoletoLinkedBlock
-                      boleto={linkedBoletoForDetail}
-                      formatCurrency={formatCurrency}
-                      onVerBoleto={() => setBoletoResumo(linkedBoletoForDetail)}
-                    />
+                  {detailExpense.expense_source === "whatsapp" &&
+                    detailExpense.status === "pending" &&
+                    isOwner && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
+                        <p className="text-sm">
+                          Esta despesa só entra no recebimento e nos alertas
+                          depois da sua aprovação.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={approvingWhatsapp}
+                            onClick={() => void handleApproveWhatsappExpense()}
+                          >
+                            {approvingWhatsapp
+                              ? "Aprovando…"
+                              : "Aprovar despesa"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={approvingWhatsapp}
+                            onClick={() => void handleRejectWhatsappExpense()}
+                          >
+                            Recusar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                  {detailExpense.supplier_id &&
+                    (() => {
+                      const s = suppliers.find(
+                        (x) => x.id === detailExpense.supplier_id,
+                      );
+                      if (
+                        !s ||
+                        (!s.sales_contact_name?.trim() &&
+                          !s.sales_whatsapp?.trim() &&
+                          !s.commercial_manager?.trim())
+                      ) {
+                        return null;
+                      }
+                      return (
+                        <div className="rounded-lg border border-border/80 p-3 space-y-1.5 text-sm">
+                          <p className="font-medium flex items-center gap-2 text-muted-foreground">
+                            <UserRound className="h-4 w-4" />
+                            Contato comercial
+                          </p>
+                          {s.sales_contact_name?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                Vendedor:
+                              </span>{" "}
+                              {s.sales_contact_name}
+                            </p>
+                          )}
+                          {s.sales_whatsapp?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                WhatsApp:
+                              </span>{" "}
+                              {maskPhone(s.sales_whatsapp)}
+                            </p>
+                          )}
+                          {s.commercial_manager?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                Gerente:
+                              </span>{" "}
+                              {s.commercial_manager}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                  {detailExpense.notes ? (
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        Observações:
+                      </span>{" "}
+                      {detailExpense.notes}
+                    </p>
                   ) : null}
 
                   {detailExpense.source_document_path && (

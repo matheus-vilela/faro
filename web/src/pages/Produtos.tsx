@@ -24,6 +24,10 @@ import { ProductStockMovementHistorySection } from "@/components/products/Produc
 import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
+  isLegacyProductUnit,
+  ProductUnitSearchSelect,
+} from "@/components/products/ProductUnitSearchSelect";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -98,6 +102,12 @@ import {
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import {
+  matchesPurchasesMetric,
+  parsePurchasesMetricParam,
+  PURCHASES_METRIC_LABELS,
+} from "@/lib/productPurchasesDashboard";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import {
@@ -384,6 +394,9 @@ export function Produtos() {
   const { currentCompany } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const lowStockOnly = searchParams.get("estoque") === "baixo";
+  const purchasesFilter = parsePurchasesMetricParam(
+    searchParams.get("compras"),
+  );
   const recipeOutputProductId =
     searchParams.get("recipeOutputProduct")?.trim() || undefined;
   const productHighlightId = searchParams.get("highlight")?.trim() || undefined;
@@ -446,6 +459,8 @@ export function Produtos() {
     excludeProductId: string;
   } | null>(null);
   const [stockBarcode, setStockBarcode] = useState("");
+  const [stockEan, setStockEan] = useState("");
+  const [stockUnitCreating, setStockUnitCreating] = useState(false);
   const [stockQuantity, setStockQuantity] = useState("");
   const [stockMinQuantity, setStockMinQuantity] = useState("");
   const [stockLastUnitValue, setStockLastUnitValue] = useState("");
@@ -896,9 +911,14 @@ export function Produtos() {
       .replace(/[^a-z0-9_]/g, "");
   };
 
-  const applyCustomUnit = async () => {
-    const code = normalizeCustomUnitCode(stockCustomUnitInput);
-    const label = stockCustomUnitLabel.trim();
+  const applyCustomUnit = async (
+    overrideLabel?: string,
+    overrideCode?: string,
+  ) => {
+    const code = normalizeCustomUnitCode(
+      overrideCode ?? stockCustomUnitInput,
+    );
+    const label = (overrideLabel ?? stockCustomUnitLabel).trim();
     if (!code) {
       toast.error("Informe um código de unidade válido (ex.: fd).");
       return;
@@ -911,8 +931,9 @@ export function Produtos() {
       toast.error("Empresa não encontrada para registrar unidade.");
       return;
     }
+    setStockUnitCreating(true);
     const sourceHint = String(
-      stockProduct?.import_unit_raw ?? stockCustomUnitInput,
+      stockProduct?.import_unit_raw ?? overrideCode ?? stockCustomUnitInput,
     ).trim();
     const { data, error } = await supabase.rpc(
       "register_company_custom_unit_alias",
@@ -932,6 +953,7 @@ export function Produtos() {
         msg.includes("does not exist");
       if (!canFallback) {
         toast.error(`Falha ao criar unidade: ${error.message}`);
+        setStockUnitCreating(false);
         return;
       }
       const { error: aliasInsertError } = await supabase
@@ -947,6 +969,7 @@ export function Produtos() {
         );
       if (aliasInsertError) {
         toast.error(`Falha ao registrar unidade: ${aliasInsertError.message}`);
+        setStockUnitCreating(false);
         return;
       }
       const { data: pendingRows, error: pendingError } = await supabase
@@ -959,6 +982,7 @@ export function Produtos() {
         toast.error(
           `Falha ao localizar produtos pendentes: ${pendingError.message}`,
         );
+        setStockUnitCreating(false);
         return;
       }
       const ids = (pendingRows ?? []).map((r) =>
@@ -975,6 +999,7 @@ export function Produtos() {
           .in("id", ids);
         if (bulkError) {
           toast.error(`Falha ao aplicar em lote: ${bulkError.message}`);
+          setStockUnitCreating(false);
           return;
         }
       }
@@ -987,6 +1012,7 @@ export function Produtos() {
       };
       if (!payload?.ok) {
         toast.error(payload?.error ?? "Não foi possível registrar unidade.");
+        setStockUnitCreating(false);
         return;
       }
       updatedProducts = Number(payload.updated_products ?? 0);
@@ -1022,12 +1048,8 @@ export function Produtos() {
       (aliases ?? []) as Array<{ unit_code: string; unit_label: string }>,
     );
     await fetchProducts();
+    setStockUnitCreating(false);
   };
-
-  const customUnitCodeNormalized =
-    normalizeCustomUnitCode(stockCustomUnitInput);
-  const customUnitIsValid = customUnitCodeNormalized.length >= 1;
-  const customUnitIsSystem = isSystemUnitCode(customUnitCodeNormalized);
 
   const loadCompanyProductCategories = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -1175,14 +1197,27 @@ export function Produtos() {
         return q;
       };
 
-      const { data, count, error } = await buildBase().range(
-        (productsPage - 1) * PAGE_SIZE,
-        productsPage * PAGE_SIZE - 1,
-      );
-      if (error) console.error(error);
-      const rows = (data ?? []) as Product[];
-      setProducts(rows);
-      setProductsCount(count ?? 0);
+      let rows: Product[];
+      if (purchasesFilter) {
+        const all = await fetchAllInRange<Product>(buildBase());
+        const filtered = all.filter((p) =>
+          matchesPurchasesMetric(p, purchasesFilter),
+        );
+        const from = (productsPage - 1) * PAGE_SIZE;
+        rows = filtered.slice(from, from + PAGE_SIZE);
+        setProducts(rows);
+        setProductsCount(filtered.length);
+      } else {
+        const { data, count, error } = await buildBase().range(
+          (productsPage - 1) * PAGE_SIZE,
+          productsPage * PAGE_SIZE - 1,
+        );
+        if (error) console.error(error);
+        rows = (data ?? []) as Product[];
+        setProducts(rows);
+        setProductsCount(count ?? 0);
+      }
+
       const [catalogMap, pendingMap, opCfg] = await Promise.all([
         fetchProductCatalogMap(
           currentCompany.id,
@@ -1259,7 +1294,13 @@ export function Produtos() {
     filterUpdatedTo,
     productsPage,
     lowStockOnly,
+    purchasesFilter,
   ]);
+
+  useEffect(() => {
+    if (!purchasesFilter) return;
+    queueMicrotask(() => setProductsPage(1));
+  }, [purchasesFilter]);
 
   const fetchLowStockCount = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -1345,7 +1386,8 @@ export function Produtos() {
   useEffect(() => {
     const est = searchParams.get("estoque");
     const aba = searchParams.get("aba");
-    if (est === "baixo") {
+    const compras = searchParams.get("compras");
+    if (est === "baixo" || compras) {
       setEstoqueTab("catalogo");
     } else if (est === "receitas") {
       setEstoqueTab("receitas");
@@ -1450,6 +1492,7 @@ export function Produtos() {
       setStockSku(p.sku ?? "");
       setStockUnit(normalizedUnit);
       setStockBarcode(p.barcode ?? "");
+      setStockEan(p.ean ?? "");
       setStockQuantity(String(p.current_quantity));
       setStockMinQuantity(String(p.min_quantity ?? 0));
       setStockLastUnitValue(
@@ -1590,6 +1633,8 @@ export function Produtos() {
     const unitChanged = stockUnit !== currentUnit;
     const barcodeChanged =
       (stockBarcode.trim() || null) !== (stockProduct.barcode?.trim() || null);
+    const eanChanged =
+      (stockEan.trim() || null) !== (stockProduct.ean?.trim() || null);
     const composesCmvChanged =
       productComposesCmv(stockProduct) !== stockComposesCmv;
     const currentOperationalType =
@@ -1641,6 +1686,7 @@ export function Produtos() {
       !skuChanged &&
       !unitChanged &&
       !barcodeChanged &&
+      !eanChanged &&
       !composesCmvChanged &&
       !operationalTypeChanged &&
       !lastUnitValueChanged &&
@@ -1687,6 +1733,7 @@ export function Produtos() {
       import_unit_raw?: string | null;
       import_unit_needs_review?: boolean;
       barcode?: string | null;
+      ean?: string | null;
       composes_cmv?: boolean;
       last_unit_value?: number | null;
       last_unit_value_unit_code?: string | null;
@@ -1711,6 +1758,7 @@ export function Produtos() {
     if (activeChanged) updates.is_active = stockIsActive;
     if (skuChanged) updates.sku = stockSku.trim() || null;
     if (barcodeChanged) updates.barcode = stockBarcode.trim() || null;
+    if (eanChanged) updates.ean = stockEan.trim() || null;
     if (composesCmvChanged) {
       updates.composes_cmv = stockComposesCmv;
     }
@@ -2109,6 +2157,25 @@ export function Produtos() {
                   <span>
                     Mostrando apenas produtos com estoque na ou abaixo do mínimo
                     cadastrado.
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    asChild
+                  >
+                    <Link to="/app/produtos">Ver todos os produtos</Link>
+                  </Button>
+                </div>
+              )}
+              {purchasesFilter && (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+                  <span>
+                    Filtro de compras: produtos com{" "}
+                    <span className="font-medium text-foreground">
+                      {PURCHASES_METRIC_LABELS[purchasesFilter]}
+                    </span>
+                    .
                   </span>
                   <Button
                     variant="ghost"
@@ -3115,184 +3182,134 @@ export function Produtos() {
                                 onChange={(e) =>
                                   setStockBarcode(e.target.value)
                                 }
-                                placeholder="Opcional — EAN ou alfanumérico"
+                                placeholder="Opcional"
+                                className={cn(SHEET_INPUT, "font-mono")}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Label htmlFor="stock-ean">EAN / GTIN</Label>
+                              <Input
+                                id="stock-ean"
+                                value={stockEan}
+                                onChange={(e) => setStockEan(e.target.value)}
+                                placeholder="Opcional — código da NF-e"
                                 className={cn(SHEET_INPUT, "font-mono")}
                               />
                             </div>
                           </div>
-                          <div className="rounded-xl border border-border bg-background px-4 py-3">
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                              Tipo final operacional
-                            </p>
-                            <div className="mt-2">
-                              <Select
-                                value={stockOperationalType}
-                                onValueChange={(v) =>
-                                  setStockOperationalType(
-                                    v as OperationalTypeValue,
-                                  )
-                                }
+                          <div className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
+                            <div className="space-y-0.5">
+                              <Label
+                                htmlFor="stock-active"
+                                className="text-base"
                               >
-                                <SelectTrigger className={SHEET_SELECT}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {OPERATIONAL_TYPE_OPTIONS.map((t) => (
-                                    <SelectItem key={t} value={t}>
-                                      {operationalTypeLabel(t)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                {stockIsActive ? "Ativo" : "Inativo"}
+                              </Label>
+                              <p className="text-xs text-muted-foreground">
+                                Inativos não aparecem ao vincular em despesas.
+                              </p>
                             </div>
+                            <Switch
+                              id="stock-active"
+                              checked={stockIsActive}
+                              onCheckedChange={setStockIsActive}
+                              disabled={stockSaving}
+                              className="data-[state=checked]:bg-primary"
+                            />
                           </div>
                           <div>
-                            <Label>Unidade</Label>
+                            <Label htmlFor="stock-operational-type">
+                              Tipo operacional
+                            </Label>
                             <Select
-                              value={stockUnit}
-                              onValueChange={handleStockUnitChange}
+                              value={stockOperationalType}
+                              onValueChange={(v) =>
+                                setStockOperationalType(
+                                  v as OperationalTypeValue,
+                                )
+                              }
                             >
-                              <SelectTrigger className={SHEET_SELECT}>
+                              <SelectTrigger
+                                id="stock-operational-type"
+                                className={SHEET_SELECT}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {unitSelectOptions.map((u) => (
-                                  <SelectItem key={u.value} value={u.value}>
-                                    {u.label}
+                                {OPERATIONAL_TYPE_OPTIONS.map((t) => (
+                                  <SelectItem key={t} value={t}>
+                                    {operationalTypeLabel(t)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
-                            {!isSystemUnitCode(stockUnit) && (
-                              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                                Unidade legada/custom. Revise para uma unidade
-                                padrão quando possível.
-                              </p>
-                            )}
-                            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-                              <div>
-                                <Label
-                                  htmlFor="stock-custom-unit-label"
-                                  className="text-xs"
-                                >
-                                  Nome da unidade
-                                </Label>
-                                <Input
-                                  id="stock-custom-unit-label"
-                                  value={stockCustomUnitLabel}
-                                  onChange={(e) =>
-                                    setStockCustomUnitLabel(e.target.value)
-                                  }
-                                  placeholder="Ex.: Vidro"
-                                  className={SHEET_INPUT}
-                                />
-                              </div>
-                              <div>
-                                <Label
-                                  htmlFor="stock-custom-unit"
-                                  className="text-xs"
-                                >
-                                  Abreviação da unidade
-                                </Label>
-                                <Input
-                                  id="stock-custom-unit"
-                                  value={stockCustomUnitInput}
-                                  onChange={(e) =>
-                                    setStockCustomUnitInput(e.target.value)
-                                  }
-                                  placeholder={
-                                    stockProduct?.import_unit_raw
-                                      ? `Sugestão XML: ${stockProduct.import_unit_raw}`
-                                      : "Ex.: fd"
-                                  }
-                                  className={SHEET_INPUT}
-                                />
-                                {stockCustomUnitInput.trim().length > 0 && (
-                                  <p
-                                    className={cn(
-                                      "mt-1 text-xs",
-                                      customUnitIsValid
-                                        ? customUnitIsSystem
-                                          ? "text-emerald-700 dark:text-emerald-300"
-                                          : "text-amber-700 dark:text-amber-300"
-                                        : "text-destructive",
-                                    )}
-                                  >
-                                    {customUnitIsValid
-                                      ? customUnitIsSystem
-                                        ? `Código válido (unidade padrão): ${customUnitCodeNormalized}`
-                                        : `Código válido custom: ${customUnitCodeNormalized}`
-                                      : "Código inválido. Use letras e números (sem espaços/símbolos)."}
-                                  </p>
-                                )}
-                              </div>
-                              <div className="md:col-span-2 flex flex-wrap items-center gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void applyCustomUnit()}
-                                  disabled={
-                                    !customUnitIsValid ||
-                                    !stockCustomUnitLabel.trim()
-                                  }
-                                >
-                                  Criar e aplicar unidade
-                                </Button>
-                                {stockProduct?.import_unit_raw && (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => {
-                                      const raw = String(
-                                        stockProduct.import_unit_raw ?? "",
-                                      ).trim();
-                                      const code = normalizeCustomUnitCode(raw);
-                                      setStockCustomUnitInput(code || raw);
-                                      if (!stockCustomUnitLabel.trim()) {
-                                        setStockCustomUnitLabel(raw);
-                                      }
-                                    }}
-                                  >
-                                    Usar unidade do XML (
-                                    {stockProduct.import_unit_raw})
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
                           </div>
+                          {currentCompany?.id ? (
+                            <div className="rounded-xl border border-border bg-background px-4 py-3">
+                              <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Categorias de produto
+                              </p>
+                              <ProductCategoryTagsField
+                                companyId={currentCompany.id}
+                                categories={companyProductCategories}
+                                selectedIds={stockProductCategoryIds}
+                                onChange={(ids) => {
+                                  stockProductCategoryIdsRef.current = ids;
+                                  setStockProductCategoryIds(ids);
+                                }}
+                                onCategoriesChange={() =>
+                                  void loadCompanyProductCategories()
+                                }
+                                disabled={stockSaving}
+                                label=""
+                                hint=""
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className={SHEET_SECTION}>
+                        <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Unidade de medida
+                        </p>
+                        <div>
+                          <Label>Unidade de estoque</Label>
+                          <ProductUnitSearchSelect
+                            value={stockUnit}
+                            options={unitSelectOptions}
+                            onSelect={handleStockUnitChange}
+                            onCreateUnit={async (label, code) => {
+                              await applyCustomUnit(label, code);
+                            }}
+                            disabled={stockSaving}
+                            creating={stockUnitCreating}
+                            importUnitRawHint={stockProduct.import_unit_raw}
+                          />
+                          {isLegacyProductUnit(stockUnit, knownUnitCodes) && (
+                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                              Unidade fora do catálogo padrão. Revise ou crie
+                              uma unidade personalizada na lista.
+                            </p>
+                          )}
                         </div>
                       </div>
 
                       {currentCompany?.id ? (
-                        <div className={SHEET_SECTION}>
-                          <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                            Categorias de produto
-                          </p>
-                          <p className="mb-3 text-xs text-muted-foreground">
-                            Várias categorias; crie novas pelo campo abaixo se
-                            precisar.
-                          </p>
-                          <ProductCategoryTagsField
-                            companyId={currentCompany.id}
-                            categories={companyProductCategories}
-                            selectedIds={stockProductCategoryIds}
-                            onChange={(ids) => {
-                              stockProductCategoryIdsRef.current = ids;
-                              setStockProductCategoryIds(ids);
-                            }}
-                            onCategoriesChange={() =>
-                              void loadCompanyProductCategories()
-                            }
-                            disabled={stockSaving}
-                            label=""
-                            hint=""
-                          />
-                        </div>
+                        <ProductUnitConversionsSection
+                          companyId={currentCompany.id}
+                          stockUnitCode={stockUnit}
+                          value={stockProductConversions}
+                          onChange={setStockProductConversions}
+                          onPromoteSecondaryToStockUnit={handleStockUnitChange}
+                          disabled={stockSaving}
+                          sectionClassName={SHEET_SECTION}
+                        />
                       ) : null}
 
                       <div className={SHEET_SECTION}>
                         <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          CMV e preço de referência
+                          CMV e preço
                         </p>
                         <div className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
                           <div className="space-y-0.5">
@@ -3352,7 +3369,7 @@ export function Produtos() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <p className="mt-1.5 text-xs text-muted-foreground">
+                          <p className="sm:col-span-2 mt-1.5 text-xs text-muted-foreground">
                             Referência manual por {stockLastUnitValueUnitCode}.
                             Esse valor de referência não muda ao trocar a
                             unidade principal do produto; o sistema converte
@@ -3363,7 +3380,7 @@ export function Produtos() {
 
                       <div className={SHEET_SECTION}>
                         <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Quantidades
+                          Estoque
                         </p>
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
@@ -3397,42 +3414,6 @@ export function Produtos() {
                             </p>
                           </div>
                         </div>
-                      </div>
-
-                      {currentCompany?.id ? (
-                        <ProductUnitConversionsSection
-                          companyId={currentCompany.id}
-                          stockUnitCode={stockUnit}
-                          value={stockProductConversions}
-                          onChange={setStockProductConversions}
-                          onPromoteSecondaryToStockUnit={handleStockUnitChange}
-                          disabled={stockSaving}
-                          sectionClassName={SHEET_SECTION}
-                        />
-                      ) : null}
-
-                      <div
-                        className={cn(
-                          SHEET_SECTION,
-                          "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
-                        )}
-                      >
-                        <div>
-                          <Label className="text-base" htmlFor="stock-active">
-                            Status do item
-                          </Label>
-                          <p
-                            id="stock-active"
-                            className="mt-1 text-sm text-muted-foreground"
-                          >
-                            Inativos não aparecem ao vincular em despesas.
-                          </p>
-                        </div>
-                        <Switch
-                          checked={stockIsActive}
-                          onCheckedChange={setStockIsActive}
-                          className="data-[state=checked]:bg-primary"
-                        />
                       </div>
                     </div>
                   </div>

@@ -1,4 +1,5 @@
 import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
+import { DashboardPurchasesSection } from "@/components/dashboard/DashboardPurchasesSection";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
@@ -232,6 +233,8 @@ export function Dashboard() {
       {/* {currentCompany ? <SetupProgressCard /> : null} */}
 
       {companyId ? <DashboardDayOperations /> : null}
+
+      {companyId ? <DashboardPurchasesSection /> : null}
 
       {/* <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">

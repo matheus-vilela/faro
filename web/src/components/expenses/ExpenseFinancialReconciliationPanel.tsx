@@ -1,3 +1,8 @@
+import {
+  ICMS_TOT_COLUMN_ORDER,
+  TotalsMatrixTable,
+  type TotalsMatrixRow,
+} from "@/components/nfe/TotalsMatrixTable";
 import type { ReactNode } from "react";
 
 const ICMS_TOT_LABELS: Record<string, string> = {
@@ -22,65 +27,10 @@ const ICMS_TOT_LABELS: Record<string, string> = {
   vTotTrib: "Valor aproximado total de tributos",
 };
 
-/** Ordem de relevância para listar primeiro totais “óbvios” da nota. */
-const ICMS_ORDER: string[] = [
-  "vNF",
-  "vProd",
-  "vDesc",
-  "vFrete",
-  "vSeg",
-  "vOutro",
-  "vIPI",
-  "vPIS",
-  "vCOFINS",
-  "vII",
-  "vICMS",
-  "vST",
-  "vBC",
-  "vBCST",
-  "vICMSDeson",
-  "vFCP",
-  "vFCPST",
-  "vIPIDevol",
-  "vTotTrib",
-];
-
 function numOrNull(v: unknown): number | null {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(String(v).replace(",", "."));
   return Number.isFinite(n) ? n : null;
-}
-
-function Row({
-  label,
-  value,
-  formatCurrency,
-}: {
-  label: string;
-  value: number;
-  formatCurrency: (v: number) => string;
-}) {
-  return (
-    <div className="flex justify-between gap-3 text-sm py-0.5 border-b border-border/40 last:border-0">
-      <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="font-medium text-right tabular-nums">
-        {formatCurrency(value)}
-      </span>
-    </div>
-  );
-}
-
-function sortIcmsRows(
-  rows: Array<{ key: string; label: string; value: number }>,
-) {
-  const rank = (k: string) => {
-    const i = ICMS_ORDER.indexOf(k);
-    return i === -1 ? 1000 + k.charCodeAt(0) : i;
-  };
-  return [...rows].sort(
-    (a, b) =>
-      rank(a.key) - rank(b.key) || a.label.localeCompare(b.label, "pt-BR"),
-  );
 }
 
 export function ExpenseFinancialReconciliationPanel({
@@ -93,7 +43,7 @@ export function ExpenseFinancialReconciliationPanel({
   if (!data || typeof data !== "object") return null;
 
   const icms = data.icms_tot;
-  const icmsRows: Array<{ key: string; label: string; value: number }> = [];
+  const icmsRows: TotalsMatrixRow[] = [];
   if (icms && typeof icms === "object" && !Array.isArray(icms)) {
     for (const [key, raw] of Object.entries(icms as Record<string, unknown>)) {
       const n = numOrNull(raw);
@@ -151,148 +101,68 @@ export function ExpenseFinancialReconciliationPanel({
   )
     return null;
 
+  const conferenceRows: TotalsMatrixRow[] = [];
+  if (lineSum != null && lineSum !== 0) {
+    conferenceRows.push({
+      key: "sum_lines",
+      label: "Soma das linhas",
+      value: lineSum,
+    });
+  }
+  if (plusFrete != null && plusFrete !== 0) {
+    conferenceRows.push({
+      key: "plus_frete",
+      label: "(+) Frete",
+      value: plusFrete,
+    });
+  }
+  if (minusDiscount != null && minusDiscount !== 0) {
+    conferenceRows.push({
+      key: "minus_discount",
+      label: "(−) Desconto global (abatimento)",
+      value: -Math.abs(minusDiscount),
+    });
+  }
+  if (plusOther != null && plusOther !== 0) {
+    conferenceRows.push({
+      key: "plus_other",
+      label: "(+) Outros (XML)",
+      value: plusOther,
+    });
+  }
+  if (docTotal != null && docTotal !== 0) {
+    conferenceRows.push({
+      key: "document_total",
+      label: "Total da nota (vNF)",
+      value: docTotal,
+    });
+  }
+  if (delta != null && delta !== 0) {
+    conferenceRows.push({
+      key: "delta",
+      label: "Diferença (nota − componentes)",
+      value: delta,
+    });
+  }
+
   return (
-    <div className="rounded-lg border p-4 space-y-4">
-      <div>
-        <p className="text-sm font-medium">Impostos e totais (NF-e)</p>
-      </div>
+    <div className="space-y-4">
+      {hasIcms ? (
+        <TotalsMatrixTable
+          title="ICMSTot (totais da nota)"
+          rows={icmsRows}
+          formatValue={formatCurrency}
+          columnOrder={ICMS_TOT_COLUMN_ORDER}
+        />
+      ) : null}
 
-      {stagingAdjusted && (beforeAdj != null || afterAdj != null) && (
-        <div className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs space-y-1">
-          <p className="font-medium text-foreground">
-            Total da despesa alinhado ao XML (vNF)
-          </p>
-          <p className="text-muted-foreground">
-            O total gravado na despesa foi definido a partir do{" "}
-            <span className="font-medium">vNF</span> do bloco ICMSTot da NF-e,
-            quando este valor difere do total vindo só da interpretação das
-            linhas.
-          </p>
-          {beforeAdj != null && (
-            <p>
-              <span className="text-muted-foreground">
-                Total interpretado (antes):
-              </span>{" "}
-              <span className="font-medium tabular-nums">
-                {formatCurrency(beforeAdj)}
-              </span>
-            </p>
-          )}
-          {afterAdj != null && (
-            <p>
-              <span className="text-muted-foreground">
-                Total aplicado (vNF):
-              </span>{" "}
-              <span className="font-medium tabular-nums">
-                {formatCurrency(afterAdj)}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {(hasTop || source || chave) && (
-        <div className="text-xs text-muted-foreground space-y-1">
-          {valorTop != null && (
-            <p>
-              <span className="text-muted-foreground">
-                Total na interpretação:
-              </span>{" "}
-              <span className="font-medium text-foreground">
-                {formatCurrency(valorTop)}
-              </span>
-            </p>
-          )}
-          {docTotal != null && docTotal !== valorTop && (
-            <p>
-              <span className="text-muted-foreground">
-                Total do documento (conferência):
-              </span>{" "}
-              <span className="font-medium text-foreground">
-                {formatCurrency(docTotal)}
-              </span>
-            </p>
-          )}
-          {/* {source && (
-            <p>
-              Origem: <span className="font-mono text-foreground">{source}</span>
-            </p>
-          )} */}
-          {chave && (
-            <p className="break-all">
-              Chave NF-e:{" "}
-              <span className="font-mono text-foreground">{chave}</span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {hasIcms && (
-        <div>
-          <div className="rounded-md bg-muted/30 px-3 py-2 space-y-0">
-            {sortIcmsRows(icmsRows).map((r) => (
-              <Row
-                key={r.key}
-                label={r.label}
-                value={r.value}
-                formatCurrency={formatCurrency}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {hasConferenceBody && (
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-            Conferência (soma vs total)
-          </p>
-          <div className="rounded-md bg-muted/30 px-3 py-2 space-y-0">
-            {lineSum != null && lineSum !== 0 && (
-              <Row
-                label="Soma das linhas"
-                value={lineSum}
-                formatCurrency={formatCurrency}
-              />
-            )}
-            {plusFrete != null && plusFrete !== 0 && (
-              <Row
-                label="(+) Frete"
-                value={plusFrete}
-                formatCurrency={formatCurrency}
-              />
-            )}
-            {minusDiscount != null && minusDiscount !== 0 && (
-              <Row
-                label="(−) Desconto global (abatimento)"
-                value={-Math.abs(minusDiscount)}
-                formatCurrency={formatCurrency}
-              />
-            )}
-            {plusOther != null && plusOther !== 0 && (
-              <Row
-                label="(+) Outros (XML)"
-                value={plusOther}
-                formatCurrency={formatCurrency}
-              />
-            )}
-            {docTotal != null && docTotal !== 0 && (
-              <Row
-                label="Total da nota (vNF)"
-                value={docTotal}
-                formatCurrency={formatCurrency}
-              />
-            )}
-            {delta != null && delta !== 0 && (
-              <Row
-                label="Diferença (nota − componentes)"
-                value={delta}
-                formatCurrency={formatCurrency}
-              />
-            )}
-          </div>
-        </div>
-      )}
+      {hasConferenceBody ? (
+        <TotalsMatrixTable
+          title="Conferência (soma vs total)"
+          rows={conferenceRows}
+          formatValue={formatCurrency}
+        />
+      ) : null}
     </div>
   );
 }
