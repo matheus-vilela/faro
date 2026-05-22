@@ -143,6 +143,7 @@ export async function matchImportBatchLineWithCatalogLlm(
     const existing = findCatalogProductByNormalizedName(
       catalog,
       arb.suggested_catalog_name,
+      name,
     );
     if (existing) {
       return {

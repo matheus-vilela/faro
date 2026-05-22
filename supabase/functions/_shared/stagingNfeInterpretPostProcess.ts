@@ -1031,6 +1031,7 @@ export async function resolveProductsForInterpretLog(
       const existingByNorm = findCatalogProductByNormalizedName(
         activeCatalog,
         nomeCadastro,
+        String(line.nome ?? "").trim(),
       );
       if (existingByNorm) {
         if (!previewSink) {

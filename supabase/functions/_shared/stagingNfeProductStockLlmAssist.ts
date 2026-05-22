@@ -15,6 +15,7 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `EAN e NCM+nome idênticos já foram tentados antes desta chamada — decida pelo **name** de cada product_id.\n` +
   `- Cadastro **com marca A** e nota **marca B** distinta (ex.: Sadia vs Seara) → não LINK.\n` +
   `- Marcas concorrentes de bebida (Coca vs Pepsi) → não LINK.\n` +
+  `- **Mesma marca, volume/embalagem diferente = produtos diferentes** (ex.: Heineken 330 ml, Heineken 600 ml, Heineken barril 50 L, Heineken long neck) → NEW_PRODUCT com volume/formato no nome; não LINK só pela marca.\n` +
   `\n--- Nome normalizado e estoque (obrigatório ler com atenção) ---\n` +
   `Muitas NF-e trazem no **nome do item** a contagem da embalagem (ex.: "HEINEKEN LONG NECK 24UN", "CERVEJA 12X350ML", "REFRIGERANTE CX 6", "FARDO AGUA 12UN") enquanto **qCom** na linha é 1 (uma embalada) e o **valor total da linha** já é o da compra inteira.\n` +
   `Para **entrada em estoque** o sistema precisa da **quantidade de unidades de consumo** (ex.: 24 garrafas) e do **valor unitário de cada uma** (valor total da linha ÷ essa quantidade).\n` +
@@ -29,7 +30,8 @@ const STAGING_NFE_LINE_STOCK_SYSTEM =
   `\n**suggested_catalog_name** (NEW_PRODUCT): deve ser **o mesmo nome limpo** que normalized_product_name (ou abreviação mínima sem perder a identidade do item); **não** repita o texto bruto da nota com pesos, packs ou medidas.\n` +
   `\n**stock_quantity** e **stock_unit_value** (números > 0, use ponto decimal):\n` +
   `- Em NEW_PRODUCT: **obrigatórios** — quantidade física de unidades do produto normalizado e preço unitário coerente com valor total da linha (stock_quantity × stock_unit_value ≈ valor total da linha; tolerância centavos).\n` +
-  `- Antes de NEW_PRODUCT: se **normalized_product_name** ou **suggested_catalog_name** for o **mesmo item** que o **name** de algum candidato (mesma identidade comercial, ignorando acento/marca de embalagem na nota), use **LINK** com esse product_id — não proponha produto novo duplicado (ex.: nota "CRYSTAL 500ML COM GAS" e cadastro "AGUA COM GAS" → LINK).\n` +
+  `- Antes de NEW_PRODUCT: se **normalized_product_name** for o **mesmo SKU** que o **name** de algum candidato (mesma marca **e** mesmo volume/formato de bebida), use **LINK** — não duplique (ex.: "CRYSTAL 500ML COM GAS" ↔ "AGUA COM GAS").\n` +
+  `- **Exceção:** cerveja/refrigerante/destilado com **mesma marca** e **volume ou embalagem diferente** → sempre **NEW_PRODUCT** com volume no nome (ex.: nota "HEINEKEN 0,6 GFA" ≠ cadastro "HEINEKEN 0,33 LT").\n` +
   `- Em LINK: **opcionais** — preencha se a linha XML esconder pack no nome e precisar corrigir quantidade/valor para estoque; se não precisar correção, use quantidade e valor unitário da linha XML (repita nos campos ou omita e o sistema usa XML).\n` +
   `- Marque **uses_packaging_from_description** = true quando a contagem efetiva veio principalmente do texto do nome e não só do XML.\n` +
   `\nResponda **apenas** um JSON válido (sem markdown), com esta forma:\n` +
@@ -239,6 +241,7 @@ export async function assistStagingNfeLineStockNormalizeAndMatch(
       const existingPid = findCandidateProductIdByNormalizedName(
         candidates,
         normFinal,
+        String(line.nome ?? "").trim(),
       );
       if (existingPid) {
         const usesFromDescLink =

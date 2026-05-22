@@ -5,6 +5,7 @@ import {
   isFlavorOnlyCatalogInsideCompositeInvoice,
   scoreNameMatch,
 } from "../_shared/productImport/matchingScore.ts";
+import { beverageSkuVolumeConflict } from "../_shared/productImport/beverageSkuIdentity.ts";
 import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
@@ -919,7 +920,9 @@ export async function resolveProductMatches(
 
     const normInvoice = normalizeInvoiceProductLabel(name);
     const exactNameHits = products.filter(
-      (p) => normalizeInvoiceProductLabel(p.name) === normInvoice,
+      (p) =>
+        normalizeInvoiceProductLabel(p.name) === normInvoice &&
+        !beverageSkuVolumeConflict(name, p.name),
     );
     if (exactNameHits.length > 0) {
       let pPick: ProductRow;

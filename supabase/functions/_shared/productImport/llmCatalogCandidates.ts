@@ -1,6 +1,7 @@
 /**
  * Monta a lista de produtos enviada à IA quando não há match direto (EAN ou NCM+nome).
  */
+import { beverageSkuVolumeConflict } from "./beverageSkuIdentity.ts";
 import {
   canonicalProductName,
   sanitizeCatalogProductName,
@@ -49,40 +50,49 @@ export function findCatalogProductByNameKey<T extends { id: string; name: string
   if (!lineKey || lineKey.length < 2) return undefined;
   const matches = catalog.filter((p) => catalogMatchNameKey(p.name) === lineKey);
   if (matches.length === 0) return undefined;
-  if (matches.length === 1) return matches[0];
   const strict = stripDiacriticsLower(
     sanitizeCatalogProductName(invoiceOrCatalogName),
   );
   const strictHits = matches.filter(
     (p) => stripDiacriticsLower(sanitizeCatalogProductName(p.name)) === strict,
   );
-  return strictHits[0] ?? matches[0];
+  const pick = strictHits[0] ?? (matches.length === 1 ? matches[0] : matches[0]);
+  if (!pick) return undefined;
+  if (beverageSkuVolumeConflict(invoiceOrCatalogName, pick.name)) return undefined;
+  return pick;
 }
 
 /** Produto já cadastrado com o mesmo nome normalizado (pós-IA ou dedupe). */
 export function findCatalogProductByNormalizedName<T extends { id: string; name: string }>(
   catalog: T[],
   normalizedName: string,
+  /** Rótulo bruto da NF-e — usado para bloquear vínculo entre bebidas de volumes diferentes. */
+  invoiceLineName?: string | null,
 ): T | undefined {
   const key = catalogMatchNameKey(normalizedName);
   if (!key || key.length < 2) return undefined;
   const matches = catalog.filter((p) => catalogMatchNameKey(p.name) === key);
   if (matches.length === 0) return undefined;
-  if (matches.length === 1) return matches[0];
   const strict = stripDiacriticsLower(sanitizeCatalogProductName(normalizedName));
   const strictHits = matches.filter(
     (p) => stripDiacriticsLower(sanitizeCatalogProductName(p.name)) === strict,
   );
-  return strictHits[0] ?? matches[0];
+  const pick = strictHits[0] ?? (matches.length === 1 ? matches[0] : matches[0]);
+  if (!pick) return undefined;
+  const invoiceRef = String(invoiceLineName ?? normalizedName).trim();
+  if (beverageSkuVolumeConflict(invoiceRef, pick.name)) return undefined;
+  return pick;
 }
 
 export function findCandidateProductIdByNormalizedName(
   candidates: { product_id: string; name: string }[],
   normalizedName: string,
+  invoiceLineName?: string | null,
 ): string | undefined {
   const hit = findCatalogProductByNormalizedName(
     candidates.map((c) => ({ id: c.product_id, name: c.name })),
     normalizedName,
+    invoiceLineName,
   );
   return hit?.id;
 }

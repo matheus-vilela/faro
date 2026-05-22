@@ -1,3 +1,4 @@
+import { beverageSkuVolumeConflict } from "./beverageSkuIdentity"
 import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName"
 
 /**
@@ -97,11 +98,31 @@ export function scoreNameMatch(
   const y = normalizeInvoiceProductLabel(String(catalogName ?? ""))
   if (!x.length && !y.length) return 100
   if (!x.length || !y.length) return 0
-  if (x === y) return 100
+  if (x === y) {
+    if (
+      beverageSkuVolumeConflict(
+        String(invoiceLine ?? ""),
+        String(catalogName ?? ""),
+      )
+    ) {
+      return 42
+    }
+    return 100
+  }
 
   const cx = canonicalProductName(invoiceLine)
   const cy = canonicalProductName(catalogName)
-  if (cx && cx === cy) return 98
+  if (cx && cx === cy) {
+    if (
+      beverageSkuVolumeConflict(
+        String(invoiceLine ?? ""),
+        String(catalogName ?? ""),
+      )
+    ) {
+      return 42
+    }
+    return 98
+  }
   if (cx && cy) {
     if (cx.includes(cy) || cy.includes(cx)) {
       const shorter = Math.min(cx.length, cy.length)
@@ -124,17 +145,42 @@ export function scoreNameMatch(
       ) {
         s = Math.min(s, 68)
       }
+      if (
+        beverageSkuVolumeConflict(
+          String(invoiceLine ?? ""),
+          String(catalogName ?? ""),
+        )
+      ) {
+        s = Math.min(s, 42)
+      }
       return s
     }
     const d = levenshtein(cx, cy)
     const maxLen = Math.max(cx.length, cy.length)
-    const base = Math.round((1 - d / maxLen) * 100)
+    let base = Math.round((1 - d / maxLen) * 100)
+    if (
+      beverageSkuVolumeConflict(
+        String(invoiceLine ?? ""),
+        String(catalogName ?? ""),
+      )
+    ) {
+      base = Math.min(base, 42)
+    }
     return Math.max(0, Math.min(100, base))
   }
 
   const d0 = levenshtein(x, y)
   const maxLen0 = Math.max(x.length, y.length)
-  return Math.max(0, Math.min(100, Math.round((1 - d0 / maxLen0) * 100)))
+  let score0 = Math.max(0, Math.min(100, Math.round((1 - d0 / maxLen0) * 100)))
+  if (
+    beverageSkuVolumeConflict(
+      String(invoiceLine ?? ""),
+      String(catalogName ?? ""),
+    )
+  ) {
+    score0 = Math.min(score0, 42)
+  }
+  return score0
 }
 
 export function digitsOnly(s: string | null | undefined): string {
