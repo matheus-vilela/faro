@@ -14,6 +14,15 @@ import {
   isExpenseStockMovementReference,
   resolveExpenseIdsForStockMovements,
 } from "@/lib/stockMovementExpenseLink";
+import {
+  isManuallyRegisteredStockMovement,
+  manualStockMovementRegisteredByLabel,
+} from "@/lib/manualStockMovement";
+import {
+  isWasteStockMovement,
+  stockMovementTypeLabel,
+} from "@/lib/stockMovementFilters";
+import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +30,7 @@ import {
   ArrowUpRight,
   FileText,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -33,7 +43,7 @@ const STOCK_REF_LABEL: Record<string, string> = {
   revenue_entry: "Venda",
   waste: "Perda",
   adjustment: "Ajuste",
-  purchase_order: "Compra",
+  purchase_order: "Despesa",
   technical_sheet_backfill: "Ficha técnica (histórico)",
 };
 
@@ -50,7 +60,14 @@ type MovementRow = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
-  metadata_json: { quantity_unit?: string } | null;
+  metadata_json: {
+    quantity_unit?: string;
+    registration_mode?: string;
+    registered_by_user_id?: string;
+    registered_by_name?: string;
+    classification?: string;
+    movement_kind?: string;
+  } | null;
   expense_id: string | null;
 };
 
@@ -154,6 +171,14 @@ export function ProductStockMovementHistorySection({
     selectedMovement?.expense_id != null &&
     isExpenseStockMovementReference(selectedMovement.reference_type);
 
+  const selectedIsManual =
+    selectedMovement != null &&
+    isManuallyRegisteredStockMovement(selectedMovement.metadata_json);
+
+  const selectedRegisteredBy = selectedMovement
+    ? manualStockMovementRegisteredByLabel(selectedMovement.metadata_json)
+    : null;
+
   return (
     <section className={cn(className)}>
       <ExpenseDetailSheet
@@ -190,16 +215,20 @@ export function ProductStockMovementHistorySection({
                         variant={
                           selectedMovement.type === "in"
                             ? "secondary"
-                            : "outline"
+                            : isWasteStockMovement(selectedMovement)
+                              ? "destructive"
+                              : "outline"
                         }
                         className="gap-1 font-normal"
                       >
                         {selectedMovement.type === "in" ? (
                           <ArrowDownLeft className="h-3 w-3" />
+                        ) : isWasteStockMovement(selectedMovement) ? (
+                          <Trash2 className="h-3 w-3" />
                         ) : (
                           <ArrowUpRight className="h-3 w-3" />
                         )}
-                        {selectedMovement.type === "in" ? "Entrada" : "Saída"}
+                        {stockMovementTypeLabel(selectedMovement)}
                       </Badge>
                     </dd>
                   </div>
@@ -215,16 +244,30 @@ export function ProductStockMovementHistorySection({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-muted-foreground">Origem</dt>
+                    <dt className="text-xs text-muted-foreground">
+                      Classificação
+                    </dt>
                     <dd className="mt-1">
                       <StockMovementOriginCell
                         referenceType={selectedMovement.reference_type}
                         expenseId={selectedMovement.expense_id}
-                        label={stockRefLabel(selectedMovement.reference_type)}
+                        label={movementClassificationDisplayLabel(
+                          selectedMovement,
+                        )}
                         onOpenExpense={openExpenseDetail}
                       />
                     </dd>
                   </div>
+                  {selectedIsManual ? (
+                    <div>
+                      <dt className="text-xs text-muted-foreground">
+                        Registrado por
+                      </dt>
+                      <dd className="mt-1 font-medium">
+                        {selectedRegisteredBy ?? "—"}
+                      </dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt className="text-xs text-muted-foreground">
                       Custo unitário
@@ -283,6 +326,8 @@ export function ProductStockMovementHistorySection({
               <tbody>
                 {rows.map((row) => {
                   const isIn = row.type === "in";
+                  const isWaste = isWasteStockMovement(row);
+                  const typeLabel = stockMovementTypeLabel(row);
                   return (
                     <tr
                       key={row.id}
@@ -308,15 +353,19 @@ export function ProductStockMovementHistorySection({
                       </td>
                       <td className="px-3 py-2">
                         <Badge
-                          variant={isIn ? "secondary" : "outline"}
+                          variant={
+                            isIn ? "secondary" : isWaste ? "destructive" : "outline"
+                          }
                           className="gap-1 font-normal"
                         >
                           {isIn ? (
                             <ArrowDownLeft className="h-3 w-3" />
+                          ) : isWaste ? (
+                            <Trash2 className="h-3 w-3" />
                           ) : (
                             <ArrowUpRight className="h-3 w-3" />
                           )}
-                          {isIn ? "Entrada" : "Saída"}
+                          {typeLabel}
                         </Badge>
                       </td>
                       <td className="px-3 py-2 tabular-nums">
