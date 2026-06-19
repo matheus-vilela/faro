@@ -8,7 +8,8 @@ export const CONTAS_A_PAGAR_FLUXO_CONFIG: FluxoBoletosPageConfig = {
   icon: TrendingDown,
   periodDescription: "Calendário e lista usam este mês",
   listTitle: "Contas a pagar",
-  listDescription: "Saídas previstas no mês selecionado (categorias de despesa)",
+  listDescription:
+    "Saídas do mês: contas reais e ocorrências projetadas de séries recorrentes/parceladas",
   searchPlaceholder: "Filtrar por descrição ou beneficiário...",
   emptyListMessage: "Nenhuma conta a pagar neste mês",
   addButtonLabel: "Adicionar conta a pagar",
