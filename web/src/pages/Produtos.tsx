@@ -20,6 +20,11 @@ import {
   PRODUCT_SHEET_SELECT,
   PRODUCT_SHEET_TILE,
 } from "@/components/products/productSheetStyles";
+import { ProductStockLotsSection } from "@/components/products/ProductStockLotsSection";
+import {
+  parseProductStockLots,
+  type ProductStockLotEntry,
+} from "@/lib/productStockLots";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
@@ -511,6 +516,11 @@ export function Produtos() {
     >
   >({});
   const [stockSaving, setStockSaving] = useState(false);
+  const [lotsRefreshKey, setLotsRefreshKey] = useState(0);
+  const [stockLots, setStockLots] = useState<ProductStockLotEntry[]>([]);
+  const [initialStockLots, setInitialStockLots] = useState<
+    ProductStockLotEntry[]
+  >([]);
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
   const [productMergeOpen, setProductMergeOpen] = useState(false);
   const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
@@ -1526,6 +1536,9 @@ export function Produtos() {
     productSheetViewRef.current = "summary";
     productConversionsLoadedIdRef.current = null;
     setStockProduct(p);
+    const parsedLots = parseProductStockLots(p.stock_lots);
+    setStockLots(parsedLots);
+    setInitialStockLots(parsedLots);
     syncStockFormFromProduct(p);
     setProductSheetView("summary");
     setProductDetailTab("resumo");
@@ -1569,6 +1582,8 @@ export function Produtos() {
     productSheetViewRef.current = "summary";
     productConversionsLoadedIdRef.current = null;
     setStockProduct(null);
+    setStockLots([]);
+    setInitialStockLots([]);
     setProductSheetView("summary");
     setProductDetailTab("resumo");
     setStockProductCategoryIds([]);
@@ -1677,6 +1692,8 @@ export function Produtos() {
       stockProductConversions,
       initialStockProductConversions,
     );
+    const lotsChanged =
+      JSON.stringify(stockLots) !== JSON.stringify(initialStockLots);
 
     if (
       !qtyChanged &&
@@ -1692,7 +1709,8 @@ export function Produtos() {
       !lastUnitValueChanged &&
       !lastUnitValueUnitChanged &&
       !categoriesChanged &&
-      !conversionsChanged
+      !conversionsChanged &&
+      !lotsChanged
     ) {
       closeStockSheet();
       return;
@@ -1739,6 +1757,7 @@ export function Produtos() {
       last_unit_value_unit_code?: string | null;
       last_unit_value_stock?: number | null;
       average_cost?: number | null;
+      stock_lots?: ProductStockLotEntry[];
     } = {};
     if (nameChanged) updates.name = newName;
     if (unitChanged) {
@@ -1827,6 +1846,9 @@ export function Produtos() {
           );
         }
       }
+    }
+    if (lotsChanged) {
+      updates.stock_lots = stockLots;
     }
     if (Object.keys(updates).length > 0) {
       const { error } = await supabase
@@ -1950,7 +1972,11 @@ export function Produtos() {
       setInitialStockProductConversions([...reloaded]);
     }
 
+    if (lotsChanged) {
+      setInitialStockLots([...stockLots]);
+    }
     setStockSaving(false);
+    setLotsRefreshKey((k) => k + 1);
     closeStockSheet();
     void loadCompanyProductCategories();
     fetchProducts();
@@ -3001,6 +3027,14 @@ export function Produtos() {
                           </div>
                         </div>
 
+                        <ProductStockLotsSection
+                          productId={stockProduct.id}
+                          unit={stockProduct.unit}
+                          currentStock={Number(stockProduct.current_quantity)}
+                          refreshKey={lotsRefreshKey}
+                          readOnly
+                        />
+
                         {currentCompany?.id ? (
                           stockProductConversionsLoading ? (
                             <div className={SHEET_SECTION}>
@@ -3415,6 +3449,17 @@ export function Produtos() {
                           </div>
                         </div>
                       </div>
+
+                      <ProductStockLotsSection
+                        productId={stockProduct.id}
+                        unit={stockProduct.unit}
+                        currentStock={
+                          Number(stockQuantity.replace(",", ".")) ||
+                          Number(stockProduct.current_quantity)
+                        }
+                        lots={stockLots}
+                        onLotsChange={setStockLots}
+                      />
                     </div>
                   </div>
 

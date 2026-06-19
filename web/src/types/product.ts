@@ -44,4 +44,8 @@ export interface Product {
   cfop?: string | null
   csosn?: string | null
   canonical_name?: string | null
+  /** Legado; preferir stock_lots. */
+  expiry_date?: string | null
+  /** Lotes com validade: [{ id, quantity, expiry_date, stock_movement_id?, created_at? }]. */
+  stock_lots?: unknown
 }
