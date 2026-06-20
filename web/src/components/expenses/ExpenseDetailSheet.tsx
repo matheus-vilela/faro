@@ -41,7 +41,6 @@ import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { CompanyCategory } from "@/types/category";
 import {
   type Boleto,
   type Expense,
@@ -258,9 +257,6 @@ export function ExpenseDetailSheet({
 
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
-  const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
-    [],
-  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -309,11 +305,6 @@ export function ExpenseDetailSheet({
   const getBoletoForExpense = (id: string) =>
     boletos.find((b) => b.expense_id === id);
 
-  const categoriesById = useMemo(
-    () => new Map(companyCategories.map((c) => [c.id, c])),
-    [companyCategories],
-  );
-
   const linkedBoletoForDetail = useMemo(() => {
     if (!detailExpense) return undefined;
     return boletos.find((b) => b.expense_id === detailExpense.id);
@@ -348,32 +339,24 @@ export function ExpenseDetailSheet({
     const shouldLoadSupportData =
       supportDataLoadedCompanyRef.current !== companyId;
     if (shouldLoadSupportData) {
-      const [{ data: bo }, { data: catRows }, { data: sup }, { data: prod }] =
-        await Promise.all([
-          supabase
-            .from("boletos")
-            .select("*")
-            .eq("company_id", companyId)
-            .eq("flow_type", "payable"),
-          supabase
-            .from("company_categories")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("sort_order", { ascending: true })
-            .order("name", { ascending: true }),
-          supabase
-            .from("suppliers")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("name"),
-          supabase
-            .from("products")
-            .select("*")
-            .eq("company_id", companyId)
-            .order("name"),
-        ]);
+      const [{ data: bo }, { data: sup }, { data: prod }] = await Promise.all([
+        supabase
+          .from("boletos")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("flow_type", "payable"),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+      ]);
       setBoletos((bo as Boleto[]) ?? []);
-      setCompanyCategories((catRows as CompanyCategory[]) ?? []);
       setSuppliers((sup as Supplier[]) ?? []);
       setProducts((prod as Product[]) ?? []);
       supportDataLoadedCompanyRef.current = companyId;
@@ -899,7 +882,10 @@ export function ExpenseDetailSheet({
                       </Badge>
                     ) : null}
                     {linkedBoletoForDetail ? (
-                      <Badge variant="default" className="bg-green-600 shrink-0">
+                      <Badge
+                        variant="default"
+                        className="bg-green-600 shrink-0"
+                      >
                         Boleto vinculado
                       </Badge>
                     ) : (

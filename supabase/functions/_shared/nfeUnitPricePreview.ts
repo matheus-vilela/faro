@@ -175,7 +175,8 @@ function buildSteps(
       label: "Outras despesas (vOutro rateado)",
       amount: b.global_voutro_allocation,
       effect: "add",
-      detail: "ICMSTot vOutro proporcional ao vProd da linha (sem CFOP 5910)",
+      detail:
+        "prod/vOutro do XML ou, se ausente, ICMSTot vOutro rateado por (vProd − vDesc) (sem CFOP 5910)",
     });
   }
   steps.push({
@@ -294,7 +295,7 @@ export function buildNfeUnitPricePreviewFromXml(
 
   return {
     formula:
-      "((qtd × valor unitário) − desconto + IPI + ICMS ST + FCP ST + juros + vOutro rateado) ÷ qtd — coluna Outros = ICMSTot vOutro rateado por vProd (sem CFOP 5910)",
+      "((qtd × valor unitário) − desconto + IPI + ICMS ST + FCP ST + juros + vOutro) ÷ qtd — coluna Outros = prod/vOutro quando informado; senão rateio do ICMSTot vOutro por (vProd − vDesc)",
     global_juros_nota: globalJuros,
     nota: {
       v_nf: vNf,

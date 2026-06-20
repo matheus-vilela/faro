@@ -1,3 +1,4 @@
+import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import type {
   ExpenseSeriesMaster,
   FluxoBoletoRow,
@@ -354,9 +355,9 @@ export function mergeFluxoBoletos(
     return !projectedByMasterMonth.has(`${b.expense_id}:${mk}`);
   });
 
-  return [...filteredReal, ...projected].sort((a, b) =>
-    a.due_date.localeCompare(b.due_date),
-  );
+  return [...filteredReal, ...projected]
+    .filter((row) => boletoVisibleInFluxo(row))
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
 }
 
 export function filterBoletosBySearch(

@@ -40,14 +40,10 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
-import {
-  RevenueEntriesCalendar,
-  type RevenueCalendarDayListPayload,
-} from "@/components/revenue/RevenueEntriesCalendar";
-import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
 import {
   fetchMergedPayableBoletosInRange,
   fetchSeriesMastersWithAnchorBoletos,
@@ -56,20 +52,27 @@ import {
   filterBoletosBySearch,
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
-import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
-import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
-import type { RevenueEntry } from "@/types/revenue";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { isBoletoPayable } from "@/types/expense";
-import type { ExpenseSeriesMaster, FluxoBoletoRow } from "@/types/expenseSeries";
+import type {
+  ExpenseSeriesMaster,
+  FluxoBoletoRow,
+} from "@/types/expenseSeries";
+import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
+import {
+  type RevenueCalendarDayListPayload,
+  RevenueEntriesCalendar,
+} from "../revenue/RevenueEntriesCalendar";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -133,9 +136,8 @@ export function FluxoBoletosPage({
   const [boletosListCount, setBoletosListCount] = useState(0);
   const [seriesMasters, setSeriesMasters] = useState<ExpenseSeriesMaster[]>([]);
   const [seriesEditOpen, setSeriesEditOpen] = useState(false);
-  const [seriesEditBoleto, setSeriesEditBoleto] = useState<FluxoBoletoRow | null>(
-    null,
-  );
+  const [seriesEditBoleto, setSeriesEditBoleto] =
+    useState<FluxoBoletoRow | null>(null);
   const [boletosPage, setBoletosPage] = useState(1);
   const [boletosSearch, setBoletosSearch] = useState("");
   const debouncedSearch = useDebounce(boletosSearch, 300);
@@ -344,7 +346,7 @@ export function FluxoBoletosPage({
       .eq("id", boletoResumo.id)
       .eq("company_id", companyId)
       .maybeSingle();
-    if (data) setBoletoResumo(data as Boleto);
+    if (data) setBoletoResumo(data as FluxoBoletoRow);
   }, [boletoResumo?.id, companyId]);
 
   const closeExpenseDetail = useCallback(() => {
@@ -398,7 +400,7 @@ export function FluxoBoletosPage({
       toast.error(error.message ?? "Não foi possível atualizar o status.");
       return;
     }
-    const updated = data as Boleto;
+    const updated = data as FluxoBoletoRow;
     setBoletoResumo(updated);
     setCalendarDayList((prev) => {
       if (!prev) return prev;
@@ -418,7 +420,9 @@ export function FluxoBoletosPage({
     );
   }, [boletoResumo, companyId, refreshAll]);
 
-  const resolveSeriesMaster = (b: FluxoBoletoRow): ExpenseSeriesMaster | null => {
+  const resolveSeriesMaster = (
+    b: FluxoBoletoRow,
+  ): ExpenseSeriesMaster | null => {
     const masterId = b.series_master_expense_id ?? b.expense_id;
     if (!masterId) return null;
     return seriesMasters.find((m) => m.id === masterId) ?? null;
@@ -970,28 +974,28 @@ export function FluxoBoletosPage({
                   )}
                 {boletoResumo.status === "pending" &&
                   !isProjectedBoleto(boletoResumo) && (
-                  <Button
-                    className="w-full"
-                    onClick={() => setMarkPaidDialogOpen(true)}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    {isBoletoPayable(boletoResumo)
-                      ? "Marcar como pago"
-                      : "Marcar como recebido"}
-                  </Button>
-                )}
+                    <Button
+                      className="w-full"
+                      onClick={() => setMarkPaidDialogOpen(true)}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      {isBoletoPayable(boletoResumo)
+                        ? "Marcar como pago"
+                        : "Marcar como recebido"}
+                    </Button>
+                  )}
                 {boletoResumo.expense_id &&
                   !isProjectedBoleto(boletoResumo) && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setExpenseDetailId(boletoResumo.expense_id)
-                    }
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Ver nota fiscal
-                  </Button>
-                )}
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setExpenseDetailId(boletoResumo.expense_id)
+                      }
+                    >
+                      <FileText className="h-4 w-4 mr-2" />
+                      Ver nota fiscal
+                    </Button>
+                  )}
               </div>
             </>
           )}
@@ -1005,9 +1009,7 @@ export function FluxoBoletosPage({
           if (!open) setSeriesEditBoleto(null);
         }}
         boleto={seriesEditBoleto}
-        master={
-          seriesEditBoleto ? resolveSeriesMaster(seriesEditBoleto) : null
-        }
+        master={seriesEditBoleto ? resolveSeriesMaster(seriesEditBoleto) : null}
         onSuccess={() => {
           setSeriesEditOpen(false);
           setSeriesEditBoleto(null);

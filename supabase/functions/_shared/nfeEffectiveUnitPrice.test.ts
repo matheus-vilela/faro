@@ -162,3 +162,60 @@ Deno.test("coluna Outros: rateia vOutro do ICMSTot por vProd; soma = outras desp
   assertEquals(preview.lines[0]!.row!.outros, 10);
   assertEquals(preview.lines[1]!.row!.outros, 5);
 });
+
+Deno.test("vOutro: peso = vProd − vDesc (base líquida), não vProd bruto", () => {
+  const xml =
+    `<nfeProc><NFe><infNFe>` +
+    "<emit><CNPJ>61186888000193</CNPJ><xNome>F</xNome></emit>" +
+    "<ide><nNF>1</nNF><serie>1</serie></ide>" +
+    "<det><prod><cProd>A</cProd><xProd>A</xProd><qCom>1</qCom>" +
+    "<vUnCom>100</vUnCom><vProd>100</vProd><vDesc>40</vDesc></prod></det>" +
+    "<det><prod><cProd>B</cProd><xProd>B</xProd><qCom>1</qCom>" +
+    "<vUnCom>50</vUnCom><vProd>50</vProd></prod></det>" +
+    "<total><ICMSTot><vNF>110</vNF><vOutro>11</vOutro></ICMSTot></total>" +
+    "</infNFe></NFe></nfeProc>";
+  const parsed = parseNfeXmlForUnifiedCatalog(xml)!;
+  const prices = computeEffectiveUnitPricesForCatalogLines(parsed.lines, xml);
+  // 11 × 60/110 e 11 × 50/110 (não 11 × 100/150)
+  assertEquals(prices[0]!.breakdown!.global_voutro_allocation, 6);
+  assertEquals(prices[1]!.breakdown!.global_voutro_allocation, 5);
+});
+
+Deno.test("vOutro: Heineken — usa prod/vOutro do XML (não recalcula rateio)", () => {
+  const rows = [
+    { vProd: 2702.4, vDesc: 961.96, vOutro: 32.81 },
+    { vProd: 1011.26, vDesc: 359.93, vOutro: 12.28 },
+    { vProd: 91.18, vDesc: 32.02, vOutro: 1.09 },
+    { vProd: 97.77, vDesc: 32.98, vOutro: 1.12 },
+    { vProd: 302.07, vDesc: 109.22, vOutro: 3.73 },
+    { vProd: 452.34, vDesc: 163.84, vOutro: 5.59 },
+    { vProd: 452.34, vDesc: 163.84, vOutro: 5.59 },
+  ];
+  let dets = "";
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    dets +=
+      `<det><prod><cProd>${i + 1}</cProd><xProd>P${i + 1}</xProd>` +
+      `<qCom>1</qCom><vProd>${r.vProd}</vProd><vDesc>${r.vDesc}</vDesc>` +
+      `<vOutro>${r.vOutro}</vOutro></prod></det>`;
+  }
+  const xml =
+    `<nfeProc><NFe><infNFe>` +
+    "<emit><CNPJ>61186888000193</CNPJ><xNome>F</xNome></emit>" +
+    "<ide><nNF>1</nNF><serie>1</serie></ide>" +
+    dets +
+    "<total><ICMSTot><vNF>1000</vNF><vOutro>62.21</vOutro></ICMSTot></total>" +
+    "</infNFe></NFe></nfeProc>";
+  const parsed = parseNfeXmlForUnifiedCatalog(xml)!;
+  const prices = computeEffectiveUnitPricesForCatalogLines(parsed.lines, xml);
+  const outros = prices.map((p) => p.breakdown!.global_voutro_allocation);
+  const sum = Math.round(outros.reduce((a, b) => a + b, 0) * 100) / 100;
+  assertEquals(sum, 62.21);
+  assertEquals(outros[0]!, 32.81);
+  assertEquals(outros[1]!, 12.28);
+  assertEquals(outros[2]!, 1.09);
+  assertEquals(outros[3]!, 1.12);
+  assertEquals(outros[4]!, 3.73);
+  assertEquals(outros[5]!, 5.59);
+  assertEquals(outros[6]!, 5.59);
+});

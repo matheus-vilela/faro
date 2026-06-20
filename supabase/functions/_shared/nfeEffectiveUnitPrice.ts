@@ -1,7 +1,8 @@
 /**
  * Preço unitário efetivo por linha NF-e (uCom):
  * ((qtd × valor unitário) − desconto + IPI + ICMS ST + FCP ST + juros) / qtd
- * Impostos na linha (`det/imposto`); totais do ICMSTot e juros da cobrança rateados por vProd quando faltam na linha.
+ * Impostos na linha (`det/imposto`); excedentes de ICMSTot rateados por vProd bruto; vOutro e juros
+ * da cobrança rateados pela base líquida (vProd − vDesc) dos itens cobrados.
  */
 import { extractDuplicatesFromNfeXml } from "./extractDupFromNfeXml.ts";
 import { isNfeBonificationCfop } from "./nfeCfopBonification.ts";
@@ -35,7 +36,7 @@ export type EffectiveUnitPriceBreakdown = {
   global_icms_st_allocation: number;
   global_fcp_st_allocation: number;
   global_juros_allocation: number;
-  /** Rateio do ICMSTot vOutro (outras despesas), proporcional ao vProd; CFOP 5910 excluído. */
+  /** Rateio do ICMSTot vOutro (outras despesas), proporcional a vProd − vDesc; CFOP 5910 excluído. */
   global_voutro_allocation: number;
   effective_line_total: number;
 };
@@ -73,6 +74,85 @@ function lineQuantityForPricing(prod: Record<string, unknown>): number {
 function lineGrossWeight(prod: Record<string, unknown>): number {
   const parsed = lineGrossAndUnit(prod);
   return parsed?.gross ?? 0;
+}
+
+/**
+ * Base líquida do item antes de impostos/adicional (regra NF para ratear vOutro):
+ * `vProd − vDesc` (itens cobrados; bonificação 5910 fica com peso 0 no chamador).
+ */
+export function lineLiquidBaseForVOutroAllocation(
+  prod: Record<string, unknown>,
+): number {
+  const vProd = num(prod.vProd);
+  const vDesc = Math.max(0, num(prod.vDesc));
+  if (vProd > 0) {
+    return roundMoney(Math.max(0, vProd - vDesc));
+  }
+  const parsed = lineGrossAndUnit(prod);
+  if (!parsed) return 0;
+  return roundMoney(Math.max(0, parsed.gross - vDesc));
+}
+
+/** `prod/vOutro` informado pelo emitente na linha (ex.: adicional financeiro Heineken). */
+export function lineVOutroFromProd(prod: Record<string, unknown>): number {
+  const v = num(prod.vOutro);
+  return v > 0 ? roundMoney(v) : 0;
+}
+
+const VOUTRO_TOTAL_TOLERANCE = 0.02;
+
+/**
+ * vOutro por linha: usa `prod/vOutro` quando todos os itens cobrados trazem o campo e a soma
+ * bate com ICMSTot; senão rateia o excedente pela base líquida (vProd − vDesc).
+ */
+function resolveVOutroAllocationPerLine(
+  lines: NfeXmlDetLineForCatalog[],
+  isBonification: boolean[],
+  globalVOutro: number,
+  liquidWeights: number[],
+): number[] {
+  if (!(globalVOutro > 0)) return lines.map(() => 0);
+
+  const explicit = lines.map((l, i) =>
+    isBonification[i] ? 0 : lineVOutroFromProd(l.prod)
+  );
+  const sumExplicit = roundMoney(explicit.reduce((a, b) => a + b, 0));
+  const chargedIndices = lines
+    .map((_, i) => i)
+    .filter((i) => !isBonification[i]);
+  const explicitOnAllCharged = chargedIndices.length > 0 &&
+    chargedIndices.every((i) => explicit[i]! > 0);
+
+  if (
+    sumExplicit > 0 &&
+    explicitOnAllCharged &&
+    Math.abs(sumExplicit - globalVOutro) <= VOUTRO_TOTAL_TOLERANCE
+  ) {
+    return explicit;
+  }
+
+  if (sumExplicit > 0) {
+    const remainder = roundMoney(Math.max(0, globalVOutro - sumExplicit));
+    const needAlloc = lines.map((_, i) =>
+      !isBonification[i] && explicit[i] === 0
+    );
+    if (remainder > 0 && needAlloc.some(Boolean)) {
+      const allocWeights = liquidWeights.map((w, i) =>
+        needAlloc[i] ? w : 0
+      );
+      const partial = allocateProportionalExact(allocWeights, remainder);
+      return explicit.map((e, i) => roundMoney(e + (partial[i] ?? 0)));
+    }
+    if (Math.abs(sumExplicit - globalVOutro) <= VOUTRO_TOTAL_TOLERANCE) {
+      return explicit;
+    }
+  }
+
+  const sumLiquid = liquidWeights.reduce((a, b) => a + b, 0);
+  if (sumLiquid > 0) {
+    return allocateProportionalExact(liquidWeights, globalVOutro);
+  }
+  return lines.map(() => 0);
 }
 
 function lineGrossAndUnit(
@@ -312,7 +392,11 @@ export function computeEffectiveUnitPricesForCatalogLines(
   const weights = lines.map((l, i) =>
     isBonification[i] ? 0 : lineGrossWeight(l.prod)
   );
+  const liquidWeights = lines.map((l, i) =>
+    isBonification[i] ? 0 : lineLiquidBaseForVOutroAllocation(l.prod)
+  );
   const sumWeights = weights.reduce((a, b) => a + b, 0);
+  const sumLiquidWeights = liquidWeights.reduce((a, b) => a + b, 0);
 
   const parsedLines = lines.map((line) =>
     lineNetBeforeGlobal(line.prod, impostoFromLine(line), 0)
@@ -359,9 +443,12 @@ export function computeEffectiveUnitPricesForCatalogLines(
   const jurosAlloc = sumWeights > 0 && globalJuros > 0
     ? allocateProportionalExact(weights, globalJuros)
     : weights.map(() => 0);
-  const vOutroAlloc = sumWeights > 0 && globalVOutro > 0
-    ? allocateProportionalExact(weights, globalVOutro)
-    : weights.map(() => 0);
+  const vOutroAlloc = resolveVOutroAllocationPerLine(
+    lines,
+    isBonification,
+    globalVOutro,
+    liquidWeights,
+  );
 
   return lines.map((line, lineIndex) => {
     const bonif = isBonification[lineIndex] ?? false;
