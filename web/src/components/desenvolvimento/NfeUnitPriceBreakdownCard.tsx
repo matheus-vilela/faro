@@ -298,11 +298,11 @@ export function NfeUnitPriceBreakdownCard({
           IPI, ICMS ST e FCP ST vêm do{" "}
           <code className="rounded bg-muted px-1">det/imposto</code> da linha.
           «Outros» rateia só o{" "}
-          <strong className="text-foreground">vOutro</strong> do ICMSTot (outras
-          despesas), proporcional ao{" "}
-          <strong className="text-foreground">vProd</strong> de cada item (CFOP
-          5910 excluído). Juros e demais rateios entram no total efetivo, mas
-          não nesta coluna.
+          <strong className="text-foreground">vOutro</strong>: valor de{" "}
+          <code className="rounded bg-muted px-1">prod/vOutro</code> no XML quando
+          o emitente informa por linha; caso contrário, rateio do ICMSTot pela base
+          líquida <strong className="text-foreground">vProd − vDesc</strong> (CFOP
+          5910 excluído).
         </p>
       </CardContent>
     </Card>
