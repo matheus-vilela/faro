@@ -20,7 +20,11 @@ export interface Product {
   average_cost?: number | null
   /** Código para etiqueta (EAN/Code128) */
   barcode?: string | null
+  /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
+  ean?: string | null
   is_active?: boolean
+  /** false = prato de ficha técnica (oculto na listagem de Produtos). */
+  listed_in_product_catalog?: boolean
   created_at: string
   updated_at: string
   /** Colunas geradas (migração stock alert) — opcionais até o banco atualizar */
@@ -32,4 +36,16 @@ export interface Product {
   import_unit_raw?: string | null
   /** Sinaliza produto com unidade legada/desconhecida criada via importação. */
   import_unit_needs_review?: boolean
+  /** Conversões entre unidade de estoque e unidades secundárias (JSON no produto). */
+  unit_conversions?: unknown
+  /** Nomes de produtos unificados neste cadastro (importação automática). */
+  merged_catalog_names?: string[]
+  ncm?: string | null
+  cfop?: string | null
+  csosn?: string | null
+  canonical_name?: string | null
+  /** Legado; preferir stock_lots. */
+  expiry_date?: string | null
+  /** Lotes com validade: [{ id, quantity, expiry_date, stock_movement_id?, created_at? }]. */
+  stock_lots?: unknown
 }

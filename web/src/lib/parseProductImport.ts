@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 
 import { SYSTEM_PRODUCT_UNITS } from "@/lib/companyUnits/systemUnits";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 
 export type ParsedProductRow = {
   name: string;
@@ -285,7 +286,7 @@ export async function parseProductImportFile(
     }
 
     rows.push({
-      name: nameRaw,
+      name: sanitizeCatalogProductName(nameRaw),
       unit,
       current_quantity: stock,
       min_quantity: minQ,

@@ -1,15 +1,15 @@
-import { DashboardAlertsCard } from "@/components/dashboard/DashboardAlertsCard";
+import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
+import { DashboardPurchasesSection } from "@/components/dashboard/DashboardPurchasesSection";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
-import { DashboardImportProgressBanner } from "@/components/dashboard/DashboardImportProgressBanner";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
+import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
-import { DashboardOperationalPulse } from "@/components/dashboard/DashboardOperationalPulse";
-import { DashboardQuickLinks } from "@/components/dashboard/DashboardQuickLinks";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
-import { drainProcessImportJobBatch } from "@/lib/processImportJobBatchClient";
+import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import type { Boleto } from "@/types/expense";
 import { LayoutDashboard } from "lucide-react";
@@ -35,12 +35,6 @@ interface AlertSummary {
   importPending: number;
 }
 
-type ImportBatchProgressRow = {
-  status: string;
-  total_files: number | null;
-  processed_files: number | null;
-};
-
 function formatLongDate(d: Date): string {
   return d.toLocaleDateString("pt-BR", {
     weekday: "long",
@@ -55,7 +49,6 @@ export function Dashboard() {
   const companyId = currentCompany?.id;
   const canSeeAlerts = currentRole === "gestor" || currentRole === "owner";
   const isOwner = currentRole === "owner";
-
   const [loadingBoletos, setLoadingBoletos] = useState(true);
   const [todayBoletos, setTodayBoletos] = useState<Boleto[]>([]);
   const [tomorrowBoletos, setTomorrowBoletos] = useState<Boleto[]>([]);
@@ -69,9 +62,11 @@ export function Dashboard() {
     boletoD1: 0,
     importPending: 0,
   });
-  const [loadingImportProgress, setLoadingImportProgress] = useState(true);
-  const [activeImportFiles, setActiveImportFiles] = useState(0);
-  const [activeImportPercent, setActiveImportPercent] = useState(0);
+  const [importReviewSeq, setImportReviewSeq] = useState(0);
+
+  const bumpImportReviewPipeline = useCallback(() => {
+    setImportReviewSeq((n) => n + 1);
+  }, []);
 
   const loadBoletos = useCallback(async () => {
     if (!companyId) {
@@ -91,6 +86,7 @@ export function Dashboard() {
       .select("id, description, due_date, amount, status")
       .eq("company_id", companyId)
       .eq("flow_type", "payable")
+      .eq("exclude_from_fluxo", false)
       .in("due_date", [todayStr, tomorrowStr])
       .eq("status", "pending")
       .order("due_date", { ascending: true })
@@ -168,59 +164,6 @@ export function Dashboard() {
     setLoadingAlerts(false);
   }, [companyId, canSeeAlerts]);
 
-  const loadImportProgress = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!companyId) {
-      setLoadingImportProgress(false);
-      setActiveImportFiles(0);
-      setActiveImportPercent(0);
-      return;
-    }
-
-    if (!opts?.silent) {
-      setLoadingImportProgress(true);
-    }
-    const { data, error } = await supabase
-      .from("import_job_batches")
-      .select("status, total_files, processed_files")
-      .eq("company_id", companyId)
-      .in("status", ["QUEUED", "PROCESSING"])
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (error) {
-      setActiveImportFiles(0);
-      setActiveImportPercent(0);
-      setLoadingImportProgress(false);
-      return;
-    }
-
-    const rows = (data ?? []) as ImportBatchProgressRow[];
-    const totals = rows.reduce(
-      (acc, row) => {
-        const total = Math.max(Number(row.total_files ?? 0), 0);
-        const processed = Math.min(
-          Math.max(Number(row.processed_files ?? 0), 0),
-          total,
-        );
-        return {
-          totalFiles: acc.totalFiles + total,
-          processedFiles: acc.processedFiles + processed,
-        };
-      },
-      { totalFiles: 0, processedFiles: 0 },
-    );
-
-    const pendingFiles = Math.max(totals.totalFiles - totals.processedFiles, 0);
-    const progress =
-      totals.totalFiles > 0
-        ? Number(((totals.processedFiles / totals.totalFiles) * 100).toFixed(0))
-        : 0;
-
-    setActiveImportFiles(pendingFiles);
-    setActiveImportPercent(progress);
-    setLoadingImportProgress(false);
-  }, [companyId]);
-
   useEffect(() => {
     queueMicrotask(() => void loadBoletos());
   }, [loadBoletos]);
@@ -228,46 +171,6 @@ export function Dashboard() {
   useEffect(() => {
     queueMicrotask(() => void loadAlertSummary());
   }, [loadAlertSummary]);
-
-  useEffect(() => {
-    queueMicrotask(() => void loadImportProgress());
-  }, [loadImportProgress]);
-
-  useEffect(() => {
-    if (!companyId) return;
-    const interval = globalThis.setInterval(() => {
-      void loadImportProgress({ silent: true });
-    }, 5000);
-    return () => globalThis.clearInterval(interval);
-  }, [companyId, loadImportProgress]);
-
-  /** Destrava lotes XML quando o encadeamento na Edge sofre EarlyDrop (reinvocação no browser). */
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      const { data } = await supabase
-        .from("import_job_batches")
-        .select("id")
-        .eq("company_id", companyId)
-        .in("status", ["QUEUED", "PROCESSING"])
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (!data?.id || cancelled) return;
-      await drainProcessImportJobBatch(data.id, { maxRounds: 20, pauseMs: 400 });
-      if (!cancelled) void loadImportProgress({ silent: true });
-    };
-    const interval = globalThis.setInterval(() => {
-      void tick();
-    }, 15_000);
-    void tick();
-    return () => {
-      cancelled = true;
-      globalThis.clearInterval(interval);
-    };
-  }, [companyId, loadImportProgress]);
 
   const formatCurrency = (v: number) =>
     new Intl.NumberFormat("pt-BR", {
@@ -314,17 +217,14 @@ export function Dashboard() {
         icon={LayoutDashboard}
       />
 
-      {!loadingImportProgress && companyId && activeImportFiles > 0 ? (
-        <DashboardImportProgressBanner
-          loading={loadingImportProgress}
-          activeImportFiles={activeImportFiles}
-          activeImportPercent={activeImportPercent}
-        />
-      ) : null}
-      {currentCompany && !currentCompany.onboarding_fiscal_completed ? (
+      {currentCompany &&
+      isOnboardingFiscalDashboardCardVisible(
+        currentCompany.onboarding_fiscal,
+      ) ? (
         <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
       ) : null}
-      {currentCompany ? (
+      {currentCompany &&
+      isOnboardingPdvDashboardCardVisible(currentCompany.onboarding_pdv) ? (
         <DashboardIntegrationCsvRevenueCard company={currentCompany} />
       ) : null}
       {companyId ? (
@@ -332,7 +232,11 @@ export function Dashboard() {
       ) : null}
       {/* {currentCompany ? <SetupProgressCard /> : null} */}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
+      {companyId ? <DashboardDayOperations /> : null}
+
+      {companyId ? <DashboardPurchasesSection /> : null}
+
+      {/* <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
         <section aria-label="Acesso rápido" className="min-w-0">
           <DashboardQuickLinks role={currentRole} />
         </section>
@@ -349,21 +253,16 @@ export function Dashboard() {
             formatCurrency={formatCurrency}
           />
         </section>
-      </div>
+      </div> */}
 
       <div className="grid gap-6">
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
-        {canSeeAlerts ? (
-          <DashboardAlertsCard
-            loading={loadingAlerts}
-            totalAlerts={totalAlerts}
-            lowStock={alertSummary.lowStock}
-            withoutBoleto={alertSummary.withoutBoleto}
-            notReceived={alertSummary.notReceived}
-            boletoD3={alertSummary.boletoD3}
-            boletoD1={alertSummary.boletoD1}
-            importPending={alertSummary.importPending}
-            onAfterImportSheetClose={() => void loadAlertSummary()}
+
+        {canSeeAlerts && companyId ? (
+          <DashboardImportReviewHub
+            companyId={companyId}
+            refreshSignal={importReviewSeq}
+            onPipelineChange={bumpImportReviewPipeline}
           />
         ) : null}
       </div>

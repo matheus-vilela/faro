@@ -1,7 +1,7 @@
 /**
- * Laboratório / pré-visualização: interpretação de unidades e quantidade de estoque
- * por linha de NF-e via LLM, com confiança e validação numérica.
- * Unidade de cadastro e quantidade 1:1 vêm sempre da NF-e (mapeamento sistema + aliases da empresa).
+ * Interpretação de unidades e nome comercial por linha de NF-e via LLM (OpenAI),
+ * com confiança e validação numérica. Usado no laboratório `dev-preview-nfe-xml` e,
+ * após `resolveProductMatches`, na importação XML em produção (`matchNfeExpenseCatalogLines`).
  */
 
 import { INVOICE_LINE_UNITS_SYSTEM } from "../aiPrompts/invoiceLineUnitsNfe.ts";
@@ -17,6 +17,10 @@ export type InvoiceLineUnitsAssistInput = {
   unit_commercial: string | null;
   unit_tax: string | null;
   quantity: number;
+  /** qCom quando disponível. */
+  quantity_commercial?: number | null;
+  /** qTrib quando disponível. */
+  quantity_tax?: number | null;
   unit_value: number;
   line_total: number;
   /** Unidade do produto sugerido/cadastro, se houver match (só contexto para a IA). */
@@ -190,6 +194,8 @@ export async function assistInvoiceLineUnits(
       unit_commercial: input.unit_commercial,
       unit_tax: input.unit_tax,
       quantity: input.quantity,
+      quantity_commercial: input.quantity_commercial ?? input.quantity,
+      quantity_tax: input.quantity_tax ?? null,
       unit_value: input.unit_value,
       line_total: input.line_total,
     },

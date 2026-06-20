@@ -1,0 +1,20 @@
+-- Secrets para `cron_invoke_focus_get_sync_nfe_interpret()` (pg_cron → net.http_post).
+-- Executar no SQL Editor (produção) ou após `supabase db reset` em dev, com valores reais.
+--
+-- Nomes **exatos** (coluna `name` em vault.secrets / visão decrypted_secrets):
+--   focus_interpret_cron_supabase_url
+--   focus_interpret_cron_anon_key
+--   focus_interpret_cron_bearer_secret   (= FOCUS_NFE_RECEBIDAS_CRON_SECRET nas Edge Functions)
+
+-- Exemplo (API Dashboard Vault ou extensão vault — sintaxe pode variar):
+-- select vault.create_secret('https://SEU_REF.supabase.co', 'focus_interpret_cron_supabase_url');
+-- select vault.create_secret('SUA_ANON_KEY', 'focus_interpret_cron_anon_key');
+-- select vault.create_secret('MESMO_SECRET_DO_CRON_FOCUS', 'focus_interpret_cron_bearer_secret');
+
+-- Passar o cron de 1 minuto (teste) para 5 minutos:
+-- select cron.unschedule((select jobid from cron.job where jobname = 'focus_get_sync_nfe_interpret_dispatch'));
+-- select cron.schedule(
+--   'focus_get_sync_nfe_interpret_dispatch',
+--   '*/5 * * * *',
+--   $cron$select public.cron_invoke_focus_get_sync_nfe_interpret();$cron$
+-- );

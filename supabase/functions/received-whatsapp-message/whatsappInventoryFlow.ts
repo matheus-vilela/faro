@@ -61,6 +61,7 @@ function publicAppAbsoluteBase(): string {
 
 async function ensureInventoryShortSlug(
   supabase: ReturnType<typeof createClient>,
+  companyId: string,
   sessionId: string,
   tokenUuid: string,
 ): Promise<string | null> {
@@ -76,6 +77,7 @@ async function ensureInventoryShortSlug(
   for (let attempt = 0; attempt < 15; attempt++) {
     const slug = randomShortSlug(8);
     const { error } = await supabase.from("inventory_count_short_links").insert({
+      company_id: companyId,
       slug,
       session_id: sessionId,
       token: tokenUuid,
@@ -340,6 +342,7 @@ export async function sendInventoryCountLink(
 
   const slug = await ensureInventoryShortSlug(
     supabase,
+    auth.companyId,
     sess.id as string,
     sess.token as string,
   );

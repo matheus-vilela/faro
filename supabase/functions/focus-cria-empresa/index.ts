@@ -75,10 +75,10 @@ function normalizeCnpjDigits(v: unknown): string | null {
 }
 
 /**
- * Primeiro dia do mês civil **anterior** à data de referência, em `America/Sao_Paulo`,
- * formato `dd/MM/yyyy` esperado pela Focus em `data_inicio_recebimento_nfe`.
+ * Primeiro dia do mês civil **de dois meses atrás** em relação à data de referência,
+ * em `America/Sao_Paulo`, formato `dd/MM/yyyy` (Focus: `data_inicio_recebimento_nfe`).
  */
-function firstDayOfPreviousMonthFocusBr(reference: Date): string {
+function firstDayOfTwoMonthsAgoFocusBr(reference: Date): string {
   const dtf = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
     day: "2-digit",
@@ -93,21 +93,21 @@ function firstDayOfPreviousMonthFocusBr(reference: Date): string {
   if (!Number.isFinite(month) || !Number.isFinite(year)) {
     const y = reference.getUTCFullYear();
     const m = reference.getUTCMonth();
-    let prevMIdx = m - 1;
-    let prevY = y;
-    if (prevMIdx < 0) {
-      prevMIdx = 11;
-      prevY -= 1;
+    let targetMIdx = m - 2;
+    let targetY = y;
+    while (targetMIdx < 0) {
+      targetMIdx += 12;
+      targetY -= 1;
     }
-    return `01/${String(prevMIdx + 1).padStart(2, "0")}/${prevY}`;
+    return `01/${String(targetMIdx + 1).padStart(2, "0")}/${targetY}`;
   }
-  let prevMonth = month - 1;
-  let prevYear = year;
-  if (prevMonth < 1) {
-    prevMonth = 12;
-    prevYear -= 1;
+  let targetMonth = month - 2;
+  let targetYear = year;
+  while (targetMonth < 1) {
+    targetMonth += 12;
+    targetYear -= 1;
   }
-  return `01/${String(prevMonth).padStart(2, "0")}/${prevYear}`;
+  return `01/${String(targetMonth).padStart(2, "0")}/${targetYear}`;
 }
 
 /** Senha do certificado: número JSON ou string; strings só dígitos viram número (como no exemplo da Focus). */
@@ -193,9 +193,8 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
   const complemento = optString(raw.complemento) ?? "";
   const enviarEmailDestinatario = false;
 
-  /** Sempre pela data atual do pedido (criação na Focus): 1º dia do mês civil anterior em SP. */
-  const dataInicioRecebimentoNfe =
-    firstDayOfPreviousMonthFocusBr(new Date());
+  /** Sempre pela data atual do pedido (criação na Focus): 1º dia de dois meses atrás em SP. */
+  const dataInicioRecebimentoNfe = firstDayOfTwoMonthsAgoFocusBr(new Date());
 
   const knownKeys = new Set([
     "dry_run",

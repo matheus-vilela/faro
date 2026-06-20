@@ -8,15 +8,11 @@ import {
 } from "@/components/ui/select";
 import {
   EXPENSE_DIVERGENCE_REASONS,
+  getNfeExpenseValueBreakdown,
   valuesDivergeCents,
 } from "@/lib/expenseDivergenceUi";
+import { AlertTriangle, PackageSearch, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  PackageSearch,
-  Sparkles,
-} from "lucide-react";
 
 function formatBrl(amount: number): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -160,10 +156,10 @@ export function ExpenseImportAttentionPanel({
                 )}
               </p>
               <p className="text-xs text-muted-foreground">
-        Pelo menos uma descrição da nota não teve correspondência
-        automática forte no seu cadastro (menos de 95% de
-        similaridade). Confira cada linha: escolha um produto existente
-                ou cadastre um novo — o Faro memoriza para a próxima compra.
+                Pelo menos uma descrição da nota não teve correspondência
+                automática forte no seu cadastro (menos de 95% de similaridade).
+                Confira cada linha: escolha um produto existente ou cadastre um
+                novo — o Faro memoriza para a próxima compra.
               </p>
             </div>
           </div>
@@ -194,18 +190,25 @@ function formatBrlInline(amount: number): string {
 export function ExpenseRecordedDivergenceBanner({
   documentTotal,
   sumLines,
+  financialReconciliationJson,
   divergenceReason,
   unlinkedProductRowCount,
 }: {
   documentTotal: number | null | undefined;
   sumLines: number;
+  financialReconciliationJson?: Record<string, unknown> | null;
   divergenceReason?: string | null;
   unlinkedProductRowCount: number;
 }): ReactNode {
-  const hasDoc = documentTotal != null && Number.isFinite(Number(documentTotal));
+  const hasDoc =
+    documentTotal != null && Number.isFinite(Number(documentTotal));
   const docN = hasDoc ? Number(documentTotal) : null;
-  const mismatch =
-    docN != null && valuesDivergeCents(docN, sumLines, 2);
+  const b = getNfeExpenseValueBreakdown({
+    documentTotal: docN,
+    sumItems: sumLines,
+    financialReconciliationJson: financialReconciliationJson ?? null,
+  });
+  const mismatch = b.needsAttention;
   const hasReason = !!(divergenceReason && divergenceReason.trim());
   const hasProductsIssue = unlinkedProductRowCount > 0;
 
@@ -213,55 +216,6 @@ export function ExpenseRecordedDivergenceBanner({
 
   return (
     <div className="space-y-3">
-      {hasDoc && (
-        <div
-          className={
-            mismatch
-              ? "rounded-xl border-2 border-destructive/35 bg-destructive/5 p-4"
-              : "rounded-xl border border-border bg-muted/25 p-4"
-          }
-        >
-          <div className="flex gap-3">
-            <div
-              className={
-                mismatch
-                  ? "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-destructive/15 text-destructive"
-                  : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-              }
-              aria-hidden
-            >
-              {mismatch ? (
-                <AlertTriangle className="h-5 w-5" />
-              ) : (
-                <CheckCircle2 className="h-5 w-5" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1 space-y-1 text-sm">
-              <p className="font-semibold">
-                {mismatch
-                  ? "Total do documento e soma dos itens ainda diferem"
-                  : "Total do documento e soma dos itens conferem"}
-              </p>
-              <p className="text-muted-foreground text-xs tabular-nums">
-                Documento (importação): {formatBrlInline(docN!)} · Soma das
-                linhas: {formatBrlInline(sumLines)}
-                {!mismatch && (
-                  <span className="text-emerald-700 dark:text-emerald-400 ml-1">
-                    ✓
-                  </span>
-                )}
-              </p>
-              {mismatch && (
-                <p className="text-xs text-muted-foreground">
-                  Ajuste quantidades/valores nas linhas, ou confira se o total do
-                  documento foi digitado corretamente.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {hasProductsIssue && (
         <div className="rounded-xl border-2 border-violet-500/35 bg-violet-500/5 p-4">
           <div className="flex gap-3">
@@ -288,7 +242,9 @@ export function ExpenseRecordedDivergenceBanner({
 
       {hasReason && (
         <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
-          <span className="text-muted-foreground">Motivo indicado na importação: </span>
+          <span className="text-muted-foreground">
+            Motivo indicado na importação:{" "}
+          </span>
           <span className="font-medium">{divergenceReason}</span>
         </div>
       )}

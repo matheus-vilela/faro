@@ -9,8 +9,12 @@
  * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR + opcionalmente um único
  * prompt OpenAI por chunk (`OPENAI_API_KEY`, `OPENAI_REVENUE_CLASSIFY_MODEL`) mapeando o rótulo
  * da linha para uma folha existente (ex.: vendas de bebidas, taxa de serviço, delivery).
- * Produtos auto-criados: `stock_control_type`, `product_operational_config` (AUTO/CONFIGURADO) e
- * vínculo em `product_category_assignments` alinhados ao tipo inferido e ao catálogo da empresa.
+ * Produtos: deduplicação (canonical + tokens fuzzy, ex. "AGUA COM GAS" → cadastro existente),
+ * reconsulta ao banco antes do INSERT, coordenador anti-paralelo, cache entre chunks.
+ * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `products.unit_conversions`.
+ * `product_operational_config` (AUTO/CONFIGURADO) e `product_category_assignments`.
+ * Rótulos novos passam por heurística + OpenAI (`OPENAI_API_KEY`, `OPENAI_EPOC_PRODUCT_KIND_MODEL`)
+ * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
  * Corpo inicial (webhook): `{ "job_id" }` ou `{ "record": { "id" } }`.
@@ -20,6 +24,13 @@
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  batchClassifyEpocProductKindWithOpenAi,
+  classifyEpocProductKindHeuristic,
+  needsEpocProductKindOpenAi,
+  type EpocProductKind,
+  type StoredEpocProductKind,
+} from "../_shared/epocCsvProductKindClassification.ts";
 import {
   batchClassifyRevenueLeavesWithOpenAi,
   classifyRevenueCategoryHeuristic,
@@ -33,6 +44,25 @@ import {
   type RevenueOperationalLeaf,
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
+import {
+  isOnboardingEpocCsvJobMetadata,
+  patchOnboardingPdv,
+} from "../_shared/onboardingPdvPatch.ts";
+import {
+  buildCanonicalProductIndex,
+  EpocProductEnsureCoordinator,
+  epocExactNameKey,
+  epocProductLineKey,
+  ensureProductSaleUnitUnConversion,
+  loadEpocOpenAiPlanFromMetadata,
+  loadProductIdCacheFromMetadata,
+  productIdCacheExactNameToMetadata,
+  productIdCacheToMetadata,
+  resolveEpocProductId,
+  runEpocProductMatchPipeline,
+  type EpocCatalogProduct,
+} from "../_shared/epocCsvProductResolution.ts";
+import type { EpocRecipeCatalogEntry } from "../_shared/epocCsvProductMatchOpenAi.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +104,8 @@ const TIME_BUDGET_MS = 14_000;
 const TIME_RESERVE_BEFORE_ROW_MS = 5000;
 /** Máximo de diagnósticos gravados no metadata em chunks intermediários (evita UPDATE gigante). */
 const DIAGNOSTICS_METADATA_CHUNK_CAP = 350;
+/** Lease de chunk: evita webhook + resume processando o mesmo offset em paralelo. */
+const CHUNK_LEASE_MS = 120_000;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -318,8 +350,9 @@ async function loadProductCatalog(
 > {
   const { data, error } = await admin
     .from("products")
-    .select("id, name, unit")
-    .eq("company_id", companyId);
+    .select("id, name, unit, canonical_name")
+    .eq("company_id", companyId)
+    .eq("is_active", true);
   if (error) {
     console.error(
       "[process-integration-csv-revenue-job] products",
@@ -327,42 +360,37 @@ async function loadProductCatalog(
     );
     return { ok: false, message: error.message };
   }
-  const catalog = (data ?? []) as Array<{
-    id: string;
-    name: string;
-    unit?: string | null;
-  }>;
+  const catalog = (data ?? []) as EpocCatalogProduct[];
   return { ok: true, catalog };
 }
 
-/**
- * Resolve produto por nome igual ao cadastro (case-insensitive, acentos, espaços),
- * uma linha por match exato após normalização — evita depender do ilike do PostgREST.
- */
-function resolveProductIdFromCatalog(
-  displayName: string,
-  catalog: Array<{ id: string; name: string; unit?: string | null }>,
-  cache: Map<string, string | null>,
-): string | null {
-  const cacheKey = normalizeCatalogName(displayName);
-  if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null;
-  if (!cacheKey) {
-    cache.set(cacheKey, null);
-    return null;
+async function loadRecipeCatalog(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+): Promise<
+  | { ok: true; recipes: EpocRecipeCatalogEntry[] }
+  | { ok: false; message: string }
+> {
+  const { data, error } = await admin
+    .from("recipes")
+    .select("id, name, output_product_id, active")
+    .eq("company_id", companyId)
+    .eq("active", true);
+  if (error) {
+    console.error(
+      "[process-integration-csv-revenue-job] recipes",
+      error.message,
+    );
+    return { ok: false, message: error.message };
   }
-  const matches = catalog.filter(
-    (p) => normalizeCatalogName(p.name) === cacheKey,
-  );
-  if (matches.length === 1) {
-    cache.set(cacheKey, matches[0]!.id);
-    return matches[0]!.id;
-  }
-  if (matches.length > 1) {
-    cache.set(cacheKey, null);
-    return null;
-  }
-  cache.set(cacheKey, null);
-  return null;
+  const recipes = (data ?? []).map((r) => ({
+    id: String(r.id),
+    name: String(r.name ?? "").trim(),
+    output_product_id: r.output_product_id
+      ? String(r.output_product_id)
+      : null,
+  }));
+  return { ok: true, recipes };
 }
 
 function extractJobId(body: Record<string, unknown>): string | null {
@@ -417,6 +445,45 @@ async function loadOperationalRevenueLeaves(
     };
   }
   return { ok: true, leaves };
+}
+
+async function tryClaimCsvJobChunk(
+  admin: ReturnType<typeof createClient>,
+  jobId: string,
+  startOffset: number,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const until = new Date(Date.now() + CHUNK_LEASE_MS).toISOString();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await admin
+    .from("integration_csv_revenue_import_jobs")
+    .update({
+      chunk_lease_expires_at: until,
+      updated_at: nowIso,
+    })
+    .eq("id", jobId)
+    .eq("status", "PROCESSING")
+    .eq("csv_resume_row_index", startOffset)
+    .or(`chunk_lease_expires_at.is.null,chunk_lease_expires_at.lt.${nowIso}`)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, reason: error.message };
+  if (!data?.id) {
+    return { ok: false, reason: "chunk_lease_busy" };
+  }
+  return { ok: true };
+}
+
+async function releaseCsvJobChunkLease(
+  admin: ReturnType<typeof createClient>,
+  jobId: string,
+): Promise<void> {
+  await admin
+    .from("integration_csv_revenue_import_jobs")
+    .update({
+      chunk_lease_expires_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
 }
 
 function scheduleResume(
@@ -566,6 +633,25 @@ Deno.serve(async (req) => {
   };
 
   const fail = async (msg: string) => {
+    await releaseCsvJobChunkLease(admin, jobId);
+    const priorForFail =
+      job.metadata &&
+      typeof job.metadata === "object" &&
+      !Array.isArray(job.metadata)
+        ? (job.metadata as Record<string, unknown>)
+        : {};
+    if (isOnboardingEpocCsvJobMetadata(priorForFail)) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          import_status: "failed",
+          import_error: msg.slice(0, 500),
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({
@@ -645,11 +731,56 @@ Deno.serve(async (req) => {
         `Falha ao ler o catálogo de produtos: ${productCatalogLoad.message}`,
       );
     }
-    const productCatalog = [...productCatalogLoad.catalog];
+    const recipeCatalogLoad = await loadRecipeCatalog(admin, job.company_id);
+    if (!recipeCatalogLoad.ok) {
+      return await fail(
+        `Falha ao ler fichas técnicas: ${recipeCatalogLoad.message}`,
+      );
+    }
+    const productCatalog: EpocCatalogProduct[] = [...productCatalogLoad.catalog];
+    const recipeCatalog: EpocRecipeCatalogEntry[] = [
+      ...recipeCatalogLoad.recipes,
+    ];
+    const canonicalProductIndex = buildCanonicalProductIndex(productCatalog);
 
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
     if (startOffset > rows.length) {
       return await fail("Cursor de retomada inválido (fora do CSV).");
+    }
+
+    const chunkClaim = await tryClaimCsvJobChunk(admin, jobId, startOffset);
+    if (!chunkClaim.ok) {
+      console.warn(
+        "[process-integration-csv-revenue-job] chunk_lease_skip",
+        { job_id: jobId, start_offset: startOffset, reason: chunkClaim.reason },
+      );
+      return json({
+        ok: true,
+        skipped: true,
+        reason: chunkClaim.reason,
+        job_id: jobId,
+        start_offset: startOffset,
+      });
+    }
+
+    const priorMetaEarly =
+      job.metadata &&
+      typeof job.metadata === "object" &&
+      !Array.isArray(job.metadata)
+        ? (job.metadata as Record<string, unknown>)
+        : {};
+    const onboardingCsvJob = isOnboardingEpocCsvJobMetadata(priorMetaEarly);
+    if (onboardingCsvJob) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          sales_total: rows.length,
+          sales_sync: startOffset,
+          import_status: "processing",
+        },
+        "[process-integration-csv-revenue-job]",
+      );
     }
 
     const priorMeta =
@@ -682,6 +813,8 @@ Deno.serve(async (req) => {
       Number(priorMeta.rows_skipped_no_product_name ?? 0) || 0;
     const prevProductsAutoCreated =
       Number(priorMeta.products_auto_created_total ?? 0) || 0;
+    const prevRecipesAutoCreated =
+      Number(priorMeta.recipes_auto_created_total ?? 0) || 0;
     const prevDiagnosticsTruncated =
       priorMeta.ignored_rows_report_truncated === true;
     const maxDiagnostics = 2000;
@@ -691,8 +824,17 @@ Deno.serve(async (req) => {
     const diagnostics: IgnoredRowDiagnostic[] = [...priorDiagnostics];
     let diagnosticsTruncated = prevDiagnosticsTruncated;
     let productsAutoCreatedChunk = 0;
+    let recipesAutoCreatedChunk = 0;
 
-    const productIdCache = new Map<string, string | null>();
+    const productIdCache = loadProductIdCacheFromMetadata(priorMeta);
+
+    const productEnsure = new EpocProductEnsureCoordinator(
+      admin,
+      job.company_id,
+      productCatalog,
+      canonicalProductIndex,
+      productIdCache,
+    );
 
     const priorCatByProduct =
       priorMeta.epoc_revenue_category_by_product &&
@@ -705,14 +847,74 @@ Deno.serve(async (req) => {
         : {};
     const catByKey: Record<string, StoredRevenueCat> = { ...priorCatByProduct };
 
+    const priorKindByProduct =
+      priorMeta.epoc_product_kind_by_name &&
+      typeof priorMeta.epoc_product_kind_by_name === "object" &&
+      !Array.isArray(priorMeta.epoc_product_kind_by_name)
+        ? (priorMeta.epoc_product_kind_by_name as Record<
+            string,
+            StoredEpocProductKind
+          >)
+        : {};
+    const kindByKey: Record<string, StoredEpocProductKind> = {
+      ...priorKindByProduct,
+    };
+
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
     const openaiClassifyModel =
       Deno.env.get("OPENAI_REVENUE_CLASSIFY_MODEL")?.trim() || "gpt-4o-mini";
+    const openaiProductKindModel =
+      Deno.env.get("OPENAI_EPOC_PRODUCT_KIND_MODEL")?.trim() ||
+      openaiClassifyModel;
+    const openaiProductMatchModel =
+      Deno.env.get("OPENAI_EPOC_PRODUCT_MATCH_MODEL")?.trim() ||
+      openaiClassifyModel;
 
     const chunkEndExclusive = Math.min(
       rows.length,
       startOffset + ROWS_HARD_CAP,
     );
+
+    const uniqueEpocNames = new Map<string, string>();
+    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
+      const row = rows[pi]!;
+      const totalCell = sanitizeCell(row[totalCol] ?? "");
+      if (parseBrMoney(totalCell) == null) continue;
+      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
+      if (!parseFlexibleDate(rawDate)) continue;
+      const rawP =
+        produtoCol >= 0
+          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+      if (!rawP) continue;
+      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
+      const exactKey = epocExactNameKey(rawP);
+      if (!exactKey) continue;
+      if (!uniqueEpocNames.has(exactKey)) uniqueEpocNames.set(exactKey, rawP);
+    }
+
+    const priorOpenAiPlan = loadEpocOpenAiPlanFromMetadata(priorMeta);
+    const matchPipeline = await runEpocProductMatchPipeline({
+      admin,
+      companyId: job.company_id,
+      uniqueNames: uniqueEpocNames,
+      catalog: productCatalog,
+      recipes: recipeCatalog,
+      canonicalIndex: canonicalProductIndex,
+      cache: productIdCache,
+      priorOpenAiPlan,
+      openaiApiKey,
+      openaiModel: openaiProductMatchModel,
+      productEnsure,
+      inferUnit: inferUnitFromProductName,
+      mapStockControl: mapOperationalTypeToStockControl,
+      deriveOperationalType: deriveOperationalTypeForAutoProduct,
+      defaultCategoryName: defaultLeaf.name,
+    });
+    const manualReviewExactNames = new Set(
+      matchPipeline.manualReviewExactNames,
+    );
+    const openAiPlanByExactName = matchPipeline.openAiPlanByExactName;
     const pendingHeuristic = new Map<
       string,
       { raw: string; pick: ReturnType<typeof classifyRevenueCategoryHeuristic> }
@@ -733,7 +935,7 @@ Deno.serve(async (req) => {
       if (!rawP) continue;
       if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
 
-      const k = normalizeCatalogName(rawP);
+      const k = epocProductLineKey(rawP);
       if (!k || catByKey[k]) continue;
       if (pendingHeuristic.has(k)) continue;
 
@@ -796,6 +998,93 @@ Deno.serve(async (req) => {
       }
     }
 
+    const pendingProductKind = new Map<
+      string,
+      { raw: string; pick: ReturnType<typeof classifyEpocProductKindHeuristic> }
+    >();
+    const uncertainKindKeysOrder: string[] = [];
+    const uncertainKindLabels: string[] = [];
+
+    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
+      const row = rows[pi]!;
+      const totalCell = sanitizeCell(row[totalCol] ?? "");
+      if (parseBrMoney(totalCell) == null) continue;
+      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
+      if (!parseFlexibleDate(rawDate)) continue;
+      const rawP =
+        produtoCol >= 0
+          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+      if (!rawP) continue;
+      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
+
+      const k = epocProductLineKey(rawP);
+      if (!k || kindByKey[k]) continue;
+      const exactKeyKind = epocExactNameKey(rawP);
+      if (manualReviewExactNames.has(exactKeyKind)) continue;
+      const kindResolve = resolveEpocProductId(
+        rawP,
+        productCatalog,
+        productIdCache,
+        canonicalProductIndex,
+        recipeCatalog,
+      );
+      if (kindResolve.productId || kindResolve.ambiguous) continue;
+      if (pendingProductKind.has(k)) continue;
+
+      const hk = classifyEpocProductKindHeuristic(rawP);
+      if (!needsEpocProductKindOpenAi(hk)) {
+        kindByKey[k] = {
+          kind: hk.kind,
+          confidence: hk.confidence,
+          reason: hk.reason,
+          src: "heuristic",
+        };
+      } else {
+        pendingProductKind.set(k, { raw: rawP, pick: hk });
+        uncertainKindKeysOrder.push(k);
+        uncertainKindLabels.push(rawP);
+      }
+    }
+
+    if (uncertainKindLabels.length && openaiApiKey) {
+      const aiKindMap = await batchClassifyEpocProductKindWithOpenAi({
+        apiKey: openaiApiKey,
+        model: openaiProductKindModel,
+        labels: uncertainKindLabels,
+      });
+      for (let i = 0; i < uncertainKindKeysOrder.length; i++) {
+        const k = uncertainKindKeysOrder[i]!;
+        const aiKind = aiKindMap.get(i);
+        if (aiKind) {
+          kindByKey[k] = {
+            kind: aiKind,
+            confidence: 0.88,
+            reason: "openai_batch",
+            src: "openai",
+          };
+        } else {
+          const ph = pendingProductKind.get(k)!;
+          kindByKey[k] = {
+            kind: ph.pick.kind,
+            confidence: ph.pick.confidence,
+            reason: ph.pick.reason,
+            src: "default",
+          };
+        }
+      }
+    } else {
+      for (const k of uncertainKindKeysOrder) {
+        const ph = pendingProductKind.get(k)!;
+        kindByKey[k] = {
+          kind: ph.pick.kind,
+          confidence: ph.pick.confidence,
+          reason: ph.pick.reason,
+          src: "heuristic",
+        };
+      }
+    }
+
     const pushDiagnostic = (d: IgnoredRowDiagnostic) => {
       if (diagnostics.length >= maxDiagnostics) {
         diagnosticsTruncated = true;
@@ -811,6 +1100,7 @@ Deno.serve(async (req) => {
       if (Date.now() - t0 >= TIME_BUDGET_MS) break;
 
       let createdNewProductThisIteration = false;
+      let createdNewRecipeThisIteration = false;
 
       const row = rows[idx]!;
       const totalCell = sanitizeCell(row[totalCol] ?? "");
@@ -893,92 +1183,43 @@ Deno.serve(async (req) => {
         break;
       }
 
-      const lineCatKey = normalizeCatalogName(rawProdutoForMatch);
-      const scRowForLine = catByKey[lineCatKey];
+      const lineKey = epocProductLineKey(rawProdutoForMatch);
+      const scRowForLine = catByKey[lineKey];
       const rowSubcategoryId = scRowForLine?.subcategory_id ?? defaultLeaf.id;
       const rowCategoryId = scRowForLine?.category_id ?? defaultLeaf.parent_id;
 
-      let productId = resolveProductIdFromCatalog(
+      const exactKeyRow = epocExactNameKey(rawProdutoForMatch);
+      if (manualReviewExactNames.has(exactKeyRow)) {
+        skippedChunk += 1;
+        skipNoProductChunk += 1;
+        const plan = openAiPlanByExactName.get(exactKeyRow);
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "epoc_manual_review",
+          details:
+            plan?.instructions ??
+            "Item sem match exato; revisar cadastro conforme orientação da importação.",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
+
+      const productResolve = resolveEpocProductId(
         rawProdutoForMatch,
         productCatalog,
         productIdCache,
+        canonicalProductIndex,
+        recipeCatalog,
       );
-      if (!productId) {
-        const normName = normalizeCatalogName(rawProdutoForMatch);
-        const ambiguous = productCatalog.filter(
-          (p) => normalizeCatalogName(p.name) === normName,
-        );
-        if (ambiguous.length > 1) {
-          skippedChunk += 1;
-          skipNoProductChunk += 1;
-          pushDiagnostic({
-            row_index: idx + 1,
-            entry_date_raw: rawDate,
-            product_name_raw: rawProdutoForMatch,
-            quantity_raw: qtyCell,
-            total_received_raw: totalCell,
-            reason: "product_ambiguous",
-            details: `Mais de um produto com o mesmo nome normalizado (${ambiguous.length})`,
-            action: "linha ignorada; consolidar nomes duplicados no cadastro",
-          });
-          idx += 1;
-          continue;
-        }
+      let productId = productResolve.productId;
+      const catalogName = productResolve.catalogName;
 
-        const inferredUnit = inferUnitFromProductName(
-          rawProdutoForMatch,
-          productCatalog,
-        );
-        const leafForAutoCreate =
-          leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const autoOpType = deriveOperationalTypeForAutoProduct(
-          leafForAutoCreate.name,
-          rawProdutoForMatch,
-        );
-        const autoStock = mapOperationalTypeToStockControl(autoOpType);
-        const { data: createdProduct, error: createErr } = await admin
-          .from("products")
-          .insert({
-            company_id: job.company_id,
-            name: rawProdutoForMatch,
-            unit: inferredUnit,
-            min_quantity: 0,
-            current_quantity: 0,
-            is_active: true,
-            stock_control_type: autoStock,
-          })
-          .select("id, name, unit")
-          .single();
-        if (createErr || !createdProduct?.id) {
-          skippedChunk += 1;
-          skipNoProductChunk += 1;
-          pushDiagnostic({
-            row_index: idx + 1,
-            entry_date_raw: rawDate,
-            product_name_raw: rawProdutoForMatch,
-            quantity_raw: qtyCell,
-            total_received_raw: totalCell,
-            reason: "product_create_failed",
-            details:
-              createErr?.message ?? "Falha ao criar produto automaticamente",
-            action: "linha ignorada",
-          });
-          idx += 1;
-          continue;
-        }
-        createdNewProductThisIteration = true;
-
-        productCatalog.push(
-          createdProduct as { id: string; name: string; unit?: string | null },
-        );
-        productsAutoCreatedChunk += 1;
-        productIdCache.set(
-          normalizeCatalogName(rawProdutoForMatch),
-          createdProduct.id as string,
-        );
-        productId = String(createdProduct.id);
-      }
-      if (!productId) {
+      if (productResolve.ambiguous) {
         skippedChunk += 1;
         skipNoProductChunk += 1;
         pushDiagnostic({
@@ -987,14 +1228,47 @@ Deno.serve(async (req) => {
           product_name_raw: rawProdutoForMatch,
           quantity_raw: qtyCell,
           total_received_raw: totalCell,
-          reason: "product_create_failed",
+          reason: "product_ambiguous",
           details:
-            "Produto nao encontrado e criacao automatica nao retornou id",
+            productResolve.ambiguousReason === "canonical"
+              ? "Mais de um produto com o mesmo nome canônico"
+              : "Mais de um produto com o mesmo nome normalizado",
+          action: "linha ignorada; consolidar nomes duplicados no cadastro",
+        });
+        idx += 1;
+        continue;
+      }
+
+      if (!productId) {
+        skippedChunk += 1;
+        skipNoProductChunk += 1;
+        const plan = openAiPlanByExactName.get(exactKeyRow);
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "epoc_product_unresolved",
+          details:
+            plan?.instructions ??
+            plan?.create?.instructions ??
+            "Sem match exato no cadastro; aguardando resolução da importação.",
           action: "linha ignorada",
         });
         idx += 1;
         continue;
       }
+
+      const hubUnit =
+        productCatalog.find((p) => p.id === productId)?.unit ?? "un";
+      await ensureProductSaleUnitUnConversion(
+        admin,
+        productId,
+        hubUnit,
+        openAiPlanByExactName.get(exactKeyRow)?.create?.un_per_stock_unit ??
+          null,
+      );
 
       let batchId = batchByDate.get(entryDate);
       if (!batchId) {
@@ -1023,6 +1297,32 @@ Deno.serve(async (req) => {
 
       const title = rawProdutoForMatch;
 
+      const { data: stockQty, error: convErr } = await admin.rpc(
+        "product_sale_qty_in_stock_unit",
+        {
+          p_product_id: productId,
+          p_sale_quantity: quantity,
+          p_sale_unit_code: "un",
+        },
+      );
+      if (convErr || stockQty == null || Number(stockQty) <= 0) {
+        skippedChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "unit_conversion_failed",
+          details:
+            convErr?.message ??
+            "Quantidade em UN sem conversão para a unidade de estoque do produto (cadastre conversões no produto)",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
+
       const { data: entryId, error: rpcErr } = await admin.rpc(
         "create_revenue_entry",
         {
@@ -1038,6 +1338,7 @@ Deno.serve(async (req) => {
             product_id: productId,
             recipe_id: null,
             quantity,
+            sale_unit_code: "un",
             pricing_mode: "total",
             unit_value: null,
             _csv_import_job_id: job.id,
@@ -1055,20 +1356,28 @@ Deno.serve(async (req) => {
       if (createdNewProductThisIteration && productId) {
         const leafForAutoCreate =
           leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const autoOpType = deriveOperationalTypeForAutoProduct(
-          leafForAutoCreate.name,
-          rawProdutoForMatch,
-        );
+        const kindPickPost =
+          kindByKey[lineKey]?.kind ??
+          (createdNewRecipeThisIteration ? "RECIPE" : "PRODUCT");
+        const autoOpType =
+          kindPickPost === "RECIPE"
+            ? "RECEITA_FICHA"
+            : deriveOperationalTypeForAutoProduct(
+                leafForAutoCreate.name,
+                rawProdutoForMatch,
+              );
         const { error: pocErr } = await admin
           .from("product_operational_config")
           .insert({
             company_id: job.company_id,
             product_id: productId,
             suggested_operational_type: autoOpType,
-            suggested_score: 0.82,
+            suggested_score: createdNewRecipeThisIteration ? 0.9 : 0.82,
             suggestion_reasons: {
               epoc_csv_revenue_import: true,
               revenue_category: scRowForLine?.reason ?? null,
+              epoc_product_kind: kindByKey[lineKey] ?? null,
+              auto_recipe: createdNewRecipeThisIteration,
             },
             final_operational_type: autoOpType,
             final_decision_source: "AUTO",
@@ -1090,6 +1399,7 @@ Deno.serve(async (req) => {
           const { error: pcaErr } = await admin
             .from("product_category_assignments")
             .insert({
+              company_id: job.company_id,
               product_id: productId,
               category_id: sugPc.categoryId,
             });
@@ -1119,6 +1429,14 @@ Deno.serve(async (req) => {
     const newMeta: Record<string, unknown> = {
       ...priorMeta,
       epoc_revenue_category_by_product: catByKey,
+      epoc_product_kind_by_name: kindByKey,
+      epoc_product_id_by_line_key: productIdCacheToMetadata(productIdCache),
+      epoc_product_id_by_exact_name: productIdCacheExactNameToMetadata(
+        productIdCache,
+      ),
+      epoc_openai_plan_by_exact_name: Object.fromEntries(
+        openAiPlanByExactName,
+      ),
       batch_by_reference_date: batchMapObj,
       csv_total_data_rows: rows.length,
       revenue_entries_created_total: prevCreated + createdChunk,
@@ -1128,16 +1446,27 @@ Deno.serve(async (req) => {
       rows_skipped_no_product_name: prevSkipNoName + skipNoNameChunk,
       products_auto_created_total:
         prevProductsAutoCreated + productsAutoCreatedChunk,
+      recipes_auto_created_total:
+        prevRecipesAutoCreated + recipesAutoCreatedChunk,
       ignored_rows_diagnostics: diagnosticsForMeta,
       ignored_rows_report_truncated: diagnosticsTruncated || sliceDiagForMeta,
     };
 
     if (!done) {
+      if (onboardingCsvJob) {
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          { sales_sync: nextOffset, import_status: "processing" },
+          "[process-integration-csv-revenue-job]",
+        );
+      }
       await admin
         .from("integration_csv_revenue_import_jobs")
         .update({
           csv_resume_row_index: nextOffset,
           metadata: newMeta,
+          chunk_lease_expires_at: null,
           updated_at: now,
         })
         .eq("id", jobId);
@@ -1153,6 +1482,7 @@ Deno.serve(async (req) => {
         revenue_entries_created_this_chunk: createdChunk,
         rows_skipped_this_chunk: skippedChunk,
         products_auto_created_this_chunk: productsAutoCreatedChunk,
+        recipes_auto_created_this_chunk: recipesAutoCreatedChunk,
         revenue_entries_created_total: prevCreated + createdChunk,
         continuing: true,
       });
@@ -1185,6 +1515,20 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (onboardingCsvJob) {
+      await patchOnboardingPdv(
+        admin,
+        job.company_id,
+        {
+          sales_total: rows.length,
+          sales_sync: rows.length,
+          import_status: "completed",
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
+
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({
@@ -1207,12 +1551,33 @@ Deno.serve(async (req) => {
       rows_skipped_total: prevSkipped + skippedChunk,
       products_auto_created_total:
         prevProductsAutoCreated + productsAutoCreatedChunk,
+      recipes_auto_created_total:
+        prevRecipesAutoCreated + recipesAutoCreatedChunk,
       ignored_rows_report_storage_path: ignoredReportPath,
       ignored_rows_report_truncated: diagnosticsTruncated,
       batches: batchIdList.length,
     });
   } catch (e) {
+    await releaseCsvJobChunkLease(admin, jobId);
     const msg = e instanceof Error ? e.message : String(e);
+    const metaForCatch =
+      jobRow?.metadata &&
+      typeof jobRow.metadata === "object" &&
+      !Array.isArray(jobRow.metadata)
+        ? (jobRow.metadata as Record<string, unknown>)
+        : {};
+    if (isOnboardingEpocCsvJobMetadata(metaForCatch) && jobRow?.company_id) {
+      await patchOnboardingPdv(
+        admin,
+        String(jobRow.company_id),
+        {
+          import_status: "failed",
+          import_error: msg.slice(0, 500),
+          sync: false,
+        },
+        "[process-integration-csv-revenue-job]",
+      );
+    }
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({

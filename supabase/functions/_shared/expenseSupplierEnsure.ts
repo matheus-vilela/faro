@@ -12,8 +12,24 @@ export function normalizeDocumentDigits(raw: string | null | undefined): string 
 }
 
 /**
+ * CPF: mantém 11 dígitos.
+ * CNPJ: XML/NF-e costumam omitir zeros à esquerda; com menos de 14 dígitos (e não sendo CPF),
+ * completa com zeros à esquerda até 14. Com mais de 14 dígitos, usa os últimos 14.
+ */
+export function normalizeTaxIdForSupplierDocument(
+  raw: string | null | undefined,
+): string {
+  const d = normalizeDocumentDigits(raw);
+  if (!d) return "";
+  if (d.length === 11) return d;
+  if (d.length > 14) return d.slice(-14);
+  if (d.length === 14) return d;
+  return d.padStart(14, "0");
+}
+
+/**
  * CPF (11) ou CNPJ (14) a partir de supplierDocument, notes ou nome (OCR costuma
- * colocar CNPJ só no rodapé ou o modelo devolve snake_case/número errado).
+ * colocar o CNPJ só no rodapé ou o modelo devolve snake_case/número errado).
  */
 export function extractTaxIdDigits(
   extracted: ExtractedDocumentResult,
@@ -27,13 +43,9 @@ export function extractTaxIdDigits(
   push(extracted.supplierName);
 
   const pickFromDigits = (d: string): string | null => {
-    let x = d.replace(/\D/g, "");
-    if (x.length === 11 || x.length === 14) return x;
-    if (x.length > 14) {
-      x = x.slice(-14);
-      return x.length === 14 ? x : null;
-    }
-    return null;
+    const norm = normalizeTaxIdForSupplierDocument(d);
+    if (!norm || (norm.length !== 11 && norm.length !== 14)) return null;
+    return norm;
   };
 
   for (const b of blocks) {
@@ -42,8 +54,9 @@ export function extractTaxIdDigits(
   }
 
   const all = blocks.join(" ").replace(/\D/g, "");
-  if (all.length >= 14) return all.slice(-14);
-  if (all.length === 11) return all;
+  if (!all) return null;
+  const normAll = normalizeTaxIdForSupplierDocument(all);
+  if (normAll.length === 11 || normAll.length === 14) return normAll;
   return null;
 }
 
@@ -53,7 +66,7 @@ export function enrichExtractedWithTaxId(
 ): ExtractedDocumentResult {
   const digits = extractTaxIdDigits(extracted);
   if (!digits) return extracted;
-  const cur = normalizeDocumentDigits(extracted.supplierDocument);
+  const cur = normalizeTaxIdForSupplierDocument(extracted.supplierDocument);
   if (cur === digits) return extracted;
   return { ...extracted, supplierDocument: digits };
 }
@@ -69,7 +82,8 @@ export type EnsureSupplierFromExtractedResult = {
 
 /**
  * Localiza fornecedor pelo documento ou cria com nome e documento.
- * `supplierId` fica null se não houver CPF/CNPJ válido (11 ou 14 dígitos) ou erro.
+ * `supplierId` fica null se não houver CPF/CNPJ válido (11 ou 14 dígitos após normalização) ou erro.
+ * CNPJ com menos de 14 dígitos no XML é completado com zeros à esquerda (exceto CPF com 11 dígitos).
  */
 export async function ensureSupplierFromExtracted(
   supabase: SupabaseClient,
@@ -93,9 +107,10 @@ export async function ensureSupplierFromExtracted(
   }
 
   const list = Array.isArray(rows) ? rows : [];
-  const norm = (d: string | null | undefined) => normalizeDocumentDigits(d);
+  const norm = (d: string | null | undefined) =>
+    normalizeTaxIdForSupplierDocument(d);
   const found = list.find((r: { document: string | null }) =>
-    norm(r.document) === digits
+    norm(r.document) === digits,
   );
   if (found) return { supplierId: found.id as string, createdNew: false };
 

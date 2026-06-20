@@ -37,6 +37,19 @@ export interface Expense {
   supplier_name: string | null
   is_recurring?: boolean
   display_name?: string | null
+  series_type?: 'single' | 'recurring' | 'installment'
+  recurrence_frequency?: string | null
+  installment_count?: number | null
+  recurrence_status?: 'active' | 'inactive' | null
+  parent_expense_id?: string | null
+  series_anchor_due_date?: string | null
+  occurrence_month?: string | null
+  scheduled_adjustments?: Array<{
+    effective_from: string
+    amount?: number
+    due_date?: string
+  }>
+  suppressed_occurrences?: string[]
   status: ExpenseStatus
   notes: string | null
   /** Caminho no bucket `expense-documents` (comprovante). */
@@ -47,6 +60,11 @@ export interface Expense {
   document_total?: number | null
   /** Motivo indicado quando havia divergência ou revisão na importação. */
   divergence_reason?: string | null
+  /**
+   * Snapshot da NF-e (ICMSTot) e/ou conferência soma linhas vs total — importação XML / staging.
+   * Ver `icms_tot` (vNF, vDesc, vPIS, vCOFINS, …) e opcionalmente `adjusted_sum_components`, `delta`.
+   */
+  financial_reconciliation_json?: Record<string, unknown> | null
   created_at: string
   updated_at: string
   items?: ExpenseItem[]
@@ -89,6 +107,9 @@ export interface Boleto {
   account: string | null
   account_type: string | null
   status: BoletoStatus
+  /** Taxas/deduções de receita: só DRE, fora do calendário e do fluxo. */
+  exclude_from_fluxo?: boolean
+  revenue_entry_id?: string | null
   created_at: string
   updated_at: string
 }

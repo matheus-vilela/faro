@@ -79,4 +79,16 @@ describe("buildDreComputedFromMaps", () => {
     expect(r.resultadoAntesImposto).toBe(330);
     expect(r.lucroLiquido).toBe(320);
   });
+
+  it("soma CMV de vendas gravado em revenue_entries", () => {
+    const categories = [
+      cat("r1", "RECEITA", "OPERACIONAL"),
+      cat("cmv1", "DESPESA", "CMV"),
+    ];
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    const byCategoryId = new Map<string, number>([["cmv1", 50]]);
+    const r = buildDreComputedFromMaps(byCategoryId, byId, 120);
+    expect(r.cmv).toBe(170);
+    expect(r.lucroBruto).toBe(-170);
+  });
 });

@@ -1,12 +1,15 @@
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import {
   applySecondarySignals,
+  digitsOnly,
   isFlavorOnlyCatalogInsideCompositeInvoice,
-  scoreNameMatch,
+  scoreNameMatchIncludingMergedAliases,
 } from "../_shared/productImport/matchingScore.ts";
+import { beverageSkuVolumeConflict } from "../_shared/productImport/beverageSkuIdentity.ts";
 import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
+  sanitizeCatalogProductName,
 } from "../_shared/productImport/canonicalName.ts";
 import {
   consolidateInvoiceItems,
@@ -23,6 +26,7 @@ import {
   computeStockQuantity,
   pickProductUnitRule,
   type ProductUnitRuleRow,
+  type ResolutionSource,
 } from "../_shared/productImport/unitConversion.ts";
 import {
   conversionFactorToA,
@@ -34,12 +38,20 @@ import {
 import {
   assistBorderlineProductMatch,
   assistImportColdNewProduct,
+  assistNfeRagArbiterMatch,
 } from "../_shared/productImport/productMatchLlmAssist.ts";
 import {
   augmentScoredListWithVectorNeighbors,
   ensureCompanyProductNameEmbeddings,
   embeddingModelFromEnv,
 } from "../_shared/productEmbedding.ts";
+import {
+  eanLookupKeys,
+} from "../_shared/productImport/llmCatalogCandidates.ts";
+import {
+  matchImportBatchLineWithCatalogLlm,
+  type ImportBatchCatalogLlmMatchResult,
+} from "../_shared/productImport/importBatchCatalogLlmMatch.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -50,6 +62,7 @@ export type ProductRow = {
   unit: string | null;
   barcode?: string | null;
   ncm?: string | null;
+  merged_catalog_names?: string[] | null;
 };
 
 export type ItemWithProductMatch = ExtractedExpenseItem & {
@@ -74,6 +87,8 @@ export type ItemWithProductMatch = ExtractedExpenseItem & {
     decisionPath?: string;
     borderlineLlmRationale?: string;
     borderlineLlmSuggestedName?: string;
+    /** Pós-match: `assistInvoiceLineUnits` (produção + preview). */
+    invoice_line_units_llm?: Record<string, unknown>;
   };
 };
 
@@ -84,6 +99,8 @@ export type ResolveProductMatchesResult = {
   deferProductCreationToReconciliation: boolean;
   /** Chamadas LLM na faixa borderline nesta execução (métricas). */
   borderlineLlmCalls: number;
+  /** Chamadas a `assistInvoiceLineUnits` (NF-e XML / preview full). */
+  lineUnitsLlmCalls?: number;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -110,6 +127,14 @@ function envProductMatchLlmForce(): boolean {
   }
 }
 
+/** Nome para cadastro: sem lixo de NF (asteriscos, packs, peso no fim). */
+function finalizeSuggestedCatalogName(raw: string | null | undefined): string | undefined {
+  const t = String(raw ?? "").trim();
+  if (!t) return undefined;
+  const n = sanitizeCatalogProductName(t).slice(0, 512);
+  return n.length ? n : undefined;
+}
+
 function envProductMatchLlmMaxCalls(): number {
   try {
     const raw =
@@ -121,6 +146,84 @@ function envProductMatchLlmMaxCalls(): number {
   } catch {
     return 30;
   }
+}
+
+/** Modo do árbitro RAG+LLM na importação NF-e em lote (`IMPORT_NFE_RAG_ARBITER`). */
+function importNfeRagArbiterMode(): "off" | "smart" | "always" {
+  try {
+    const v = String(
+      typeof Deno !== "undefined" ? Deno.env.get("IMPORT_NFE_RAG_ARBITER") ?? "" : "",
+    )
+      .trim()
+      .toLowerCase();
+    if (v === "off" || v === "false" || v === "0") return "off";
+    if (v === "always" || v === "true" || v === "1") return "always";
+    return "smart";
+  } catch {
+    return "smart";
+  }
+}
+
+function importNfeRagArbiterGapThreshold(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_ARBITER_GAP_THRESHOLD") ?? "14"
+          : "14",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 4 && n <= 40 ? n : 14;
+  } catch {
+    return 14;
+  }
+}
+
+function importNfeRagMatchCount(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_RAG_MATCH_COUNT") ?? "42"
+          : "42",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 8 && n <= 80 ? Math.floor(n) : 42;
+  } catch {
+    return 42;
+  }
+}
+
+function importNfeArbiterMaxCandidates(): number {
+  try {
+    const n = Number.parseInt(
+      String(
+        typeof Deno !== "undefined"
+          ? Deno.env.get("IMPORT_NFE_ARBITER_MAX_CANDIDATES") ?? "18"
+          : "18",
+      ),
+      10,
+    );
+    return Number.isFinite(n) && n >= 6 && n <= 30 ? Math.floor(n) : 18;
+  } catch {
+    return 18;
+  }
+}
+
+function promoteScoredCandidateToTop(
+  list: Array<{ product: ProductRow; score: number; detail: string }>,
+  productId: string,
+): boolean {
+  const i = list.findIndex((s) => s.product.id === productId);
+  if (i < 0) return false;
+  const [row] = list.splice(i, 1);
+  const prevTop = list[0]?.score ?? 0;
+  row.score = Math.max(row.score, prevTop + 0.5, 86);
+  row.detail = `${row.detail} · árbitro RAG+LLM`;
+  list.unshift(row);
+  return true;
 }
 
 async function loadImportSettings(
@@ -167,6 +270,14 @@ async function loadImportSettings(
       !!d.defer_product_creation_to_reconciliation,
   };
 }
+
+const RESOLUTION_SOURCE_PT: Record<ResolutionSource, string> = {
+  DIRECT_UNIT_MATCH: "mesma unidade (sem conversão)",
+  AUTO_CONVERTED_GLOBAL_RULE: "conversão global massa/volume",
+  AUTO_CONVERTED_PRODUCT_RULE: "regra de conversão do produto",
+  UNIT_VALIDATION_REQUIRED: "validação de unidade necessária",
+  UNKNOWN_INVOICE_UNIT: "unidade da nota ausente ou não reconhecida",
+};
 
 function equivToProductRule(
   e: EquivRow,
@@ -241,9 +352,133 @@ function enrichProductMatch(
     invoiceUnitNormalized: invoiceU,
     catalogUnitNormalized: catU,
     matchReason: partial.matchReason
-      ? `${partial.matchReason} · estoque: ${c.stockQuantity} (${c.resolutionSource})`
-      : `estoque: ${c.stockQuantity} (${c.resolutionSource})`,
+      ? `${partial.matchReason} · estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`
+      : `estoque: ${c.stockQuantity} (${RESOLUTION_SOURCE_PT[c.resolutionSource] ?? c.resolutionSource})`,
   };
+}
+
+function buildImportBatchMatchOutput(params: {
+  it: ExtractedExpenseItem;
+  name: string;
+  invoiceU: NormalizedUnitCode;
+  batchResult: ImportBatchCatalogLlmMatchResult;
+  products: ProductRow[];
+  thresholds: ImportMatchThresholds;
+  autoApplyGlobalMassVolume: boolean;
+  rulesByProduct: Map<string, ProductUnitRuleRow[]>;
+  rawUnit: string | null;
+}): ItemWithProductMatch {
+  const {
+    it,
+    invoiceU,
+    batchResult,
+    thresholds,
+    autoApplyGlobalMassVolume,
+    rulesByProduct,
+    rawUnit,
+  } = params;
+
+  const linkProduct =
+    batchResult.kind === "DIRECT_EAN" ||
+    batchResult.kind === "DIRECT_NCM_NAME" ||
+    batchResult.kind === "LLM_LINK"
+      ? batchResult.product
+      : null;
+
+  if (linkProduct) {
+    const prules = rulesByProduct.get(linkProduct.id) ?? [];
+    const matchReason =
+      batchResult.kind === "DIRECT_EAN"
+        ? "EAN igual ao cadastro"
+        : batchResult.kind === "DIRECT_NCM_NAME"
+          ? "NCM e nome idênticos ao cadastro"
+          : `IA: ${batchResult.rationale}`;
+    const decisionPath =
+      batchResult.kind === "DIRECT_EAN"
+        ? "import_batch_direct_ean"
+        : batchResult.kind === "DIRECT_NCM_NAME"
+          ? "import_batch_direct_ncm_name"
+          : "import_batch_llm_link";
+    const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
+      resolvedProductId: linkProduct.id,
+      suggestedProductId: linkProduct.id,
+      suggestedProductName: linkProduct.name,
+      suggestedScore: 100,
+      needsConfirmation: false,
+      resolutionStatus: "AUTO_MATCH",
+      matchReason,
+      invoiceUnitNormalized: invoiceU,
+      catalogUnitNormalized: normalizeUnitLabel(linkProduct.unit),
+      unitConvertible: false,
+      decisionPath,
+      borderlineLlmRationale:
+        batchResult.kind === "LLM_LINK" ? batchResult.rationale : undefined,
+    };
+    const m = enrichProductMatch(
+      it,
+      partial,
+      linkProduct,
+      invoiceU,
+      autoApplyGlobalMassVolume,
+      prules,
+      null,
+    );
+    return { ...it, productId: m.resolvedProductId, productMatch: m };
+  }
+
+  const suggestedRaw =
+    batchResult.kind === "LLM_NEW_PRODUCT"
+      ? batchResult.suggestedCatalogName
+      : batchResult.kind === "LLM_SKIP" || batchResult.kind === "NO_OPENAI" ||
+          batchResult.kind === "EMPTY_CATALOG"
+        ? batchResult.fallbackSuggestedName
+        : finalizeSuggestedCatalogName(params.name.trim()) ?? params.name.trim();
+
+  const suggestedName = finalizeSuggestedCatalogName(suggestedRaw) ?? suggestedRaw;
+  const rationale =
+    batchResult.kind === "LLM_NEW_PRODUCT"
+      ? batchResult.rationale
+      : batchResult.kind === "LLM_SKIP"
+        ? batchResult.rationale
+        : batchResult.kind === "NO_OPENAI"
+          ? "Sem OpenAI — cadastro automático com nome da nota."
+          : batchResult.kind === "EMPTY_CATALOG"
+            ? "Catálogo vazio — cadastro automático."
+            : "—";
+
+  const stubProduct: ProductRow = {
+    id: "",
+    name: suggestedName,
+    unit: rawUnit ?? null,
+  };
+  const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
+    resolvedProductId: null,
+    suggestedProductId: null,
+    suggestedProductName: null,
+    suggestedScore: 0,
+    needsConfirmation: false,
+    resolutionStatus: "NEW_PRODUCT_STAGED",
+    matchReason: `IA: ${rationale}`,
+    invoiceUnitNormalized: invoiceU,
+    catalogUnitNormalized: normalizeUnitLabel(stubProduct.unit),
+    unitConvertible: false,
+    decisionPath:
+      batchResult.kind === "LLM_NEW_PRODUCT"
+        ? "import_batch_llm_new_product"
+        : "import_batch_llm_fallback_new",
+    borderlineLlmSuggestedName: suggestedName,
+    borderlineLlmRationale: rationale,
+  };
+  const m = enrichProductMatch(
+    it,
+    partial,
+    stubProduct,
+    invoiceU,
+    autoApplyGlobalMassVolume,
+    [],
+    null,
+  );
+  return { ...it, productId: null, productMatch: m };
 }
 
 function decideWithUnits(params: {
@@ -280,7 +515,7 @@ function decideWithUnits(params: {
       resolutionStatus: "AUTO_MATCH",
       needsConfirmation: false,
       unitConvertible: false,
-      matchReason: `Score ${bestScore.toFixed(1)} ≥ ${auto} e unidade compatível (${invoiceU})`,
+      matchReason: `Pontuação ${bestScore.toFixed(1)} ≥ ${auto} e unidade compatível (${invoiceU})`,
     };
   }
 
@@ -290,7 +525,7 @@ function decideWithUnits(params: {
       needsConfirmation: false,
       unitConvertible: false,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}; unidade da nota ausente — vínculo por nome forte (cadastro ${catalogU})`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}; unidade da nota ausente — vínculo por nome forte (cadastro ${catalogU})`,
     };
   }
 
@@ -300,7 +535,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: true,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}, mas unidade da nota (${invoiceU}) difere do cadastro (${catalogU}); conversão não automática`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}, mas a unidade da nota (${invoiceU}) difere do cadastro (${catalogU}); conversão não automática`,
     };
   }
 
@@ -310,7 +545,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: false,
       matchReason:
-        `Score ${bestScore.toFixed(1)} ≥ ${auto}, mas unidades ${invoiceU} vs ${catalogU} exigem confirmação`,
+        `Pontuação ${bestScore.toFixed(1)} ≥ ${auto}, mas as unidades ${invoiceU} (nota) e ${catalogU} (cadastro) exigem confirmação`,
     };
   }
 
@@ -320,7 +555,7 @@ function decideWithUnits(params: {
       needsConfirmation: true,
       unitConvertible: conv,
       matchReason:
-        `Score ${bestScore.toFixed(1)} entre ${conf} e ${auto - 1}; confirmação recomendada`,
+        `Pontuação ${bestScore.toFixed(1)} entre ${conf} e ${auto - 1}; confirmação recomendada`,
     };
   }
 
@@ -328,7 +563,7 @@ function decideWithUnits(params: {
     resolutionStatus: "NEW_PRODUCT_STAGED",
     needsConfirmation: true,
     unitConvertible: false,
-    matchReason: `Score ${bestScore.toFixed(1)} < ${conf}; tratar como novo produto`,
+    matchReason: `Pontuação ${bestScore.toFixed(1)} < ${conf}; tratar como novo produto`,
   };
 }
 
@@ -454,7 +689,7 @@ export async function resolveProductMatches(
 
   const { data: prodRows, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, unit, barcode, ncm")
+    .select("id, name, unit, barcode, ncm, merged_catalog_names")
     .eq("company_id", companyId)
     .eq("is_active", true);
 
@@ -647,9 +882,48 @@ export async function resolveProductMatches(
       }
     }
 
+    if (opts?.importBatch === true) {
+      if (!opts.skipLlmAssist && openaiKey && borderlineLlmRemaining > 0) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+      }
+      const batchResult = await matchImportBatchLineWithCatalogLlm({
+        item: it,
+        productName: name,
+        invoiceUnitNormalized: invoiceU,
+        products,
+        itemNcm,
+        itemEan,
+        openaiKey: openaiKey ?? "",
+        openaiModel,
+        thresholds,
+        eanLookupKeys,
+        skipLlm: opts.skipLlmAssist || !openaiKey,
+      });
+
+      const batchOut = buildImportBatchMatchOutput({
+        it,
+        name,
+        invoiceU,
+        batchResult,
+        products,
+        thresholds,
+        autoApplyGlobalMassVolume,
+        rulesByProduct,
+        rawUnit,
+      });
+      if (batchOut.productMatch?.needsConfirmation) {
+        requiresProductConfirmation = true;
+      }
+      out.push(batchOut);
+      continue;
+    }
+
     const normInvoice = normalizeInvoiceProductLabel(name);
     const exactNameHits = products.filter(
-      (p) => normalizeInvoiceProductLabel(p.name) === normInvoice,
+      (p) =>
+        normalizeInvoiceProductLabel(p.name) === normInvoice &&
+        !beverageSkuVolumeConflict(name, p.name),
     );
     if (exactNameHits.length > 0) {
       let pPick: ProductRow;
@@ -697,7 +971,11 @@ export async function resolveProductMatches(
     const scoredList: Scored[] = [];
 
     for (const p of products) {
-      let sc = scoreNameMatch(name, p.name);
+      let sc = scoreNameMatchIncludingMergedAliases(
+        name,
+        p.name,
+        p.merged_catalog_names,
+      );
       const sec = applySecondarySignals({
         baseScore: sc,
         invoiceNcm: itemNcm,
@@ -711,7 +989,7 @@ export async function resolveProductMatches(
       scoredList.push({
         product: p,
         score: sc,
-        detail: `score ${sc.toFixed(1)}${extra}`,
+        detail: `pontuação ${sc.toFixed(1)}${extra}`,
       });
     }
 
@@ -733,6 +1011,7 @@ export async function resolveProductMatches(
           productById,
           openaiKey,
           model: embeddingModel,
+          matchCount: opts?.importBatch ? importNfeRagMatchCount() : 24,
         });
       } catch (e) {
         console.error("[productMatch] vector RAG:", e);
@@ -759,14 +1038,96 @@ export async function resolveProductMatches(
           catalogUnitNormalized: "UNKN",
           unitConvertible: false,
           decisionPath: "catalog_empty_or_no_candidates",
-          borderlineLlmSuggestedName: autoNewEmpty ? name.trim() : undefined,
+          borderlineLlmSuggestedName: autoNewEmpty
+            ? finalizeSuggestedCatalogName(name.trim())
+            : undefined,
         },
       });
       continue;
     }
 
-    let bestScore = scoredList[0].score;
+    let borderlineLlmSuggestedName: string | undefined;
+    let nfeArbiterRationale: string | undefined;
+    let nfeArbiterDecisionPath: string | undefined;
+    let nfeArbiterForcedNewSuggestedName: string | undefined;
+
+    const arbMode = importNfeRagArbiterMode();
+    const gapTh = importNfeRagArbiterGapThreshold();
+    const maxCand = importNfeArbiterMaxCandidates();
+    if (
+      opts?.importBatch &&
+      arbMode !== "off" &&
+      !opts?.skipLlmAssist &&
+      openaiKey &&
+      borderlineLlmRemaining > 0 &&
+      name.trim()
+    ) {
+      const top = scoredList[0]!;
+      const second = scoredList[1];
+      const gap = second ? top.score - second.score : 100;
+      const ambiguous = second != null && gap < gapTh;
+      const belowAuto = top.score < thresholds.autoMatchMinScore;
+      const softTop = top.score < 86;
+      const runArb =
+        arbMode === "always" ||
+        (arbMode === "smart" && (ambiguous || belowAuto || softTop));
+      if (runArb) {
+        borderlineLlmRemaining -= 1;
+        borderlineLlmCalls += 1;
+        const sliceN = Math.min(maxCand, scoredList.length);
+        const arbInputCands = scoredList.slice(0, sliceN).map((s, idx) => ({
+          rank: idx + 1,
+          product_id: s.product.id,
+          name: s.product.name,
+          catalog_unit: s.product.unit,
+          ncm: s.product.ncm ?? null,
+          barcode_digits: (() => {
+            const d = digitsOnly(s.product.barcode);
+            return d.length >= 4 ? d : null;
+          })(),
+          similarity_0_100: Math.round(s.score * 10) / 10,
+          match_detail: s.detail,
+        }));
+        const arb = await assistNfeRagArbiterMatch(openaiKey, openaiModel, {
+          invoice_description: name,
+          invoice_unit_raw: rawUnit ?? null,
+          invoice_ean: itemEan ? String(itemEan) : null,
+          invoice_ncm: itemNcm ? String(itemNcm) : null,
+          candidates: arbInputCands,
+        });
+        if (arb.kind === "LINK") {
+          promoteScoredCandidateToTop(scoredList, arb.product_id);
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_link";
+        } else if (arb.kind === "NEW_PRODUCT") {
+          nfeArbiterForcedNewSuggestedName = arb.suggested_catalog_name;
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
+            arb.suggested_catalog_name,
+          );
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_new_product";
+        } else if (arb.kind === "ERROR") {
+          nfeArbiterRationale = arb.message;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_error";
+        } else {
+          nfeArbiterRationale = arb.rationale;
+          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_skip";
+        }
+      }
+    }
+
+    const nfeArbiterForcedNew = nfeArbiterForcedNewSuggestedName != null;
+    let bestScore = nfeArbiterForcedNew
+      ? Math.min(45, Math.max(0, thresholds.confirmMinScore - 1))
+      : scoredList[0].score;
     let bestProduct = scoredList[0].product;
+    if (nfeArbiterForcedNew && borderlineLlmSuggestedName) {
+      bestProduct = {
+        ...bestProduct,
+        name: borderlineLlmSuggestedName,
+        unit: rawUnit ?? bestProduct.unit,
+      };
+    }
     let matchReason = `Melhor candidato: ${scoredList[0].detail}`;
 
     const autoTh = thresholds.autoMatchMinScore;
@@ -774,9 +1135,19 @@ export async function resolveProductMatches(
 
     const topK = opts?.importBatch ? 12 : 5;
     const LLM_LINK_MIN_SCORE = 52;
-    const safeForLink = (s: Scored) =>
-      s.score >= LLM_LINK_MIN_SCORE &&
-      !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name);
+    const LLM_LINK_MIN_NAME_SCORE = 42;
+    const safeForLink = (s: Scored) => {
+      const nameOnly = scoreNameMatchIncludingMergedAliases(
+        name,
+        s.product.name,
+        s.product.merged_catalog_names,
+      );
+      return (
+        s.score >= LLM_LINK_MIN_SCORE &&
+        nameOnly >= LLM_LINK_MIN_NAME_SCORE &&
+        !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name)
+      );
+    };
     const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
 
     const importBatchNoSafeLink =
@@ -793,9 +1164,8 @@ export async function resolveProductMatches(
       hasCandidate: true,
     });
 
-    let decisionPath = "scored_catalog";
-    let borderlineLlmRationale: string | undefined;
-    let borderlineLlmSuggestedName: string | undefined;
+    let decisionPath = nfeArbiterDecisionPath ?? "scored_catalog";
+    let borderlineLlmRationale: string | undefined = nfeArbiterRationale;
 
     const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
     const importBatchLlmEligible =
@@ -811,10 +1181,14 @@ export async function resolveProductMatches(
       borderlineLlmRemaining > 0;
 
     const useColdNewOnly =
-      importBatchLlmEligible && linkCandidates.length === 0;
+      importBatchLlmEligible &&
+      linkCandidates.length === 0 &&
+      String(borderlineLlmSuggestedName ?? "").trim() === "";
+
     const useBorderlineAssist =
       linkCandidates.length > 0 &&
-      (importBatchLlmEligible || runBorderlineLlm);
+      (importBatchLlmEligible || runBorderlineLlm) &&
+      String(borderlineLlmSuggestedName ?? "").trim() === "";
 
     const canInvokeLlm =
       !opts?.skipLlmAssist &&
@@ -877,12 +1251,14 @@ export async function resolveProductMatches(
           ? "import_llm_cold_new"
           : "borderline_llm_new_hint";
         borderlineLlmRationale = assist.rationale;
-        borderlineLlmSuggestedName = assist.suggested_catalog_name;
+        borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
+          assist.suggested_catalog_name,
+        );
       } else if (assist.kind === "SKIP") {
         decisionPath = "borderline_llm_skip";
         borderlineLlmRationale = assist.rationale;
         if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_llm_cold_fallback";
           borderlineLlmRationale = `${assist.rationale} · fallback: nome da nota.`;
         } else if (
@@ -890,7 +1266,7 @@ export async function resolveProductMatches(
           bestScore < autoTh &&
           useBorderlineAssist
         ) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_batch_borderline_llm_skip_auto_new";
           borderlineLlmRationale = `${assist.rationale} · cadastro automático (batch) com nome da nota.`;
         }
@@ -898,17 +1274,17 @@ export async function resolveProductMatches(
         decisionPath = "borderline_llm_error";
         borderlineLlmRationale = assist.message;
         if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_llm_cold_fallback_error";
           borderlineLlmRationale = `${assist.message} · fallback: nome da nota.`;
         } else if (opts?.importBatch && bestScore < autoTh && useBorderlineAssist) {
-          borderlineLlmSuggestedName = name.trim();
+          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
           decisionPath = "import_batch_borderline_llm_error_auto_new";
           borderlineLlmRationale = `${assist.message} · cadastro automático (batch) com nome da nota.`;
         }
       }
     } else if (importBatchNoSafeLink) {
-      borderlineLlmSuggestedName = name.trim();
+      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
       decisionPath = "import_batch_deterministic_new";
       borderlineLlmRationale =
         "Sem candidatos com similaridade mínima no catálogo; cadastro automático com o nome da nota.";
@@ -921,7 +1297,7 @@ export async function resolveProductMatches(
       !openaiKey
     ) {
       decisionPath = "import_batch_no_openai_key";
-      borderlineLlmSuggestedName = name.trim();
+      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
       borderlineLlmRationale =
         "Sem OpenAI no servidor; cadastro automático (batch) com nome da nota.";
     }
@@ -1004,6 +1380,7 @@ export async function resolveProductMatches(
     requiresProductConfirmation,
     deferProductCreationToReconciliation,
     borderlineLlmCalls,
+    lineUnitsLlmCalls: 0,
   };
 }
 

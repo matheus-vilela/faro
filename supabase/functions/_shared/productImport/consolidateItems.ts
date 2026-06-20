@@ -1,4 +1,5 @@
 import { canonicalProductName } from "./canonicalName.ts"
+import { nfeUsesUnTaxUnitBase } from "./nfeCommercialTaxUnitConversion.ts"
 import { normalizeUnitLabel, type NormalizedUnitCode } from "./unitNormalize.ts"
 
 /** Campos mínimos de linha + metadados de NF (unidade, NCM, EAN). */
@@ -9,6 +10,8 @@ export type InvoiceItemFields = {
   lineTotal: number
   unitCommercial?: string | null
   unitTax?: string | null
+  quantityCommercial?: number | null
+  quantityTax?: number | null
   invoiceUnitRaw?: string | null
   ncm?: string | null
   ean?: string | null
@@ -18,13 +21,14 @@ export type ExtractedItemWithInvoiceMeta = InvoiceItemFields & {
   _consolidatedFrom?: number
 }
 
-/** Prioriza unidade comercial, depois tributável, para refletir a nota. */
+/** Prioriza unidade comercial; se uTrib for UN distinta de uCom, prioriza UN (estoque). */
 export function pickInvoiceUnitRaw(it: InvoiceItemFields): string | null {
+  const c = it.unitCommercial?.trim()
+  const t = it.unitTax?.trim()
+  if (c && t && nfeUsesUnTaxUnitBase(c, t)) return t
   const a = it.invoiceUnitRaw?.trim()
   if (a) return a
-  const c = it.unitCommercial?.trim()
   if (c) return c
-  const t = it.unitTax?.trim()
   return t ?? null
 }
 
@@ -64,9 +68,25 @@ export function consolidateInvoiceItems<T extends ExtractedItemWithInvoiceMeta>(
     const lineTotal =
       Math.round((Number(existing.lineTotal) + Number(it.lineTotal)) * 100) / 100
     const unitValue = Math.round((lineTotal / newQty) * 10000) / 10000
+    const q1c = Number(existing.quantityCommercial ?? existing.quantity)
+    const q2c = Number(it.quantityCommercial ?? it.quantity)
+    const q1t = Number(existing.quantityTax ?? 0)
+    const q2t = Number(it.quantityTax ?? 0)
+    const newQCom =
+      Math.round((Math.max(0, q1c) + Math.max(0, q2c)) * 10000) / 10000
+    const newQTrib =
+      q1t > 0 && q2t > 0
+        ? Math.round((q1t + q2t) * 10000) / 10000
+        : q1t > 0
+          ? q1t
+          : q2t > 0
+            ? q2t
+            : null
     map.set(k, {
       ...existing,
       quantity: newQty,
+      quantityCommercial: newQCom > 0 ? newQCom : null,
+      quantityTax: newQTrib,
       lineTotal,
       unitValue,
       _consolidatedFrom: (existing._consolidatedFrom ?? 1) + 1,

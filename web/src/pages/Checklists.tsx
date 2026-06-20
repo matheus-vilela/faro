@@ -387,6 +387,7 @@ export function Checklists() {
           .delete()
           .eq("checklist_id", editing.id);
         const itemRows = lines.map((line, i) => ({
+          company_id: companyId,
           checklist_id: editing.id,
           title: line,
           sort_order: i,
@@ -405,6 +406,7 @@ export function Checklists() {
             .from("checklist_assignments")
             .insert(
               [...memberIds].map((mid) => ({
+                company_id: companyId,
                 checklist_id: editing.id,
                 company_member_id: mid,
               })),
@@ -428,6 +430,7 @@ export function Checklists() {
 
         const cid = ins.id as string;
         const itemRows = lines.map((line, i) => ({
+          company_id: companyId,
           checklist_id: cid,
           title: line,
           sort_order: i,
@@ -442,6 +445,7 @@ export function Checklists() {
             .from("checklist_assignments")
             .insert(
               [...memberIds].map((mid) => ({
+                company_id: companyId,
                 checklist_id: cid,
                 company_member_id: mid,
               })),

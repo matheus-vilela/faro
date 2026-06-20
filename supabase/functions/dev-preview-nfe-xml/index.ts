@@ -1,9 +1,7 @@
 /**
- * Laboratório: pré-visualiza NF-e a partir de XML. Entrypoint leve: OPTIONS e auth
- * sem importar productMatch/parse (grafo pesado) — isso evita BOOT_ERROR no cold start.
+ * Laboratório: pré-visualiza NF-e (parse, valor unitário, dry-run interpret staging).
  *
  * POST multipart: `company_id`, `file` (.xml). JWT + `user_companies`.
- * Ver `preview_impl.ts` para flags `simulate_import_batch`, `ai_line_units_preview`.
  */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
@@ -18,11 +16,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
   });
-}
-
-function formBool(v: FormDataEntryValue | null): boolean {
-  const s = String(v ?? "").trim().toLowerCase();
-  return s === "true" || s === "1" || s === "on" || s === "yes";
 }
 
 Deno.serve(async (req) => {
@@ -60,10 +53,6 @@ Deno.serve(async (req) => {
 
   const companyId = String(form.get("company_id") ?? "").trim();
   const file = form.get("file");
-  const simRaw = form.get("simulate_import_batch");
-  /** Ausência do campo = simular batch (alinhado ao fluxo XML real); explícito `false` desliga. */
-  const simulateImportBatch = simRaw == null ? true : formBool(simRaw);
-  const aiLineUnitsPreview = formBool(form.get("ai_line_units_preview"));
   if (!companyId) return json({ ok: false, error: "company_id é obrigatório." }, 400);
   if (!(file instanceof File) || file.size === 0) {
     return json({ ok: false, error: "Envie um ficheiro XML." }, 400);
@@ -92,11 +81,9 @@ Deno.serve(async (req) => {
 
   const { handleDevPreview } = await import("./preview_impl.ts");
   return handleDevPreview({
-    supabase,
-    companyId,
     fileName: file.name || "nota.xml",
     xmlText,
-    simulateImportBatch,
-    aiLineUnitsPreview,
+    companyId,
+    admin: supabase,
   });
 });

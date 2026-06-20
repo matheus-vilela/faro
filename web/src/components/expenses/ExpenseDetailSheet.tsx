@@ -1,7 +1,13 @@
+import { ExpenseFinancialReconciliationPanel } from "@/components/expenses/ExpenseFinancialReconciliationPanel";
 import { ExpenseRecordedDivergenceBanner } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -28,13 +34,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
-import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
+import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
-import type { CompanyCategory } from "@/types/category";
+import { cn } from "@/lib/utils";
 import {
   type Boleto,
   type Expense,
@@ -44,7 +50,14 @@ import {
 } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { Supplier } from "@/types/supplier";
-import { Copy, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Pencil,
+  Plus,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -54,15 +67,16 @@ function formatDocForDisplay(doc: string | null): string {
   return maskCpfCnpj(doc);
 }
 
+function expenseChaveNfe(
+  json: Record<string, unknown> | null | undefined,
+): string {
+  if (!json || typeof json !== "object") return "";
+  return String(json.chave_nfe ?? "").trim();
+}
+
 const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
   romaneio: "Romaneio",
   recibo: "Recibo",
-};
-
-const STATUS_LABELS = {
-  pending: "Pendente",
-  approved: "Aprovada",
-  rejected: "Recusada",
 };
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
@@ -83,14 +97,50 @@ function BoletoLinkedBlock({
   onVerBoleto: () => void;
 }) {
   return (
-    <div className="rounded-lg border p-4 space-y-2">
-      <p className="font-medium">Boleto vinculado</p>
-      <p className="text-sm text-muted-foreground">
-        {boleto.description} • {formatCurrency(boleto.amount)}
+    <div
+      className="cursor-pointer rounded-xl border-2 border-green-300/60 bg-green-100/10 p-4 shadow-sm transition-colors hover:bg-green-600/15"
+      role="button"
+      tabIndex={0}
+      onClick={onVerBoleto}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onVerBoleto();
+        }
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-green-800 dark:text-green-300">
+            Boleto vinculado
+          </p>
+          <p className="mt-1 truncate text-sm font-medium text-foreground">
+            {boleto.description}
+          </p>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-green-700 dark:text-green-400">
+            {formatCurrency(boleto.amount)}
+          </p>
+        </div>
+        <Badge className="shrink-0 bg-green-600 hover:bg-green-700">
+          Ver detalhes
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
+function BoletoUnlinkedBlock() {
+  return (
+    <div className="rounded-xl border-2 border-dashed border-border bg-muted/50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Pagamento
       </p>
-      <Button variant="outline" size="sm" onClick={onVerBoleto}>
-        Ver boleto
-      </Button>
+      <p className="mt-1 text-lg font-semibold text-foreground">
+        Sem boleto vinculado
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Nenhum boleto associado a esta despesa.
+      </p>
     </div>
   );
 }
@@ -101,16 +151,103 @@ const EXPENSE_SELECT = `
   suppliers (id, name, document, sales_contact_name, sales_whatsapp, commercial_manager)
 `;
 
+type ExpenseItemStockRow = {
+  id?: string;
+  product_id?: string | null;
+  stock_added?: boolean;
+  quantity: number;
+  stock_quantity?: number | null;
+  unit_value?: number;
+};
+
+function expenseItemStockQty(it: ExpenseItemStockRow): number {
+  const sq = it.stock_quantity;
+  if (sq != null && Number(sq) > 0) return Number(sq);
+  return Number(it.quantity);
+}
+
+async function reverseExpenseItemStock(it: ExpenseItemStockRow): Promise<void> {
+  if (!it.product_id) return;
+  await supabase.rpc("adjust_product_stock", {
+    p_product_id: it.product_id,
+    p_delta: -expenseItemStockQty(it),
+    p_type: "out",
+    p_reference_type: "expense_item",
+    p_reference_id: it.id ?? null,
+  });
+}
+
+async function applyExpenseItemStockIn(it: ExpenseItemStockRow): Promise<void> {
+  if (!it.product_id) return;
+  const delta = expenseItemStockQty(it);
+  if (delta <= 0) return;
+  await supabase.rpc("adjust_product_stock", {
+    p_product_id: it.product_id,
+    p_delta: delta,
+    p_type: "in",
+    p_reference_type: "expense_item",
+    p_reference_id: it.id ?? null,
+    p_unit_value:
+      it.unit_value != null && Number(it.unit_value) >= 0
+        ? Number(it.unit_value)
+        : null,
+  });
+}
+
+/** Transfere estoque entre produtos ou ajusta quantidade só na linha alterada. */
+async function syncExpenseItemStockOnEdit(
+  old: ExpenseItemStockRow,
+  it: {
+    id?: string;
+    product_id?: string | null;
+    quantity: number;
+    unit_value: number;
+    stock_quantity?: number | null;
+  },
+): Promise<boolean> {
+  const oldPid = old.product_id ?? null;
+  const newPid = it.product_id || null;
+  const productChanged = oldPid !== newPid;
+  const qtyChanged = Number(old.quantity) !== Number(it.quantity);
+  const hadStock = !!(old.product_id && old.stock_added);
+
+  if (!hadStock) {
+    return !!(old.stock_added && !productChanged && !qtyChanged);
+  }
+
+  if (!productChanged && !qtyChanged) {
+    return true;
+  }
+
+  await reverseExpenseItemStock(old);
+
+  if (!newPid) {
+    return false;
+  }
+
+  await applyExpenseItemStockIn({
+    id: it.id,
+    product_id: newPid,
+    quantity: it.quantity,
+    stock_quantity: qtyChanged ? undefined : old.stock_quantity,
+    unit_value: it.unit_value,
+  });
+  return true;
+}
+
 type ExpenseDetailSheetProps = {
   expenseId: string | null;
   onClose: () => void;
   onRefresh?: () => void;
+  /** Empilha acima de outros sheets (ex.: resumo de boleto no fluxo). */
+  elevated?: boolean;
 };
 
 export function ExpenseDetailSheet({
   expenseId,
   onClose,
   onRefresh,
+  elevated = false,
 }: ExpenseDetailSheetProps) {
   const { currentCompany, currentRole } = useCompany();
   const navigate = useNavigate();
@@ -120,9 +257,6 @@ export function ExpenseDetailSheet({
 
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
-  const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
-    [],
-  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -146,6 +280,7 @@ export function ExpenseDetailSheet({
   const [deleting, setDeleting] = useState(false);
   const [approvingWhatsapp, setApprovingWhatsapp] = useState(false);
   const [linkItemSheetOpen, setLinkItemSheetOpen] = useState(false);
+  const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
   const [linkItem, setLinkItem] = useState<{
     id: string;
     product_name: string;
@@ -156,19 +291,19 @@ export function ExpenseDetailSheet({
   const [linkSaving, setLinkSaving] = useState(false);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
+  const supportDataLoadedCompanyRef = useRef<string | null>(null);
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
+  useEffect(() => {
+    setValidationDetailsOpen(false);
+  }, [detailExpense?.id]);
+
   const getBoletoForExpense = (id: string) =>
     boletos.find((b) => b.expense_id === id);
-
-  const categoriesById = useMemo(
-    () => new Map(companyCategories.map((c) => [c.id, c])),
-    [companyCategories],
-  );
 
   const linkedBoletoForDetail = useMemo(() => {
     if (!detailExpense) return undefined;
@@ -201,31 +336,38 @@ export function ExpenseDetailSheet({
       return;
     }
     setDetailExpense(exp as Expense);
-    const { data: bo } = await supabase
-      .from("boletos")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("flow_type", "payable");
-    setBoletos((bo as Boleto[]) ?? []);
-    const { data: catRows } = await supabase
-      .from("company_categories")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    const { data: sup } = await supabase
-      .from("suppliers")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("name");
-    const { data: prod } = await supabase
-      .from("products")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("name");
-    setSuppliers((sup as Supplier[]) ?? []);
-    setProducts((prod as Product[]) ?? []);
+    const shouldLoadSupportData =
+      supportDataLoadedCompanyRef.current !== companyId;
+    if (shouldLoadSupportData) {
+      const [{ data: bo }, { data: sup }, { data: prod }] = await Promise.all([
+        supabase
+          .from("boletos")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("flow_type", "payable"),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+      ]);
+      setBoletos((bo as Boleto[]) ?? []);
+      setSuppliers((sup as Supplier[]) ?? []);
+      setProducts((prod as Product[]) ?? []);
+      supportDataLoadedCompanyRef.current = companyId;
+    } else {
+      const { data: bo } = await supabase
+        .from("boletos")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("flow_type", "payable");
+      setBoletos((bo as Boleto[]) ?? []);
+    }
   }, [expenseId, companyId]);
 
   useEffect(() => {
@@ -288,9 +430,36 @@ export function ExpenseDetailSheet({
   const handleLinkItemSave = async () => {
     if (!linkItem?.id || !linkProductId) return;
     setLinkSaving(true);
+    const oldItem = detailExpense?.expense_items?.find(
+      (i) => i.id === linkItem.id,
+    );
+    const oldPid = oldItem?.product_id ?? null;
+    const hadStock = !!(oldPid && oldItem?.stock_added);
+
+    if (hadStock && oldPid !== linkProductId) {
+      await reverseExpenseItemStock({
+        id: linkItem.id,
+        product_id: oldPid,
+        stock_added: true,
+        quantity: Number(oldItem!.quantity),
+        stock_quantity: oldItem!.stock_quantity ?? undefined,
+        unit_value: Number(oldItem!.unit_value),
+      });
+      await applyExpenseItemStockIn({
+        id: linkItem.id,
+        product_id: linkProductId,
+        quantity: Number(linkItem.quantity),
+        stock_quantity: oldItem!.stock_quantity ?? undefined,
+        unit_value: Number(linkItem.unit_value),
+      });
+    }
+
     const { error } = await supabase
       .from("expense_items")
-      .update({ product_id: linkProductId, stock_added: false })
+      .update({
+        product_id: linkProductId,
+        stock_added: hadStock,
+      })
       .eq("id", linkItem.id);
     setLinkSaving(false);
     if (error) {
@@ -422,6 +591,7 @@ export function ExpenseDetailSheet({
             id: it.id,
             product_id: it.product_id ?? undefined,
             stock_added: it.stock_added ?? false,
+            stock_quantity: it.stock_quantity ?? undefined,
             product_name: it.product_name ?? "",
             quantity: Number(it.quantity),
             unit_value: Number(it.unit_value),
@@ -461,7 +631,7 @@ export function ExpenseDetailSheet({
     (!!detailExpense &&
       detailExpense.type === "nota_fiscal" &&
       editType === "nota_fiscal" &&
-      !(detailExpense.invoice_number?.trim()));
+      !detailExpense.invoice_number?.trim());
 
   const canEditSubmit =
     editItems.every(
@@ -544,46 +714,77 @@ export function ExpenseDetailSheet({
       return;
     }
 
-    const oldItems = (detailExpense.expense_items ?? []) as Array<{
-      id?: string;
-      product_id?: string | null;
-      stock_added?: boolean;
-      quantity: number;
-    }>;
-
-    for (const it of oldItems) {
-      if (it.product_id && it.stock_added) {
-        const qty = Number(it.quantity);
-        await supabase.rpc("adjust_product_stock", {
-          p_product_id: it.product_id,
-          p_delta: -qty,
-          p_type: "out",
-          p_reference_type: "expense_item",
-          p_reference_id: it.id ?? null,
-        });
-      }
-    }
-
-    await supabase
-      .from("expense_items")
-      .delete()
-      .eq("expense_id", detailExpense.id);
+    const oldItems: ExpenseItemStockRow[] = (
+      detailExpense.expense_items ?? []
+    ).map((row) => ({
+      id: row.id,
+      product_id: row.product_id,
+      stock_added: row.stock_added,
+      quantity: Number(row.quantity),
+      stock_quantity: row.stock_quantity,
+      unit_value: Number(row.unit_value),
+    }));
+    const oldById = new Map(
+      oldItems.filter((it) => it.id).map((it) => [it.id as string, it]),
+    );
+    const keptEditIds = new Set<string>();
 
     for (const it of editItems) {
       const productId = it.product_id || null;
-      const { data: inserted } = await supabase
-        .from("expense_items")
-        .insert({
-          expense_id: detailExpense.id,
-          product_name: it.product_name,
+
+      if (it.id && oldById.has(it.id)) {
+        keptEditIds.add(it.id);
+        const old = oldById.get(it.id)!;
+        const stockAdded = await syncExpenseItemStockOnEdit(old, {
+          id: it.id,
+          product_id: productId,
           quantity: it.quantity,
           unit_value: it.unit_value,
-          product_id: productId,
-          stock_added: false,
-        })
-        .select("id")
-        .single();
-      void inserted;
+          stock_quantity: it.stock_quantity,
+        });
+
+        const { error: itemErr } = await supabase
+          .from("expense_items")
+          .update({
+            product_name: it.product_name,
+            quantity: it.quantity,
+            unit_value: it.unit_value,
+            product_id: productId,
+            stock_added: stockAdded,
+          })
+          .eq("id", it.id);
+        if (itemErr) {
+          console.error(itemErr);
+          toast.error(itemErr.message ?? "Não foi possível atualizar um item.");
+          setEditSaving(false);
+          return;
+        }
+        continue;
+      }
+
+      const { error: insErr } = await supabase.from("expense_items").insert({
+        company_id: detailExpense.company_id,
+        expense_id: detailExpense.id,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_value: it.unit_value,
+        product_id: productId,
+        stock_added: false,
+      });
+      if (insErr) {
+        console.error(insErr);
+        toast.error(insErr.message ?? "Não foi possível adicionar um item.");
+        setEditSaving(false);
+        return;
+      }
+    }
+
+    for (const old of oldItems) {
+      if (!old.id || keptEditIds.has(old.id)) continue;
+      if (old.product_id && old.stock_added) {
+        await reverseExpenseItemStock(old);
+      }
+      await supabase.from("expense_items").delete().eq("id", old.id);
     }
 
     const { data: updated } = await supabase
@@ -624,7 +825,10 @@ export function ExpenseDetailSheet({
   return (
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <SheetContent
+          className={cn("overflow-y-auto sm:max-w-xl", elevated && "z-[70]")}
+          overlayClassName={elevated ? "z-[70]" : undefined}
+        >
           {loading && (
             <p className="text-sm text-muted-foreground py-8">Carregando…</p>
           )}
@@ -652,28 +856,70 @@ export function ExpenseDetailSheet({
                     </div>
                   )}
                 </div>
-                <SheetDescription className="flex flex-wrap items-center gap-2">
-                  <span>
-                    {detailExpense.supplier_name ||
-                      TYPE_LABELS[
-                        detailExpense.type as keyof typeof TYPE_LABELS
-                      ] ||
-                      "Sem fornecedor"}
-                  </span>
-                  {linkedBoletoForDetail ? (
-                    <Badge variant="default" className="bg-green-600 shrink-0">
-                      Boleto vinculado
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="shrink-0">
-                      Sem boleto vinculado
-                    </Badge>
-                  )}
-                </SheetDescription>
+                {!detailEditMode && (
+                  <SheetDescription className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {detailExpense.display_name?.trim() ||
+                        detailExpense.supplier_name ||
+                        TYPE_LABELS[
+                          detailExpense.type as keyof typeof TYPE_LABELS
+                        ] ||
+                        "Sem fornecedor"}
+                    </span>
+                    {detailExpense.parent_expense_id ? (
+                      <Badge variant="secondary" className="shrink-0">
+                        Exceção de série
+                      </Badge>
+                    ) : null}
+                    {(detailExpense.series_type === "recurring" ||
+                      detailExpense.series_type === "installment") &&
+                    !detailExpense.parent_expense_id ? (
+                      <Badge variant="outline" className="shrink-0">
+                        Série ·{" "}
+                        {detailExpense.series_type === "recurring"
+                          ? "recorrente"
+                          : "parcelada"}
+                      </Badge>
+                    ) : null}
+                    {linkedBoletoForDetail ? (
+                      <Badge
+                        variant="default"
+                        className="bg-green-600 shrink-0"
+                      >
+                        Boleto vinculado
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="shrink-0">
+                        Sem boleto vinculado
+                      </Badge>
+                    )}
+                  </SheetDescription>
+                )}
               </SheetHeader>
-              <div className="mt-4 border-t border-border pt-4">
-                <ExpenseLauncherInfo expenseId={detailExpense.id} />
-              </div>
+              {!detailEditMode && (
+                <div className="mt-4 space-y-1 border-t border-border pt-4">
+                  <ExpenseLauncherInfo expenseId={detailExpense.id} />
+                  <p className="text-sm text-muted-foreground">
+                    Cadastrada em {formatDate(detailExpense.created_at)}
+                  </p>
+                </div>
+              )}
+              {detailExpense.parent_expense_id && !detailEditMode ? (
+                <p className="mt-3 rounded-md border border-sky-600/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
+                  Exceção materializada de um mês da série. Alterações aqui não
+                  mudam a projeção dos demais meses.
+                </p>
+              ) : null}
+              {(detailExpense.series_type === "recurring" ||
+                detailExpense.series_type === "installment") &&
+              !detailExpense.parent_expense_id &&
+              !detailEditMode ? (
+                <p className="mt-3 rounded-md border border-amber-600/25 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+                  Esta é a despesa principal da série. Excluí-la remove toda a
+                  recorrência/parcelamento e exceções vinculadas. Gerencie
+                  ocorrências futuras em Contas a pagar.
+                </p>
+              ) : null}
               {detailEditMode ? (
                 <form onSubmit={handleUpdate} className="space-y-6 py-6">
                   <div>
@@ -979,204 +1225,149 @@ export function ExpenseDetailSheet({
                   </SheetFooter>
                 </form>
               ) : (
-                <div className="space-y-6 py-6">
+                <div className="space-y-4 pb-6 pt-4">
+                  {(() => {
+                    const supplierRecord = detailExpense.supplier_id
+                      ? suppliers.find(
+                          (x) => x.id === detailExpense.supplier_id,
+                        )
+                      : undefined;
+                    const supplierLabel =
+                      detailExpense.supplier_name?.trim() ||
+                      supplierRecord?.name?.trim() ||
+                      "Sem fornecedor";
+                    const chaveNfe = expenseChaveNfe(
+                      detailExpense.financial_reconciliation_json,
+                    );
+                    return (
+                      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Fornecedor
+                        </p>
+                        <p className="mt-1 text-xl font-semibold leading-tight text-foreground">
+                          {supplierLabel}
+                        </p>
+                        {detailExpense.supplier_document ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {formatDocForDisplay(
+                              detailExpense.supplier_document,
+                            )}
+                          </p>
+                        ) : null}
+                        {detailExpense.invoice_number || chaveNfe ? (
+                          <div className="mt-4 border-t border-border/80 pt-4">
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {detailExpense.type === "nota_fiscal"
+                                ? "Nota fiscal"
+                                : "Documento"}
+                            </p>
+                            {detailExpense.invoice_number ? (
+                              <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+                                Nº {detailExpense.invoice_number}
+                                {detailExpense.invoice_series ? (
+                                  <span className="font-medium text-muted-foreground">
+                                    {" "}
+                                    · Série {detailExpense.invoice_series}
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                            {chaveNfe ? (
+                              <div className="mt-3">
+                                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Chave NF-e
+                                </p>
+                                <div className="mt-1 flex items-start gap-2">
+                                  <p className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-foreground">
+                                    {chaveNfe}
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 shrink-0 px-2"
+                                    onClick={() => {
+                                      void navigator.clipboard.writeText(
+                                        chaveNfe,
+                                      );
+                                      toast.success("Chave copiada.");
+                                    }}
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+
+                  {(detailExpense.type === "nota_fiscal" ||
+                    detailExpense.financial_reconciliation_json) && (
+                    <Collapsible
+                      open={validationDetailsOpen}
+                      onOpenChange={setValidationDetailsOpen}
+                    >
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/40"
+                        >
+                          <span>Impostos e totais</span>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                              validationDetailsOpen && "rotate-180",
+                            )}
+                          />
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="rounded-b-lg border border-t-0 border-border bg-card px-4 pb-4 pt-3">
+                        <ExpenseFinancialReconciliationPanel
+                          data={
+                            detailExpense.financial_reconciliation_json as
+                              | Record<string, unknown>
+                              | null
+                              | undefined
+                          }
+                          formatCurrency={formatCurrency}
+                        />
+                        {!detailExpense.financial_reconciliation_json && (
+                          <p className="text-sm text-muted-foreground">
+                            Sem dados de impostos e totais para esta despesa.
+                          </p>
+                        )}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+
+                  {linkedBoletoForDetail ? (
+                    <BoletoLinkedBlock
+                      boleto={linkedBoletoForDetail}
+                      formatCurrency={formatCurrency}
+                      onVerBoleto={() => setBoletoResumo(linkedBoletoForDetail)}
+                    />
+                  ) : (
+                    <BoletoUnlinkedBlock />
+                  )}
+
                   <ExpenseRecordedDivergenceBanner
                     documentTotal={detailExpense.document_total}
                     sumLines={detailLineSum}
+                    financialReconciliationJson={
+                      detailExpense.financial_reconciliation_json ?? null
+                    }
                     divergenceReason={detailExpense.divergence_reason}
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
-                  <div className="grid gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Tipo:</span>{" "}
-                      {detailExpense.type === "nota_fiscal"
-                        ? "Nota fiscal"
-                        : TYPE_LABELS[
-                            detailExpense.type as keyof typeof TYPE_LABELS
-                          ]}
-                    </div>
-                    {detailExpense.supplier_name && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Fornecedor:
-                        </span>{" "}
-                        {detailExpense.supplier_name}
-                      </div>
-                    )}
-                    {detailExpense.supplier_document && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Documento:
-                        </span>{" "}
-                        {formatDocForDisplay(detailExpense.supplier_document)}
-                      </div>
-                    )}
-                    {detailExpense.supplier_id &&
-                      (() => {
-                        const s = suppliers.find(
-                          (x) => x.id === detailExpense.supplier_id,
-                        );
-                        if (
-                          !s ||
-                          (!s.sales_contact_name?.trim() &&
-                            !s.sales_whatsapp?.trim() &&
-                            !s.commercial_manager?.trim())
-                        ) {
-                          return null;
-                        }
-                        return (
-                          <div className="rounded-lg border border-border/80 p-3 space-y-1.5 text-sm">
-                            <p className="font-medium flex items-center gap-2 text-muted-foreground">
-                              <UserRound className="h-4 w-4" />
-                              Contato comercial (fornecedor)
-                            </p>
-                            {s.sales_contact_name?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  Vendedor:
-                                </span>{" "}
-                                {s.sales_contact_name}
-                              </p>
-                            )}
-                            {s.sales_whatsapp?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  WhatsApp:
-                                </span>{" "}
-                                {maskPhone(s.sales_whatsapp)}
-                              </p>
-                            )}
-                            {s.commercial_manager?.trim() && (
-                              <p>
-                                <span className="text-muted-foreground">
-                                  Nome do gerente comercial:
-                                </span>{" "}
-                                {s.commercial_manager}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    {detailExpense.invoice_number && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          {detailExpense.type === "nota_fiscal"
-                            ? "Nº nota:"
-                            : "Nº documento:"}
-                        </span>{" "}
-                        {detailExpense.invoice_number}
-                        {detailExpense.invoice_series ? (
-                          <>
-                            {" "}
-                            <span className="text-muted-foreground">
-                              · série:
-                            </span>{" "}
-                            {detailExpense.invoice_series}
-                          </>
-                        ) : null}
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-muted-foreground">Status:</span>{" "}
-                      <Badge
-                        variant={
-                          detailExpense.status === "approved"
-                            ? "default"
-                            : detailExpense.status === "rejected"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {STATUS_LABELS[detailExpense.status]}
-                      </Badge>
-                      {detailExpense.expense_source === "whatsapp" && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          (WhatsApp)
-                        </span>
-                      )}
-                    </div>
-                    <div className="rounded-lg border border-border/80 bg-muted/20 p-3 space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Fluxo de caixa e alertas
-                      </p>
-                      <div>
-                        <span className="text-muted-foreground">Categoria:</span>{" "}
-                        <span className="text-foreground">
-                          {linkedBoletoForDetail
-                            ? formatBoletoCategoryLabel(
-                                linkedBoletoForDetail,
-                                categoriesById,
-                              )
-                            : "—"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">
-                          Vencimento:
-                        </span>{" "}
-                        <span className="text-foreground">
-                          {linkedBoletoForDetail
-                            ? formatDate(linkedBoletoForDetail.due_date)
-                            : "—"}
-                        </span>
-                      </div>
-                      {!linkedBoletoForDetail && (
-                        <p className="text-xs text-muted-foreground">
-                          Categoria e vencimento vêm do boleto vinculado. Use o
-                          ícone na lista de despesas para vincular.
-                        </p>
-                      )}
-                    </div>
-                    {detailExpense.expense_source === "whatsapp" &&
-                      detailExpense.status === "pending" &&
-                      isOwner && (
-                        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
-                          <p className="text-sm">
-                            Esta despesa só entra no recebimento e nos alertas
-                            depois da sua aprovação.
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={approvingWhatsapp}
-                              onClick={() =>
-                                void handleApproveWhatsappExpense()
-                              }
-                            >
-                              {approvingWhatsapp
-                                ? "Aprovando…"
-                                : "Aprovar despesa"}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={approvingWhatsapp}
-                              onClick={() => void handleRejectWhatsappExpense()}
-                            >
-                              Recusar
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    <div>
-                      <span className="text-muted-foreground">Criada em:</span>{" "}
-                      {formatDate(detailExpense.created_at)}
-                    </div>
-                    {detailExpense.notes && (
-                      <div>
-                        <span className="text-muted-foreground">
-                          Observações:
-                        </span>{" "}
-                        {detailExpense.notes}
-                      </div>
-                    )}
-                  </div>
 
                   {(detailExpense.expense_items?.length ?? 0) > 0 && (
                     <div>
-                      <p className="font-medium mb-2">Itens</p>
+                      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Itens da despesa
+                      </p>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead>
@@ -1199,75 +1390,160 @@ export function ExpenseDetailSheet({
                             </tr>
                           </thead>
                           <tbody>
-                            {detailExpense.expense_items!.map((it, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-2">
-                                  <span>{it.product_name || "—"}</span>
-                                  {it.product_id && it.products && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      → {it.products.name}
-                                    </p>
-                                  )}
-                                </td>
-                                <td className="p-2">
-                                  {it.product_id ? (
-                                    <Badge variant="secondary">Vinculado</Badge>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openLinkItemSheet({
-                                          id: it.id!,
-                                          product_name: it.product_name,
-                                          quantity: Number(it.quantity),
-                                          unit_value: Number(it.unit_value),
-                                        });
-                                      }}
-                                    >
-                                      Vincular
-                                    </Button>
-                                  )}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {it.quantity}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(Number(it.unit_value))}
-                                </td>
-                                <td className="p-2 text-right">
-                                  {formatCurrency(
-                                    Number(it.quantity) * Number(it.unit_value),
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                            {detailExpense.expense_items!.map((it, i) => {
+                              const rawLineName = it.product_name || "";
+                              const strippedLine =
+                                stripPackSizeFromLabel(rawLineName).trim() ||
+                                rawLineName;
+                              const catalogName = it.products?.name?.trim();
+                              const primary =
+                                catalogName ||
+                                strippedLine ||
+                                rawLineName ||
+                                "—";
+                              return (
+                                <tr key={i} className="border-t">
+                                  <td className="p-2">
+                                    <span>{primary}</span>
+                                    {catalogName &&
+                                      (strippedLine !== catalogName ||
+                                        rawLineName !== catalogName) && (
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                          Nota: {strippedLine || rawLineName}
+                                        </p>
+                                      )}
+                                  </td>
+                                  <td className="p-2">
+                                    {it.product_id ? (
+                                      <Badge variant="secondary">
+                                        Vinculado
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openLinkItemSheet({
+                                            id: it.id!,
+                                            product_name: it.product_name,
+                                            quantity: Number(it.quantity),
+                                            unit_value: Number(it.unit_value),
+                                          });
+                                        }}
+                                      >
+                                        Vincular
+                                      </Button>
+                                    )}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {it.quantity}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {formatCurrency(Number(it.unit_value))}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {formatCurrency(
+                                      Number(it.quantity) *
+                                        Number(it.unit_value),
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
-                      <p className="text-right font-medium mt-2">
-                        Total:{" "}
-                        {formatCurrency(
-                          detailExpense.expense_items!.reduce(
-                            (s, it) =>
-                              s + Number(it.quantity) * Number(it.unit_value),
-                            0,
-                          ),
-                        )}
-                      </p>
                     </div>
                   )}
 
-                  {linkedBoletoForDetail ? (
-                    <BoletoLinkedBlock
-                      boleto={linkedBoletoForDetail}
-                      formatCurrency={formatCurrency}
-                      onVerBoleto={() =>
-                        setBoletoResumo(linkedBoletoForDetail)
+                  {detailExpense.expense_source === "whatsapp" &&
+                    detailExpense.status === "pending" &&
+                    isOwner && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
+                        <p className="text-sm">
+                          Esta despesa só entra no recebimento e nos alertas
+                          depois da sua aprovação.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={approvingWhatsapp}
+                            onClick={() => void handleApproveWhatsappExpense()}
+                          >
+                            {approvingWhatsapp
+                              ? "Aprovando…"
+                              : "Aprovar despesa"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={approvingWhatsapp}
+                            onClick={() => void handleRejectWhatsappExpense()}
+                          >
+                            Recusar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                  {detailExpense.supplier_id &&
+                    (() => {
+                      const s = suppliers.find(
+                        (x) => x.id === detailExpense.supplier_id,
+                      );
+                      if (
+                        !s ||
+                        (!s.sales_contact_name?.trim() &&
+                          !s.sales_whatsapp?.trim() &&
+                          !s.commercial_manager?.trim())
+                      ) {
+                        return null;
                       }
-                    />
+                      return (
+                        <div className="rounded-lg border border-border/80 p-3 space-y-1.5 text-sm">
+                          <p className="font-medium flex items-center gap-2 text-muted-foreground">
+                            <UserRound className="h-4 w-4" />
+                            Contato comercial
+                          </p>
+                          {s.sales_contact_name?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                Vendedor:
+                              </span>{" "}
+                              {s.sales_contact_name}
+                            </p>
+                          )}
+                          {s.sales_whatsapp?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                WhatsApp:
+                              </span>{" "}
+                              {maskPhone(s.sales_whatsapp)}
+                            </p>
+                          )}
+                          {s.commercial_manager?.trim() && (
+                            <p>
+                              <span className="text-muted-foreground">
+                                Gerente:
+                              </span>{" "}
+                              {s.commercial_manager}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                  {detailExpense.notes ? (
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        Observações:
+                      </span>{" "}
+                      {detailExpense.notes}
+                    </p>
                   ) : null}
 
                   {detailExpense.source_document_path && (
@@ -1315,7 +1591,10 @@ export function ExpenseDetailSheet({
         open={!!boletoResumo}
         onOpenChange={(o) => !o && setBoletoResumo(null)}
       >
-        <SheetContent className="sm:max-w-md">
+        <SheetContent
+          className={cn("sm:max-w-md", elevated && "z-[80]")}
+          overlayClassName={elevated ? "z-[80]" : undefined}
+        >
           {boletoResumo && (
             <>
               <SheetHeader>
@@ -1430,7 +1709,7 @@ export function ExpenseDetailSheet({
               <SheetFooter className="flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/app/fluxo-de-caixa")}
+                  onClick={() => navigate("/app/contas-a-pagar")}
                 >
                   Ir para Fluxo de Caixa
                 </Button>
@@ -1456,9 +1735,22 @@ export function ExpenseDetailSheet({
           <DialogHeader>
             <DialogTitle>Excluir despesa</DialogTitle>
             <DialogDescription>
-              Tem certeza que deseja excluir esta despesa? O recebimento e
-              boleto vinculados serão excluídos. Se o recebimento já foi
-              confirmado, as quantidades serão deduzidas do estoque.
+              {detailExpense &&
+              (detailExpense.series_type === "recurring" ||
+                detailExpense.series_type === "installment") &&
+              !detailExpense.parent_expense_id ? (
+                <>
+                  Esta é a despesa principal da série. Ao excluir, toda a
+                  recorrência ou parcelamento será removida, incluindo exceções
+                  materializadas (filhas) e boletos vinculados.
+                </>
+              ) : (
+                <>
+                  Tem certeza que deseja excluir esta despesa? O recebimento e
+                  boleto vinculados serão excluídos. Se o recebimento já foi
+                  confirmado, as quantidades serão deduzidas do estoque.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

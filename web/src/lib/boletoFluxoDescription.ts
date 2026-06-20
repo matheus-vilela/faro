@@ -1,32 +1,35 @@
 import type { Boleto } from "@/types/expense";
-import { isBoletoPayable } from "@/types/expense";
 
-/**
- * Texto exibido no fluxo de caixa. Boletos a pagar gerados com receita antiga
- * vinham como "Receita: … - Taxas/deducoes"; para saídas usa-se "Despesa:".
- */
-const LEGACY_REVENUE_TAX_PAYABLE =
-  /^Receita:\s*(.+?)\s*-\s*Taxas\/dedu[cç][oõ]es\s*$/iu;
-const LEGACY_REVENUE_CMV_PAYABLE = /^Receita:\s*.+\s*-\s*CMV\s*$/iu;
-/** Alinhado a Receitas: `Venda — ${nome do produto}` (travessão EM DASH). */
-const PRODUCT_SALE_TITLE = /^Venda\s*—\s*/i;
+/** Remove prefixos legados nas descrições do fluxo (dados antigos). */
+function stripLegacyFluxoPrefixes(description: string): string {
+  return description
+    .replace(/^Receita:\s*/iu, "")
+    .replace(/^Despesa:\s*/iu, "")
+    .trim();
+}
+
+const LEGACY_REVENUE_TAX_SUFFIX =
+  /^(.+?)\s*-\s*Taxas\/dedu[cç][oõ]es\s*$/iu;
 
 export function formatBoletoFluxoDescription(b: Boleto): string {
-  const d = b.description;
-  if (!isBoletoPayable(b)) return d;
+  const raw = b.description?.trim() ?? "";
+  if (!raw) return raw;
 
-  const taxMatch = d.match(LEGACY_REVENUE_TAX_PAYABLE);
+  const taxMatch = raw.match(LEGACY_REVENUE_TAX_SUFFIX);
   if (taxMatch) {
-    const inner = taxMatch[1]?.trim() ?? "";
-    if (PRODUCT_SALE_TITLE.test(inner)) {
-      return "Despesa: Taxas/Deduções - Venda produtos";
+    const inner = stripLegacyFluxoPrefixes(taxMatch[1] ?? "");
+    if (/^venda\s*—/i.test(inner) || inner === "Venda produtos") {
+      return "Taxas/Deduções - Venda produtos";
     }
-    return `Despesa: Taxas/Deduções - ${inner}`;
+    if (inner === "Venda por receita") {
+      return "Taxas/Deduções - Venda por receita";
+    }
+    return inner ? `Taxas/Deduções - ${inner}` : "Taxas/Deduções";
   }
 
-  if (LEGACY_REVENUE_CMV_PAYABLE.test(d)) {
-    return "Despesa: CMV - Venda produtos";
+  if (/CMV\s*$/iu.test(stripLegacyFluxoPrefixes(raw))) {
+    return "CMV - Venda produtos";
   }
 
-  return d;
+  return stripLegacyFluxoPrefixes(raw);
 }

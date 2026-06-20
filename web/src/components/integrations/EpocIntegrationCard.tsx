@@ -20,14 +20,15 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
-import { supabase } from "@/lib/supabase";
 import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
+import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
+import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
   invokeEpocCsvSync,
+  releaseStalePdvSyncLockIfIdle,
   triggerEpocCsvSyncInBackground,
 } from "@/services/epocSyncCsvService";
-import { patchCompanyMaps } from "@/services/unitSetupService";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -88,11 +89,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     () => userCompanies.find((uc) => uc.company.id === companyId)?.company,
     [userCompanies, companyId],
   );
-  const lockOnboardingPdv = companyMeta
-    ? companyMeta.onboarding_integration_pdv_completed !== true
-    : false;
-  const syncingPdvServer = companyMeta?.syncing_pdv === true;
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -112,6 +108,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   >(null);
   const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
   const [syncingFull, setSyncingFull] = useState(false);
+  const epocSyncUiBusy = useMemo(
+    () =>
+      isEpocCsvSyncUiBusy(companyId, {
+        localSyncing: syncingFull,
+        onboardingPdv: companyMeta?.onboarding_pdv,
+      }),
+    [companyId, syncingFull, companyMeta?.onboarding_pdv],
+  );
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
   const [purgeCountLoading, setPurgeCountLoading] = useState(false);
@@ -191,6 +195,13 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  useEffect(() => {
+    if (!companyMeta?.onboarding_pdv?.sync) return;
+    void releaseStalePdvSyncLockIfIdle(companyId).then((released) => {
+      if (released) void refetchCompanies();
+    });
+  }, [companyId, companyMeta?.onboarding_pdv?.sync, refetchCompanies]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -272,13 +283,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       username.trim() !== sheetConfigBaseline.username ||
       password.trim().length > 0
     );
-  }, [
-    sheetConfigBaseline,
-    enabled,
-    baseUrl,
-    username,
-    password,
-  ]);
+  }, [sheetConfigBaseline, enabled, baseUrl, username, password]);
 
   const fileNameFromStoragePath = (path: string, fallback: string) => {
     const t = path.trim();
@@ -466,18 +471,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
       return;
     }
-    const { error: lockErr } = await patchCompanyMaps(companyId, {
-      syncing_pdv: true,
-      onboarding_integration_pdv_completed: false,
-    });
-    if (lockErr) {
-      toast.error(
-        lockErr.slice(0, 220) ??
-          "Não foi possível iniciar a sincronização (trava PDV).",
-      );
-      return;
-    }
-    await refetchCompanies();
     const oldPaths = [lastEpocCsvStoragePath?.trim() ?? ""].filter(Boolean);
     const uniqueOldPaths = Array.from(new Set(oldPaths));
     if (uniqueOldPaths.length > 0) {
@@ -504,9 +497,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSyncingFull(true);
     let res: Awaited<ReturnType<typeof invokeEpocCsvSync>>;
     try {
-      res = await invokeEpocCsvSync(companyId, {
-        lockOnboardingPdv,
-      });
+      res = await invokeEpocCsvSync(companyId);
     } finally {
       setSyncingFull(false);
       await refetchCompanies();
@@ -577,8 +568,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     try {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
-        lockOnboardingPdv,
-        resetPdvOnboardingCompleted: true,
       });
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
@@ -591,7 +580,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         console.groupEnd();
       }
       if (!res.ok) {
-        toast.error(res.error ?? "Falha ao repetir a sincronização desta(s) data(s).");
+        toast.error(
+          res.error ?? "Falha ao repetir a sincronização desta(s) data(s).",
+        );
         return;
       }
       toast.success(
@@ -729,9 +720,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSheetOpen(false);
 
     if (enabled && baseUrl.trim()) {
-      triggerEpocCsvSyncInBackground(companyId, {
-        lockOnboardingPdv,
-      });
+      triggerEpocCsvSyncInBackground(companyId);
       void refetchCompanies();
       toast.message(
         "Sincronização EPOC em segundo plano: login e exportação do CSV.",
@@ -812,26 +801,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
               />
             </div>
           </button>
-          {lastEpocCsvStoragePath ? (
-            <div className="flex shrink-0 flex-col justify-center border-l border-border/80 p-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 shrink-0"
-                onClick={() => void handleDownloadLastCsv()}
-                disabled={downloadingLastCsv}
-                title="Baixar último CSV"
-                aria-label="Baixar último CSV EPOC"
-              >
-                {downloadingLastCsv ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          ) : null}
         </div>
       </Card>
 
@@ -996,12 +965,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     type="button"
                     className="w-full"
                     onClick={() => void handleSyncNow()}
-                    disabled={
-                      !enabled ||
-                      !baseUrl.trim() ||
-                      syncingFull ||
-                      syncingPdvServer
-                    }
+                    disabled={!enabled || !baseUrl.trim() || epocSyncUiBusy}
                   >
                     {syncingFull ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1170,7 +1134,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 disabled={
                                   !enabled ||
                                   replayRunId === item.id ||
-                                  syncingPdvServer
+                                  epocSyncUiBusy
                                 }
                                 onClick={() => void handleReplaySyncRun(item)}
                               >
@@ -1190,6 +1154,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                       const created =
                         Number(meta.revenue_entries_created_total ?? 0) || 0;
                       const skipped = Number(meta.rows_skipped_total ?? 0) || 0;
+                      const productsCreated =
+                        Number(meta.products_auto_created_total ?? 0) || 0;
+                      const recipesCreated =
+                        Number(meta.recipes_auto_created_total ?? 0) || 0;
                       const totalRows =
                         Number(meta.csv_total_data_rows ?? 0) || 0;
                       const jobIdShort = item.id.slice(0, 8);
@@ -1265,6 +1233,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 ? ` · Linhas CSV: ${totalRows}`
                                 : ""}
                             </p>
+                            {productsCreated > 0 || recipesCreated > 0 ? (
+                              <p>
+                                Catálogo: {productsCreated} produto(s) novo(s)
+                                {recipesCreated > 0
+                                  ? ` · ${recipesCreated} ficha(s) técnica(s)`
+                                  : ""}
+                              </p>
+                            ) : null}
                             {item.csv_resume_row_index != null ? (
                               <p>Cursor: linha {item.csv_resume_row_index}</p>
                             ) : null}

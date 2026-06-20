@@ -34,20 +34,18 @@ import {
   BarChart3,
   Bell,
   Building2,
-  CircleDollarSign,
-  FileText,
   FlaskConical,
   LayoutDashboard,
   ListChecks,
   LogOut,
-  Monitor,
   Moon,
   Package,
   PackageCheck,
   Plug,
-  Repeat2,
   Settings2,
   Sun,
+  TrendingDown,
+  TrendingUp,
   Truck,
   Wallet,
   type LucideIcon,
@@ -59,6 +57,8 @@ type NavItem = {
   url: string;
   icon: LucideIcon;
   roles: UserCompanyRole[];
+  /** Só marca ativo na URL exata (evita sub-rotas, ex. /desenvolvimento vs /desenvolvimento/fornecedores). */
+  exact?: boolean;
 };
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -82,12 +82,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         icon: Wallet,
         roles: ["operador", "gestor", "owner"],
       },
-      {
-        title: "Receitas",
-        url: "/app/receitas",
-        icon: CircleDollarSign,
-        roles: ["operador", "gestor", "owner"],
-      },
+
       {
         title: "Recebimento de mercadorias",
         url: "/app/recebimento",
@@ -112,21 +107,21 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         icon: Package,
         roles: ["operador", "gestor", "owner"],
       },
-      {
-        title: "Importações",
-        url: "/app/importacoes",
-        icon: Repeat2,
-        roles: ["operador", "gestor", "owner"],
-      },
     ],
   },
   {
     label: "Financeiro",
     items: [
       {
-        title: "Fluxo de Caixa",
-        url: "/app/fluxo-de-caixa",
-        icon: FileText,
+        title: "Contas a pagar",
+        url: "/app/contas-a-pagar",
+        icon: TrendingDown,
+        roles: ["operador", "gestor", "owner"],
+      },
+      {
+        title: "Vendas realizadas",
+        url: "/app/vendas-realizadas",
+        icon: TrendingUp,
         roles: ["operador", "gestor", "owner"],
       },
       {
@@ -162,6 +157,13 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         url: "/app/desenvolvimento",
         icon: FlaskConical,
         roles: ["operador", "gestor", "owner"],
+        exact: true,
+      },
+      {
+        title: "Fornecedores globais",
+        url: "/app/desenvolvimento/fornecedores",
+        icon: Truck,
+        roles: ["operador", "gestor", "owner"],
       },
     ],
   },
@@ -178,9 +180,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-function isNavActive(pathname: string, url: string): boolean {
+function isNavActive(pathname: string, url: string, exact?: boolean): boolean {
   if (url === "/app") {
     return pathname === "/app" || pathname === "/app/";
+  }
+  if (exact) {
+    return pathname === url || pathname === `${url}/`;
   }
   return pathname === url || pathname.startsWith(`${url}/`);
 }
@@ -289,12 +294,6 @@ function AppLayoutContent() {
                 />
                 Escuro
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("system")}>
-                <Monitor
-                  className={`mr-2 h-4 w-4 ${theme === "system" ? "opacity-100" : "opacity-50"}`}
-                />
-                Sistema
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -340,10 +339,7 @@ function AppLayoutContent() {
         </div>
       </header>
 
-      <Sidebar
-        collapsible="icon"
-        className="top-12 bottom-0 h-auto min-h-0"
-      >
+      <Sidebar collapsible="icon" className="top-12 bottom-0 h-auto min-h-0">
         {isMobile && (
           <SidebarHeader className="flex items-start justify-center ">
             <Link
@@ -380,7 +376,11 @@ function AppLayoutContent() {
               <SidebarGroupContent className="mt-0">
                 <SidebarMenu>
                   {section.items.map((item) => {
-                    const active = isNavActive(location.pathname, item.url);
+                    const active = isNavActive(
+                      location.pathname,
+                      item.url,
+                      item.exact,
+                    );
                     return (
                       <SidebarMenuItem key={item.url}>
                         <SidebarMenuButton

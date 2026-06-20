@@ -10,16 +10,19 @@ type ExpenseLauncherInfoProps = {
   expenseId: string;
   className?: string;
   compact?: boolean;
+  fallbackLine?: string | null;
 };
 
 export function ExpenseLauncherInfo({
   expenseId,
   className,
   compact,
+  fallbackLine,
 }: ExpenseLauncherInfoProps) {
-  const [line, setLine] = useState<string | null>(null);
+  const [line, setLine] = useState<string | null>(fallbackLine ?? null);
 
   useEffect(() => {
+    if (compact && fallbackLine) return;
     let cancelled = false;
     void (async () => {
       const { data, error } = await supabase.rpc("get_expense_launcher_label", {
@@ -27,7 +30,7 @@ export function ExpenseLauncherInfo({
       });
       if (cancelled) return;
       if (error) {
-        setLine("—");
+        setLine(fallbackLine ?? "—");
         return;
       }
       setLine(
@@ -37,7 +40,7 @@ export function ExpenseLauncherInfo({
     return () => {
       cancelled = true;
     };
-  }, [expenseId]);
+  }, [expenseId, compact, fallbackLine]);
 
   const text = line ?? (compact ? "…" : "Carregando…");
 

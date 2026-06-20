@@ -23,6 +23,7 @@ import {
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import { Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -132,7 +133,7 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, w, c] = await Promise.all([
+    const [p, w] = await Promise.all([
       supabase
         .from("products")
         .select("*")
@@ -147,12 +148,14 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
         .eq("products.company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(80),
-      supabase.from("product_unit_conversions").select("*").eq("company_id", companyId),
     ]);
     setLoading(false);
-    setProducts((p.data ?? []) as Product[]);
+    const productsList = (p.data ?? []) as Product[];
+    setProducts(productsList);
     setRows((w.data ?? []) as unknown as WasteRow[]);
-    setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
   }, [companyId]);
 
   useEffect(() => {

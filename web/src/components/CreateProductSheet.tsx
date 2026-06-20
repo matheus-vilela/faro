@@ -30,6 +30,7 @@ import {
   convertQuantityForProduct,
   rebaseProductConversionsToHub,
 } from '@/lib/companyUnits/convert'
+import { sanitizeCatalogProductName } from '@/lib/productImport/canonicalName'
 import {
   defaultProductStockUnitCode,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -37,6 +38,10 @@ import {
 import { supabase } from '@/lib/supabase'
 import type { CompanyProductCategory } from '@/types/companyProductCategory'
 import type { Product } from '@/types/product'
+import {
+  prepareProductUnitConversionsForPersist,
+} from '@/lib/productUnitConversionsService'
+import { toProductUnitConversionsJson } from '@/lib/productUnitConversionsJson'
 import type { ProductUnitConversionDraft } from '@/types/productUnitConversion'
 import { Package, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -57,6 +62,8 @@ interface CreateProductSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   companyId: string
+  /** Nome sugerido ao abrir (ex.: termo da busca no seletor de insumos). */
+  defaultName?: string
   onSuccess?: (product: Product) => void
 }
 
@@ -64,6 +71,7 @@ export function CreateProductSheet({
   open,
   onOpenChange,
   companyId,
+  defaultName,
   onSuccess,
 }: CreateProductSheetProps) {
   const roundUnitPrice = (value: number) =>
@@ -124,7 +132,18 @@ export function CreateProductSheet({
     setLastUnitValueUnitCode(defaultProductStockUnitCode())
     setComposesCmv(true)
     setPendingConversions([])
-  }, [open, companyId, loadCompanyProductCategories])
+    const suggested = defaultName?.trim()
+    if (suggested) {
+      setName(sanitizeCatalogProductName(suggested) || suggested)
+    } else {
+      setName('')
+    }
+    setSku('')
+    setMinQuantity('')
+    setLastUnitValue('')
+    setBarcode('')
+    setProductCategoryIds([])
+  }, [open, companyId, defaultName, loadCompanyProductCategories])
 
   const unitOptions = useMemo(
     () => getSystemProductUnitSelectOptionsWithLegacy(unit),
@@ -183,7 +202,8 @@ export function CreateProductSheet({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!companyId || !name.trim()) return
+    const catalogName = sanitizeCatalogProductName(name)
+    if (!companyId || !catalogName) return
     setLoading(true)
     const finalSku = sku.trim() || generateRandomSku()
     const parsedLast = parseCurrencyInput(lastUnitValue)
@@ -208,17 +228,29 @@ export function CreateProductSheet({
             ) ?? lastUnitValueToSave,
           )
         : null
+    const toPersistConversions =
+      pendingConversions.length > 0
+        ? prepareProductUnitConversionsForPersist(
+            unit,
+            pendingConversions.map((r) => ({
+              ...r,
+              company_id: companyId,
+              product_id: '',
+            })),
+          )
+        : []
     const { data, error } = await supabase
       .from('products')
       .insert({
         company_id: companyId,
-        name: name.trim(),
+        name: catalogName,
         sku: finalSku,
         unit,
         min_quantity: parseFloat(minQuantity || '0') || 0,
         current_quantity: 0,
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
+        unit_conversions: toProductUnitConversionsJson(toPersistConversions),
         ...(lastUnitValueToSave != null
           ? {
               last_unit_value: lastUnitValueToSave,
@@ -241,31 +273,13 @@ export function CreateProductSheet({
         .from('product_category_assignments')
         .insert(
           productCategoryIds.map((category_id) => ({
+            company_id: companyId,
             product_id: product.id,
             category_id,
           })),
         )
       if (linkErr) {
         console.error(linkErr)
-        setLoading(false)
-        return
-      }
-    }
-    if (pendingConversions.length > 0) {
-      const { error: convErr } = await supabase
-        .from('product_unit_conversions')
-        .insert(
-          pendingConversions.map((r) => ({
-            company_id: companyId,
-            product_id: product.id,
-            primary_qty: r.primary_qty,
-            primary_unit_code: r.primary_unit_code,
-            secondary_qty: r.secondary_qty,
-            secondary_unit_code: r.secondary_unit_code,
-          })),
-        )
-      if (convErr) {
-        console.error(convErr)
         setLoading(false)
         return
       }

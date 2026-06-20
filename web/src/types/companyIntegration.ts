@@ -13,9 +13,19 @@ export type EpocIntegrationSettings = {
   /** Preenchido pela edge `epoc-sync-csv` após sucesso. */
   last_epoc_csv_sync_at?: string;
   last_epoc_csv_storage_path?: string;
+  /** Reserva do rodízio cron (`epoc-daily-sync`); mesma unidade só reprocessa após 12 h. */
+  epoc_daily_sync_rotacao_at?: string;
   /** Última tentativa da rotina diária (`epoc-daily-sync`); uso no dashboard. */
   epoc_daily_sync_last_attempt_at?: string;
   epoc_daily_sync_last_attempt_ok?: boolean;
+  /** `no_tbl_export` = dia sem vendas no portal (rotina diária OK). */
+  epoc_daily_sync_last_attempt_outcome?:
+    | "success"
+    | "no_tbl_export"
+    | "failed"
+    | null;
+  /** Dia consultado na rotina diária (dd/MM/aaaa), quando não há vendas. */
+  epoc_daily_sync_last_consulted_day_br?: string | null;
   epoc_daily_sync_last_attempt_error?: string | null;
   /**
    * Legado: ignorado pelo import; a edge escolhe automaticamente a primeira folha de
@@ -54,6 +64,10 @@ export function parseEpocSettings(
       typeof raw.last_epoc_csv_storage_path === "string"
         ? raw.last_epoc_csv_storage_path
         : "",
+    epoc_daily_sync_rotacao_at:
+      typeof raw.epoc_daily_sync_rotacao_at === "string"
+        ? raw.epoc_daily_sync_rotacao_at
+        : "",
     epoc_daily_sync_last_attempt_at:
       typeof raw.epoc_daily_sync_last_attempt_at === "string"
         ? raw.epoc_daily_sync_last_attempt_at
@@ -62,6 +76,18 @@ export function parseEpocSettings(
       typeof raw.epoc_daily_sync_last_attempt_ok === "boolean"
         ? raw.epoc_daily_sync_last_attempt_ok
         : undefined,
+    epoc_daily_sync_last_attempt_outcome:
+      raw.epoc_daily_sync_last_attempt_outcome === "success" ||
+      raw.epoc_daily_sync_last_attempt_outcome === "no_tbl_export" ||
+      raw.epoc_daily_sync_last_attempt_outcome === "failed"
+        ? raw.epoc_daily_sync_last_attempt_outcome
+        : undefined,
+    epoc_daily_sync_last_consulted_day_br:
+      raw.epoc_daily_sync_last_consulted_day_br === null
+        ? null
+        : typeof raw.epoc_daily_sync_last_consulted_day_br === "string"
+          ? raw.epoc_daily_sync_last_consulted_day_br
+          : undefined,
     epoc_daily_sync_last_attempt_error:
       raw.epoc_daily_sync_last_attempt_error === null
         ? null

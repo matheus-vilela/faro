@@ -1,49 +1,71 @@
-import { assertEquals } from "jsr:@std/assert@1/assert-equals";
-import {
-  batchImportReviewPendingTitleDetail,
-  importJobItemPendingReason,
-} from "./batchImportPendingMessaging.ts";
+import { assertEquals } from "jsr:@std/assert@1";
+import { lineNeedsCatalogProductReview } from "./batchImportPendingMessaging.ts";
 
-Deno.test("importJobItemPendingReason prefers resolution status label", () => {
+Deno.test("lineNeedsCatalogProductReview: AUTO_MATCH com produto => não", () => {
   assertEquals(
-    importJobItemPendingReason({
-      resolutionStatus: "UNIT_CONFLICT_PENDING",
-      matchReason: "extra",
+    lineNeedsCatalogProductReview({
+      resolution: "AUTO_MATCH",
+      productId: "uuid-1",
+      pm: { resolutionStatus: "AUTO_MATCH", needsConfirmation: false },
     }),
-    "Conflito de unidade",
+    false,
   );
 });
 
-Deno.test("importJobItemPendingReason falls back to trimmed matchReason", () => {
+Deno.test("lineNeedsCatalogProductReview: sem produto => sim", () => {
   assertEquals(
-    importJobItemPendingReason({
-      resolutionStatus: "",
-      matchReason: "Motivo longo do matcher",
+    lineNeedsCatalogProductReview({
+      resolution: "PENDING_REVIEW",
+      productId: null,
+      pm: { resolutionStatus: "PENDING_USER_CONFIRM" },
     }),
-    "Motivo longo do matcher",
+    true,
   );
 });
 
-Deno.test("batchImportReviewPendingTitleDetail marks missing product", () => {
-  const x = batchImportReviewPendingTitleDetail({
-    productName: "Item X",
-    pm: { resolutionStatus: "PENDING_USER_CONFIRM", matchReason: "" },
-    missingProduct: true,
-  });
-  assertEquals(x.reason_code, "MISSING_PRODUCT");
-  assertEquals(x.title, "Sem produto resolvido — Item X");
+Deno.test("lineNeedsCatalogProductReview: NEW_PRODUCT_CREATED com pm residual => não", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "NEW_PRODUCT_CREATED",
+      productId: "uuid-new",
+      pm: {
+        resolutionStatus: "NEW_PRODUCT_STAGED",
+        needsConfirmation: true,
+      },
+    }),
+    false,
+  );
 });
 
-Deno.test("batchImportReviewPendingTitleDetail uses status when product exists", () => {
-  const x = batchImportReviewPendingTitleDetail({
-    productName: "Limão",
-    pm: {
-      resolutionStatus: "UNIT_CONFLICT_PENDING",
-      matchReason: "Detalhe técnico",
-    },
-    missingProduct: false,
-  });
-  assertEquals(x.reason_code, "UNIT_CONFLICT_PENDING");
-  assertEquals(x.title, "Conflito de unidade — Limão");
-  assertEquals(x.detail, "Detalhe técnico");
+Deno.test("lineNeedsCatalogProductReview: AUTO_MATCH com needsConfirmation => não", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "AUTO_MATCH",
+      productId: "uuid-1",
+      pm: { resolutionStatus: "AUTO_MATCH", needsConfirmation: true },
+    }),
+    false,
+  );
+});
+
+Deno.test("lineNeedsCatalogProductReview: NEW_PRODUCT_STAGED => sim", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "PENDING_REVIEW",
+      productId: "x",
+      pm: { resolutionStatus: "NEW_PRODUCT_STAGED", needsConfirmation: false },
+    }),
+    true,
+  );
+});
+
+Deno.test("lineNeedsCatalogProductReview: SKIPPED => não", () => {
+  assertEquals(
+    lineNeedsCatalogProductReview({
+      resolution: "SKIPPED",
+      productId: null,
+      pm: undefined,
+    }),
+    false,
+  );
 });

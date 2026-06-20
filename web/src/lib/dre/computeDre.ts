@@ -139,10 +139,14 @@ export function sumForBucket(
 export function buildDreComputedFromMaps(
   byCategoryId: Map<string, number>,
   categoriesById: Map<string, CompanyCategory>,
+  /** CMV de vendas (revenue_entries.cmv_amount) no período — competência por entry_date. */
+  salesCmvFromRevenueEntries = 0,
 ): DreComputed {
   const vendasBrutas = sumForBucket(byCategoryId, categoriesById, "VENDAS_BRUTAS");
   const deducoesReceita = sumForBucket(byCategoryId, categoriesById, "DEDUCAO_RECEITA");
-  const cmv = sumForBucket(byCategoryId, categoriesById, "CMV");
+  const cmv =
+    sumForBucket(byCategoryId, categoriesById, "CMV") +
+    Math.max(0, Number(salesCmvFromRevenueEntries) || 0);
   const despesasVariaveis = sumForBucket(byCategoryId, categoriesById, "DESPESAS_VARIAVEIS");
   const despesasFixas = sumForBucket(byCategoryId, categoriesById, "DESPESAS_FIXAS");
   const resultadoFinanceiroReceitas = sumForBucket(

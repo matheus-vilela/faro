@@ -11,6 +11,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
+import {
+  isOnboardingPdvSyncInProgress,
+  patchOnboardingPdv,
+  type OnboardingPdvPatch,
+} from "../_shared/onboardingPdvPatch.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +42,18 @@ const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
+
+interface OnboardingPdv {
+  sync: boolean;
+  completed: boolean;
+  sales_sync: number;
+  portal_busy: boolean;
+  sales_total: number;
+  import_error: string | null;
+  import_status: string | null;
+  portal_message: string | null;
+  portal_outcome: string | null;
+}
 
 function headersValidador(
   cookies: string,
@@ -173,7 +190,9 @@ function normalizeEpocBaseUrl(base: string): string {
   const lower = t.toLowerCase();
   const suf = "/index.php";
   if (lower.endsWith(suf)) {
-    return t.slice(0, -suf.length).replace(/\/$/, "") || t.slice(0, -suf.length);
+    return (
+      t.slice(0, -suf.length).replace(/\/$/, "") || t.slice(0, -suf.length)
+    );
   }
   return t;
 }
@@ -660,7 +679,9 @@ Deno.serve(async (req) => {
       : body.sync_mode === "onboarding_initial"
         ? "onboarding_initial"
         : "full";
-  const manualConsultaDias = normalizeConsultaDiasBrInput(body.consulta_dias_br);
+  const manualConsultaDias = normalizeConsultaDiasBrInput(
+    body.consulta_dias_br,
+  );
 
   const admin = createClient(supabaseUrl, serviceKey);
   const serviceKeyNorm = serviceKey.trim();
@@ -758,6 +779,35 @@ Deno.serve(async (req) => {
   }
   if (!integ.enabled) {
     return json({ ok: false, error: "Integração inativa" }, 400);
+  }
+
+  if (syncMode === "previous_day") {
+    const { data: companyRow, error: companyErr } = await admin
+      .from("companies")
+      .select("onboarding_pdv")
+      .eq("id", companyId)
+      .maybeSingle();
+    if (companyErr) {
+      return json({ ok: false, error: companyErr.message }, 500);
+    }
+    if (isOnboardingPdvSyncInProgress(companyRow?.onboarding_pdv)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "Sincronização PDV do onboarding em curso. A rotina diária EPOC não pode executar agora.",
+        },
+        409,
+      );
+    }
+  }
+
+  /** Só o fluxo `onboarding_initial` atualiza `onboarding_pdv` (card do dashboard). */
+  const patchOnboardingPdvEnabled = syncMode === "onboarding_initial";
+
+  async function patchOb(patch: OnboardingPdvPatch): Promise<void> {
+    if (!patchOnboardingPdvEnabled) return;
+    await patchOnboardingPdv(admin, companyId, patch, LOG);
   }
 
   const raw = (integ.settings ?? {}) as Record<string, unknown>;
@@ -906,11 +956,20 @@ Deno.serve(async (req) => {
     return step;
   }
 
-  function failJson(
+  async function failJson(
     httpStatus: number,
     error: string,
     extras: Record<string, unknown> = {},
-  ): Response {
+    opts?: { skipPortalPatch?: boolean },
+  ): Promise<Response> {
+    if (!opts?.skipPortalPatch) {
+      await patchOb({
+        portal_busy: false,
+        portal_outcome: "failed",
+        portal_message: error.slice(0, 500),
+        sync: false,
+      });
+    }
     return json(
       {
         ok: false,
@@ -923,6 +982,13 @@ Deno.serve(async (req) => {
       httpStatus,
     );
   }
+
+  await patchOb({
+    portal_busy: true,
+    portal_outcome: null,
+    portal_message: null,
+    import_error: null,
+  });
 
   log("inicio", {
     company_id: companyId,
@@ -954,7 +1020,7 @@ Deno.serve(async (req) => {
   });
 
   if (!loginResult.ok) {
-    return failJson(502, loginResult.message, {
+    return await failJson(502, loginResult.message, {
       epoc_error_code: loginResult.errorCode,
     });
   }
@@ -1083,7 +1149,7 @@ Deno.serve(async (req) => {
   // --- Fase 1: validadorOz + acoes “vazia” → exige id=ConteudoTela ----------
   const v1 = await callValidador("fase1");
   if (v1.status === "fail") {
-    return failJson(502, v1.message ?? "validadorOz fase1 falhou.");
+    return await failJson(502, v1.message ?? "validadorOz fase1 falhou.");
   }
 
   const acoes1 = await callAcoes("fase1", {
@@ -1098,7 +1164,10 @@ Deno.serve(async (req) => {
     token: tokenForBody,
   });
   if (!acoes1.ok) {
-    return failJson(502, acoes1.step.message ?? "acoes.php (fase1) falhou.");
+    return await failJson(
+      502,
+      acoes1.step.message ?? "acoes.php (fase1) falhou.",
+    );
   }
   if (!hasConteudoTela(acoes1.text)) {
     acoes1.step.status = "fail";
@@ -1106,7 +1175,7 @@ Deno.serve(async (req) => {
     log("conteudo_tela_nao_encontrado", {
       previa: previewText(acoes1.text, 800),
     });
-    return failJson(
+    return await failJson(
       502,
       "Verifique credenciais, NaoMenu e o módulo configurado.",
     );
@@ -1204,14 +1273,12 @@ Deno.serve(async (req) => {
 
         const htmlDia = unwrapAcoesHtml(acoesDia.text);
         if (!htmlHasId(htmlDia, EPOC_ID_TBL_EXPORT)) {
-          const portalMsg =
-            mensagemPortalSemEventosPorFiltro(acoesDia.text);
+          const portalMsg = mensagemPortalSemEventosPorFiltro(acoesDia.text);
           return {
             dia,
             suffix,
             ok: false as const,
-            message:
-              portalMsg ?? "Sem id=tblExport para este dia.",
+            message: portalMsg ?? "Sem id=tblExport para este dia.",
             portal_feedback: portalMsg ?? undefined,
           };
         }
@@ -1259,14 +1326,10 @@ Deno.serve(async (req) => {
           `Resumo consulta diária ${result.dia}`,
           {
             status: "warn",
-            message: portalFb
-              ? `${result.dia}: ${portalFb}`
-              : result.message,
+            message: portalFb ? `${result.dia}: ${portalFb}` : result.message,
             detalhes: {
               dia: result.dia,
-              ...(portalFb
-                ? { mensagem_portal_epoc: portalFb }
-                : {}),
+              ...(portalFb ? { mensagem_portal_epoc: portalFb } : {}),
             },
           },
         );
@@ -1375,14 +1438,64 @@ Deno.serve(async (req) => {
       epocCsvSyncRunId = String(histRow.id);
     }
 
-    return failJson(
+    await patchOb({
+      portal_busy: false,
+      portal_outcome: "no_tbl_export",
+      portal_message: summary.slice(0, 500),
+      sync: false,
+    });
+
+    const isDailyPreviousDayOnly =
+      syncMode === "previous_day" && !manualConsultaDias?.length;
+
+    if (isDailyPreviousDayOnly) {
+      const nowIso = new Date().toISOString();
+      const nextSettings: Record<string, unknown> = {
+        ...raw,
+        epoc_daily_sync_last_attempt_at: nowIso,
+        epoc_daily_sync_last_attempt_ok: true,
+        epoc_daily_sync_last_attempt_outcome: "no_tbl_export",
+        epoc_daily_sync_last_attempt_error: null,
+        epoc_daily_sync_last_consulted_day_br: diasConsulta[0] ?? null,
+      };
+      const { error: upDailyErr } = await admin
+        .from("company_integrations")
+        .update({
+          settings: nextSettings,
+          updated_at: nowIso,
+        })
+        .eq("company_id", companyId)
+        .eq("provider", "epoc");
+      if (upDailyErr) {
+        log("epoc_daily_sync_no_sales_settings_falhou", {
+          message: upDailyErr.message,
+        });
+      }
+
+      return json({
+        ok: true,
+        outcome: "no_tbl_export",
+        message: summary,
+        consulted_day_br: diasConsulta[0] ?? null,
+        tblExport_found: false,
+        dias_consultados: diasConsulta.length,
+        epoc_csv_sync_run_id: epocCsvSyncRunId,
+        steps_prefix: stepsPrefix,
+        steps,
+        signed_url_expires_in: signedTtl,
+      });
+    }
+
+    return await failJson(
       502,
-      `Nenhuma tabela #tblExport encontrada na janela (${diasConsultaLabel}).`,
+      summary,
       {
         tblExport_found: false,
         dias_consultados: diasConsulta.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
+        outcome: "no_tbl_export",
       },
+      { skipPortalPatch: true },
     );
   }
 
@@ -1472,7 +1585,9 @@ Deno.serve(async (req) => {
   ) {
     nextSettings.epoc_daily_sync_last_attempt_at = nowIso;
     nextSettings.epoc_daily_sync_last_attempt_ok = true;
+    nextSettings.epoc_daily_sync_last_attempt_outcome = "success";
     nextSettings.epoc_daily_sync_last_attempt_error = null;
+    nextSettings.epoc_daily_sync_last_consulted_day_br = null;
   }
 
   const { error: upIntegErr } = await admin
@@ -1485,7 +1600,7 @@ Deno.serve(async (req) => {
     .eq("provider", "epoc");
   if (upIntegErr) {
     log("settings_falha", { message: upIntegErr.message });
-    return failJson(
+    return await failJson(
       500,
       `Conteúdo salvo no Storage, mas metadados não atualizados: ${upIntegErr.message}.`,
       {},
@@ -1527,6 +1642,13 @@ Deno.serve(async (req) => {
       log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
     }
   }
+
+  await patchOb({
+    portal_busy: false,
+    portal_outcome: "success",
+    portal_message: null,
+    import_status: csvRevenueImportJobId ? "pending" : null,
+  });
 
   log("concluido", {
     steps: steps.length,

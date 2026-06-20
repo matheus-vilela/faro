@@ -46,19 +46,19 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
   convertQuantityForProduct,
   getLockedSystemSecondaryQty,
 } from "@/lib/companyUnits/convert";
-import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
+import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import {
   countLinesNeedingProductReview,
   divergenceReasonLabel,
-  valuesDivergeCents,
+  getNfeExpenseValueBreakdown,
 } from "@/lib/expenseDivergenceUi";
-import { findExpenseDuplicateId } from "@/lib/expenseDedup";
-import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj } from "@/lib/masks";
+import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { canGestorAccess } from "@/lib/roles";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -76,10 +76,12 @@ import {
   type PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
   CheckCircle2,
+  ChevronRight,
   Copy,
   FileText,
   Loader2,
@@ -97,6 +99,28 @@ import { toast } from "sonner";
 function formatDocForDisplay(doc: string | null): string {
   if (!doc || !doc.replace(/\D/g, "")) return "";
   return maskCpfCnpj(doc);
+}
+
+function compactLauncherFallback(exp: Expense): string {
+  const src = String(exp.expense_source ?? "")
+    .trim()
+    .toLowerCase();
+  if (src === "whatsapp") {
+    const phone = String(exp.whatsapp_sender_phone_normalized ?? "").trim();
+    return phone ? `WhatsApp · ${phone}` : "WhatsApp";
+  }
+  return "Plataforma Faro";
+}
+
+function expenseListDisplayTotal(exp: Expense): number {
+  const docTotal = Number(exp.document_total ?? 0);
+  if (Number.isFinite(docTotal) && docTotal > 0) return docTotal;
+  return (
+    exp.expense_items?.reduce(
+      (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+      0,
+    ) ?? 0
+  );
 }
 
 const TYPE_LABELS: Record<Exclude<ExpenseType, "nota_fiscal">, string> = {
@@ -160,6 +184,7 @@ const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 export function Despesas() {
   const { currentCompany, currentRole } = useCompany();
+  const companyId = currentCompany?.id ?? "";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightExpenseId = searchParams.get("expense");
@@ -219,8 +244,10 @@ export function Despesas() {
   const [importDocumentTotal, setImportDocumentTotal] = useState<number | null>(
     null,
   );
-  const [importRequiresProductConfirmation, setImportRequiresProductConfirmation] =
-    useState(false);
+  const [
+    importRequiresProductConfirmation,
+    setImportRequiresProductConfirmation,
+  ] = useState(false);
   const [importProductReviewLineCount, setImportProductReviewLineCount] =
     useState(0);
   const [divergenceReasonValue, setDivergenceReasonValue] = useState("");
@@ -237,8 +264,17 @@ export function Despesas() {
   const [linking, setLinking] = useState(false);
   const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
 
+  const boletosByExpenseId = useMemo(() => {
+    const map = new Map<string, Boleto>();
+    for (const b of boletos) {
+      if (!b.expense_id) continue;
+      if (!map.has(b.expense_id)) map.set(b.expense_id, b);
+    }
+    return map;
+  }, [boletos]);
+
   const getBoletoForExpense = (expenseId: string) =>
-    boletos.find((b) => b.expense_id === expenseId);
+    boletosByExpenseId.get(expenseId);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -266,7 +302,10 @@ export function Despesas() {
       const allowed = new Set<string>([base]);
       const convs = conversionsByProduct.get(productId) ?? [];
       for (const c of convs) {
-        if (c.primary_unit_code?.trim().toLowerCase() === base.trim().toLowerCase()) {
+        if (
+          c.primary_unit_code?.trim().toLowerCase() ===
+          base.trim().toLowerCase()
+        ) {
           allowed.add(c.secondary_unit_code);
         }
       }
@@ -302,8 +341,37 @@ export function Despesas() {
     [conversionsByProduct, productById],
   );
 
+  const fetchSupportData = useCallback(async () => {
+    if (!companyId) return;
+    const [{ data: catRows }, { data: sup }, { data: prod }] = await Promise.all([
+      supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("suppliers")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+    ]);
+    const productsList = (prod as Product[]) ?? [];
+    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
+    setSuppliers((sup as Supplier[]) ?? []);
+    setProducts(productsList);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
+  }, [companyId]);
+
   const fetchData = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    if (!companyId) return;
     setLoading(true);
     const { start, end } = getMonthRange(period.month, period.year);
     const startDate = start.slice(0, 10);
@@ -316,9 +384,9 @@ export function Despesas() {
         expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
       `,
-        { count: "exact" },
+        { count: "estimated" },
       )
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .gte("reference_date", startDate)
       .lte("reference_date", endDate)
       .order("reference_date", { ascending: false })
@@ -341,40 +409,14 @@ export function Despesas() {
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("flow_type", "payable");
-    const { data: catRows } = await supabase
-      .from("company_categories")
-      .select("*")
-      .eq("company_id", currentCompany.id)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-    setCompanyCategories((catRows as CompanyCategory[]) ?? []);
-    const [{ data: sup }, { data: prod }, { data: conv }] = await Promise.all([
-      supabase
-        .from("suppliers")
-        .select("*")
-        .eq("company_id", currentCompany.id)
-        .order("name"),
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", currentCompany.id)
-        .order("name"),
-      supabase
-        .from("product_unit_conversions")
-        .select("*")
-        .eq("company_id", currentCompany.id),
-    ]);
     setExpenses((ex as Expense[]) ?? []);
     setExpensesCount(count ?? 0);
     setBoletos((bo as Boleto[]) ?? []);
-    setSuppliers((sup as Supplier[]) ?? []);
-    setProducts((prod as Product[]) ?? []);
-    setProductConversions((conv as ProductUnitConversionDraft[]) ?? []);
     setLoading(false);
   }, [
-    currentCompany,
+    companyId,
     period.month,
     period.year,
     debouncedSearch,
@@ -389,6 +431,10 @@ export function Despesas() {
   useEffect(() => {
     queueMicrotask(() => fetchData());
   }, [fetchData]);
+
+  useEffect(() => {
+    queueMicrotask(() => fetchSupportData());
+  }, [fetchSupportData]);
 
   useEffect(() => {
     if (highlightExpenseId) {
@@ -538,6 +584,7 @@ export function Despesas() {
           ? toStockQty(it.product_id, Number(it.quantity), invoiceUnit)
           : null;
       await supabase.from("expense_items").insert({
+        company_id: currentCompany.id,
         expense_id: exp.id,
         product_name: it.product_name,
         quantity: it.quantity,
@@ -549,6 +596,7 @@ export function Despesas() {
       });
     }
     await supabase.from("recebimentos").insert({
+      company_id: currentCompany.id,
       expense_id: exp.id,
     });
     setType("nota_fiscal");
@@ -824,7 +872,7 @@ export function Despesas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pelo mês de competência da despesa (data do documento / emissão da NF)"
+        description="Lista filtrada pelo mês de competência da despesa"
       />
 
       <Sheet
@@ -1312,16 +1360,20 @@ export function Despesas() {
                           <Select
                             value={it.product_id ?? "__none__"}
                             onValueChange={(v) =>
-                              updateItem(i, (() => {
-                                const productId = v === "__none__" ? undefined : v;
-                                const product = productId
-                                  ? products.find((p) => p.id === productId)
-                                  : undefined;
-                                return {
-                                  product_id: productId,
-                                  invoice_unit: product?.unit ?? undefined,
-                                };
-                              })())
+                              updateItem(
+                                i,
+                                (() => {
+                                  const productId =
+                                    v === "__none__" ? undefined : v;
+                                  const product = productId
+                                    ? products.find((p) => p.id === productId)
+                                    : undefined;
+                                  return {
+                                    product_id: productId,
+                                    invoice_unit: product?.unit ?? undefined,
+                                  };
+                                })(),
+                              )
                             }
                           >
                             <SelectTrigger>
@@ -1360,7 +1412,8 @@ export function Despesas() {
                               value={it.invoice_unit ?? "__none__"}
                               onValueChange={(v) =>
                                 updateItem(i, {
-                                  invoice_unit: v === "__none__" ? undefined : v,
+                                  invoice_unit:
+                                    v === "__none__" ? undefined : v,
                                 })
                               }
                             >
@@ -1368,12 +1421,19 @@ export function Despesas() {
                                 <SelectValue placeholder="Selecione a unidade" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">Selecione</SelectItem>
-                                {allowedUnitsForProduct(it.product_id).map((u) => (
-                                  <SelectItem key={`${it.product_id}-${u}`} value={u}>
-                                    {u}
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="__none__">
+                                  Selecione
+                                </SelectItem>
+                                {allowedUnitsForProduct(it.product_id).map(
+                                  (u) => (
+                                    <SelectItem
+                                      key={`${it.product_id}-${u}`}
+                                      value={u}
+                                    >
+                                      {u}
+                                    </SelectItem>
+                                  ),
+                                )}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1448,7 +1508,7 @@ export function Despesas() {
             <CardDescription>
               {onlyPendingApproval
                 ? "Somente importações pelo WhatsApp pendentes de aprovação do proprietário."
-                : "Clique no ícone de boleto para vincular"}
+                : "Use o botão de boleto na linha para vincular ou ver o resumo"}
             </CardDescription>
           </div>
         </CardHeader>
@@ -1483,7 +1543,7 @@ export function Despesas() {
                 : "Nenhuma despesa cadastrada"}
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {expenses.map((exp) => {
                 const isHighlight = highlightExpenseId === exp.id;
                 const boleto = getBoletoForExpense(exp.id);
@@ -1492,19 +1552,30 @@ export function Despesas() {
                   exp.expense_source === "whatsapp" && exp.status === "pending";
                 const sumItemsRow =
                   exp.expense_items?.reduce(
-                    (s, it) =>
-                      s + Number(it.quantity) * Number(it.unit_value),
+                    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
                     0,
                   ) ?? 0;
                 const documentTotalImport =
                   exp.document_total != null
                     ? Number(exp.document_total)
                     : null;
-                const valueRisk =
-                  documentTotalImport != null &&
-                  valuesDivergeCents(documentTotalImport, sumItemsRow);
+                const nfeVal = getNfeExpenseValueBreakdown({
+                  documentTotal: documentTotalImport,
+                  sumItems: sumItemsRow,
+                  financialReconciliationJson: exp.financial_reconciliation_json ?? null,
+                });
+                const valueRisk = nfeVal.needsAttention;
                 const unlinkedProducts =
                   exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
+                const typeLabel =
+                  exp.type === "nota_fiscal"
+                    ? "Nota fiscal"
+                    : TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS];
+                const displayTitle =
+                  exp.display_name?.trim() ||
+                  exp.supplier_name?.trim() ||
+                  typeLabel ||
+                  "Sem fornecedor";
                 return (
                   <div
                     key={exp.id}
@@ -1515,126 +1586,148 @@ export function Despesas() {
                     onKeyDown={(e) =>
                       e.key === "Enter" && setDetailExpenseId(exp.id)
                     }
-                    className={`flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors cursor-pointer ${"hover:bg-muted/50"} ${isHighlight ? "" : ""}`}
+                    className={cn(
+                      "group flex cursor-pointer flex-col gap-4 rounded-xl border bg-card p-4 transition-all sm:flex-row sm:items-stretch",
+                      "hover:border-border/90 hover:bg-muted/25 hover:shadow-sm",
+                      isHighlight && "border-primary/45 bg-primary/5 ring-2 ring-primary/15",
+                      linked
+                        ? "border-l-[3px] border-l-green-600/80 pl-[calc(1rem-3px)]"
+                        : "border-l-[3px] border-l-amber-500/50 pl-[calc(1rem-3px)]",
+                    )}
                   >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium flex flex-wrap items-center gap-2">
-                        <span>
-                          {exp.supplier_name ||
-                            TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS] ||
-                            "Sem fornecedor"}
-                        </span>
-                      </p>
-                      {pendingOwnerApproval && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-md border border-amber-600/25 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-950 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100 mt-1"
-                          title="Importação pelo WhatsApp — aguardando aprovação do proprietário "
-                        >
-                          <MessageCircle
-                            className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300"
-                            aria-hidden
-                          />
-                          Pendente de aprovação
-                        </span>
-                      )}
-                      {(valueRisk || unlinkedProducts > 0) && (
-                        <span className="mt-1 flex flex-wrap gap-1.5">
-                          {valueRisk && (
-                            <span
-                              className="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
-                              title="Total do documento na importação difere da soma das linhas"
-                            >
-                              Ajuste: valores
-                            </span>
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate text-base font-semibold leading-snug tracking-tight">
+                            {displayTitle}
+                          </p>
+                          {exp.supplier_document && (
+                            <p className="text-sm text-muted-foreground">
+                              {formatDocForDisplay(exp.supplier_document)}
+                            </p>
                           )}
-                          {unlinkedProducts > 0 && (
-                            <span
-                              className="inline-flex items-center rounded-md border border-violet-500/35 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-900 dark:text-violet-100"
-                              title="Linhas sem produto vinculado ao estoque"
-                            >
-                              Revisar produto
-                              {unlinkedProducts > 1
-                                ? ` (${unlinkedProducts})`
-                                : ""}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      {exp.supplier_document && (
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                          {formatDocForDisplay(exp.supplier_document)}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        <span className="font-medium text-muted-foreground">
-                          Competência:{" "}
-                        </span>
-                        {exp.reference_date
-                          ? formatDate(`${exp.reference_date}T12:00:00`)
-                          : "—"}
-                        <span className="text-muted-foreground/70 mx-1">·</span>
-                        <span className="font-medium text-muted-foreground">
-                          Quem lançou:{" "}
-                        </span>
-                        <ExpenseLauncherInfo
-                          expenseId={exp.id}
-                          compact
-                          className="inline"
+                        </div>
+                        <ChevronRight
+                          className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
+                          aria-hidden
                         />
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        <span className="font-medium text-muted-foreground">
-                          Categoria:
-                        </span>{" "}
-                        {boleto
-                          ? formatBoletoCategoryLabel(boleto, categoriesById)
-                          : "—"}{" "}
-                        <span className="text-muted-foreground/70 mx-1">·</span>{" "}
-                        <span className="font-medium text-muted-foreground">
-                          Venc.:
-                        </span>{" "}
-                        {boleto ? formatDate(boleto.due_date) : "—"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">
-                        {formatCurrency(
-                          exp.expense_items?.reduce(
-                            (s, it) =>
-                              s + Number(it.quantity) * Number(it.unit_value),
-                            0,
-                          ) ?? 0,
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[11px] font-normal">
+                          {typeLabel}
+                        </Badge>
+                        <Badge
+                          variant={
+                            exp.status === "approved"
+                              ? "default"
+                              : exp.status === "rejected"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                          className="text-[11px]"
+                        >
+                          {STATUS_LABELS[exp.status]}
+                        </Badge>
+                        {pendingOwnerApproval && (
+                          <Badge
+                            variant="outline"
+                            className="gap-1 border-amber-600/30 bg-amber-500/10 text-[11px] text-amber-950 dark:text-amber-100"
+                            title="Importação pelo WhatsApp — aguardando aprovação do proprietário"
+                          >
+                            <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
+                            Pendente de aprovação
+                          </Badge>
                         )}
-                      </span>
-                      <Badge
-                        variant={
-                          exp.status === "approved"
-                            ? "default"
-                            : exp.status === "rejected"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {STATUS_LABELS[exp.status]}
-                      </Badge>
-                      <button
+                        {valueRisk && (
+                          <Badge
+                            variant="outline"
+                            className="border-destructive/35 bg-destructive/10 text-[11px] text-destructive"
+                            title={
+                              nfeVal.hasIcmsBreakdown
+                                ? "Há ICMSTot no registro — totais do XML são a referência."
+                                : "Total do documento difere da soma das linhas"
+                            }
+                          >
+                            Ajuste: valores
+                          </Badge>
+                        )}
+                        {unlinkedProducts > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="border-violet-500/35 bg-violet-500/10 text-[11px] text-violet-900 dark:text-violet-100"
+                            title="Linhas sem produto vinculado ao estoque"
+                          >
+                            Revisar produto
+                            {unlinkedProducts > 1 ? ` (${unlinkedProducts})` : ""}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">Competência</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {exp.reference_date
+                              ? formatDate(`${exp.reference_date}T12:00:00`)
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">Vencimento</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {boleto ? formatDate(boleto.due_date) : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2">
+                          <dt className="text-muted-foreground">Categoria</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            {boleto
+                              ? formatBoletoCategoryLabel(boleto, categoriesById)
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2">
+                          <dt className="text-muted-foreground">Quem lançou</dt>
+                          <dd className="mt-0.5 font-medium text-foreground">
+                            <ExpenseLauncherInfo
+                              expenseId={exp.id}
+                              compact
+                              fallbackLine={compactLauncherFallback(exp)}
+                              className="inline"
+                            />
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-border/60 pt-3 sm:w-[11.5rem] sm:flex-col sm:items-stretch sm:justify-between sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                      <div className="sm:text-right">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Total
+                        </p>
+                        <p className="text-lg font-semibold tabular-nums tracking-tight">
+                          {formatCurrency(expenseListDisplayTotal(exp))}
+                        </p>
+                      </div>
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (linked) setBoletoResumo(boleto!);
                           else openLinkDialog(exp.id);
                         }}
-                        className="p-2 rounded-md hover:bg-muted transition-colors shrink-0"
-                        title={
-                          linked ? "Ver resumo do boleto" : "Vincular boleto"
-                        }
+                        className={cn(
+                          "h-9 w-full px-3 text-xs font-medium sm:w-auto",
+                          linked
+                            ? "border-green-600/35 bg-green-500/10 text-green-800 hover:bg-green-500/15 dark:text-green-200"
+                            : "border-destructive/35 bg-destructive/5 text-destructive hover:bg-destructive/10",
+                        )}
                       >
-                        <FileText
-                          className={`h-5 w-5 ${
-                            linked ? "text-green-600" : "text-red-600"
-                          }`}
-                        />
-                      </button>
+                        {linked ? "Boleto vinculado" : "Sem boleto vinculado"}
+                      </Button>
                     </div>
                   </div>
                 );
@@ -1695,7 +1788,7 @@ export function Despesas() {
                   setBoletoSheetOpen(true);
                 } else {
                   setLinkDialogOpen(false);
-                  navigate("/app/fluxo-de-caixa");
+                  navigate("/app/contas-a-pagar");
                 }
               }}
             >
@@ -1846,7 +1939,7 @@ export function Despesas() {
               <SheetFooter className="flex-col sm:flex-row gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/app/fluxo-de-caixa")}
+                  onClick={() => navigate("/app/contas-a-pagar")}
                 >
                   Ir para Fluxo de Caixa
                 </Button>

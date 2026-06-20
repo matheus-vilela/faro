@@ -30,6 +30,7 @@ export function mapInvoiceUnitToCatalogUnit(raw: string | null | undefined): {
     cx: "cx",
     caixa: "cx",
     pct: "pct",
+    pac: "pct",
     pacote: "pct",
     kg: "kg",
     g: "g",
@@ -38,6 +39,11 @@ export function mapInvoiceUnitToCatalogUnit(raw: string | null | undefined): {
     ml: "ml",
     fardo: "fd",
     fd: "fd",
+    galao: "gl",
+    galão: "gl",
+    galoes: "gl",
+    galões: "gl",
+    gl: "gl",
   };
   if (aliases[t]) {
     return { unit: aliases[t], needsReview: false, rawUnit: original };

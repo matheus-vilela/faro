@@ -1,6 +1,7 @@
 /**
- * Paridade com `supabase/functions/_shared/productImport/packSizeFromLabel.ts`
- * (UI / testes no Vitest).
+ * Heurística determinística: fator de embalagem no nome; massa/volume por unidade;
+ * `stripPackSizeFromLabel` remove embalagem e sufixos de massa/volume para cadastro.
+ * Paridade com `web/src/lib/productImport/packSizeFromLabel.ts` (Vitest).
  */
 
 export type PackSizeFromLabelResult = {
@@ -117,7 +118,6 @@ const LABEL_PACK_PATTERNS: Array<{
     label: "CXn / caixa+N no nome",
   },
   {
-    // Ordem: ramos mais longos primeiro (menos backtracking que pc|p[cç]|p[cç]s?).
     re: /\b(\d{1,4})\s*(?:pe[cç]as|pe[cç]a|pecas|peca|pcs?|pçs?)\b/gi,
     label: "peça(s) no nome",
   },
@@ -134,6 +134,14 @@ const LABEL_PACK_PATTERNS: Array<{
     label: "fator após cx/fardo",
   },
 ]
+
+/** Ex.: 4X6UNPBR → 24 unidades (garrafas) na embalagem de venda. */
+const COMPOSITE_UN_PACK_RE =
+  /\b(\d{1,3})\s*[xX×]\s*(\d{1,4})\s*UN[A-Z]{0,8}\b/gi
+
+/** Ex.: 0,330GFA → garrafa 330 ml (litros no rótulo). */
+const LABEL_GFA_VOLUME_RE =
+  /\b(\d+(?:[.,]\d+)?)\s*GFA\b|\b(\d+(?:[.,]\d+)?)GFA\b/gi
 
 const LABEL_MASS_VOLUME_PATTERNS: RegExp[] = [
   /\s*[-–—]\s*(\d+(?:[.,]\d+)?)\s*(kg|kgs?|kilo|kilos?|quilo|quilos?|g|gr|gramas?|grama|l|lt|litros?|litro|ml|mililitros?|mililitro)\b/gi,
@@ -160,6 +168,40 @@ type MassVolMatch = {
 function clampFactor(n: number): number | null {
   if (!Number.isFinite(n) || n < MIN_FACTOR || n > MAX_FACTOR) return null
   return Math.floor(n)
+}
+
+function stripMatchFromName(
+  name: string,
+  m: { index: number; fullMatch: string },
+): string {
+  const before = name.slice(0, m.index)
+  const after = name.slice(m.index + m.fullMatch.length)
+  let cleaned = `${before} ${after}`.replace(/\s+/g, " ").trim()
+  cleaned = cleaned.replace(/^[.,\-–—/:]+\s*|\s*[.,\-–—/:]+$/g, "").trim()
+  return cleaned.length ? cleaned : name
+}
+
+function findCompositeUnPackMatch(productName: string): PackLabelMatch | null {
+  const maxExec = Math.min(256, productName.length + 48)
+  COMPOSITE_UN_PACK_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  let execCount = 0
+  let best: PackLabelMatch | null = null
+  while ((m = COMPOSITE_UN_PACK_RE.exec(productName)) !== null) {
+    if (++execCount > maxExec) break
+    const a = Number.parseInt(m[1]!, 10)
+    const b = Number.parseInt(m[2]!, 10)
+    const f = clampFactor(a * b)
+    if (f == null) continue
+    const hit: PackLabelMatch = {
+      factor: f,
+      rationale: `Fator ${f} (${a}×${b} unidades no nome)`,
+      fullMatch: m[0],
+      index: m.index,
+    }
+    if (!best || hit.index >= best.index) best = hit
+  }
+  return best
 }
 
 function findFirstPackLabelMatch(productName: string): PackLabelMatch | null {
@@ -227,8 +269,30 @@ function parseMassVolumeToKgAndLiters(
   return { kg: null, liters: null }
 }
 
-function collectMassVolumeMatches(productName: string): MassVolMatch[] {
+function collectGfaVolumeMatches(productName: string): MassVolMatch[] {
   const out: MassVolMatch[] = []
+  const maxExec = Math.min(256, productName.length + 48)
+  LABEL_GFA_VOLUME_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  let execCount = 0
+  while ((m = LABEL_GFA_VOLUME_RE.exec(productName)) !== null) {
+    if (++execCount > maxExec) break
+    const numStr = m[1] ?? m[2]
+    if (!numStr) continue
+    const liters = parseNumToken(numStr)
+    if (liters == null || liters <= 0 || liters > 1e6) continue
+    out.push({
+      fullMatch: m[0],
+      index: m.index,
+      kg: null,
+      liters,
+    })
+  }
+  return out
+}
+
+function collectMassVolumeMatches(productName: string): MassVolMatch[] {
+  const out: MassVolMatch[] = [...collectGfaVolumeMatches(productName)]
   const maxExec = Math.min(256, productName.length + 48)
   for (const re of LABEL_MASS_VOLUME_PATTERNS) {
     re.lastIndex = 0
@@ -288,15 +352,26 @@ function stripLastMassVolumeFromName(name: string): string {
   return cleaned
 }
 
+function stripGfaVolumeFromName(name: string): string {
+  let s = name
+  LABEL_GFA_VOLUME_RE.lastIndex = 0
+  s = s.replace(LABEL_GFA_VOLUME_RE, " ")
+  return s.replace(/\s+/g, " ").trim()
+}
+
+function stripInvoiceCatalogNoiseFromName(name: string): string {
+  return name
+    .replace(/\b(?:DES|PBR)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 function stripPackCountFromName(name: string): string {
+  const composite = findCompositeUnPackMatch(name)
+  if (composite) return stripMatchFromName(name, composite)
   const m = findFirstPackLabelMatch(name)
   if (!m) return name
-  const before = name.slice(0, m.index)
-  const after = name.slice(m.index + m.fullMatch.length)
-  let cleaned = `${before} ${after}`.replace(/\s+/g, " ").trim()
-  cleaned = cleaned.replace(/^[.,\-–—/:]+\s*|\s*[.,\-–—/:]+$/g, "").trim()
-  if (!cleaned) return name
-  return cleaned
+  return stripMatchFromName(name, m)
 }
 
 export function stripPackSizeFromLabel(raw: string | null | undefined): string {
@@ -305,8 +380,10 @@ export function stripPackSizeFromLabel(raw: string | null | undefined): string {
   }
   let name = String(raw).trim()
   name = stripSlashCompositeFromName(name)
+  name = stripGfaVolumeFromName(name)
   name = stripLastMassVolumeFromName(name)
   name = stripPackCountFromName(name)
+  name = stripInvoiceCatalogNoiseFromName(name)
   return name
 }
 
@@ -323,6 +400,10 @@ export function packSizeFromLabel(
       packFactor: slash.innerCount,
       rationale: `Fator ${slash.innerCount} (unidades internas no padrão ${slash.innerCount}${slash.suffixRaw}/${slash.netNum}${slash.unitRaw})`,
     }
+  }
+  const composite = findCompositeUnPackMatch(name)
+  if (composite) {
+    return { packFactor: composite.factor, rationale: composite.rationale }
   }
   const m = findFirstPackLabelMatch(name)
   if (!m) return { packFactor: null, rationale: null }

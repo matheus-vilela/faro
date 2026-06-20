@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { canonicalProductName, normalizeInvoiceProductLabel } from "./canonicalName";
+import {
+  canonicalProductName,
+  normalizeInvoiceProductLabel,
+  sanitizeCatalogProductName,
+  stripTrailingPackagingQtyAndUnitsForCatalogName,
+} from "./canonicalName";
+import { stripPackSizeFromLabel } from "./packSizeFromLabel";
 import { consolidateInvoiceItems, pickInvoiceUnitRaw } from "./consolidateItems";
 import {
   applySecondarySignals,
   isFlavorOnlyCatalogInsideCompositeInvoice,
   scoreNameMatch,
+  shortCatalogAnchorsInvoiceHead,
 } from "./matchingScore";
 import { clampThresholds } from "./matchConfig";
 import {
@@ -69,6 +76,122 @@ describe("matchingScore", () => {
     });
     expect(r.score).toBeGreaterThan(85);
     expect(r.reasons.length).toBeGreaterThan(0);
+  });
+
+  it("does not push NCM to high floor when lexical name score is low", () => {
+    const r = applySecondarySignals({
+      baseScore: 28,
+      invoiceNcm: "07119000",
+      productNcm: "07119000",
+    });
+    expect(r.score).toBeLessThan(88);
+    expect(r.score).toBe(38);
+  });
+
+  it("keeps strong NCM floor when base name score is already solid", () => {
+    const r = applySecondarySignals({
+      baseScore: 62,
+      invoiceNcm: "21032010",
+      productNcm: "21032010",
+    });
+    expect(r.score).toBeGreaterThanOrEqual(88);
+  });
+
+  it("penalizes short catalog name that only matches a tail token in a long invoice line", () => {
+    const s = scoreNameMatch(
+      "PANO BOBINA MULTIUSO 28X240MTS LARANJA INOVEN",
+      "Laranja",
+    );
+    expect(s).toBeLessThanOrEqual(58);
+  });
+
+  it("shortCatalogAnchorsInvoiceHead is true when catalog tokens prefix the invoice", () => {
+    expect(shortCatalogAnchorsInvoiceHead("Arroz Branco Tipo 1", "Arroz")).toBe(true);
+  });
+});
+
+describe("canonicalName — strip sufixo embalagem/unidade", () => {
+  it("remove quantidade + unidades no fim (canudo)", () => {
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName(
+        "Canudo de Papel 6mm Golden 100 Unidades",
+      ),
+    ).toBe("Canudo de Papel 6mm Golden");
+  });
+
+  it("remove 100 UN no fim", () => {
+    expect(stripTrailingPackagingQtyAndUnitsForCatalogName("Canudo 6mm Golden 100 UN")).toBe(
+      "Canudo 6mm Golden",
+    );
+  });
+
+  it("não remove dimensão colada ao token (6mm)", () => {
+    expect(stripTrailingPackagingQtyAndUnitsForCatalogName("Canudo Papel 6mm")).toBe(
+      "Canudo Papel 6mm",
+    );
+  });
+
+  it("remove kg no fim", () => {
+    expect(stripTrailingPackagingQtyAndUnitsForCatalogName("Açúcar Cristal 5 kg")).toBe(
+      "Açúcar Cristal",
+    );
+  });
+
+  it("remove peso + PCT e formato NxML compacto", () => {
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName(
+        "AMORA CONGELADA SWEET BERRY 1,002 KG PCT",
+      ),
+    ).toBe("AMORA CONGELADA SWEET BERRY");
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName(
+        "APERITIVO VERMOUTH CARPANO ROSSO 6X950ML",
+      ),
+    ).toBe("APERITIVO VERMOUTH CARPANO ROSSO");
+  });
+
+  it("remove PC + peso no fim", () => {
+    expect(
+      stripTrailingPackagingQtyAndUnitsForCatalogName("* CHIMICHURRI SEM PIMENTA PC 1KG"),
+    ).toBe("* CHIMICHURRI SEM PIMENTA");
+  });
+});
+
+describe("canonicalName — sanitizeCatalogProductName", () => {
+  it("remove asteriscos à esquerda e sufixos de embalagem", () => {
+    expect(sanitizeCatalogProductName("* CHIMICHURRI SEM PIMENTA PC 1KG")).toBe(
+      "CHIMICHURRI SEM PIMENTA",
+    );
+  });
+
+  it("água mineral sem gás explícito recebe SEM GAS", () => {
+    expect(sanitizeCatalogProductName("AGUA MINERAL")).toBe(
+      "AGUA MINERAL SEM GAS",
+    );
+    expect(sanitizeCatalogProductName("Água Mineral Crystal")).toBe(
+      "AGUA MINERAL CRYSTAL SEM GAS",
+    );
+  });
+
+  it("Heineken 0,0% — só marca/variante no cadastro", () => {
+    expect(
+      sanitizeCatalogProductName("CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR"),
+    ).toBe("CERVEJA HEINEKEN 0,0%");
+    expect(
+      stripPackSizeFromLabel("CERV HEINEKEN 0,0% 0,330GFA DES 4X6UNPBR"),
+    ).toBe("CERV HEINEKEN 0,0%");
+  });
+
+  it("água mineral com gás não altera especificação", () => {
+    expect(sanitizeCatalogProductName("AGUA MINERAL COM GAS")).toBe(
+      "AGUA MINERAL COM GAS",
+    );
+    expect(sanitizeCatalogProductName("AGUA MINERAL GASEIFICADA")).toBe(
+      "AGUA MINERAL GASEIFICADA",
+    );
+    expect(sanitizeCatalogProductName("AGUA MINERAL SEM GAS")).toBe(
+      "AGUA MINERAL SEM GAS",
+    );
   });
 });
 

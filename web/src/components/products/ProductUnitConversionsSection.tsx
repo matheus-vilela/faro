@@ -1,13 +1,17 @@
 import { UnitConversionDialog } from "@/components/units/UnitConversionDialog";
 import { PRODUCT_SHEET_SECTION } from "@/components/products/productSheetStyles";
 import { Button } from "@/components/ui/button";
+import { isLockedSystemConversionPair } from "@/lib/companyUnits/convert";
+import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
 import {
-  getLockedSystemSecondaryQty,
-  isLockedSystemConversionPair,
-} from "@/lib/companyUnits/convert";
+  buildLockedProductConversionRows,
+  buildProductConversionRowsToRender,
+  productConversionRowLabel,
+} from "@/lib/companyUnits/productConversionRows";
 import { SYSTEM_PRODUCT_UNITS } from "@/lib/companyUnits/systemUnits";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { Plus, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Plus, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 interface ProductUnitConversionsSectionProps {
@@ -16,8 +20,14 @@ interface ProductUnitConversionsSectionProps {
   stockUnitCode: string;
   value: ProductUnitConversionDraft[];
   onChange: (next: ProductUnitConversionDraft[]) => void;
+  /** Torna a unidade secundária da regra a unidade de estoque (rebase + conversão de quantidades). */
+  onPromoteSecondaryToStockUnit?: (
+    secondaryUnitCode: string,
+  ) => void | Promise<void>;
   disabled?: boolean;
   sectionClassName?: string;
+  /** Resumo do produto: título curto, sem texto explicativo longo. */
+  compact?: boolean;
 }
 
 export function ProductUnitConversionsSection({
@@ -25,25 +35,12 @@ export function ProductUnitConversionsSection({
   stockUnitCode,
   value,
   onChange,
+  onPromoteSecondaryToStockUnit,
   disabled,
   sectionClassName = PRODUCT_SHEET_SECTION,
+  compact = false,
 }: ProductUnitConversionsSectionProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  const formatQty = (n: number) => {
-    if (!Number.isFinite(n)) return "0";
-    const abs = Math.abs(n);
-    if (abs >= 1) {
-      return n.toLocaleString("pt-BR", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 4,
-      });
-    }
-    return n.toLocaleString("pt-BR", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 8,
-    });
-  };
 
   const primaryMeta = useMemo(() => {
     const c = stockUnitCode.trim().toLowerCase();
@@ -63,28 +60,14 @@ export function ProductUnitConversionsSection({
     ).map((u) => ({ code: u.code, label: u.label }));
   }, [stockUnitCode, value]);
 
-  const lockedRows = useMemo(() => {
-    const out: ProductUnitConversionDraft[] = [];
-    const primary = stockUnitCode.trim();
-    if (!primary) return out;
-    for (const u of SYSTEM_PRODUCT_UNITS) {
-      if (u.code.toLowerCase() === primary.toLowerCase()) continue;
-      const secondaryQty = getLockedSystemSecondaryQty(1, primary, u.code);
-      if (secondaryQty == null) continue;
-      out.push({
-        company_id: companyId,
-        primary_qty: 1,
-        primary_unit_code: primary,
-        secondary_qty: secondaryQty,
-        secondary_unit_code: u.code,
-      });
-    }
-    return out;
-  }, [companyId, stockUnitCode]);
+  const lockedRows = useMemo(
+    () => buildLockedProductConversionRows(companyId, stockUnitCode),
+    [companyId, stockUnitCode],
+  );
 
   const rowsToRender = useMemo(
-    () => [...lockedRows, ...value],
-    [lockedRows, value],
+    () => buildProductConversionRowsToRender(companyId, stockUnitCode, value),
+    [companyId, stockUnitCode, value],
   );
 
   const handleAdd = async (payload: {
@@ -94,16 +77,18 @@ export function ProductUnitConversionsSection({
   }) => {
     const code = stockUnitCode.trim();
     if (!code) return;
-    onChange([
-      ...value,
-      {
-        company_id: companyId,
-        primary_qty: payload.primary_qty,
-        primary_unit_code: code,
-        secondary_qty: payload.secondary_qty,
-        secondary_unit_code: payload.secondary_unit_code,
-      },
-    ]);
+    onChange(
+      prepareProductUnitConversionsForPersist(code, [
+        ...value,
+        {
+          company_id: companyId,
+          primary_qty: payload.primary_qty,
+          primary_unit_code: code,
+          secondary_qty: payload.secondary_qty,
+          secondary_unit_code: payload.secondary_unit_code,
+        },
+      ]),
+    );
     setDialogOpen(false);
   };
 
@@ -120,16 +105,23 @@ export function ProductUnitConversionsSection({
   return (
     <>
       <div className={sectionClassName}>
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          className={cn(
+            "mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between",
+            compact && "mb-3",
+          )}
+        >
           <div>
             <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-              Unidade de estoque e conversões
+              {compact ? "Conversões de unidade" : "Unidade de estoque e conversões"}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              A unidade escolhida acima é a base do estoque. Abaixo, relacione
-              com outras medidas (ex.: 1 garrafa = 750 ml). Várias regras
-              permitidas — cada produto tem a sua.
-            </p>
+            {!compact ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                A unidade escolhida acima é a base do estoque. Abaixo, relacione
+                com outras medidas (ex.: 1 garrafa = 750 ml). Várias regras
+                permitidas — cada produto tem a sua.
+              </p>
+            ) : null}
           </div>
           <Button
             type="button"
@@ -144,7 +136,7 @@ export function ProductUnitConversionsSection({
             onClick={() => setDialogOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            Nova conversão
+            Adicionar conversão
           </Button>
         </div>
 
@@ -163,42 +155,56 @@ export function ProductUnitConversionsSection({
                 row.primary_unit_code,
                 row.secondary_unit_code,
               );
-              const sec = SYSTEM_PRODUCT_UNITS.find(
-                (u) =>
-                  u.code.toLowerCase() ===
-                  row.secondary_unit_code.trim().toLowerCase(),
-              );
-              const pri = primaryMeta;
               return (
                 <li
                   key={row.id ?? `${row.secondary_unit_code}-${index}`}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm"
                 >
                   <span>
-                    {formatQty(Number(row.primary_qty))}{" "}
-                    {pri?.label ?? row.primary_unit_code} (
-                    {row.primary_unit_code}) ={" "}
-                    {formatQty(Number(row.secondary_qty))}{" "}
-                    {sec?.label ?? row.secondary_unit_code} (
-                    {row.secondary_unit_code})
+                    {productConversionRowLabel(row, stockUnitCode)}
                   </span>
-                  {isLocked ? (
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Travada
-                    </span>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 text-destructive"
-                      disabled={disabled}
-                      onClick={() => removeAt(index - lockedRows.length)}
-                      aria-label="Remover conversão"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {isLocked ? (
+                      <span className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Travada
+                      </span>
+                    ) : (
+                      <>
+                        {onPromoteSecondaryToStockUnit &&
+                        row.secondary_unit_code.trim().toLowerCase() !==
+                          stockUnitCode.trim().toLowerCase() &&
+                        row.primary_unit_code.trim().toLowerCase() ===
+                          stockUnitCode.trim().toLowerCase() ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-xs"
+                            disabled={disabled}
+                            onClick={() =>
+                              onPromoteSecondaryToStockUnit(
+                                row.secondary_unit_code.trim(),
+                              )
+                            }
+                          >
+                            <Star className="h-3.5 w-3.5" />
+                            Tornar padrão
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-destructive"
+                          disabled={disabled}
+                          onClick={() => removeAt(index - lockedRows.length)}
+                          aria-label="Remover conversão"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </li>
               );
             })}

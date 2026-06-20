@@ -21,12 +21,14 @@ import { Dashboard } from "@/pages/Dashboard";
 import { Despesas } from "@/pages/Despesas";
 import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
+import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoFornecedoresGlobais";
 import { Dre } from "@/pages/Dre";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
+import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
+import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
-import { Importacoes } from "@/pages/Importacoes";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
@@ -77,24 +79,37 @@ function AuthenticatedLayout() {
           <Route path="/app" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="despesas" element={<Despesas />} />
-          <Route path="receitas" element={<Receitas />} />
+          <Route path="vendas" element={<Receitas />} />
+          <Route
+            path="receitas"
+            element={<Navigate to="/app/vendas" replace />}
+          />
           <Route
             path="lancamento-receitas"
-            element={<Navigate to="/app/receitas" replace />}
+            element={<Navigate to="/app/vendas" replace />}
           />
+          <Route path="contas-a-pagar" element={<ContasAPagar />} />
+          <Route path="vendas-realizadas" element={<VendasRealizadasFluxo />} />
           <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
           <Route
             path="boletos"
-            element={<Navigate to="/app/fluxo-de-caixa" replace />}
+            element={<Navigate to="/app/contas-a-pagar" replace />}
           />
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="produtos" element={<Produtos />} />
           <Route path="recebimento" element={<Recebimento />} />
-          <Route path="importacoes" element={<Importacoes />} />
+          <Route
+            path="importacoes"
+            element={<Navigate to="/app" replace />}
+          />
           <Route path="checklists" element={<Checklists />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="integracoes" element={<Integracoes />} />
           <Route path="desenvolvimento" element={<Desenvolvimento />} />
+          <Route
+            path="desenvolvimento/fornecedores"
+            element={<DesenvolvimentoFornecedoresGlobais />}
+          />
           <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>
             <Route index element={<Navigate to="usuarios-membros" replace />} />

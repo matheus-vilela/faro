@@ -44,6 +44,7 @@ import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   AlertTriangle,
@@ -286,7 +287,7 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [o, p, s, c] = await Promise.all([
+    const [o, p, s] = await Promise.all([
       supabase
         .from("purchase_orders")
         .select(
@@ -322,14 +323,16 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
         .select("id, name")
         .eq("company_id", companyId)
         .order("name"),
-      supabase.from("product_unit_conversions").select("*").eq("company_id", companyId),
     ]);
     setLoading(false);
     if (o.error) console.error(o.error);
+    const productsList = (p.data ?? []) as Product[];
     setOrders((o.data ?? []) as unknown as OrderRow[]);
-    setProducts((p.data ?? []) as Product[]);
+    setProducts(productsList);
     setSuppliers((s.data ?? []) as { id: string; name: string }[]);
-    setProductConversions((c.data ?? []) as ProductUnitConversionDraft[]);
+    setProductConversions(
+      flattenProductUnitConversionsDrafts(companyId, productsList),
+    );
   }, [companyId]);
 
   const formatBRL = (n: number) =>
@@ -545,6 +548,7 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
       const qty = parseFloat(l.quantity.replace(",", "."));
       const baseQty = toBaseQty(l.product_id, qty, l.unit_code);
       return {
+        company_id: companyId,
         order_id: oid,
         product_id: l.product_id,
         quantity: baseQty ?? qty,

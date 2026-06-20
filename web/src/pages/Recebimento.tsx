@@ -1,3 +1,4 @@
+import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -46,7 +47,6 @@ import {
   User,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 interface ItemStatus {
@@ -102,6 +102,7 @@ export function Recebimento() {
   const [loadingManualCandidates, setLoadingManualCandidates] = useState(false);
   const [selectedExpenseId, setSelectedExpenseId] = useState<string>("");
   const [creatingRecebimento, setCreatingRecebimento] = useState(false);
+  const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
 
   const loadManualCandidates = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -153,7 +154,9 @@ export function Recebimento() {
       return;
     }
     setCreatingRecebimento(true);
+    if (!currentCompany?.id) return;
     const { error } = await supabase.from("recebimentos").insert({
+      company_id: currentCompany.id,
       expense_id: selectedExpenseId,
     });
     setCreatingRecebimento(false);
@@ -698,10 +701,16 @@ export function Recebimento() {
                             )}
                           </Button>
                         )}
-                        <Button asChild variant="outline" size="sm">
-                          <Link to={`/app/despesas?expense=${r.expense_id}`}>
-                            Ver despesa
-                          </Link>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpenseDetailId(r.expense_id);
+                          }}
+                        >
+                          Ver despesa
                         </Button>
                         {!isReceived && (
                           <Button
@@ -994,16 +1003,15 @@ export function Recebimento() {
                       </div>
                     </div>
 
-                    <Button asChild variant="outline" className="w-full">
-                      <Link
-                        to={`/app/despesas?expense=${detailRecebimento.expense_id}`}
-                        onClick={() => {
-                          setDetailRecebimento(null);
-                          setItemStatuses([]);
-                        }}
-                      >
-                        Ver despesa completa
-                      </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        setExpenseDetailId(detailRecebimento.expense_id)
+                      }
+                    >
+                      Ver despesa completa
                     </Button>
                   </div>
                 </>
@@ -1084,6 +1092,13 @@ export function Recebimento() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExpenseDetailSheet
+        expenseId={expenseDetailId}
+        onClose={() => setExpenseDetailId(null)}
+        onRefresh={fetchRecebimentos}
+        elevated={!!detailRecebimento}
+      />
     </PageShell>
   );
 }

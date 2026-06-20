@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
+import { getDefaultCatalogMatchingOpts } from "../_shared/nfeExpenseProducts/catalogMatchingPolicy.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -91,10 +92,16 @@ Deno.serve(async (req) => {
   }
 
   const baseItems = itemsToMatchInput(itemsRaw);
+  const matchOpts = await getDefaultCatalogMatchingOpts(
+    supabase,
+    draft.company_id as string,
+    "WHATSAPP_INTERACTIVE",
+  );
   const matchResult = await resolveProductMatches(
     supabase,
     draft.company_id as string,
     baseItems,
+    matchOpts,
   );
 
   const newExtracted: Record<string, unknown> = {

@@ -12,6 +12,7 @@ import {
   parseProductImportFile,
   type ParsedProductRow,
 } from "@/lib/parseProductImport";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { supabase } from "@/lib/supabase";
 import { FileSpreadsheet, Loader2, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -96,7 +97,7 @@ export function ProductImportSheet({
         const slice = rows.slice(i, i + chunkSize);
         const payload = slice.map((r, j) => ({
           company_id: companyId,
-          name: r.name,
+          name: sanitizeCatalogProductName(r.name),
           sku: generateImportSku(i + j),
           unit: r.unit,
           min_quantity: r.min_quantity,

@@ -39,22 +39,12 @@ export type EnderecoPrincipalMap = {
   codigo_siafi?: string;
 };
 
-/** Representante legal (opcional; preenchido pela API CNPJ quando existir). */
-export type RepresentanteLegalMap = {
-  nome_responsavel?: string;
-  /** Apenas dígitos */
-  cpf_responsavel?: string;
-  /** ISO YYYY-MM-DD */
-  data_nascimento?: string;
-};
-
 /** Campos bloqueados após consulta CNPJ bem-sucedida (até o CNPJ mudar). */
 export type FocusCnpjLockState = {
   validated_cnpj_digits: string;
   validated_at: string;
   locked_empresa_keys: string[];
   locked_endereco_keys: string[];
-  locked_representante_keys: string[];
 };
 
 /** Alinhado ao schema pedido; valores opcionais até o usuário preencher */

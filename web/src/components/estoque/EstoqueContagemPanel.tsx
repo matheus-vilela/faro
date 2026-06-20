@@ -285,6 +285,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       .from("inventory_count_listing_products")
       .insert(
         productIds.map((productId) => ({
+          company_id: companyId,
           listing_id: listingId,
           product_id: productId,
         })),
@@ -454,6 +455,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       .from("inventory_count_listing_products")
       .insert(
         productIds.map((productId) => ({
+          company_id: companyId,
           listing_id: activeListingId,
           product_id: productId,
         })),
@@ -501,6 +503,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         const { error: le } = await supabase
           .from("inventory_count_short_links")
           .insert({
+            company_id: companyId,
             slug: s,
             session_id: sess.id,
             token: sess.token,
@@ -634,13 +637,24 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <div className="flex-1">
                   <Select
-                    value={selectedGroupId || "__none__"}
+                    value={
+                      groups.length > 0
+                        ? selectedGroupId || "__none__"
+                        : undefined
+                    }
                     onValueChange={(v) =>
                       setSelectedGroupId(v === "__none__" ? "" : v)
                     }
+                    disabled={groups.length === 0}
                   >
                     <SelectTrigger className="border-primary/30 bg-background">
-                      <SelectValue placeholder="Selecione o grupo" />
+                      <SelectValue
+                        placeholder={
+                          groups.length === 0
+                            ? "Sem grupos criados"
+                            : "Selecione o grupo"
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">Selecione</SelectItem>
@@ -758,12 +772,16 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
             <div className="space-y-2">
               <Label>Tipo</Label>
               <Select
-                value={linkTarget}
+                value={groups.length > 0 ? linkTarget : undefined}
                 onValueChange={(v) => setLinkTarget(v as "group" | "listing")}
-                disabled={loadingMeta}
+                disabled={loadingMeta || groups.length === 0}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue
+                    placeholder={
+                      groups.length === 0 ? "Sem grupos criados" : undefined
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="group">
@@ -776,14 +794,22 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
             <div className="space-y-2">
               <Label>Grupo</Label>
               <Select
-                value={targetGroupId || "__none__"}
+                value={
+                  groups.length > 0 ? targetGroupId || "__none__" : undefined
+                }
                 onValueChange={(v) =>
                   setTargetGroupId(v === "__none__" ? "" : v)
                 }
-                disabled={loadingMeta}
+                disabled={loadingMeta || groups.length === 0}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
+                  <SelectValue
+                    placeholder={
+                      groups.length === 0
+                        ? "Sem grupos criados"
+                        : "Selecione"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Selecione</SelectItem>

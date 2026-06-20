@@ -50,6 +50,12 @@ export interface RevenueEntry {
   source: RevenueEntryMode;
   /** Preenchido quando o lançamento veio de import automático (lote). */
   integration_import_batch_id?: string | null;
+  /** Unidade informada na venda pontual de produto. */
+  sale_unit_code?: string | null;
+  /** CMV total reconhecido nesta venda (DRE por data da receita). */
+  cmv_amount?: number;
+  cmv_lines?: unknown;
+  cmv_needs_backfill?: boolean;
   created_at: string;
   updated_at: string;
 }

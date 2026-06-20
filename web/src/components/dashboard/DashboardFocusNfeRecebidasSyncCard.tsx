@@ -1,36 +1,98 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useCompany } from "@/contexts/CompanyContext";
 import type { Company } from "@/contexts/CompanyContext";
-import { supabase } from "@/lib/supabase";
-import { hasFocusNfeEmpresaId } from "@/services/focusAtualizarCertificadoService";
-import { completeCompanyOnboardingFiscalStep } from "@/services/companyOnboardingFlagsService";
+import { useCompany } from "@/contexts/CompanyContext";
 import {
+  isOnboardingFiscalFlowCompleted,
+  isOnboardingFiscalInterpretConfirmPhase,
+  isOnboardingFiscalNfeRecebidasDashboardEnabled,
+  isOnboardingFiscalSefazUnavailable,
+  onboardingFiscalSefazRetryAt,
+} from "@/lib/onboardingFiscalDashboard";
+import { confirmOnboardingFiscalInterpretPhase } from "@/services/companyOnboardingFlagsService";
+import {
+  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   FileBadge,
   Loader2,
-  Landmark,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-const HOURS_UNTIL_CONSIDER_EMPTY = 4;
-/** Após onboarding, não manter este aviso indefinidamente quando continua sem NF-e na base. */
-const MAX_DAYS_SINCE_ONBOARDING = 30;
+type FiscalCardTheme = {
+  card: string;
+  iconBox: string;
+  eyebrow: string;
+  subtitle: string;
+  progressTrack: string;
+  progressFill: string;
+};
 
-function parseCompletedAtIso(setup: Record<string, unknown> | null | undefined): string | null {
-  const raw = setup?.completed_at;
-  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
-}
+/** Cores por fase (diferencia do card EPOC em sky). Layout igual ao PDV. */
+const FISCAL_CARD_THEMES = {
+  confirm: {
+    card: "border-2 border-emerald-500/40 bg-linear-to-r from-emerald-500/12 via-teal-500/10 to-sky-500/10 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/30 text-emerald-950 ring-1 ring-emerald-700/20 dark:text-emerald-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-emerald-950/85 dark:text-emerald-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-emerald-950/92 dark:text-emerald-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-emerald-950/15 dark:bg-emerald-100/20",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-emerald-500 to-teal-500 transition-all",
+  },
+  sefaz: {
+    card: "border-2 border-amber-500/45 bg-linear-to-r from-amber-500/14 via-orange-500/10 to-amber-500/8 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/35 text-amber-950 ring-1 ring-amber-700/25 dark:text-amber-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-amber-950/85 dark:text-amber-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-amber-950/92 dark:text-amber-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-amber-950/15 dark:bg-amber-100/20",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-amber-500 to-orange-500 transition-all",
+  },
+  sync: {
+    card: "border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md",
+    iconBox:
+      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/30 text-violet-950 ring-1 ring-violet-700/20 dark:text-violet-100",
+    eyebrow:
+      "text-xs font-bold uppercase tracking-wider text-violet-950/85 dark:text-violet-100/85",
+    subtitle:
+      "mt-1 text-sm font-medium leading-relaxed text-violet-950/92 dark:text-violet-100/90",
+    progressTrack:
+      "mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18",
+    progressFill:
+      "h-full rounded-full bg-linear-to-r from-violet-500 to-indigo-500 transition-all",
+  },
+} satisfies Record<string, FiscalCardTheme>;
 
-function isSetupCompleted(setup: Record<string, unknown> | null | undefined): boolean {
-  return setup?.status === "completed";
-}
-
-function hoursBetween(startMs: number, endMs: number): number {
-  return (endMs - startMs) / 3_600_000;
+function parseOnboardingFiscalMetrics(raw: unknown): {
+  sync: boolean;
+  max: number;
+  synced: number;
+  ignored: number;
+} {
+  const o =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const n = (k: string) => {
+    const v = o[k];
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0;
+  };
+  return {
+    sync: isOnboardingFiscalNfeRecebidasDashboardEnabled(raw),
+    max: n("max_nfes_sync"),
+    synced: n("nfes_sync"),
+    ignored: n("nfes_ignored"),
+  };
 }
 
 function formatRelativeCompact(iso: string, refMs: number): string {
@@ -47,9 +109,30 @@ function formatRelativeCompact(iso: string, refMs: number): string {
   return `há ${d} dias`;
 }
 
+function progressPercent(max: number, synced: number, ignored: number): number {
+  if (max <= 0) return 0;
+  const done = Math.max(0, synced + ignored);
+  return Math.min(100, Math.max(0, Math.round((done / max) * 100)));
+}
+
+function formatSefazRetryLabel(
+  retryAtIso: string | null,
+  nowMs: number,
+): string {
+  if (!retryAtIso) return "em breve";
+  const t = new Date(retryAtIso).getTime();
+  if (!Number.isFinite(t)) return "em breve";
+  const diffMs = t - nowMs;
+  if (diffMs <= 60_000) return "em breve";
+  const m = Math.ceil(diffMs / 60_000);
+  if (m < 60) return `em cerca de ${m} min`;
+  const h = Math.ceil(m / 60);
+  return `em cerca de ${h} h`;
+}
+
 /**
- * Aviso no primeiro ciclo sem NF-e importada na base (fonte típica: sincronização
- * NF-e **recebidas** na SEFAZ via Focus — pode demorar várias horas).
+ * Onboarding fiscal · NF-e recebidas (Focus / SEFAZ).
+ * Layout alinhado ao card EPOC; cores por fase (violeta / âmbar / verde).
  */
 export function DashboardFocusNfeRecebidasSyncCard({
   company,
@@ -58,60 +141,30 @@ export function DashboardFocusNfeRecebidasSyncCard({
 }) {
   const { refetchCompanies } = useCompany();
   const companyId = company?.id;
-  const [loading, setLoading] = useState(true);
-  const [nfeLogCount, setNfeLogCount] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const autoFiscalSyncedRef = useRef(false);
+  const [interpretClosing, setInterpretClosing] = useState(false);
 
-  const loadCount = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!companyId) {
-      setNfeLogCount(null);
-      if (!opts?.silent) setLoading(false);
-      return;
-    }
-    if (!opts?.silent) setLoading(true);
-    const { count, error } = await supabase
-      .from("company_nfe_import_logs")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId);
-    if (error) {
-      console.error("DashboardFocusNfeRecebidasSyncCard", error);
-      if (!opts?.silent) setNfeLogCount(null);
-    } else {
-      setNfeLogCount(count ?? 0);
-    }
-    if (!opts?.silent) setLoading(false);
-  }, [companyId]);
+  const obFiscal = parseOnboardingFiscalMetrics(company?.onboarding_fiscal);
+  const fiscalOnboardingDone = isOnboardingFiscalFlowCompleted(
+    company?.onboarding_fiscal,
+  );
+  const focusnfe = company?.focusnfe;
+  const interpretConfirmPhase = isOnboardingFiscalInterpretConfirmPhase(
+    company?.onboarding_fiscal,
+  );
+  const progressPhase = isOnboardingFiscalNfeRecebidasDashboardEnabled(
+    company?.onboarding_fiscal,
+  );
+  const sefazUnavailable = isOnboardingFiscalSefazUnavailable(
+    company?.onboarding_fiscal,
+  );
+  const sefazRetryAt = onboardingFiscalSefazRetryAt(company?.onboarding_fiscal);
+  const sefazRetryLabel = formatSefazRetryLabel(sefazRetryAt, nowMs);
 
   useEffect(() => {
-    queueMicrotask(() => void loadCount());
-  }, [loadCount]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 60_000);
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
-
-  const focusnfe = company?.focusnfe;
-  const setup = company?.setup as Record<string, unknown> | undefined;
-  const completedAtIso = parseCompletedAtIso(setup ?? null);
-  const anchorSetupMs = completedAtIso ? new Date(completedAtIso).getTime() : NaN;
-  const anchorCreatedMs = company?.created_at
-    ? new Date(company.created_at).getTime()
-    : NaN;
-  const anchorMs = Number.isFinite(anchorSetupMs)
-    ? anchorSetupMs
-    : Number.isFinite(anchorCreatedMs)
-      ? anchorCreatedMs
-      : NaN;
-
-  const hoursSinceOnboarding = Number.isFinite(anchorMs)
-    ? hoursBetween(anchorMs, nowMs)
-    : 0;
-  const daysSinceOnboarding = hoursSinceOnboarding / 24;
-  const withinExpectationWindow = hoursSinceOnboarding < HOURS_UNTIL_CONSIDER_EMPTY;
 
   const ultimaSyncAt =
     focusnfe && typeof focusnfe === "object" && !Array.isArray(focusnfe)
@@ -122,163 +175,150 @@ export function DashboardFocusNfeRecebidasSyncCard({
       ? formatRelativeCompact(ultimaSyncAt, nowMs)
       : null;
 
-  const eligibleBase =
-    !!companyId &&
-    Number.isFinite(anchorMs) &&
-    hasFocusNfeEmpresaId(focusnfe) &&
-    isSetupCompleted(setup) &&
-    daysSinceOnboarding <= MAX_DAYS_SINCE_ONBOARDING;
+  const max = obFiscal.max;
+  const done = obFiscal.synced + obFiscal.ignored;
+  const barPct = progressPercent(max, obFiscal.synced, obFiscal.ignored);
+  const awaitingSefazEstimate = max === 0 && !sefazUnavailable;
 
-  const showFullContent =
-    eligibleBase && !loading && nfeLogCount !== null && nfeLogCount === 0;
-  const showLoadingShell = eligibleBase && loading;
+  const theme = useMemo((): FiscalCardTheme => {
+    if (interpretConfirmPhase) return FISCAL_CARD_THEMES.confirm;
+    if (sefazUnavailable) return FISCAL_CARD_THEMES.sefaz;
+    return FISCAL_CARD_THEMES.sync;
+  }, [interpretConfirmPhase, sefazUnavailable]);
 
-  useEffect(() => {
-    if (!showFullContent) return;
-    const id = window.setInterval(() => {
-      void loadCount({ silent: true });
-    }, 45_000);
-    return () => window.clearInterval(id);
-  }, [showFullContent, loadCount]);
-
-  /** Primeira NF-e na base: persistir conclusão fiscal sem obrigar clique extra. */
-  useEffect(() => {
-    if (
-      !companyId ||
-      nfeLogCount === null ||
-      nfeLogCount === 0 ||
-      autoFiscalSyncedRef.current
-    ) {
-      return;
+  const { title, subtitle, showSpinner, percent, icon } = useMemo(() => {
+    if (interpretConfirmPhase) {
+      return {
+        title: "Sincronização concluída",
+        subtitle:
+          "As notas deste lote foram processadas. Fornecedores, produtos, despesas e estoque foram criados automaticamente.",
+        showSpinner: false,
+        percent: 100,
+        icon: "success" as const,
+      };
     }
-    autoFiscalSyncedRef.current = true;
-    void (async () => {
-      const res = await completeCompanyOnboardingFiscalStep(companyId);
-      if (res.error) {
-        autoFiscalSyncedRef.current = false;
-        console.error("DashboardFocusNfeRecebidasSyncCard fiscal sync", res.error);
-        return;
-      }
-      await refetchCompanies();
-    })();
-  }, [companyId, nfeLogCount, refetchCompanies]);
+    if (sefazUnavailable) {
+      return {
+        title: "SEFAZ indisponível no momento",
+        subtitle: `Não foi possível obter resposta da SEFAZ para listar as NF-e recebidas desta unidade. Vamos tentar novamente ${sefazRetryLabel} de forma automática. Não é necessário fazer nada agora — o painel atualiza assim que a sincronização retomar.`,
+        showSpinner: false,
+        percent: 12,
+        icon: "warning" as const,
+      };
+    }
+    if (awaitingSefazEstimate) {
+      return {
+        title: "A obter dados na SEFAZ",
+        subtitle: `Este processo pode demorar um pouco. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.
+            <br /> 
+          <strong>Fornecedores, produtos, despesas e estoque serão criados automaticamente.</strong>`,
+        showSpinner: true,
+        percent: 0,
+        icon: "sync" as const,
+      };
+    }
+    return {
+      title: "Sincronização das NF-e recebidas",
+      subtitle: `${done} de ${max} notas processadas${ultimaSyncLabel ? ` · Última sincronização ${ultimaSyncLabel}` : ""}.`,
+      showSpinner: obFiscal.sync && done < max,
+      percent: barPct,
+      icon: "sync" as const,
+    };
+  }, [
+    interpretConfirmPhase,
+    sefazUnavailable,
+    sefazRetryLabel,
+    awaitingSefazEstimate,
+    done,
+    max,
+    ultimaSyncLabel,
+    obFiscal.sync,
+    barPct,
+  ]);
 
-  if (!eligibleBase) {
+  if (!company || fiscalOnboardingDone) {
     return null;
   }
 
-  if (!loading && nfeLogCount === null) {
+  if (!progressPhase && !interpretConfirmPhase) {
     return null;
   }
 
-  if (!loading && nfeLogCount !== null && nfeLogCount > 0) {
-    return null;
-  }
+  const renderIcon = () => {
+    if (showSpinner) {
+      return <Loader2 className="h-5 w-5 animate-spin" />;
+    }
+    if (icon === "success") {
+      return <CheckCircle2 className="h-5 w-5 opacity-95" />;
+    }
+    if (icon === "warning") {
+      return <AlertTriangle className="h-5 w-5 opacity-95" />;
+    }
+    return <FileBadge className="h-5 w-5 opacity-95" />;
+  };
 
-  if (showLoadingShell) {
-    return (
-      <Card className="border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md">
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Skeleton className="h-11 w-11 shrink-0 rounded-xl" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <Skeleton className="h-3 w-48" />
-                <Skeleton className="h-6 w-full max-w-md" />
-                <Skeleton className="h-4 w-full max-w-xl" />
-                <Skeleton className="h-3 w-64" />
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-              <Skeleton className="h-9 w-40 sm:ml-auto" />
-              <Skeleton className="h-9 w-52 sm:ml-auto" />
-            </div>
-          </div>
-          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18">
-            <Skeleton className="h-full w-1/3 rounded-full" />
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            A verificar NF-e na base…
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const title = withinExpectationWindow
-    ? "A sincronizar NF-e recebidas (SEFAZ)"
-    : "Ainda sem NF-e recebidas na conta";
-
-  const body = withinExpectationWindow ? (
-    <>
-      O sistema está a consultar e a importar as notas fiscais de{" "}
-      <strong>compra</strong> disponíveis na SEFAZ para o CNPJ desta unidade. Esse
-      primeiro ciclo costuma levar entre <strong>2 e 4 horas</strong>; quando houver notas
-      e a importação concluir, os dados passam a aparecer na aplicação (compras, produtos,
-      etc.).
-    </>
-  ) : (
-    <>
-      Já passou o tempo habitual de espera e{" "}
-      <strong>ainda não há nenhuma NF-e importada</strong> para esta unidade. Nesse caso
-      assumimos que <strong>pode não existir histórico de NF-e de entrada associado a este
-      CNPJ</strong> na SEFAZ — ou o certificado / ambiente ainda não permitem essa
-      consulta. Se a unidade compra com nota fiscal, confira as configurações fiscais e o
-      certificado A1; caso contrário pode continuar a usar o Faro sem esse histórico.
-    </>
-  );
+  const barWidth = showSpinner
+    ? Math.max(12, percent)
+    : interpretConfirmPhase
+      ? 100
+      : sefazUnavailable
+        ? 12
+        : percent;
 
   return (
-    <Card className="border-2 border-violet-500/40 bg-linear-to-r from-violet-500/12 via-indigo-500/10 to-sky-500/10 shadow-md">
+    <Card className={theme.card}>
       <CardContent className="p-4 sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/30 text-violet-950 ring-1 ring-violet-700/20 dark:text-violet-100">
-              {withinExpectationWindow ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <FileBadge className="h-5 w-5 opacity-95" />
-              )}
-            </div>
+            <div className={theme.iconBox}>{renderIcon()}</div>
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-wider text-violet-950/85 dark:text-violet-100/85">
+              <p className={theme.eyebrow}>
                 Onboarding fiscal · NF-e recebidas
               </p>
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {title}
               </h3>
-              <div className="mt-2 text-sm font-medium text-violet-950/92 dark:text-violet-100/90 [&_strong]:font-semibold">
-                <p className="leading-relaxed">{body}</p>
-              </div>
-              {ultimaSyncLabel ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Última sincronização com a Focus registada{" "}
-                  <span className="font-medium text-foreground/80">{ultimaSyncLabel}</span>
-                  .
-                </p>
-              ) : (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  A primeira sincronização automática pode começar minutos após concluir o
-                  onboarding com certificado válido na Focus.
-                </p>
-              )}
+              <p
+                className={theme.subtitle}
+                dangerouslySetInnerHTML={{ __html: subtitle as string }}
+              />
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-            {!withinExpectationWindow ? (
-              <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-3 py-2 text-xs text-muted-foreground">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span>
-                  Quando aparecerem importações na base, este aviso some automaticamente.
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-3 py-2 text-xs text-muted-foreground">
-                <Landmark className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
-                <span>Consulta SEFAZ mediada pela Focus · até ~4 h é normal</span>
-              </div>
-            )}
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
+            {interpretConfirmPhase ? (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant="default"
+                disabled={interpretClosing}
+                onClick={() => {
+                  if (!companyId) return;
+                  setInterpretClosing(true);
+                  void (async () => {
+                    const res =
+                      await confirmOnboardingFiscalInterpretPhase(companyId);
+                    if (res.error) {
+                      setInterpretClosing(false);
+                      console.error(
+                        "confirmOnboardingFiscalInterpretPhase",
+                        res.error,
+                      );
+                      return;
+                    }
+                    await refetchCompanies();
+                  })();
+                }}
+              >
+                {interpretClosing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                Confirmar e fechar
+              </Button>
+            ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
               <Link to="/app/configuracoes/fiscal">
                 Configurações fiscais
@@ -288,17 +328,19 @@ export function DashboardFocusNfeRecebidasSyncCard({
           </div>
         </div>
 
-        {withinExpectationWindow ? (
-          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-violet-950/15 dark:bg-violet-100/18">
+        {!awaitingSefazEstimate && !interpretConfirmPhase && (
+          <div className={theme.progressTrack}>
             <div
-              className="h-full rounded-full bg-linear-to-r from-violet-500 to-indigo-500 transition-all motion-safe:animate-pulse"
-              style={{
-                width: `${Math.min(96, Math.max(28, Math.round((hoursSinceOnboarding / HOURS_UNTIL_CONSIDER_EMPTY) * 92)))}%`,
-              }}
-              aria-hidden
+              className={theme.progressFill}
+              style={{ width: `${barWidth}%` }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={barWidth}
+              aria-label="Progresso do onboarding fiscal"
             />
           </div>
-        ) : null}
+        )}
       </CardContent>
     </Card>
   );

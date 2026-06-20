@@ -1,15 +1,16 @@
-/** Colunas `companies.syncing_fiscal` / `syncing_pdv` (onboarding + UI). */
+/** Travas de sync: fiscal via `onboarding_fiscal`; PDV via `onboarding_pdv.sync`. */
 
-export function isFiscalSyncInProgress(
-  syncingFiscal: boolean | null | undefined,
-): boolean {
-  return syncingFiscal === true;
+import {
+  isFiscalOnboardingSyncInProgress,
+} from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
+
+export function isFiscalSyncInProgress(onboardingFiscal: unknown): boolean {
+  return isFiscalOnboardingSyncInProgress(onboardingFiscal);
 }
 
-export function isPdvSyncInProgress(
-  syncingPdv: boolean | null | undefined,
-): boolean {
-  return syncingPdv === true;
+export function isPdvSyncInProgress(onboardingPdv: unknown): boolean {
+  return isOnboardingPdvSyncInProgress(onboardingPdv);
 }
 
 /** Texto legado / heurística para mensagens de “ocupado”. */

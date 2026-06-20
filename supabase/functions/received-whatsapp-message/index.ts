@@ -854,6 +854,7 @@ function randomShortSlug(len = 8): string {
 /** Cria ou reutiliza slug em `recebimento_short_links` (service role). */
 async function ensureRecebimentoShortSlug(
   supabase: ReturnType<typeof createClient>,
+  companyId: string,
   recebimentoId: string,
   tokenUuid: string,
 ): Promise<string | null> {
@@ -871,6 +872,7 @@ async function ensureRecebimentoShortSlug(
   for (let attempt = 0; attempt < 15; attempt++) {
     const slug = randomShortSlug(8);
     const { error } = await supabase.from("recebimento_short_links").insert({
+      company_id: companyId,
       slug,
       recebimento_id: recebimentoId,
       token: tokenUuid,
@@ -1184,7 +1186,12 @@ async function handleRecebimentoTextFlow(
       });
       return true;
     }
-    const slug = await ensureRecebimentoShortSlug(supabase, rid, token);
+    const slug = await ensureRecebimentoShortSlug(
+      supabase,
+      auth.companyId,
+      rid,
+      token,
+    );
     const link = slug ? `${base}/s/${slug}` : `${base}/c/${token}`;
     if (!slug) {
       console.warn(
