@@ -32,7 +32,13 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
+import {
+  applyWhatsappPhoneMaskChange,
+  maskWhatsappBrInput,
+  validateAndNormalizePhone,
+} from "@/lib/whatsappPhone";
 import { cn } from "@/lib/utils";
 import type { Recebimento } from "@/types/recebimento";
 import {
@@ -57,6 +63,8 @@ interface ItemStatus {
 
 type CompanyMemberRow = { id: string; name: string };
 
+const ADD_MEMBER_SELECT_VALUE = "__add_member__";
+
 type RecebimentoStatusFilter = "all" | "pending" | "received";
 
 type ExpenseRecebimentoCandidate = {
@@ -69,9 +77,23 @@ type ExpenseRecebimentoCandidate = {
   status: string | null;
 };
 
+function mapCompanyMemberError(message: string): string {
+  if (message.includes("Limite de 3")) {
+    return "Limite de 3 membros ativos por empresa.";
+  }
+  if (message.includes("proprietário")) {
+    return "Este número já é o do proprietário ou conflita com ele.";
+  }
+  if (message.includes("23505")) {
+    return "Já existe um membro ativo com este telefone.";
+  }
+  return message;
+}
+
 export function Recebimento() {
   const { currentCompany, currentRole } = useCompany();
   const canAssignShare = currentRole === "owner" || currentRole === "gestor";
+  const canCreateMember = currentRole ? canOwnerAccess(currentRole) : false;
   const [recebimentos, setRecebimentos] = useState<Recebimento[]>([]);
   const [recebimentosCount, setRecebimentosCount] = useState(0);
   const [recebimentosPage, setRecebimentosPage] = useState(1);
@@ -91,6 +113,10 @@ export function Recebimento() {
   const [companyMembers, setCompanyMembers] = useState<CompanyMemberRow[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [savingShare, setSavingShare] = useState(false);
+  const [addMemberSheetOpen, setAddMemberSheetOpen] = useState(false);
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberPhoneDigits, setNewMemberPhoneDigits] = useState("");
+  const [creatingMember, setCreatingMember] = useState(false);
   const [openingOperadorId, setOpeningOperadorId] = useState<string | null>(
     null,
   );
@@ -337,37 +363,105 @@ export function Recebimento() {
   const openShareDialog = (r: Recebimento) => {
     setShareTarget(r);
     setShareMemberId(r.assigned_company_member_id ?? "");
+    setAddMemberSheetOpen(false);
+    setNewMemberName("");
+    setNewMemberPhoneDigits("");
     setShareDialogOpen(true);
   };
 
+  const openAddMemberSheet = () => {
+    setNewMemberName("");
+    setNewMemberPhoneDigits("");
+    setAddMemberSheetOpen(true);
+  };
+
+  const loadShareDialogMembers = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    setLoadingMembers(true);
+    const { data: members, error } = await supabase
+      .from("company_members")
+      .select("id, name")
+      .eq("company_id", currentCompany.id)
+      .eq("is_active", true)
+      .order("name");
+    setLoadingMembers(false);
+    if (error) {
+      toast.error("Não foi possível carregar os membros.");
+      setCompanyMembers([]);
+      return [];
+    }
+    const rows = (members as CompanyMemberRow[] | null) ?? [];
+    setCompanyMembers(rows);
+    return rows;
+  }, [currentCompany?.id]);
+
   useEffect(() => {
     if (!shareDialogOpen || !currentCompany?.id) return;
-    let cancelled = false;
-    queueMicrotask(() => setLoadingMembers(true));
-    void (async () => {
-      const { data: members, error } = await supabase
-        .from("company_members")
-        .select("id, name")
-        .eq("company_id", currentCompany.id)
-        .eq("is_active", true)
-        .order("name");
-      if (cancelled) return;
-      setLoadingMembers(false);
-      if (error) {
-        toast.error("Não foi possível carregar os membros.");
-        setCompanyMembers([]);
-        return;
-      }
-      setCompanyMembers((members as CompanyMemberRow[] | null) ?? []);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [shareDialogOpen, currentCompany?.id]);
+    void loadShareDialogMembers();
+  }, [shareDialogOpen, currentCompany?.id, loadShareDialogMembers]);
 
-  const copyShareLink = async () => {
+  const handleShareMemberSelect = (value: string) => {
+    if (value === ADD_MEMBER_SELECT_VALUE) {
+      openAddMemberSheet();
+      return;
+    }
+    setShareMemberId(value);
+  };
+
+  const canShowAddMemberOption =
+    canCreateMember && companyMembers.length < 3;
+
+  const handleCreateMemberInShareDialog = async () => {
+    if (!currentCompany?.id || !canCreateMember) return;
+    if (companyMembers.length >= 3) {
+      toast.error("Limite de 3 membros ativos por empresa.");
+      return;
+    }
+    const name = newMemberName.trim();
+    if (!name) {
+      toast.error("Informe o nome do membro.");
+      return;
+    }
+    const phoneValidation = validateAndNormalizePhone(newMemberPhoneDigits);
+    if (!phoneValidation.ok) {
+      toast.error(phoneValidation.error);
+      return;
+    }
+
+    setCreatingMember(true);
+    const { data: created, error } = await supabase
+      .from("company_members")
+      .insert({
+        company_id: currentCompany.id,
+        name,
+        phone_normalized: phoneValidation.normalized,
+        phone_display:
+          maskWhatsappBrInput(newMemberPhoneDigits).trim() || null,
+        is_active: true,
+        can_inventory_count: false,
+      })
+      .select("id, name")
+      .single();
+    setCreatingMember(false);
+
+    if (error || !created) {
+      toast.error(mapCompanyMemberError(error?.message ?? "Erro ao cadastrar membro."));
+      return;
+    }
+
+    toast.success("Membro cadastrado.");
+    setAddMemberSheetOpen(false);
+    setNewMemberName("");
+    setNewMemberPhoneDigits("");
+    setCompanyMembers((prev) => [...prev, created as CompanyMemberRow]);
+    setShareMemberId(created.id);
+    await copyShareLink(created.id);
+  };
+
+  const copyShareLink = async (memberIdOverride?: string) => {
     if (!shareTarget || !currentCompany?.id) return;
-    if (!shareMemberId) {
+    const memberId = memberIdOverride ?? shareMemberId;
+    if (!memberId) {
       toast.error("Selecione o membro de referência para este recebimento.");
       return;
     }
@@ -376,7 +470,7 @@ export function Recebimento() {
       "set_recebimento_assigned_member",
       {
         p_recebimento_id: shareTarget.id,
-        p_company_member_id: shareMemberId,
+        p_company_member_id: memberId,
       },
     );
     setSavingShare(false);
@@ -1024,7 +1118,12 @@ export function Recebimento() {
         open={shareDialogOpen}
         onOpenChange={(open) => {
           setShareDialogOpen(open);
-          if (!open) setShareTarget(null);
+          if (!open) {
+            setShareTarget(null);
+            setAddMemberSheetOpen(false);
+            setNewMemberName("");
+            setNewMemberPhoneDigits("");
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -1036,12 +1135,12 @@ export function Recebimento() {
               confirmar o recebimento.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label htmlFor="share-member">Membro de referência</Label>
               <Select
                 value={shareMemberId || undefined}
-                onValueChange={setShareMemberId}
+                onValueChange={handleShareMemberSelect}
                 disabled={loadingMembers}
               >
                 <SelectTrigger id="share-member" className="w-full">
@@ -1059,12 +1158,26 @@ export function Recebimento() {
                       {m.name?.trim() || m.id.slice(0, 8) + "…"}
                     </SelectItem>
                   ))}
+                  {canShowAddMemberOption && (
+                    <SelectItem value={ADD_MEMBER_SELECT_VALUE}>
+                      <span className="flex items-center gap-2">
+                        <Plus className="h-4 w-4" />
+                        Adicionar membro
+                      </span>
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
-              {!loadingMembers && companyMembers.length === 0 && (
+              {!loadingMembers && companyMembers.length === 0 && !canCreateMember && (
                 <p className="text-sm text-amber-600 dark:text-amber-500">
-                  Não há membros cadastrados em Configurações. Cadastre membros
-                  para poder vincular ao recebimento.
+                  Não há membros cadastrados. Peça ao proprietário para
+                  cadastrar em Configurações → Usuários e membros.
+                </p>
+              )}
+              {canCreateMember && companyMembers.length >= 3 && (
+                <p className="text-xs text-muted-foreground">
+                  Limite de 3 membros ativos atingido. Desative um membro em
+                  Configurações para cadastrar outro.
                 </p>
               )}
             </div>
@@ -1083,8 +1196,8 @@ export function Recebimento() {
               disabled={
                 savingShare ||
                 loadingMembers ||
-                companyMembers.length === 0 ||
-                !shareMemberId
+                !shareMemberId ||
+                shareMemberId === ADD_MEMBER_SELECT_VALUE
               }
             >
               {savingShare ? "Salvando…" : "Vincular e copiar o link"}
@@ -1092,6 +1205,87 @@ export function Recebimento() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet
+        open={addMemberSheetOpen}
+        onOpenChange={(open) => {
+          setAddMemberSheetOpen(open);
+          if (!open) {
+            setNewMemberName("");
+            setNewMemberPhoneDigits("");
+          }
+        }}
+      >
+        <SheetContent
+          overlayClassName="z-[70]"
+          className="z-[70] flex flex-col gap-0 sm:max-w-md"
+        >
+          <SheetHeader>
+            <SheetTitle>Novo membro</SheetTitle>
+            <SheetDescription>
+              Cadastre o <strong>nome</strong> e o <strong>WhatsApp</strong> do
+              operador. Este membro não terá login no Faro — o número serve para
+              referência e autorização no webhook.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="grid gap-5 py-6">
+            <div className="space-y-2">
+              <Label htmlFor="share-new-member-name">Nome</Label>
+              <Input
+                id="share-new-member-name"
+                value={newMemberName}
+                onChange={(e) => setNewMemberName(e.target.value)}
+                placeholder="Nome para identificação"
+                disabled={creatingMember || savingShare}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="share-new-member-phone">WhatsApp (celular)</Label>
+              <Input
+                id="share-new-member-phone"
+                type="tel"
+                inputMode="tel"
+                className="font-mono"
+                placeholder="+55 (11) 91234-5678"
+                value={maskWhatsappBrInput(newMemberPhoneDigits)}
+                onChange={(e) =>
+                  setNewMemberPhoneDigits(
+                    applyWhatsappPhoneMaskChange(
+                      newMemberPhoneDigits,
+                      e.target.value,
+                    ),
+                  )
+                }
+                disabled={creatingMember || savingShare}
+              />
+              <p className="text-xs text-muted-foreground">
+                Celular com WhatsApp ativo. Se omitir o DDI, usamos 55 (Brasil).
+              </p>
+            </div>
+          </div>
+          <SheetFooter className="mt-auto flex-col gap-2 border-t pt-4 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={creatingMember || savingShare}
+              onClick={() => setAddMemberSheetOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => void handleCreateMemberInShareDialog()}
+              disabled={creatingMember || savingShare}
+            >
+              {creatingMember || savingShare
+                ? "Salvando…"
+                : "Salvar e copiar link"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       <ExpenseDetailSheet
         expenseId={expenseDetailId}

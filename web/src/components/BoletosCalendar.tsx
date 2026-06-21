@@ -26,14 +26,41 @@ function groupByDueDate(boletos: Boleto[]): Map<string, Boleto[]> {
   return m;
 }
 
-function dayTotals(items: Boleto[]): { payable: number; receivable: number } {
+function dayTotals(
+  items: Boleto[],
+  options?: {
+    splitPayableByReceipt?: (b: Boleto) => boolean;
+    onlyScheduledPayables?: (b: Boleto) => boolean;
+  },
+): {
+  payable: number;
+  receivable: number;
+  payableReady: number;
+  payablePendingReceipt: number;
+} {
   let payable = 0;
   let receivable = 0;
+  let payableReady = 0;
+  let payablePendingReceipt = 0;
+
   for (const b of items) {
-    if (isBoletoPayable(b)) payable += b.amount;
-    else receivable += b.amount;
+    if (isBoletoPayable(b)) {
+      if (options?.onlyScheduledPayables && !options.onlyScheduledPayables(b)) {
+        continue;
+      }
+      payable += b.amount;
+      if (options?.splitPayableByReceipt) {
+        if (options.splitPayableByReceipt(b)) payableReady += b.amount;
+        else payablePendingReceipt += b.amount;
+      } else {
+        payableReady += b.amount;
+      }
+    } else {
+      receivable += b.amount;
+    }
   }
-  return { payable, receivable };
+
+  return { payable, receivable, payableReady, payablePendingReceipt };
 }
 
 function dateKey(y: number, m: number, d: number): string {
@@ -87,6 +114,82 @@ interface BoletosCalendarProps {
   formatCurrency: (v: number) => string;
   /** Quando definido, o calendário mostra só saídas ou só entradas (vendas realizadas). */
   viewMode?: BoletosCalendarViewMode;
+  /** Quando definido, separa saídas entre valores a pagar e valores a confirmar (recebimento). */
+  isPayableReadyToPay?: (b: Boleto) => boolean;
+  /** Limita totais de saída a contas ainda agendadas (pendentes/projetadas). */
+  onlyScheduledPayables?: (b: Boleto) => boolean;
+}
+
+type CalendarDayValueTone = "payable" | "pendingReceipt" | "receivable";
+
+function CalendarDayValueBucket({
+  label,
+  amount,
+  tone,
+  formatCurrency,
+  title,
+  muted,
+}: {
+  label: string;
+  amount: number;
+  tone: CalendarDayValueTone;
+  formatCurrency: (v: number) => string;
+  title: string;
+  muted?: boolean;
+}) {
+  const toneClass: Record<
+    CalendarDayValueTone,
+    { wrap: string; label: string; amount: string; prefix: string }
+  > = {
+    payable: {
+      wrap: "border-destructive/40 bg-destructive/12 shadow-[inset_4px_0_0_0] shadow-destructive dark:bg-destructive/15",
+      label: "text-destructive/95",
+      amount: "text-destructive",
+      prefix: "−",
+    },
+    pendingReceipt: {
+      wrap: "border-amber-500/45 bg-amber-500/14 shadow-[inset_4px_0_0_0] shadow-amber-600 dark:bg-amber-500/15",
+      label: "text-amber-900 dark:text-amber-200",
+      amount: "text-amber-800 dark:text-amber-300",
+      prefix: "−",
+    },
+    receivable: {
+      wrap: "border-emerald-600/35 bg-emerald-500/12 shadow-[inset_4px_0_0_0] shadow-emerald-600 dark:bg-emerald-500/15",
+      label: "text-emerald-800 dark:text-emerald-300",
+      amount: "text-emerald-700 dark:text-emerald-400",
+      prefix: "+",
+    },
+  };
+
+  const styles = toneClass[tone];
+
+  return (
+    <div
+      className={cn(
+        "w-full min-w-0 overflow-hidden rounded-md border px-2 py-1.5 sm:py-2",
+        styles.wrap,
+        muted && "opacity-85",
+      )}
+      title={title}
+    >
+      <p
+        className={cn(
+          "text-[9px] font-bold uppercase leading-tight tracking-wide sm:text-[10px]",
+          styles.label,
+        )}
+      >
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-0.5 text-right text-sm font-extrabold tabular-nums leading-none sm:text-base",
+          styles.amount,
+        )}
+      >
+        {styles.prefix} {formatCurrency(amount)}
+      </p>
+    </div>
+  );
 }
 
 export function BoletosCalendar({
@@ -97,10 +200,13 @@ export function BoletosCalendar({
   onDayListOpen,
   formatCurrency,
   viewMode = "all",
+  isPayableReadyToPay,
+  onlyScheduledPayables,
 }: BoletosCalendarProps) {
   const visibleBoletos = filterBoletosForView(boletos, viewMode);
   const byDay = groupByDueDate(visibleBoletos);
   const cells = buildCalendarCells(year, month);
+  const splitPayableTotals = Boolean(isPayableReadyToPay);
 
   if (loading) {
     return (
@@ -135,7 +241,11 @@ export function BoletosCalendar({
 
                 const dateStr = dateKey(cell.year, cell.month, cell.day);
                 const list = byDay.get(dateStr) ?? [];
-                const { payable, receivable } = dayTotals(list);
+                const { payable, receivable, payableReady, payablePendingReceipt } =
+                  dayTotals(list, {
+                    splitPayableByReceipt: isPayableReadyToPay,
+                    onlyScheduledPayables,
+                  });
                 const today = isToday(cell.year, cell.month, cell.day);
                 const isWeekend = (() => {
                   return false;
@@ -151,6 +261,10 @@ export function BoletosCalendar({
                 };
 
                 const hasAny = list.length > 0;
+                const showSplitPayables =
+                  splitPayableTotals &&
+                  (viewMode === "all" || viewMode === "payable") &&
+                  payable > 0;
 
                 return (
                   <div
@@ -158,8 +272,18 @@ export function BoletosCalendar({
                     role="presentation"
                     onClick={() => onDayListOpen(dayListPayload)}
                     className={cn(
-                      "relative flex min-h-[112px] cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5 sm:min-h-[128px]",
+                      "relative flex cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5",
+                      splitPayableTotals
+                        ? "min-h-[132px] sm:min-h-[156px]"
+                        : "min-h-[112px] sm:min-h-[128px]",
                       !isAdjacent && "bg-background",
+                      !isAdjacent &&
+                        payablePendingReceipt > 0 &&
+                        "bg-amber-500/[0.06] dark:bg-amber-500/[0.08]",
+                      !isAdjacent &&
+                        payablePendingReceipt === 0 &&
+                        payableReady > 0 &&
+                        "bg-destructive/[0.04] dark:bg-destructive/[0.06]",
                       !isAdjacent && isWeekend && "bg-muted/20",
                       isAdjacent &&
                         "border-dashed border-border/80 bg-muted/45 bg-[repeating-linear-gradient(-45deg,transparent,transparent_6px,hsl(var(--muted)/0.35)_6px,hsl(var(--muted)/0.35)_7px)]",
@@ -255,51 +379,60 @@ export function BoletosCalendar({
                           </span>
                         ) : (
                           <>
-                            <div className="flex w-full flex-col gap-1">
+                            <div
+                              className={cn(
+                                "flex w-full flex-col",
+                                showSplitPayables ? "gap-1.5" : "gap-1",
+                              )}
+                            >
                               {receivable > 0 &&
                                 (viewMode === "all" ||
                                   viewMode === "receivable") && (
-                                  <div
-                                    className={cn(
-                                      "flex w-full min-w-0 overflow-hidden rounded-md border border-emerald-600/25 bg-emerald-500/[0.07] shadow-[inset_3px_0_0_0] shadow-emerald-600/75 dark:bg-emerald-500/10 dark:shadow-emerald-500/70",
-                                      isAdjacent && "opacity-85",
-                                    )}
-                                  >
-                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1  sm:items-center sm:justify-between sm:gap-1">
-                                      <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-emerald-700 dark:text-emerald-400/95 sm:text-[10px]">
-                                        Vendas realizadas
-                                      </span>
-                                      <p
-                                        className="text-right text-[9px] font-semibold tabular-nums leading-none text-emerald-600 dark:text-emerald-400 sm:text-[12px]"
-                                        title="Contas a receber"
-                                      >
-                                        + {formatCurrency(receivable)}
-                                      </p>
-                                    </div>
-                                  </div>
+                                  <CalendarDayValueBucket
+                                    label="Vendas realizadas"
+                                    amount={receivable}
+                                    tone="receivable"
+                                    formatCurrency={formatCurrency}
+                                    title="Contas a receber"
+                                    muted={isAdjacent}
+                                  />
                                 )}
                               {payable > 0 &&
                                 (viewMode === "all" ||
-                                  viewMode === "payable") && (
-                                  <div
-                                    className={cn(
-                                      "flex w-full min-w-0 overflow-hidden rounded-md border border-destructive/20 bg-destructive/[0.06] shadow-[inset_3px_0_0_0] shadow-destructive/70 dark:bg-destructive/10 dark:shadow-destructive/80",
-                                      isAdjacent && "opacity-85",
+                                  viewMode === "payable") &&
+                                (showSplitPayables ? (
+                                  <>
+                                    {payableReady > 0 && (
+                                      <CalendarDayValueBucket
+                                        label="A pagar"
+                                        amount={payableReady}
+                                        tone="payable"
+                                        formatCurrency={formatCurrency}
+                                        title="Contas agendadas com recebimento confirmado ou sem vínculo com NF/romaneio"
+                                        muted={isAdjacent}
+                                      />
                                     )}
-                                  >
-                                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1  sm:items-center sm:justify-between sm:gap-1">
-                                      <span className="text-left text-[6px] font-semibold uppercase leading-tight tracking-wide text-destructive/90 sm:text-[10px]">
-                                        Valores a Pagar
-                                      </span>
-                                      <p
-                                        className="text-right text-[9px] font-semibold tabular-nums leading-none text-destructive sm:text-[12px]"
-                                        title="Contas a pagar"
-                                      >
-                                        − {formatCurrency(payable)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                )}
+                                    {payablePendingReceipt > 0 && (
+                                      <CalendarDayValueBucket
+                                        label="A confirmar"
+                                        amount={payablePendingReceipt}
+                                        tone="pendingReceipt"
+                                        formatCurrency={formatCurrency}
+                                        title="NF ou romaneio aguardando recebimento da mercadoria"
+                                        muted={isAdjacent}
+                                      />
+                                    )}
+                                  </>
+                                ) : (
+                                  <CalendarDayValueBucket
+                                    label="Valores a pagar"
+                                    amount={payable}
+                                    tone="payable"
+                                    formatCurrency={formatCurrency}
+                                    title="Contas a pagar"
+                                    muted={isAdjacent}
+                                  />
+                                ))}
                             </div>
                             <Button
                               type="button"

@@ -44,6 +44,15 @@ import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { fetchPayableReceiptContext } from "@/lib/fetchPayableReceiptContext";
+import {
+  EMPTY_PAYABLE_RECEIPT_CONTEXT,
+  isBoletoPendingMerchandiseReceipt,
+  isBoletoReadyToPay,
+  isScheduledPayableBoleto,
+  sumPayableBuckets,
+  type PayableReceiptContext,
+} from "@/lib/payableBoletoReceipt";
 import {
   fetchMergedPayableBoletosInRange,
   fetchSeriesMastersWithAnchorBoletos,
@@ -64,7 +73,7 @@ import type {
 } from "@/types/expenseSeries";
 import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
-import { CheckCircle2, Copy, FileText, Loader2, Plus } from "lucide-react";
+import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -159,6 +168,8 @@ export function FluxoBoletosPage({
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
   );
+  const [payableReceiptContext, setPayableReceiptContext] =
+    useState<PayableReceiptContext>(EMPTY_PAYABLE_RECEIPT_CONTEXT);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -320,6 +331,50 @@ export function FluxoBoletosPage({
   }, [fetchBoletosList]);
 
   useEffect(() => {
+    if (!companyId || flowType !== "payable") {
+      queueMicrotask(() =>
+        setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT),
+      );
+      return;
+    }
+    void fetchPayableReceiptContext(calendarBoletos)
+      .then(setPayableReceiptContext)
+      .catch((error) => {
+        console.error(error);
+        setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
+      });
+  }, [companyId, flowType, calendarBoletos]);
+
+  const boletoReadyToPay = useCallback(
+    (b: FluxoBoletoRow) => isBoletoReadyToPay(b, payableReceiptContext),
+    [payableReceiptContext],
+  );
+
+  const boletoPendingMerchandiseReceipt = useCallback(
+    (b: FluxoBoletoRow) =>
+      isBoletoPendingMerchandiseReceipt(b, payableReceiptContext),
+    [payableReceiptContext],
+  );
+
+  const listReadyToPay = useMemo(
+    () => boletosList.filter((b) => boletoReadyToPay(b)),
+    [boletosList, boletoReadyToPay],
+  );
+
+  const listPendingReceipt = useMemo(
+    () => boletosList.filter((b) => boletoPendingMerchandiseReceipt(b)),
+    [boletosList, boletoPendingMerchandiseReceipt],
+  );
+
+  const listOther = useMemo(
+    () =>
+      boletosList.filter(
+        (b) => !boletoReadyToPay(b) && !boletoPendingMerchandiseReceipt(b),
+      ),
+    [boletosList, boletoReadyToPay, boletoPendingMerchandiseReceipt],
+  );
+
+  useEffect(() => {
     if (expenseIdFromUrl) queueMicrotask(() => setBoletoSheetOpen(true));
   }, [expenseIdFromUrl]);
 
@@ -431,10 +486,14 @@ export function FluxoBoletosPage({
   const renderListCard = (b: FluxoBoletoRow) => {
     const payable = isBoletoPayable(b);
     const projected = isProjectedBoleto(b);
+    const pendingReceipt =
+      flowType === "payable" && boletoPendingMerchandiseReceipt(b);
     const statusLabel = projected
       ? "Projetada"
       : b.status === "pending"
-        ? "Pendente"
+        ? pendingReceipt
+          ? "Aguardando recebimento"
+          : "Pendente"
         : payable
           ? "Pago"
           : "Recebido";
@@ -457,15 +516,26 @@ export function FluxoBoletosPage({
                 "text-xs font-semibold rounded-full px-2.5 py-0.5",
                 projected
                   ? "bg-sky-500/15 text-sky-800 dark:text-sky-200"
-                  : b.status === "pending"
-                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                    : payable
-                      ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
-                      : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
+                  : pendingReceipt
+                    ? "bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                    : b.status === "pending"
+                      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                      : payable
+                        ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                        : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
               )}
             >
               {statusLabel}
             </span>
+            {pendingReceipt && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-800 dark:text-amber-200"
+              >
+                <PackageSearch className="mr-1 h-3 w-3" />
+                Mercadoria não recebida
+              </Badge>
+            )}
             {projected && (
               <Badge variant="outline" className="text-[10px]">
                 Virtual
@@ -492,6 +562,12 @@ export function FluxoBoletosPage({
           {b.provider ? (
             <p className="mt-2 text-sm text-muted-foreground">{b.provider}</p>
           ) : null}
+          {pendingReceipt && (
+            <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+              Vinculada a NF ou romaneio sem recebimento confirmado. Confirme a
+              mercadoria em Recebimento antes de pagar.
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-row items-end justify-between border-t border-border pt-3 sm:flex-col sm:items-end sm:justify-start sm:border-t-0 sm:pt-0 sm:text-right">
           <div className="flex  items-center justify-end gap-1">
@@ -517,10 +593,18 @@ export function FluxoBoletosPage({
     );
   };
 
-  const renderCalendarDayCompactCard = (b: Boleto) => {
+  const renderCalendarDayCompactCard = (b: FluxoBoletoRow) => {
     const payable = isBoletoPayable(b);
+    const pendingReceipt =
+      flowType === "payable" && boletoPendingMerchandiseReceipt(b);
     const statusLabel =
-      b.status === "pending" ? "Pendente" : payable ? "Pago" : "Recebido";
+      b.status === "pending"
+        ? pendingReceipt
+          ? "Aguardando recebimento"
+          : "Pendente"
+        : payable
+          ? "Pago"
+          : "Recebido";
 
     return (
       <button
@@ -529,9 +613,11 @@ export function FluxoBoletosPage({
         onClick={() => setBoletoResumo(b)}
         className={cn(
           "w-full rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
-          payable
-            ? "border-destructive/30 dark:border-destructive/35"
-            : "border-emerald-600/30 dark:border-emerald-500/35",
+          pendingReceipt
+            ? "border-amber-500/35 bg-amber-500/[0.06] dark:border-amber-500/40"
+            : payable
+              ? "border-destructive/30 dark:border-destructive/35"
+              : "border-emerald-600/30 dark:border-emerald-500/35",
           "flex flex-col gap-1.5 sm:gap-2",
         )}
       >
@@ -546,22 +632,26 @@ export function FluxoBoletosPage({
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                b.status === "pending"
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                  : payable
-                    ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
-                    : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
+                pendingReceipt
+                  ? "bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                  : b.status === "pending"
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : payable
+                      ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-sky-600/15 text-sky-700 dark:text-sky-300",
               )}
             >
               {statusLabel}
             </span>
           </div>
-          <p
-            className="
-                mt-1.5 truncate text-xs text-muted-foreground"
-          >
+          <p className="mt-1.5 truncate text-xs text-muted-foreground">
             {formatBoletoFluxoDescription(b)}
           </p>
+          {pendingReceipt && (
+            <p className="mt-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200">
+              NF ou romaneio sem recebimento da mercadoria confirmado.
+            </p>
+          )}
         </div>
         <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -573,9 +663,11 @@ export function FluxoBoletosPage({
           <p
             className={cn(
               "text-base font-bold tabular-nums",
-              payable
-                ? "text-destructive"
-                : "text-emerald-600 dark:text-emerald-400",
+              pendingReceipt
+                ? "text-amber-700 dark:text-amber-300"
+                : payable
+                  ? "text-destructive"
+                  : "text-emerald-600 dark:text-emerald-400",
             )}
           >
             {formatCurrency(b.amount)}
@@ -585,7 +677,35 @@ export function FluxoBoletosPage({
     );
   };
 
-  const calendarDayItems = calendarDayList?.items ?? [];
+  const calendarDayItems = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
+
+  const calendarDayBuckets = useMemo(() => {
+    const items = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
+    if (flowType !== "payable") {
+      return {
+        ready: [] as FluxoBoletoRow[],
+        pending: [] as FluxoBoletoRow[],
+        other: items,
+        totals: { readyToPay: 0, pendingReceipt: 0 },
+      };
+    }
+    const ready = items.filter((b) => boletoReadyToPay(b));
+    const pending = items.filter((b) =>
+      boletoPendingMerchandiseReceipt(b),
+    );
+    const other = items.filter(
+      (b) => !boletoReadyToPay(b) && !boletoPendingMerchandiseReceipt(b),
+    );
+    const totals = sumPayableBuckets(items, payableReceiptContext);
+    return { ready, pending, other, totals };
+  }, [
+    calendarDayList,
+    flowType,
+    boletoReadyToPay,
+    boletoPendingMerchandiseReceipt,
+    payableReceiptContext,
+  ]);
+
   const revenueCalendarDayItems = revenueCalendarDayList?.items ?? [];
 
   const renderRevenueCalendarDayCompactCard = (e: RevenueEntry) => (
@@ -673,6 +793,12 @@ export function FluxoBoletosPage({
           viewMode={calendarViewMode}
           onDayListOpen={setCalendarDayList}
           formatCurrency={formatCurrency}
+          isPayableReadyToPay={
+            flowType === "payable" ? boletoReadyToPay : undefined
+          }
+          onlyScheduledPayables={
+            flowType === "payable" ? isScheduledPayableBoleto : undefined
+          }
         />
       )}
 
@@ -698,8 +824,46 @@ export function FluxoBoletosPage({
           ) : boletosList.length === 0 ? (
             <p className="text-muted-foreground">{emptyListMessage}</p>
           ) : (
-            <div className="space-y-2">
-              {boletosList.map((b) => renderListCard(b))}
+            <div className="space-y-6">
+              {flowType === "payable" && listReadyToPay.length > 0 && (
+                <div className="space-y-2">
+                  <div>
+                    <h3 className="text-sm font-semibold">Valores a pagar</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Contas agendadas liberadas para pagamento.
+                    </p>
+                  </div>
+                  {listReadyToPay.map((b) => renderListCard(b))}
+                </div>
+              )}
+              {flowType === "payable" && listPendingReceipt.length > 0 && (
+                <div className="space-y-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                      Valores a confirmar
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      NF ou romaneio aguardando recebimento da mercadoria.
+                    </p>
+                  </div>
+                  {listPendingReceipt.map((b) => renderListCard(b))}
+                </div>
+              )}
+              {(flowType !== "payable" || listOther.length > 0) && (
+                <div className="space-y-2">
+                  {flowType === "payable" && listOther.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold">Quitadas</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Contas já pagas neste mês.
+                      </p>
+                    </div>
+                  )}
+                  {(flowType === "payable" ? listOther : boletosList).map((b) =>
+                    renderListCard(b),
+                  )}
+                </div>
+              )}
             </div>
           )}
           {!loadingList && (
@@ -726,15 +890,84 @@ export function FluxoBoletosPage({
                 {calendarDayList?.title}
               </SheetDescription>
             </SheetHeader>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
               {calendarDayList && calendarDayList.items.length === 0 && (
                 <p className="text-sm text-muted-foreground">
                   Nenhum lançamento com vencimento neste dia.
                 </p>
               )}
+              {flowType === "payable" && calendarDayItems.length > 0 && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-destructive">
+                      A pagar
+                    </p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-destructive">
+                      {formatCurrency(calendarDayBuckets.totals.readyToPay)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.07] px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      A confirmar
+                    </p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-amber-700 dark:text-amber-300">
+                      {formatCurrency(calendarDayBuckets.totals.pendingReceipt)}
+                    </p>
+                  </div>
+                </div>
+              )}
               {calendarDayItems.length > 0 && (
-                <div className="space-y-2">
-                  {calendarDayItems.map((b) => renderCalendarDayCompactCard(b))}
+                <div className="space-y-5">
+                  {flowType === "payable" &&
+                    calendarDayBuckets.ready.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold">
+                            Valores a pagar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            Liberadas para pagamento neste dia.
+                          </p>
+                        </div>
+                        {calendarDayBuckets.ready.map((b) =>
+                          renderCalendarDayCompactCard(b),
+                        )}
+                      </div>
+                    )}
+                  {flowType === "payable" &&
+                    calendarDayBuckets.pending.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                            Valores a confirmar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            NF ou romaneio aguardando recebimento da mercadoria.
+                          </p>
+                        </div>
+                        {calendarDayBuckets.pending.map((b) =>
+                          renderCalendarDayCompactCard(b),
+                        )}
+                      </div>
+                    )}
+                  {(flowType !== "payable" ||
+                    calendarDayBuckets.other.length > 0) && (
+                    <div className="space-y-2">
+                      {flowType === "payable" &&
+                        calendarDayBuckets.other.length > 0 && (
+                          <div>
+                            <h3 className="text-sm font-semibold">Quitadas</h3>
+                            <p className="text-xs text-muted-foreground">
+                              Contas já pagas com vencimento neste dia.
+                            </p>
+                          </div>
+                        )}
+                      {(flowType === "payable"
+                        ? calendarDayBuckets.other
+                        : calendarDayItems
+                      ).map((b) => renderCalendarDayCompactCard(b))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -876,6 +1109,17 @@ export function FluxoBoletosPage({
                   <Badge variant="outline" className="mt-2">
                     {boletoCategoryLabel(boletoResumo)}
                   </Badge>
+                  {flowType === "payable" &&
+                    boletoPendingMerchandiseReceipt(boletoResumo) && (
+                      <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
+                        <p className="font-medium">Mercadoria ainda não recebida</p>
+                        <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-100/90">
+                          Esta conta está vinculada a uma NF ou romaneio sem
+                          recebimento confirmado. Confirme a mercadoria antes de
+                          pagar.
+                        </p>
+                      </div>
+                    )}
                 </div>
 
                 {boletoResumo.status === "pending" && (
