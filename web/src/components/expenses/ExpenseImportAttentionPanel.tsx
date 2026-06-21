@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/select";
 import {
   EXPENSE_DIVERGENCE_REASONS,
-  getNfeExpenseValueBreakdown,
   valuesDivergeCents,
 } from "@/lib/expenseDivergenceUi";
 import { AlertTriangle, PackageSearch, Sparkles } from "lucide-react";
@@ -179,18 +178,11 @@ export function ExpenseImportAttentionPanel({
   );
 }
 
-function formatBrlInline(amount: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(amount);
-}
-
 /** Resumo somente leitura no detalhe da despesa (importação já gravada). */
 export function ExpenseRecordedDivergenceBanner({
-  documentTotal,
-  sumLines,
-  financialReconciliationJson,
+  documentTotal: _documentTotal,
+  sumLines: _sumLines,
+  financialReconciliationJson: _financialReconciliationJson,
   divergenceReason,
   unlinkedProductRowCount,
 }: {
@@ -201,14 +193,7 @@ export function ExpenseRecordedDivergenceBanner({
   unlinkedProductRowCount: number;
 }): ReactNode {
   const hasDoc =
-    documentTotal != null && Number.isFinite(Number(documentTotal));
-  const docN = hasDoc ? Number(documentTotal) : null;
-  const b = getNfeExpenseValueBreakdown({
-    documentTotal: docN,
-    sumItems: sumLines,
-    financialReconciliationJson: financialReconciliationJson ?? null,
-  });
-  const mismatch = b.needsAttention;
+    _documentTotal != null && Number.isFinite(Number(_documentTotal));
   const hasReason = !!(divergenceReason && divergenceReason.trim());
   const hasProductsIssue = unlinkedProductRowCount > 0;
 

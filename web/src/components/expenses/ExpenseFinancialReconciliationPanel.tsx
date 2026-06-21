@@ -88,8 +88,6 @@ export function ExpenseFinancialReconciliationPanel({
   const stagingAdjusted =
     data.document_total_adjusted === true ||
     data.document_total_adjusted === "true";
-  const beforeAdj = numOrNull(data.document_total_before);
-  const afterAdj = numOrNull(data.document_total_after);
 
   if (
     !hasIcms &&

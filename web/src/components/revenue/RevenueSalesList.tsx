@@ -113,38 +113,6 @@ function formatEntryDateParts(isoDate: string) {
   };
 }
 
-function SummaryTile({
-  label,
-  value,
-  sub,
-  loading,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  loading?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-border/80 bg-card px-4 py-3 shadow-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      {loading ? (
-        <div className="mt-2 h-7 w-24 animate-pulse rounded-md bg-muted" />
-      ) : (
-        <>
-          <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-foreground">
-            {value}
-          </p>
-          {sub ? (
-            <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}
-
 function ViewModeToggle({
   value,
   onChange,
@@ -589,8 +557,6 @@ export function RevenueSalesList(props: RevenueSalesListProps) {
     onEntryModeFilterChange,
     revenueTypeFilter,
     onRevenueTypeFilterChange,
-    periodSummary,
-    summaryLoading,
     categoriesById,
     categoryPathLabel,
     productNameById,

@@ -10,9 +10,9 @@ import type { Boleto } from "@/types/expense";
 const PROJECTED_ID_PREFIX = "virtual:";
 
 export function isProjectedBoleto(
-  b: Pick<Boleto, "id"> & { is_projected?: boolean },
+  b: { id?: string; is_projected?: boolean },
 ): boolean {
-  return !!b.is_projected || String(b.id).startsWith(PROJECTED_ID_PREFIX);
+  return !!b.is_projected || (b.id != null && String(b.id).startsWith(PROJECTED_ID_PREFIX));
 }
 
 export function monthKeyFromDate(d: Date): string {

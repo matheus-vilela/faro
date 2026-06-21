@@ -44,7 +44,7 @@ export async function fetchProductTechnicalSheet(
   const recipe = row.recipe;
   const ingredients = Array.isArray(row.ingredients)
     ? row.ingredients
-        .map((raw) => {
+        .map((raw): TechnicalSheetIngredient | null => {
           const o = raw as Record<string, unknown>;
           const id = String(o.product_id ?? "").trim();
           if (!id) return null;
@@ -57,7 +57,7 @@ export async function fetchProductTechnicalSheet(
               .trim()
               .toLowerCase(),
             stock_quantity: Number(o.stock_quantity ?? 0),
-          } satisfies TechnicalSheetIngredient;
+          };
         })
         .filter((x): x is TechnicalSheetIngredient => x != null)
     : [];

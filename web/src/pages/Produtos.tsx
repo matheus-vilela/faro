@@ -94,7 +94,6 @@ import {
   convertUnitPriceForProduct,
   getLockedSystemSecondaryQty,
 } from "@/lib/companyUnits/convert";
-import { productConversionRowLabel } from "@/lib/companyUnits/productConversionRows";
 import {
   buildProductUnitSelectOptions,
   getSystemProductUnitSelectOptionsWithLegacy,
@@ -1918,6 +1917,11 @@ export function Produtos() {
     }
 
     if (categoriesChanged) {
+      if (!currentCompany?.id) {
+        setStockSaving(false);
+        return;
+      }
+      const companyId = currentCompany.id;
       const idsToPersist = [...categoryIdsSnapshot];
       const { error: delErr } = await supabase
         .from("product_category_assignments")
@@ -1933,7 +1937,7 @@ export function Produtos() {
           .from("product_category_assignments")
           .insert(
             idsToPersist.map((category_id) => ({
-              company_id: currentCompany.id,
+              company_id: companyId,
               product_id: stockProduct.id,
               category_id,
             })),
@@ -2455,33 +2459,6 @@ export function Produtos() {
                     const pendingPurchaseQty =
                       pendingPurchaseByProduct[p.id] ?? 0;
                     const convRows = productConversionMap[p.id] ?? [];
-                    const conversionStatus = p.import_unit_needs_review
-                      ? "conflitante"
-                      : convRows.length > 0
-                        ? "configurada"
-                        : "pendente";
-                    const hubUnit = (p.unit || "un").trim();
-                    const exampleConvRow =
-                      convRows.find(
-                        (r) =>
-                          r.primary_unit_code.trim().toLowerCase() ===
-                          hubUnit.toLowerCase(),
-                      ) ?? convRows[0];
-                    const conversionExample =
-                      exampleConvRow != null
-                        ? productConversionRowLabel(
-                            {
-                              company_id: currentCompany?.id ?? "",
-                              primary_qty: exampleConvRow.primary_qty,
-                              primary_unit_code:
-                                exampleConvRow.primary_unit_code,
-                              secondary_qty: exampleConvRow.secondary_qty,
-                              secondary_unit_code:
-                                exampleConvRow.secondary_unit_code,
-                            },
-                            hubUnit,
-                          )
-                        : "Sem conversão cadastrada";
                     return (
                       <li key={p.id}>
                         <div

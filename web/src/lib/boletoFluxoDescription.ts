@@ -11,7 +11,9 @@ function stripLegacyFluxoPrefixes(description: string): string {
 const LEGACY_REVENUE_TAX_SUFFIX =
   /^(.+?)\s*-\s*Taxas\/dedu[cç][oõ]es\s*$/iu;
 
-export function formatBoletoFluxoDescription(b: Boleto): string {
+export function formatBoletoFluxoDescription(
+  b: Pick<Boleto, "description">,
+): string {
   const raw = b.description?.trim() ?? "";
   if (!raw) return raw;
 

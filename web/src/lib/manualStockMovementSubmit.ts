@@ -2,8 +2,6 @@ import {
   computeManualMovementDelta,
   convertUnitPriceToStockUnit,
   dateInputToIsoMidday,
-  type EntryClassification,
-  type ExitClassification,
   type ManualClassification,
   type ManualMovementKind,
   type ManualRegistrationMode,
@@ -53,10 +51,7 @@ export function validateManualStockMovementInput(
   if (!selectedUnit) {
     return { ok: false, message: "Selecione uma unidade válida para o produto." };
   }
-  if (
-    input.movementKind !== "inventory" &&
-    (input.classification == null || input.classification === "")
-  ) {
+  if (input.movementKind !== "inventory" && input.classification == null) {
     return { ok: false, message: "Selecione a classificação." };
   }
   return { ok: true };

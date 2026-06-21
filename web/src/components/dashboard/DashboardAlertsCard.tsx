@@ -34,6 +34,10 @@ import {
   readPendingPayloadReasonCode,
 } from "@/lib/importPending/pendingReasonUi";
 import { DASHBOARD_OPEN_IMPORT_PENDING_SHEET_EVENT } from "@/lib/dashboardImportReviewUi";
+import {
+  canonicalProductName,
+  normalizeInvoiceProductLabel,
+} from "@/lib/productImport/canonicalName";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {

@@ -18,7 +18,6 @@ import { spCivilDayBoundsUtc, spTodayYmd } from "@/lib/checklistSpDay";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Boleto } from "@/types/expense";
-import type { Recebimento } from "@/types/recebimento";
 import {
   ArrowRight,
   ChevronRight,
@@ -133,7 +132,19 @@ function isChecklistDueToday(r: ChecklistRow, now = new Date()): boolean {
   return (mask & (1 << getWeekdaySP(now))) !== 0;
 }
 
-function recebimentoTitle(r: Recebimento): string {
+type RecebimentoDashboardRow = {
+  id: string;
+  status: "pending" | "received";
+  created_at: string;
+  received_at: string | null;
+  expenses?: {
+    supplier_name: string | null;
+    display_name: string | null;
+    invoice_number: string | null;
+  } | null;
+};
+
+function recebimentoTitle(r: RecebimentoDashboardRow): string {
   return (
     r.expenses?.display_name?.trim() ||
     r.expenses?.supplier_name?.trim() ||
@@ -171,9 +182,11 @@ export function DashboardDayOperations() {
 
   const [recebPending, setRecebPending] = useState(0);
   const [recebReceivedToday, setRecebReceivedToday] = useState(0);
-  const [recebPendingRows, setRecebPendingRows] = useState<Recebimento[]>([]);
+  const [recebPendingRows, setRecebPendingRows] = useState<
+    RecebimentoDashboardRow[]
+  >([]);
   const [recebReceivedTodayRows, setRecebReceivedTodayRows] = useState<
-    Recebimento[]
+    RecebimentoDashboardRow[]
   >([]);
 
   const todayLabel = useMemo(() => formatLongDate(new Date()), []);
@@ -297,7 +310,7 @@ export function DashboardDayOperations() {
           .order("submitted_at", { ascending: false }),
       ]);
 
-      const runsToday = (runsRes.data ?? []) as ChecklistRunToday[];
+      const runsToday = (runsRes.data ?? []) as unknown as ChecklistRunToday[];
       setChecklistRunsToday(runsToday);
       setChecklistCompleted(runsToday.length);
 
@@ -346,7 +359,7 @@ export function DashboardDayOperations() {
       );
     }
 
-    const invRows = (inventoryRes.data ?? []) as InventorySessionRow[];
+    const invRows = (inventoryRes.data ?? []) as unknown as InventorySessionRow[];
     const open = invRows.filter((r) => r.status === "open");
     const submittedToday = invRows.filter(
       (r) =>
@@ -386,7 +399,7 @@ export function DashboardDayOperations() {
         .order("updated_at", { ascending: false })
         .limit(120);
 
-      const recList = (recData ?? []) as Recebimento[];
+      const recList = (recData ?? []) as unknown as RecebimentoDashboardRow[];
       const pending = recList.filter((r) => r.status === "pending");
       const receivedToday = recList.filter(
         (r) =>
@@ -893,7 +906,7 @@ function RecebimentoListItem({
   row,
   received,
 }: {
-  row: Recebimento;
+  row: RecebimentoDashboardRow;
   received?: boolean;
 }) {
   const nf = row.expenses?.invoice_number?.trim();

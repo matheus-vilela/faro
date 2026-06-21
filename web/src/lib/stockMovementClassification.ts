@@ -1,5 +1,8 @@
 import { manualClassificationLabel } from "@/lib/manualStockMovement";
-import { isWasteStockMovement } from "@/lib/stockMovementFilters";
+import {
+  isWasteStockMovement,
+  type FilterableQuery,
+} from "@/lib/stockMovementFilters";
 
 /** Slugs usados nos filtros de classificação (UI e query). */
 export type MovementClassificationFilter =
@@ -124,15 +127,10 @@ export function resolveMovementClassificationFilterKey(
   return "other";
 }
 
-type FilterableQuery = {
-  eq: (column: string, value: string) => FilterableQuery;
-  or: (filters: string) => FilterableQuery;
-};
-
-export function applyStockMovementClassificationFilter<T extends FilterableQuery>(
-  query: T,
+export function applyStockMovementClassificationFilter(
+  query: FilterableQuery,
   classificationFilter: MovementClassificationFilter,
-): T {
+): FilterableQuery {
   if (classificationFilter === "all") return query;
 
   const parts: string[] = [];
@@ -194,5 +192,5 @@ export function applyStockMovementClassificationFilter<T extends FilterableQuery
   }
 
   if (parts.length === 0) return query;
-  return query.or(parts.join(",")) as T;
+  return query.or(parts.join(","));
 }

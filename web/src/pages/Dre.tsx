@@ -49,6 +49,8 @@ import {
 import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 
+type DreMainView = "resumo" | "sem-categoria";
+
 export function Dre() {
   const { user } = useAuth();
   const { currentCompany, currentRole } = useCompany();

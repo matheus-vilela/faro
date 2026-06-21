@@ -28,6 +28,7 @@ import {
 import {
   applyStockMovementDirectionFilter,
   stockMovementTypeLabel,
+  type FilterableQuery,
   type MovementDirectionFilter,
 } from "@/lib/stockMovementFilters";
 import { supabase } from "@/lib/supabase";
@@ -170,14 +171,15 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
 
     setProducts((productsRes.data ?? []) as ProductOption[]);
 
-    let listQuery = supabase
+    // Tipagem loose: PostgrestFilterBuilder recursivo estoura o limite do tsc -b.
+    let listQuery: FilterableQuery = supabase
       .from("stock_movements")
       .select(
         "id, product_id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json, products!inner(name, unit, company_id)",
       )
       .eq("products.company_id", companyId)
       .order("created_at", { ascending: false })
-      .limit(250);
+      .limit(250) as unknown as FilterableQuery;
 
     if (productFilterId) {
       listQuery = listQuery.eq("product_id", productFilterId);
@@ -188,13 +190,20 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       classificationFilter,
     );
     if (dateBounds?.gte) {
-      listQuery = listQuery.gte("created_at", dateBounds.gte);
+      listQuery = (listQuery as FilterableQuery & {
+        gte: (column: string, value: string) => FilterableQuery;
+      }).gte("created_at", dateBounds.gte);
     }
     if (dateBounds?.lte) {
-      listQuery = listQuery.lte("created_at", dateBounds.lte);
+      listQuery = (listQuery as FilterableQuery & {
+        lte: (column: string, value: string) => FilterableQuery;
+      }).lte("created_at", dateBounds.lte);
     }
 
-    const filteredListRes = await listQuery;
+    const filteredListRes = await (listQuery as unknown as PromiseLike<{
+      data: unknown;
+      error: { message: string } | null;
+    }>);
 
     if (filteredListRes.error) {
       console.error(filteredListRes.error);
@@ -218,14 +227,16 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       return;
     }
 
-    let aggQuery = supabase
+    let aggQuery: FilterableQuery = supabase
       .from("stock_movements")
-      .select("quantity, type, unit_cost", { count: "exact" });
+      .select("quantity, type, unit_cost", { count: "exact" }) as unknown as FilterableQuery;
 
     if (productFilterId) {
       aggQuery = aggQuery.eq("product_id", productFilterId);
     } else {
-      aggQuery = aggQuery.in("product_id", productIds);
+      aggQuery = (aggQuery as FilterableQuery & {
+        in: (column: string, values: string[]) => FilterableQuery;
+      }).in("product_id", productIds);
     }
     aggQuery = applyStockMovementDirectionFilter(aggQuery, directionFilter);
     aggQuery = applyStockMovementClassificationFilter(
@@ -233,13 +244,25 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       classificationFilter,
     );
     if (dateBounds?.gte) {
-      aggQuery = aggQuery.gte("created_at", dateBounds.gte);
+      aggQuery = (aggQuery as FilterableQuery & {
+        gte: (column: string, value: string) => FilterableQuery;
+      }).gte("created_at", dateBounds.gte);
     }
     if (dateBounds?.lte) {
-      aggQuery = aggQuery.lte("created_at", dateBounds.lte);
+      aggQuery = (aggQuery as FilterableQuery & {
+        lte: (column: string, value: string) => FilterableQuery;
+      }).lte("created_at", dateBounds.lte);
     }
 
-    const { count, data: aggData, error: aggError } = await aggQuery;
+    const {
+      count,
+      data: aggData,
+      error: aggError,
+    } = await (aggQuery as unknown as PromiseLike<{
+      count: number | null;
+      data: { quantity: number; type: string; unit_cost: number | null }[] | null;
+      error: { message: string } | null;
+    }>);
 
     if (aggError) {
       console.error(aggError);

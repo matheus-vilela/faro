@@ -10,7 +10,7 @@ import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { isSystemUnitCode } from "@/lib/companyUnits/productUnitOptions";
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 export type ProductUnitOption = { value: string; label: string };
 
@@ -49,7 +49,8 @@ export function ProductUnitSearchSelect({
   const [createOpen, setCreateOpen] = useState(false);
   const [createLabel, setCreateLabel] = useState("");
   const [createCode, setCreateCode] = useState("");
-  const listRef = usePopoverListScrollFix();
+  const listRef = useRef<HTMLDivElement>(null);
+  usePopoverListScrollFix(open, listRef);
 
   const selectedLabel =
     (options.find((o) => o.value === value)?.label ?? value) || "Selecione";

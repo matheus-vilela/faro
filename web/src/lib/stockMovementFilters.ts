@@ -3,26 +3,26 @@ export type MovementDirectionFilter = "all" | "in" | "out";
 /** @deprecated use MovementDirectionFilter */
 export type MovementActionFilter = MovementDirectionFilter;
 
-type FilterableQuery = {
+export type FilterableQuery = {
   eq: (column: string, value: string) => FilterableQuery;
   or: (filters: string) => FilterableQuery;
 };
 
 /** Filtro Tipo: somente entrada ou saída (perda conta como saída). */
-export function applyStockMovementDirectionFilter<T extends FilterableQuery>(
-  query: T,
+export function applyStockMovementDirectionFilter(
+  query: FilterableQuery,
   directionFilter: MovementDirectionFilter,
-): T {
+): FilterableQuery {
   if (directionFilter === "all") return query;
-  if (directionFilter === "in") return query.eq("type", "in") as T;
-  return query.or("type.eq.out,type.eq.waste") as T;
+  if (directionFilter === "in") return query.eq("type", "in");
+  return query.or("type.eq.out,type.eq.waste");
 }
 
 /** @deprecated use applyStockMovementDirectionFilter */
-export function applyStockMovementActionFilter<T extends FilterableQuery>(
-  query: T,
+export function applyStockMovementActionFilter(
+  query: FilterableQuery,
   actionFilter: MovementDirectionFilter,
-): T {
+): FilterableQuery {
   return applyStockMovementDirectionFilter(query, actionFilter);
 }
 
