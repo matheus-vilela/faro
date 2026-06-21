@@ -42,18 +42,20 @@ function RecipeListItem({
   onRevert: (productId: string) => void;
 }) {
   return (
-    <li className="min-h-[6.25rem]">
-      <button
+    <li>
+      <div
         className={cn(
-          "flex h-full min-h-[6.25rem] flex-col rounded-xl border p-3 transition-colors w-full",
+          "flex items-start gap-2 rounded-xl border p-3 transition-colors",
           isSelected
             ? "border-amber-500/50 bg-amber-500/10 ring-1 ring-amber-500/30"
             : "border-border/80 bg-background/60 hover:border-amber-500/25 hover:bg-muted/30",
         )}
-        type="button"
-        onClick={() => onSelect(row.recipe_id)}
       >
-        <div className="w-full text-left">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => onSelect(row.recipe_id)}
+        >
           <p className="truncate font-medium text-foreground">{row.name}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Unidade de venda: {row.unit}
@@ -63,33 +65,19 @@ function RecipeListItem({
               </span>
             ) : null}
           </p>
-        </div>
-        <div className="mt-2 flex flex-wrap w-fit gap-2 ">
-          <Button
-            type="button"
-            variant={isSelected ? "default" : "outline"}
-            size="sm"
-            disabled={busyId === row.product_id}
-            onClick={() => onSelect(row.recipe_id)}
-          >
-            Cadastrar ficha
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground border-1"
-            disabled={busyId === row.product_id}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRevert(row.product_id);
-            }}
-          >
-            <Package className="mr-1 h-3.5 w-3.5" />
-            Não é ficha
-          </Button>
-        </div>
-      </button>
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-muted-foreground"
+          disabled={busyId === row.product_id}
+          onClick={() => onRevert(row.product_id)}
+        >
+          <Package className="mr-1 h-3.5 w-3.5" />
+          Não é ficha
+        </Button>
+      </div>
     </li>
   );
 }
@@ -213,6 +201,9 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       embedInline={!isMobile}
       ingredientsOnly
       initialOpenRecipeId={selectedRecipeId}
+      contextOutputProductId={
+        rows.find((r) => r.recipe_id === selectedRecipeId)?.product_id ?? null
+      }
       onSheetOpenChange={(open) => {
         if (!open) setSelectedRecipeId(null);
       }}
@@ -273,15 +264,15 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
                   importação do EPOC (ex.: caipirinha, balde de cerveja).{" "}
                   {isMobile ? (
                     <>
-                      Toque em <strong>Cadastrar produto</strong> para abrir o
-                      editor ou use <strong>Não é ficha</strong> para tratar
-                      como produto de venda.
+                      Toque em uma ficha para abrir o editor ou use{" "}
+                      <strong>Não é ficha</strong> para tratar como produto de
+                      venda.
                     </>
                   ) : (
                     <>
-                      Selecione uma ficha à esquerda e cadastre os produtos à
-                      direita, ou use <strong>Não é uma ficha técnica</strong>{" "}
-                      para tratar como produto de venda.
+                      Clique em uma ficha à esquerda para montar os produtos à
+                      direita, ou use <strong>Não é ficha</strong> para tratar
+                      como produto de venda.
                     </>
                   )}
                 </CardDescription>
@@ -330,11 +321,8 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
                   <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 px-6 py-12 text-center text-sm text-muted-foreground">
                     <ChefHat className="h-10 w-10 opacity-40" />
                     <p>
-                      Selecione uma ficha na lista ou clique em{" "}
-                      <span className="font-medium text-foreground">
-                        Cadastrar produtos
-                      </span>{" "}
-                      para montar os produtos aqui.
+                      Selecione uma ficha na lista para montar os produtos
+                      aqui.
                     </p>
                   </div>
                 )}

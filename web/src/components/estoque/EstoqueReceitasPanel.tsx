@@ -284,6 +284,8 @@ type IngredientEditorProps = {
   ) => number | null;
   formatQtyHint: (value: number) => string;
   onProductCreated?: (product: Product) => void;
+  /** Produto de saída da ficha — não aparece na lista de insumos. */
+  excludeProductId?: string;
 };
 
 function RecipeIngredientsAddPanel({
@@ -297,6 +299,7 @@ function RecipeIngredientsAddPanel({
   handleIngredientConversionsChange,
   toBaseQty,
   onProductCreated,
+  excludeProductId = "",
 }: IngredientEditorProps) {
   const [draftProductId, setDraftProductId] = useState("");
   const [draftUnitCode, setDraftUnitCode] = useState("");
@@ -323,10 +326,30 @@ function RecipeIngredientsAddPanel({
     [ings],
   );
 
+  const pickerProducts = useMemo(() => {
+    const excluded = excludeProductId.trim();
+    if (!excluded) return products;
+    return products.filter((p) => p.id !== excluded);
+  }, [products, excludeProductId]);
+
+  useEffect(() => {
+    if (!draftProductId) return;
+    const excluded = excludeProductId.trim();
+    if (excluded && draftProductId === excluded) {
+      queueMicrotask(() => setDraftProductId(""));
+    }
+  }, [draftProductId, excludeProductId]);
+
   const addIngredient = () => {
     const pid = draftProductId.trim();
     if (!pid) {
       toast.error("Selecione um produto.");
+      return;
+    }
+    if (excludeProductId.trim() && pid === excludeProductId.trim()) {
+      toast.error(
+        "O produto desta ficha não pode ser adicionado como insumo de si mesmo.",
+      );
       return;
     }
     const unit = draftUnitCode.trim().toLowerCase();
@@ -390,7 +413,7 @@ function RecipeIngredientsAddPanel({
         <div className="space-y-2">
           <Label>Produto</Label>
           <ProductPicker
-            products={products}
+            products={pickerProducts}
             value={draftProductId}
             onChange={setDraftProductId}
             placeholder="Selecionar produto"
@@ -536,6 +559,8 @@ export const EstoqueReceitasPanel = forwardRef<
     embedInline?: boolean;
     /** Abre esta receita no sheet após carregar o catálogo. */
     initialOpenRecipeId?: string | null;
+    /** Produto de saída da ficha (ex.: item EPOC) — oculto na lista de insumos. */
+    contextOutputProductId?: string | null;
     onSheetOpenChange?: (open: boolean) => void;
     /**
      * Salva via RPC de ficha técnica do produto (catálogo, backfill).
@@ -561,6 +586,7 @@ export const EstoqueReceitasPanel = forwardRef<
     ingredientsOnly = false,
     embedInline = false,
     initialOpenRecipeId,
+    contextOutputProductId,
     onSheetOpenChange,
     technicalSheetOutputProductId,
     onTechnicalSheetSaved,
@@ -615,6 +641,17 @@ export const EstoqueReceitasPanel = forwardRef<
   ]);
 
   const technicalSheetPid = technicalSheetOutputProductId?.trim() ?? "";
+
+  const ingredientExcludeProductId = useMemo(() => {
+    for (const candidate of [
+      technicalSheetPid,
+      outputId.trim(),
+      contextOutputProductId?.trim() ?? "",
+    ]) {
+      if (candidate) return candidate;
+    }
+    return "";
+  }, [technicalSheetPid, outputId, contextOutputProductId]);
 
   useEffect(() => {
     if (!technicalSheetPid || loading || initialOpenRecipeId?.trim()) return;
@@ -1532,6 +1569,7 @@ export const EstoqueReceitasPanel = forwardRef<
                     fromBaseQty={fromBaseQty}
                     formatQtyHint={formatQtyHint}
                     onProductCreated={handleIngredientProductCreated}
+                    excludeProductId={ingredientExcludeProductId}
                   />
                 </div>
               </div>
@@ -1742,6 +1780,7 @@ export const EstoqueReceitasPanel = forwardRef<
                     fromBaseQty={fromBaseQty}
                     formatQtyHint={formatQtyHint}
                     onProductCreated={handleIngredientProductCreated}
+                    excludeProductId={ingredientExcludeProductId}
                   />
                 </div>
               </div>
