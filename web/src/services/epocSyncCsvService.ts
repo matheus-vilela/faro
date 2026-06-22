@@ -1,4 +1,5 @@
 import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
+import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { supabase } from "@/lib/supabase";
 import { shouldKeepOnboardingPdvSync } from "@/lib/onboardingPdvDefaults";
@@ -28,17 +29,19 @@ async function messageFromInvokeFailure(
           const msg =
             (typeof j.error === "string" && j.error.trim()) ||
             (typeof j.message === "string" && j.message.trim());
-          if (msg) return msg.slice(0, 2000);
+          if (msg) return humanizeEpocRemoteError(msg).slice(0, 2000);
         } catch {
           /* not JSON */
         }
-        return raw.slice(0, 2000);
+        return humanizeEpocRemoteError(raw).slice(0, 2000);
       }
     } catch {
       /* ignore */
     }
   }
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Error && error.message) {
+    return humanizeEpocRemoteError(error.message);
+  }
   return "Falha ao executar sincronização.";
 }
 
@@ -198,19 +201,24 @@ export async function invokeEpocCsvSync(
       return { ok: false, error: "Resposta vazia da função" };
     }
     if (!data.ok) {
+      const syncError = humanizeEpocRemoteError(
+        data.error ?? "Falha na sincronização",
+      );
       if (isOnboardingFlow) {
         await patchCompanyOnboardingPdv(companyId, {
           sync: false,
           portal_busy: false,
           portal_outcome: "failed",
-          portal_message: (data.error ?? "Falha na sincronização").slice(0, 500),
+          portal_message: syncError.slice(0, 500),
         });
       }
-      return data;
+      return { ...data, error: syncError };
     }
     return data;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao executar sincronização.";
+    const msg = humanizeEpocRemoteError(
+      e instanceof Error ? e.message : "Falha ao executar sincronização.",
+    );
     if (isOnboardingFlow) {
       await patchCompanyOnboardingPdv(companyId, {
         sync: false,

@@ -2,6 +2,7 @@
  * Login no portal EPOC até obter cookies de sessão + token (mesma sequência que epoc-sync-csv).
  * Usado por epoc-validate-login (sem gravação de steps) e por epoc-sync-csv (com hooks de trace).
  */
+import { humanizeEpocRemoteError } from "./epocRemoteErrorMessage.ts";
 
 export type EpocPortalLoginErrorCode =
   | "INVALID_URL"
@@ -360,6 +361,15 @@ p.note{color:#666;font-size:0.9rem}
 }
 
 function classifyNetworkError(e: unknown): EpocPortalLoginFail {
+  const msg = e instanceof Error ? e.message : String(e);
+  const humanized = humanizeEpocRemoteError(msg);
+  if (humanized !== msg.trim()) {
+    return {
+      ok: false,
+      errorCode: "SERVER_UNAVAILABLE",
+      message: humanized,
+    };
+  }
   if (e instanceof Error && e.name === "AbortError") {
     return {
       ok: false,
@@ -367,7 +377,6 @@ function classifyNetworkError(e: unknown): EpocPortalLoginFail {
       message: "Tempo limite ao contactar o servidor EPOC.",
     };
   }
-  const msg = e instanceof Error ? e.message : String(e);
   const lower = msg.toLowerCase();
   if (
     lower.includes("fetch") ||

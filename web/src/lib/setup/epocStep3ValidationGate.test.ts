@@ -149,6 +149,21 @@ describe("normalizeEpocValidateLoginResponse", () => {
     });
   });
 
+  it("humaniza erro de conexão resetada do portal EPOC", () => {
+    const r = normalizeEpocValidateLoginResponse({
+      success: false,
+      errorCode: "SERVER_UNAVAILABLE",
+      message:
+        "error sending request from 10.30.9.119:36042 for http://rac_coon.din.epoc.com.br:8751/acoes.php (35.199.118.63:8751): client error (SendRequest): connection error: Connection reset by peer (os error 104)",
+    });
+    expect(r).toEqual({
+      success: false,
+      errorCode: "SERVER_UNAVAILABLE",
+      message:
+        "O sistema remoto não respondeu corretamente. Verifique a conexão e tente novamente.",
+    });
+  });
+
   it("omite mensagem genérica suprimida da edge", () => {
     const r = normalizeEpocValidateLoginResponse({
       success: false,

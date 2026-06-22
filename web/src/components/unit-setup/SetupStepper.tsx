@@ -4,28 +4,80 @@ import type { CompanySetupMap, SetupStepNumber } from "@/types/companySetup";
 import { Check, Minus } from "lucide-react";
 import { Fragment } from "react";
 
-/** Rótulos curtos exibidos no trilho de etapas. */
+export const GROUP_STEP_LABEL = "Grupo";
+export const GROUP_STEP_HINT =
+  "Crie o grupo que reunirá as unidades da sua operação.";
+
+/** Rótulos curtos exibidos no trilho de etapas (passos de unidade, fiscal e PDV). */
 export const SETUP_STEP_LABELS: Record<SetupStepNumber, string> = {
-  1: "Empresa",
+  1: "Unidade",
   2: "Fiscal",
   3: "PDV",
 };
 
 /** Uma linha de contexto para o cabeçalho da página (etapa atual). */
 export const SETUP_STEP_HINTS: Record<SetupStepNumber, string> = {
-  1: "Dados da empresa, CNPJ e endereço (preenchidos na validação).",
+  1: "CNPJ, nome fantasia e dados da unidade (endereço pela validação do CNPJ).",
   2: "Certificado digital A1 usado na emissão fiscal.",
   3: "Integração de PDV com a operação da unidade.",
 };
 
-const STEPS: readonly SetupStepNumber[] = [1, 2, 3];
-const TRAIL_STEPS = 3;
+export function wizardStepCount(includeGroupStep: boolean): number {
+  return includeGroupStep ? 4 : 3;
+}
+
+export function wizardStepLabel(
+  wizardStep: number,
+  includeGroupStep: boolean,
+): string {
+  if (includeGroupStep && wizardStep === 1) return GROUP_STEP_LABEL;
+  const setupStep = (
+    includeGroupStep ? wizardStep - 1 : wizardStep
+  ) as SetupStepNumber;
+  return SETUP_STEP_LABELS[setupStep];
+}
+
+export function wizardStepHint(
+  wizardStep: number,
+  includeGroupStep: boolean,
+): string {
+  if (includeGroupStep && wizardStep === 1) return GROUP_STEP_HINT;
+  const setupStep = (
+    includeGroupStep ? wizardStep - 1 : wizardStep
+  ) as SetupStepNumber;
+  return SETUP_STEP_HINTS[setupStep];
+}
+
+function wizardSteps(includeGroupStep: boolean): number[] {
+  const count = wizardStepCount(includeGroupStep);
+  return Array.from({ length: count }, (_, i) => i + 1);
+}
+
+function wizardStepStatus(
+  wizardStep: number,
+  includeGroupStep: boolean,
+  setup: CompanySetupMap,
+  activeWizardStep: number,
+): ReturnType<typeof stepStatus> {
+  if (includeGroupStep && wizardStep === 1) {
+    if (activeWizardStep > 1) return "done";
+    if (activeWizardStep === 1) return "current";
+    return "pending";
+  }
+  const setupStep = (
+    includeGroupStep ? wizardStep - 1 : wizardStep
+  ) as SetupStepNumber;
+  const setupActive = includeGroupStep
+    ? activeWizardStep - 1
+    : activeWizardStep;
+  return stepStatus(setupStep, setup, setupActive);
+}
 
 function StepCircle({
   n,
   st,
 }: {
-  n: SetupStepNumber;
+  n: number;
   st: ReturnType<typeof stepStatus>;
 }) {
   return (
@@ -55,21 +107,32 @@ export function SetupStepper({
   setup,
   companyId,
   lockStepsOneToTwo,
+  includeGroupStep = false,
   onStepClick,
 }: {
   activeStep: number;
   setup: CompanySetupMap;
   companyId: string | null;
   lockStepsOneToTwo?: boolean;
-  onStepClick?: (step: SetupStepNumber) => void;
+  /** Passo inicial só para criação de grupo (novo grupo). */
+  includeGroupStep?: boolean;
+  onStepClick?: (step: number) => void;
 }) {
   const pct = Math.min(100, Math.max(0, setup.progress_percent ?? 0));
   const interactive = !!onStepClick;
   const locked12 = lockStepsOneToTwo === true;
+  const steps = wizardSteps(includeGroupStep);
+  const trailSteps = wizardStepCount(includeGroupStep);
 
-  const stepEnabled = (n: SetupStepNumber) => {
-    if (locked12 && n <= 2) return false;
-    if (n === 1) return true;
+  const stepEnabled = (wizardStep: number) => {
+    if (includeGroupStep && wizardStep === 1) {
+      return !companyId;
+    }
+    const setupStep = (
+      includeGroupStep ? wizardStep - 1 : wizardStep
+    ) as SetupStepNumber;
+    if (locked12 && setupStep <= 2) return false;
+    if (setupStep === 1) return true;
     return !!companyId;
   };
 
@@ -104,13 +167,26 @@ export function SetupStepper({
         aria-label="Etapas do assistente"
       >
         <div className="flex w-full min-w-0 items-start justify-between">
-          {STEPS.map((n, i) => {
-            const st = stepStatus(n, setup, activeStep);
+          {steps.map((n, i) => {
+            const st = wizardStepStatus(
+              n,
+              includeGroupStep,
+              setup,
+              activeStep,
+            );
             const enabled = stepEnabled(n);
             const canClick = interactive && enabled;
             const beforeSt =
-              i > 0 ? stepStatus(STEPS[i - 1]!, setup, activeStep) : null;
+              i > 0
+                ? wizardStepStatus(
+                    steps[i - 1]!,
+                    includeGroupStep,
+                    setup,
+                    activeStep,
+                  )
+                : null;
             const lineComplete = beforeSt === "done" || beforeSt === "skipped";
+            const label = wizardStepLabel(n, includeGroupStep);
 
             const labelClass = cn(
               "mt-1.5 block w-full text-center text-[10px] font-medium leading-tight sm:text-xs",
@@ -147,12 +223,12 @@ export function SetupStepper({
                           "cursor-not-allowed opacity-50",
                       )}
                       aria-current={st === "current" ? "step" : undefined}
-                      aria-label={`${SETUP_STEP_LABELS[n]}, etapa ${n} de ${TRAIL_STEPS}${
+                      aria-label={`${label}, etapa ${n} de ${trailSteps}${
                         !enabled ? " (indisponível)" : ""
                       }`}
                     >
                       <StepCircle n={n} st={st} />
-                      <span className={labelClass}>{SETUP_STEP_LABELS[n]}</span>
+                      <span className={labelClass}>{label}</span>
                     </button>
                   ) : (
                     <div
@@ -160,7 +236,7 @@ export function SetupStepper({
                       aria-current={st === "current" ? "step" : undefined}
                     >
                       <StepCircle n={n} st={st} />
-                      <span className={labelClass}>{SETUP_STEP_LABELS[n]}</span>
+                      <span className={labelClass}>{label}</span>
                     </div>
                   )}
                 </div>

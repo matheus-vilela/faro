@@ -72,12 +72,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  SETUP_STEP_HINTS,
-  SETUP_STEP_LABELS,
   SetupStepper,
+  wizardStepCount,
+  wizardStepHint,
+  wizardStepLabel,
 } from "./SetupStepper";
 import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
+import { StepGroupForm } from "./steps/StepGroupForm";
 import { StepPdvForm } from "./steps/StepPdvForm";
 
 type Phase = "wizard" | "finalize_loading" | "finalize_summary";
@@ -161,6 +163,13 @@ export function UnitSetupWizard({
     errorCode: string;
   } | null>(null);
 
+  /** Passo extra só ao criar um novo grupo (não ao retomar). */
+  const includeGroupStep = createNewGroup && !resumeCompanyId;
+  const empresaWizardStep = includeGroupStep ? 2 : 1;
+  const certWizardStep = includeGroupStep ? 3 : 2;
+  const pdvWizardStep = includeGroupStep ? 4 : 3;
+  const totalWizardSteps = wizardStepCount(includeGroupStep);
+
   /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
   const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
 
@@ -230,10 +239,14 @@ export function UnitSetupWizard({
     }
 
     setSetup(su);
-    setActiveStep(
-      Math.min(3, Math.max(1, su.current_step ?? getNextPendingStep(su))),
+    const setupStep = Math.min(
+      3,
+      Math.max(1, su.current_step ?? getNextPendingStep(su)),
     );
-  }, [resumeCompanyId]);
+    setActiveStep(
+      includeGroupStep ? Math.min(4, setupStep + 1) : setupStep,
+    );
+  }, [resumeCompanyId, includeGroupStep]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -394,10 +407,6 @@ export function UnitSetupWizard({
       setStepError(err);
       return false;
     }
-    if (createNewGroup && !groupName.trim()) {
-      setStepError("Informe o nome do grupo.");
-      return false;
-    }
     if (!createNewGroup && !newUnitGroupId) {
       setStepError("Grupo inválido.");
       return false;
@@ -530,18 +539,27 @@ export function UnitSetupWizard({
   const handleNext = async () => {
     setStepError(null);
 
-    if (activeStep === 1) {
-      if (!companyId) {
-        if (!runAdvanceStep1Local()) return;
-        setActiveStep(2);
+    if (includeGroupStep && activeStep === 1) {
+      if (!groupName.trim()) {
+        setStepError("Informe o nome do grupo.");
         return;
       }
-      const ok = await runStep1Patch();
-      if (ok) setActiveStep(2);
+      setActiveStep(2);
       return;
     }
 
-    if (activeStep === 2) {
+    if (activeStep === empresaWizardStep) {
+      if (!companyId) {
+        if (!runAdvanceStep1Local()) return;
+        setActiveStep(certWizardStep);
+        return;
+      }
+      const ok = await runStep1Patch();
+      if (ok) setActiveStep(certWizardStep);
+      return;
+    }
+
+    if (activeStep === certWizardStep) {
       if (!companyId) {
         const err1 = validateStep1Empresa(empresa, {
           requireFocusCnpjValidation: true,
@@ -564,7 +582,7 @@ export function UnitSetupWizard({
           })
         ) {
           setStepError(
-            "Envie o certificado A1 (PFX/P12), informe a senha e aguarde o carregamento em base64.",
+            "Envie o certificado A1 (PFX/P12), informe a senha e aguarde o carregamento do arquivo.",
           );
           return;
         }
@@ -614,7 +632,7 @@ export function UnitSetupWizard({
         const okCreate = await runCreateCompanyAfterFocusSuccess(focusnfeForDb);
         setSaving(false);
         if (!okCreate) return;
-        setActiveStep(3);
+        setActiveStep(pdvWizardStep);
         return;
       }
 
@@ -704,11 +722,11 @@ export function UnitSetupWizard({
         return;
       }
       setSetup(nextSetup);
-      setActiveStep(3);
+      setActiveStep(pdvWizardStep);
       return;
     }
 
-    if (activeStep === 3) {
+    if (activeStep === pdvWizardStep) {
       if (!companyId) {
         toast.error("Conclua o certificado para criar a unidade.");
         return;
@@ -860,31 +878,48 @@ export function UnitSetupWizard({
   const handleBack = () => {
     if (activeStep <= 1) return;
     const target = activeStep - 1;
-    if (lockStepsOneToTwo && target >= 1 && target <= 2) {
+    if (
+      lockStepsOneToTwo &&
+      target >= empresaWizardStep &&
+      target <= certWizardStep
+    ) {
       toast.message(
-        "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa ou Certificado.",
+        "Após criar a unidade com sucesso, não é possível voltar aos passos Unidade ou Certificado.",
       );
       return;
     }
-    if (activeStep === 3) setEpocValidateError(null);
+    if (activeStep === pdvWizardStep) setEpocValidateError(null);
     setActiveStep((s) => s - 1);
   };
 
   const goToStep = useCallback(
-    (step: SetupStepNumber) => {
-      if (step < 1 || step > 3) return;
-      if (step > 1 && !companyId && step > 2) return;
-      if (lockStepsOneToTwo && step >= 1 && step <= 2) {
+    (step: number) => {
+      if (step < 1 || step > totalWizardSteps) return;
+      if (includeGroupStep && step === 1 && companyId) return;
+      if (!companyId && step > certWizardStep) return;
+      if (
+        lockStepsOneToTwo &&
+        step >= empresaWizardStep &&
+        step <= certWizardStep
+      ) {
         toast.message(
-          "Após criar a unidade com sucesso, não é possível voltar aos passos Empresa ou Certificado.",
+          "Após criar a unidade com sucesso, não é possível voltar aos passos Unidade ou Certificado.",
         );
         return;
       }
       setStepError(null);
-      if (step !== 3) setEpocValidateError(null);
+      if (step !== pdvWizardStep) setEpocValidateError(null);
       setActiveStep(step);
     },
-    [companyId, lockStepsOneToTwo],
+    [
+      companyId,
+      lockStepsOneToTwo,
+      totalWizardSteps,
+      includeGroupStep,
+      empresaWizardStep,
+      certWizardStep,
+      pdvWizardStep,
+    ],
   );
 
   const handleRemoveCertificate = useCallback(async () => {
@@ -1062,15 +1097,11 @@ export function UnitSetupWizard({
     );
   }
 
-  const stepKey = (
-    activeStep >= 1 && activeStep <= 3 ? activeStep : 1
-  ) as SetupStepNumber;
-
   const wizardBody = (
     <>
       <PageHeader
         title="Configurar unidade"
-        description={SETUP_STEP_HINTS[stepKey]}
+        description={wizardStepHint(activeStep, includeGroupStep)}
         icon={Building2}
         className={isModal ? "pb-1" : undefined}
       />
@@ -1080,6 +1111,7 @@ export function UnitSetupWizard({
         setup={setup}
         companyId={companyId}
         lockStepsOneToTwo={lockStepsOneToTwo}
+        includeGroupStep={includeGroupStep}
         onStepClick={goToStep}
       />
 
@@ -1092,18 +1124,24 @@ export function UnitSetupWizard({
       <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
         <div className="border-b border-border/60 bg-muted/20 px-4 py-3 sm:px-6 sm:py-3.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Etapa {activeStep} de 3
+            Etapa {activeStep} de {totalWizardSteps}
           </p>
           <h2 className="text-base font-semibold leading-snug sm:text-lg">
-            {SETUP_STEP_LABELS[stepKey]}
+            {wizardStepLabel(activeStep, includeGroupStep)}
           </h2>
         </div>
         <div className="p-4 sm:p-6">
-          {activeStep === 1 ? (
+          {includeGroupStep && activeStep === 1 ? (
+            <StepGroupForm
+              groupName={groupName}
+              onGroupNameChange={setGroupName}
+            />
+          ) : null}
+          {activeStep === empresaWizardStep ? (
             <StepCompanyForm
               groupName={groupName}
               onGroupNameChange={setGroupName}
-              showGroupName={createNewGroup && !resumeCompanyId}
+              showGroupName={false}
               empresa={{
                 ...empresa,
                 cnpj_cpf: empresa.cnpj_cpf ?? "",
@@ -1120,7 +1158,7 @@ export function UnitSetupWizard({
               }
             />
           ) : null}
-          {activeStep === 2 ? (
+          {activeStep === certWizardStep ? (
             <StepCertificateForm
               companyId={companyId}
               cert={setup.certificate}
@@ -1139,7 +1177,7 @@ export function UnitSetupWizard({
               busy={certBusy}
             />
           ) : null}
-          {activeStep === 3 ? (
+          {activeStep === pdvWizardStep ? (
             <StepPdvForm
               epoc={setup.epoc}
               validationError={epocValidateError}
@@ -1159,10 +1197,10 @@ export function UnitSetupWizard({
       <div
         className={cn(
           "flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:pt-5",
-          activeStep > 2 ? "sm:justify-between" : "sm:justify-end",
+          activeStep === pdvWizardStep ? "sm:justify-between" : "sm:justify-end",
         )}
       >
-        {activeStep > 2 ? (
+        {activeStep === pdvWizardStep ? (
           <Button
             type="button"
             variant="ghost"
@@ -1183,7 +1221,7 @@ export function UnitSetupWizard({
                 ? () => requestLeaveConfirm(() => exitApp())
                 : handleBack
             }
-            disabled={saving || (lockStepsOneToTwo && activeStep === 3)}
+            disabled={saving || (lockStepsOneToTwo && activeStep === pdvWizardStep)}
           >
             {activeStep === 1 ? "Cancelar" : "Voltar"}
           </Button>
@@ -1196,9 +1234,11 @@ export function UnitSetupWizard({
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {activeStep === 3 ? "A validar e a concluir…" : "Salvando…"}
+                {activeStep === pdvWizardStep
+                  ? "A validar e a concluir…"
+                  : "Salvando…"}
               </>
-            ) : activeStep === 3 ? (
+            ) : activeStep === pdvWizardStep ? (
               "Concluir"
             ) : (
               "Continuar"

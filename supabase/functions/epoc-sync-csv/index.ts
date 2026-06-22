@@ -11,6 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
+import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
 import {
   isOnboardingPdvSyncInProgress,
   patchOnboardingPdv,
@@ -962,18 +963,19 @@ Deno.serve(async (req) => {
     extras: Record<string, unknown> = {},
     opts?: { skipPortalPatch?: boolean },
   ): Promise<Response> {
+    const friendlyError = humanizeEpocRemoteError(error);
     if (!opts?.skipPortalPatch) {
       await patchOb({
         portal_busy: false,
         portal_outcome: "failed",
-        portal_message: error.slice(0, 500),
+        portal_message: friendlyError.slice(0, 500),
         sync: false,
       });
     }
     return json(
       {
         ok: false,
-        error,
+        error: friendlyError,
         steps_prefix: stepsPrefix,
         steps,
         signed_url_expires_in: signedTtl,

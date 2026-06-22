@@ -132,7 +132,13 @@ function summarizeMovements(
   return { entriesValue, exitsValue, entriesHasCost, exitsHasCost };
 }
 
-export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) {
+export function EstoqueMovimentacoesPanel({
+  companyId,
+  onStockChanged,
+}: {
+  companyId: string;
+  onStockChanged?: () => void;
+}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [stats, setStats] = useState<MovementStats>(EMPTY_STATS);
@@ -529,7 +535,10 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
         companyId={companyId}
         open={registerSheetOpen}
         onOpenChange={setRegisterSheetOpen}
-        onSaved={() => void load()}
+        onSaved={() => {
+          void load();
+          onStockChanged?.();
+        }}
       />
     </Card>
   );
