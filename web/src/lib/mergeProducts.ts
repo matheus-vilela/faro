@@ -1,7 +1,13 @@
 import { supabase } from "@/lib/supabase";
 
 export type MergeProductsResult =
-  | { ok: true; winnerId: string; mergedNames: string[] }
+  | {
+      ok: true;
+      winnerId: string;
+      mergedNames: string[];
+      mergeEventId: string;
+      mergeMovementId: string | null;
+    }
   | { ok: false; error: string };
 
 export type MergeCompanyProductsOptions = {
@@ -34,6 +40,8 @@ export async function mergeCompanyProducts(
     message?: string;
     winner_id?: string;
     merged_names?: string[];
+    merge_event_id?: string;
+    merge_movement_id?: string;
   } | null;
 
   if (!row?.ok) {
@@ -60,5 +68,9 @@ export async function mergeCompanyProducts(
     mergedNames: Array.isArray(row.merged_names)
       ? row.merged_names.map(String)
       : [],
+    mergeEventId: String(row.merge_event_id ?? ""),
+    mergeMovementId: row.merge_movement_id
+      ? String(row.merge_movement_id)
+      : null,
   };
 }

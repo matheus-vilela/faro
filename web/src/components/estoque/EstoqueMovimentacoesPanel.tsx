@@ -1,3 +1,8 @@
+import { ProductMergeMovementPair } from "@/components/estoque/ProductMergeMovementPair";
+import { RegisterManualStockMovementSheet } from "@/components/estoque/RegisterManualStockMovementSheet";
+import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
+import { ProductMergeMovementUndoButton } from "@/components/products/ProductMergeAuditSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,23 +21,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
-import { RegisterManualStockMovementSheet } from "@/components/estoque/RegisterManualStockMovementSheet";
-import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import {
   applyStockMovementClassificationFilter,
-  movementClassificationDisplayLabel,
   MOVEMENT_CLASSIFICATION_FILTER_OPTIONS,
+  movementClassificationDisplayLabel,
   type MovementClassificationFilter,
 } from "@/lib/stockMovementClassification";
+import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import {
   applyStockMovementDirectionFilter,
-  stockMovementTypeLabel,
   type FilterableQuery,
   type MovementDirectionFilter,
 } from "@/lib/stockMovementFilters";
+import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
-import { ArrowDownLeft, ArrowUpRight, Loader2, Plus, SlidersHorizontal } from "lucide-react";
+import {
+  stockMovementMergeUndoProps,
+  type StockMovementProductMergeMeta,
+} from "@/types/productMergeAudit";
+import { Loader2, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Row = {
@@ -44,11 +51,13 @@ type Row = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
-  metadata_json: {
-    quantity_unit?: string;
-    classification?: string;
-    movement_kind?: string;
-  } | null;
+  metadata_json:
+    | (StockMovementProductMergeMeta & {
+        quantity_unit?: string;
+        classification?: string;
+        movement_kind?: string;
+      })
+    | null;
   expense_id: string | null;
   products: { name: string; unit: string } | null;
 };
@@ -75,14 +84,37 @@ function movementQuantityUnit(row: Row): string {
   return fromMeta || fromProduct || "un";
 }
 
-function movementTypeDisplay(row: Row): {
-  label: string;
-  isIn: boolean;
-} {
-  return {
-    label: stockMovementTypeLabel(row),
-    isIn: row.type === "in",
-  };
+function summarizeMovements(
+  rows: {
+    quantity: number;
+    type: string;
+    unit_cost: number | null;
+    reference_type: string | null;
+  }[],
+): Omit<MovementStats, "totalCount"> {
+  let entriesValue = 0;
+  let exitsValue = 0;
+  let entriesHasCost = false;
+  let exitsHasCost = false;
+  for (const row of rows) {
+    if (
+      row.reference_type === "product_merge" ||
+      row.reference_type === "product_merge_undo"
+    ) {
+      continue;
+    }
+    const cost = row.unit_cost != null ? Number(row.unit_cost) : NaN;
+    if (!Number.isFinite(cost)) continue;
+    const value = movementLineValue(row);
+    if (row.type === "in") {
+      entriesHasCost = true;
+      entriesValue += value;
+    } else {
+      exitsHasCost = true;
+      exitsValue += value;
+    }
+  }
+  return { entriesValue, exitsValue, entriesHasCost, exitsHasCost };
 }
 
 type MovementStats = {
@@ -111,29 +143,13 @@ function movementLineValue(row: {
   return qty * cost;
 }
 
-function summarizeMovements(
-  rows: { quantity: number; type: string; unit_cost: number | null }[],
-): Omit<MovementStats, "totalCount"> {
-  let entriesValue = 0;
-  let exitsValue = 0;
-  let entriesHasCost = false;
-  let exitsHasCost = false;
-  for (const row of rows) {
-    const cost = row.unit_cost != null ? Number(row.unit_cost) : NaN;
-    if (!Number.isFinite(cost)) continue;
-    const value = movementLineValue(row);
-    if (row.type === "in") {
-      entriesHasCost = true;
-      entriesValue += value;
-    } else {
-      exitsHasCost = true;
-      exitsValue += value;
-    }
-  }
-  return { entriesValue, exitsValue, entriesHasCost, exitsHasCost };
-}
-
-export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) {
+export function EstoqueMovimentacoesPanel({
+  companyId,
+  onStockChanged,
+}: {
+  companyId: string;
+  onStockChanged?: () => void;
+}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [stats, setStats] = useState<MovementStats>(EMPTY_STATS);
@@ -151,10 +167,10 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
     () =>
       Boolean(
         dateFrom ||
-          dateTo ||
-          productFilterId ||
-          directionFilter !== "all" ||
-          classificationFilter !== "all",
+        dateTo ||
+        productFilterId ||
+        directionFilter !== "all" ||
+        classificationFilter !== "all",
       ),
     [dateFrom, dateTo, productFilterId, directionFilter, classificationFilter],
   );
@@ -190,14 +206,18 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       classificationFilter,
     );
     if (dateBounds?.gte) {
-      listQuery = (listQuery as FilterableQuery & {
-        gte: (column: string, value: string) => FilterableQuery;
-      }).gte("created_at", dateBounds.gte);
+      listQuery = (
+        listQuery as FilterableQuery & {
+          gte: (column: string, value: string) => FilterableQuery;
+        }
+      ).gte("created_at", dateBounds.gte);
     }
     if (dateBounds?.lte) {
-      listQuery = (listQuery as FilterableQuery & {
-        lte: (column: string, value: string) => FilterableQuery;
-      }).lte("created_at", dateBounds.lte);
+      listQuery = (
+        listQuery as FilterableQuery & {
+          lte: (column: string, value: string) => FilterableQuery;
+        }
+      ).lte("created_at", dateBounds.lte);
     }
 
     const filteredListRes = await (listQuery as unknown as PromiseLike<{
@@ -229,14 +249,16 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
 
     let aggQuery: FilterableQuery = supabase
       .from("stock_movements")
-      .select("quantity, type, unit_cost", { count: "exact" }) as unknown as FilterableQuery;
+      .select("quantity, type, unit_cost, reference_type", { count: "exact" });
 
     if (productFilterId) {
       aggQuery = aggQuery.eq("product_id", productFilterId);
     } else {
-      aggQuery = (aggQuery as FilterableQuery & {
-        in: (column: string, values: string[]) => FilterableQuery;
-      }).in("product_id", productIds);
+      aggQuery = (
+        aggQuery as FilterableQuery & {
+          in: (column: string, values: string[]) => FilterableQuery;
+        }
+      ).in("product_id", productIds);
     }
     aggQuery = applyStockMovementDirectionFilter(aggQuery, directionFilter);
     aggQuery = applyStockMovementClassificationFilter(
@@ -244,14 +266,18 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       classificationFilter,
     );
     if (dateBounds?.gte) {
-      aggQuery = (aggQuery as FilterableQuery & {
-        gte: (column: string, value: string) => FilterableQuery;
-      }).gte("created_at", dateBounds.gte);
+      aggQuery = (
+        aggQuery as FilterableQuery & {
+          gte: (column: string, value: string) => FilterableQuery;
+        }
+      ).gte("created_at", dateBounds.gte);
     }
     if (dateBounds?.lte) {
-      aggQuery = (aggQuery as FilterableQuery & {
-        lte: (column: string, value: string) => FilterableQuery;
-      }).lte("created_at", dateBounds.lte);
+      aggQuery = (
+        aggQuery as FilterableQuery & {
+          lte: (column: string, value: string) => FilterableQuery;
+        }
+      ).lte("created_at", dateBounds.lte);
     }
 
     const {
@@ -260,7 +286,9 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
       error: aggError,
     } = await (aggQuery as unknown as PromiseLike<{
       count: number | null;
-      data: { quantity: number; type: string; unit_cost: number | null }[] | null;
+      data:
+        | { quantity: number; type: string; unit_cost: number | null }[]
+        | null;
       error: { message: string } | null;
     }>);
 
@@ -346,7 +374,9 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                 {stats.totalCount.toLocaleString("pt-BR")}
               </p>
               <p className="mt-0.5 text-xs text-blue-950/70 dark:text-blue-50/75">
-                {hasActiveFilters ? "Com filtros atuais" : "Registros no histórico"}
+                {hasActiveFilters
+                  ? "Com filtros atuais"
+                  : "Registros no histórico"}
               </p>
             </div>
             <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-4 py-3 shadow-sm dark:bg-emerald-500/[0.12]">
@@ -376,7 +406,10 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
 
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border/80 bg-muted/20 p-3">
           <div className="space-y-1.5">
-            <Label htmlFor="mov-date-from" className="text-xs text-muted-foreground">
+            <Label
+              htmlFor="mov-date-from"
+              className="text-xs text-muted-foreground"
+            >
               Data de
             </Label>
             <Input
@@ -388,7 +421,10 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="mov-date-to" className="text-xs text-muted-foreground">
+            <Label
+              htmlFor="mov-date-to"
+              className="text-xs text-muted-foreground"
+            >
               Data até
             </Label>
             <Input
@@ -439,7 +475,9 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
             </Select>
           </div>
           <div className="w-full min-w-[150px] max-w-[220px] space-y-1.5 sm:w-auto">
-            <Label className="text-xs text-muted-foreground">Classificação</Label>
+            <Label className="text-xs text-muted-foreground">
+              Classificação
+            </Label>
             <Select
               value={classificationFilter}
               onValueChange={(v) =>
@@ -493,13 +531,18 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                   <th className="p-2 font-medium">Classificação</th>
                   <th className="p-2 font-medium">Qtd</th>
                   <th className="p-2 font-medium">Custo un.</th>
+                  <th className="p-2 font-medium" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const name = r.products?.name ?? "—";
+                  const winnerName = r.products?.name ?? "—";
                   const qtyUnit = movementQuantityUnit(r);
-                  const typeDisplay = movementTypeDisplay(r);
+                  const mergeUndo = stockMovementMergeUndoProps(r);
+                  const mergePair = stockMovementMergePairDisplay(
+                    r,
+                    winnerName,
+                  );
                   return (
                     <tr key={r.id} className="border-b border-border/60">
                       <td className="p-2 whitespace-nowrap text-muted-foreground">
@@ -510,26 +553,28 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                           minute: "2-digit",
                         })}
                       </td>
-                      <td className="p-2 font-medium">{name}</td>
                       <td className="p-2">
-                        <Badge
-                          variant={typeDisplay.isIn ? "secondary" : "outline"}
-                          className="gap-1 font-normal"
-                        >
-                          {typeDisplay.isIn ? (
-                            <ArrowDownLeft className="h-3 w-3" />
-                          ) : (
-                            <ArrowUpRight className="h-3 w-3" />
-                          )}
-                          {typeDisplay.label}
-                        </Badge>
+                        {mergePair ? (
+                          <ProductMergeMovementPair {...mergePair} />
+                        ) : (
+                          <span className="font-medium">{winnerName}</span>
+                        )}
                       </td>
                       <td className="p-2">
-                        <StockMovementOriginCell
-                          referenceType={r.reference_type}
-                          expenseId={r.expense_id}
-                          label={movementClassificationDisplayLabel(r)}
-                        />
+                        <StockMovementTypeBadge row={r} />
+                      </td>
+                      <td className="p-2">
+                        {mergePair ? (
+                          <span className="text-muted-foreground">
+                            {movementClassificationDisplayLabel(r)}
+                          </span>
+                        ) : (
+                          <StockMovementOriginCell
+                            referenceType={r.reference_type}
+                            expenseId={r.expense_id}
+                            label={movementClassificationDisplayLabel(r)}
+                          />
+                        )}
                       </td>
                       <td className="p-2 tabular-nums">
                         {Number(r.quantity).toLocaleString("pt-BR")} {qtyUnit}
@@ -538,6 +583,28 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
                         {formatMoney(
                           r.unit_cost != null ? Number(r.unit_cost) : null,
                         )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {mergeUndo.eventId ? (
+                          <ProductMergeMovementUndoButton
+                            companyId={companyId}
+                            eventId={mergeUndo.eventId}
+                            loserName={mergeUndo.loserName}
+                            undoneAt={mergeUndo.undoneAt}
+                            onUndone={() => {
+                              void load();
+                              onStockChanged?.();
+                            }}
+                          />
+                        ) : r.reference_type === "product_merge_undo" ||
+                          r.metadata_json?.undone_at ? (
+                          <Badge
+                            variant="outline"
+                            className="text-xs font-normal"
+                          >
+                            Desfeita
+                          </Badge>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -552,7 +619,10 @@ export function EstoqueMovimentacoesPanel({ companyId }: { companyId: string }) 
         companyId={companyId}
         open={registerSheetOpen}
         onOpenChange={setRegisterSheetOpen}
-        onSaved={() => void load()}
+        onSaved={() => {
+          void load();
+          onStockChanged?.();
+        }}
       />
     </Card>
   );

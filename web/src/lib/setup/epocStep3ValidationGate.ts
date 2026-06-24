@@ -1,4 +1,5 @@
 import type { SetupEpocState } from "@/types/companySetup";
+import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 
 export type EpocValidateLoginErrorCode =
   | "INVALID_URL"
@@ -37,7 +38,7 @@ export const EPOC_VALIDATE_LOGIN_SUPPRESSED_ONBOARDING_DETAIL =
 
 /** Normaliza mensagem da API; vazio = sem parágrafo extra no card de onboarding. */
 export function sanitizeEpocOnboardingValidateMessage(message: string): string {
-  const m = message.trim();
+  const m = humanizeEpocRemoteError(message.trim());
   if (!m) return m;
   if (m === EPOC_VALIDATE_LOGIN_SUPPRESSED_ONBOARDING_DETAIL) {
     return "";

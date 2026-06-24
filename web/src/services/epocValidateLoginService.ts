@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 import {
   normalizeEpocValidateLoginResponse,
   type EpocValidateLoginResponse,
@@ -32,9 +33,10 @@ export async function invokeValidateEpocLogin(params: {
       return {
         success: false,
         errorCode: "SERVER_UNAVAILABLE",
-        message:
+        message: humanizeEpocRemoteError(
           error.message ||
-          "Não foi possível contactar o serviço de validação EPOC.",
+            "Não foi possível contactar o serviço de validação EPOC.",
+        ),
       };
     }
     return normalizeEpocValidateLoginResponse(data);
@@ -42,10 +44,9 @@ export async function invokeValidateEpocLogin(params: {
     return {
       success: false,
       errorCode: "SERVER_UNAVAILABLE",
-      message:
-        e instanceof Error
-          ? e.message
-          : "Falha de rede ao validar o EPOC.",
+      message: humanizeEpocRemoteError(
+        e instanceof Error ? e.message : "Falha de rede ao validar o EPOC.",
+      ),
     };
   }
 }

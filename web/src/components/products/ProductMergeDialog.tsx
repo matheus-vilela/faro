@@ -333,6 +333,10 @@ export function ProductMergeDialog({
     }
     toast.success(
       `Produtos unificados. «${loser.name}» passou a ser reconhecido como «${winner.name}».`,
+      {
+        description:
+          "O histórico do produto registra a unificação — você pode desfazê-la na aba Resumo ou Histórico.",
+      },
     );
     onMerged(result.winnerId);
     handleOpenChange(false);

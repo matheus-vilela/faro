@@ -14,7 +14,7 @@ const STORAGE_KEY = 'faro-theme'
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    return (localStorage.getItem(STORAGE_KEY) as Theme) ?? 'system'
+    return (localStorage.getItem(STORAGE_KEY) as Theme) ?? 'light'
   })
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
 

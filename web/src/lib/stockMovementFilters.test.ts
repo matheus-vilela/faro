@@ -46,6 +46,10 @@ describe("stockMovementFilters", () => {
         calls.push(`or:${filters}`);
         return this;
       },
+      not(column: string, operator: string, value: string) {
+        calls.push(`not:${column}:${operator}:${value}`);
+        return this;
+      },
     };
 
     applyStockMovementDirectionFilter(query, "all");
@@ -53,9 +57,12 @@ describe("stockMovementFilters", () => {
 
     applyStockMovementDirectionFilter(query, "in");
     expect(calls).toContain("eq:type:in");
+    expect(calls).toContain("not:reference_type:eq:product_merge");
 
+    calls.length = 0;
     applyStockMovementDirectionFilter(query, "out");
     expect(calls).toContain("or:type.eq.out,type.eq.waste");
+    expect(calls).toContain("not:reference_type:eq:product_merge_undo");
   });
 });
 

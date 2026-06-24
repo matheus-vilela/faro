@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCompany } from "@/contexts/CompanyContext";
 import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
+import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 import {
   epocDailySyncConsultedDayLabel,
   formatEpocDailySyncAttemptAtPtBr,
@@ -167,8 +168,10 @@ export function DashboardEpocDailySyncAlertCard({
         title: "Falha na sincronização automática (EPOC)",
         body: (
           <p className="text-sm text-muted-foreground">
-            {s.epoc_daily_sync_last_attempt_error?.trim() ||
-              "A rotina diária não concluiu a exportação. Pode repetir agora ou ver detalhes nas integrações."}
+            {humanizeEpocRemoteError(
+              s.epoc_daily_sync_last_attempt_error?.trim() ||
+                "A rotina diária não concluiu a exportação. Pode repetir agora ou ver detalhes nas integrações.",
+            )}
             {atRaw ? (
               <>
                 {" "}

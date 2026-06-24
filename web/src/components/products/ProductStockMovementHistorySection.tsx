@@ -1,5 +1,8 @@
+import { ProductMergeMovementPair } from "@/components/estoque/ProductMergeMovementPair";
 import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { ProductMergeMovementUndoButton } from "@/components/products/ProductMergeAuditSection";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,39 +21,16 @@ import {
   isManuallyRegisteredStockMovement,
   manualStockMovementRegisteredByLabel,
 } from "@/lib/manualStockMovement";
-import {
-  isWasteStockMovement,
-  stockMovementTypeLabel,
-} from "@/lib/stockMovementFilters";
 import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
+import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  FileText,
-  Loader2,
-  Trash2,
-} from "lucide-react";
+  stockMovementMergeUndoProps,
+  type StockMovementProductMergeMeta,
+} from "@/types/productMergeAudit";
+import { FileText, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-
-const STOCK_REF_LABEL: Record<string, string> = {
-  inventory_count: "Contagem",
-  expense: "Despesa",
-  expense_item: "Despesa",
-  recebimento: "Recebimento",
-  recipe: "Receita",
-  revenue_entry: "Venda",
-  waste: "Perda",
-  adjustment: "Ajuste",
-  purchase_order: "Despesa",
-  technical_sheet_backfill: "Ficha técnica (histórico)",
-};
-
-function stockRefLabel(type: string | null): string {
-  if (!type) return "—";
-  return STOCK_REF_LABEL[type] ?? type;
-}
 
 type MovementRow = {
   id: string;
@@ -60,14 +40,14 @@ type MovementRow = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
-  metadata_json: {
+  metadata_json: (StockMovementProductMergeMeta & {
     quantity_unit?: string;
     registration_mode?: string;
     registered_by_user_id?: string;
     registered_by_name?: string;
     classification?: string;
     movement_kind?: string;
-  } | null;
+  }) | null;
   expense_id: string | null;
 };
 
@@ -81,19 +61,25 @@ function movementQuantityUnit(
 
 type Props = {
   productId: string;
+  productName: string;
+  companyId: string;
   unit: string;
   /** Só busca quando a aba Histórico está visível. */
   active?: boolean;
   pageSize?: number;
   className?: string;
+  onStockChanged?: () => void;
 };
 
 export function ProductStockMovementHistorySection({
   productId,
+  productName,
+  companyId,
   unit,
   active = true,
   pageSize = PAGE_SIZE,
   className,
+  onStockChanged,
 }: Props) {
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -179,6 +165,19 @@ export function ProductStockMovementHistorySection({
     ? manualStockMovementRegisteredByLabel(selectedMovement.metadata_json)
     : null;
 
+  const selectedMergePair = selectedMovement
+    ? stockMovementMergePairDisplay(selectedMovement, productName)
+    : null;
+
+  const selectedMergeUndo = selectedMovement
+    ? stockMovementMergeUndoProps(selectedMovement)
+    : null;
+
+  const handleMergeUndone = () => {
+    void load();
+    onStockChanged?.();
+  };
+
   return (
     <section className={cn(className)}>
       <ExpenseDetailSheet
@@ -211,27 +210,17 @@ export function ProductStockMovementHistorySection({
                   <div>
                     <dt className="text-xs text-muted-foreground">Tipo</dt>
                     <dd className="mt-1">
-                      <Badge
-                        variant={
-                          selectedMovement.type === "in"
-                            ? "secondary"
-                            : isWasteStockMovement(selectedMovement)
-                              ? "destructive"
-                              : "outline"
-                        }
-                        className="gap-1 font-normal"
-                      >
-                        {selectedMovement.type === "in" ? (
-                          <ArrowDownLeft className="h-3 w-3" />
-                        ) : isWasteStockMovement(selectedMovement) ? (
-                          <Trash2 className="h-3 w-3" />
-                        ) : (
-                          <ArrowUpRight className="h-3 w-3" />
-                        )}
-                        {stockMovementTypeLabel(selectedMovement)}
-                      </Badge>
+                      <StockMovementTypeBadge row={selectedMovement} />
                     </dd>
                   </div>
+                  {selectedMergePair ? (
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Produtos</dt>
+                      <dd className="mt-1">
+                        <ProductMergeMovementPair {...selectedMergePair} />
+                      </dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt className="text-xs text-muted-foreground">
                       Quantidade
@@ -245,17 +234,23 @@ export function ProductStockMovementHistorySection({
                   </div>
                   <div>
                     <dt className="text-xs text-muted-foreground">
-                      Classificação
+                      {selectedMergePair ? "Detalhe" : "Classificação"}
                     </dt>
                     <dd className="mt-1">
-                      <StockMovementOriginCell
-                        referenceType={selectedMovement.reference_type}
-                        expenseId={selectedMovement.expense_id}
-                        label={movementClassificationDisplayLabel(
-                          selectedMovement,
-                        )}
-                        onOpenExpense={openExpenseDetail}
-                      />
+                      {selectedMergePair ? (
+                        <p className="text-sm text-muted-foreground">
+                          {movementClassificationDisplayLabel(selectedMovement)}
+                        </p>
+                      ) : (
+                        <StockMovementOriginCell
+                          referenceType={selectedMovement.reference_type}
+                          expenseId={selectedMovement.expense_id}
+                          label={movementClassificationDisplayLabel(
+                            selectedMovement,
+                          )}
+                          onOpenExpense={openExpenseDetail}
+                        />
+                      )}
                     </dd>
                   </div>
                   {selectedIsManual ? (
@@ -292,6 +287,17 @@ export function ProductStockMovementHistorySection({
                     Visualizar despesa / nota
                   </Button>
                 ) : null}
+                {selectedMergeUndo?.eventId ? (
+                  <div className="flex justify-end">
+                    <ProductMergeMovementUndoButton
+                      companyId={companyId}
+                      eventId={selectedMergeUndo.eventId}
+                      loserName={selectedMergeUndo.loserName}
+                      undoneAt={selectedMergeUndo.undoneAt}
+                      onUndone={handleMergeUndone}
+                    />
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -321,13 +327,16 @@ export function ProductStockMovementHistorySection({
                   <th className="px-3 py-2 font-medium">Quantidade</th>
                   <th className="px-3 py-2 font-medium">Origem</th>
                   <th className="px-3 py-2 font-medium">Custo un.</th>
+                  <th className="px-3 py-2 font-medium" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const isIn = row.type === "in";
-                  const isWaste = isWasteStockMovement(row);
-                  const typeLabel = stockMovementTypeLabel(row);
+                  const mergeUndo = stockMovementMergeUndoProps(row);
+                  const mergePair = stockMovementMergePairDisplay(
+                    row,
+                    productName,
+                  );
                   return (
                     <tr
                       key={row.id}
@@ -352,38 +361,44 @@ export function ProductStockMovementHistorySection({
                         })}
                       </td>
                       <td className="px-3 py-2">
-                        <Badge
-                          variant={
-                            isIn ? "secondary" : isWaste ? "destructive" : "outline"
-                          }
-                          className="gap-1 font-normal"
-                        >
-                          {isIn ? (
-                            <ArrowDownLeft className="h-3 w-3" />
-                          ) : isWaste ? (
-                            <Trash2 className="h-3 w-3" />
-                          ) : (
-                            <ArrowUpRight className="h-3 w-3" />
-                          )}
-                          {typeLabel}
-                        </Badge>
+                        <StockMovementTypeBadge row={row} />
                       </td>
                       <td className="px-3 py-2 tabular-nums">
                         {Number(row.quantity).toLocaleString("pt-BR")}{" "}
                         {movementQuantityUnit(row, unit)}
                       </td>
                       <td className="px-3 py-2">
-                        <StockMovementOriginCell
-                          referenceType={row.reference_type}
-                          expenseId={row.expense_id}
-                          label={stockRefLabel(row.reference_type)}
-                          onOpenExpense={openExpenseDetail}
-                        />
+                        {mergePair ? (
+                          <ProductMergeMovementPair {...mergePair} />
+                        ) : (
+                          <StockMovementOriginCell
+                            referenceType={row.reference_type}
+                            expenseId={row.expense_id}
+                            label={movementClassificationDisplayLabel(row)}
+                            onOpenExpense={openExpenseDetail}
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2 tabular-nums text-muted-foreground">
                         {row.unit_cost != null
                           ? formatCurrency(Number(row.unit_cost))
                           : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {mergeUndo.eventId ? (
+                          <ProductMergeMovementUndoButton
+                            companyId={companyId}
+                            eventId={mergeUndo.eventId}
+                            loserName={mergeUndo.loserName}
+                            undoneAt={mergeUndo.undoneAt}
+                            onUndone={handleMergeUndone}
+                          />
+                        ) : row.reference_type === "product_merge_undo" ||
+                          row.metadata_json?.undone_at ? (
+                          <Badge variant="outline" className="text-xs font-normal">
+                            Desfeita
+                          </Badge>
+                        ) : null}
                       </td>
                     </tr>
                   );

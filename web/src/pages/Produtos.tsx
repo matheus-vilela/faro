@@ -10,10 +10,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
-import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
+import type { ProductCatalogLayout } from "@/components/products/ProductCatalogCard";
+import { ProductCatalogCard } from "@/components/products/ProductCatalogCard";
+import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalogFiltersPanel";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
+import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
-import { ProductTechnicalSheetDialog } from "@/components/products/ProductTechnicalSheetDialog";
 import {
   PRODUCT_SHEET_INPUT,
   PRODUCT_SHEET_SECTION,
@@ -21,12 +23,9 @@ import {
   PRODUCT_SHEET_TILE,
 } from "@/components/products/productSheetStyles";
 import { ProductStockLotsSection } from "@/components/products/ProductStockLotsSection";
-import {
-  parseProductStockLots,
-  type ProductStockLotEntry,
-} from "@/lib/productStockLots";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
+import { ProductTechnicalSheetDialog } from "@/components/products/ProductTechnicalSheetDialog";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
   isLegacyProductUnit,
@@ -87,10 +86,6 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
-  fetchProductTechnicalSheet,
-  technicalSheetErrorMessage,
-} from "@/lib/productTechnicalSheet";
-import {
   convertUnitPriceForProduct,
   getLockedSystemSecondaryQty,
 } from "@/lib/companyUnits/convert";
@@ -106,19 +101,27 @@ import {
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import {
   matchesPurchasesMetric,
   parsePurchasesMetricParam,
   PURCHASES_METRIC_LABELS,
 } from "@/lib/productPurchasesDashboard";
-import { fetchAllInRange } from "@/lib/supabaseFetchAll";
-import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import {
+  parseProductStockLots,
+  type ProductStockLotEntry,
+} from "@/lib/productStockLots";
+import {
+  fetchProductTechnicalSheet,
+  technicalSheetErrorMessage,
+} from "@/lib/productTechnicalSheet";
 import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import {
   loadProductUnitConversions,
   persistProductUnitConversions,
 } from "@/lib/productUnitConversionsService";
 import { supabase } from "@/lib/supabase";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import type { Product } from "@/types/product";
@@ -127,14 +130,13 @@ import {
   AlertTriangle,
   ChefHat,
   ChevronDown,
-  ChevronRight,
   ClipboardList,
   Coins,
   Download,
   FileSpreadsheet,
   History,
-  Truck,
   LayoutGrid,
+  Loader2,
   Merge,
   Package,
   Pencil,
@@ -144,6 +146,7 @@ import {
   SlidersHorizontal,
   Tag,
   Trash2,
+  Truck,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -161,6 +164,17 @@ const CMV_CATEGORY_TAG_STYLES = [
 
 function cmvCategoryTagClass(index: number) {
   return CMV_CATEGORY_TAG_STYLES[index % CMV_CATEGORY_TAG_STYLES.length];
+}
+
+const CATALOG_VIEW_STORAGE_KEY = "faro:produtos-catalog-view-mode";
+
+function readCatalogViewMode(): ProductCatalogLayout {
+  try {
+    const stored = localStorage.getItem(CATALOG_VIEW_STORAGE_KEY);
+    return stored === "grid" ? "grid" : "list";
+  } catch {
+    return "list";
+  }
 }
 
 function productComposesCmv(p: Pick<Product, "composes_cmv">): boolean {
@@ -416,6 +430,7 @@ export function Produtos() {
   const [productsCount, setProductsCount] = useState(0);
   const [productsPage, setProductsPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [filterActive, setFilterActive] = useState<
@@ -433,6 +448,11 @@ export function Produtos() {
   >("all");
   const [filterUpdatedFrom, setFilterUpdatedFrom] = useState("");
   const [filterUpdatedTo, setFilterUpdatedTo] = useState("");
+  const [catalogViewMode, setCatalogViewMode] =
+    useState<ProductCatalogLayout>(readCatalogViewMode);
+  const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(
+    () => lowStockOnly || purchasesFilter != null,
+  );
   const [stockExportLoading, setStockExportLoading] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [productSheetOpen, setProductSheetOpen] = useState(false);
@@ -488,6 +508,8 @@ export function Produtos() {
   const productConversionsLoadedIdRef = useRef<string | null>(null);
   const productSheetViewRef = useRef<"summary" | "edit">("summary");
   const productHighlightHandledRef = useRef<string | null>(null);
+  const productsFetchSeqRef = useRef(0);
+  const catalogLoadedForCompanyRef = useRef<string | null>(null);
   /** Nomes das categorias de catálogo por produto (listagem). */
   const [productCatalogMap, setProductCatalogMap] = useState<
     Record<string, { id: string; name: string }[]>
@@ -523,9 +545,8 @@ export function Produtos() {
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
   const [productMergeOpen, setProductMergeOpen] = useState(false);
   const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
-  const [outputTechnicalSheetRecipeId, setOutputTechnicalSheetRecipeId] = useState<
-    string | null
-  >(null);
+  const [outputTechnicalSheetRecipeId, setOutputTechnicalSheetRecipeId] =
+    useState<string | null>(null);
   const [stockDeleting, setStockDeleting] = useState(false);
   const [stockProductConversions, setStockProductConversions] = useState<
     ProductUnitConversionDraft[]
@@ -789,7 +810,9 @@ export function Produtos() {
     );
     const newQty =
       effects.numericQuantity ??
-      (Number.isFinite(currentQty) ? currentQty : stockProduct.current_quantity);
+      (Number.isFinite(currentQty)
+        ? currentQty
+        : stockProduct.current_quantity);
     const newMin =
       effects.numericMinQuantity ??
       parseFloat(stockMinQuantity.replace(/\s/g, "").replace(",", ".")) ??
@@ -805,7 +828,9 @@ export function Produtos() {
     } = {
       unit: effects.nextUnit.trim().toLowerCase(),
       current_quantity: newQty,
-      min_quantity: Number.isFinite(newMin) ? newMin : stockProduct.min_quantity,
+      min_quantity: Number.isFinite(newMin)
+        ? newMin
+        : stockProduct.min_quantity,
     };
 
     if (effects.lastUnitValueUnitCode != null) {
@@ -882,7 +907,8 @@ export function Produtos() {
             current_quantity: updates.current_quantity,
             min_quantity: updates.min_quantity,
             last_unit_value_unit_code:
-              updates.last_unit_value_unit_code ?? prev.last_unit_value_unit_code,
+              updates.last_unit_value_unit_code ??
+              prev.last_unit_value_unit_code,
             last_unit_value_stock:
               updates.last_unit_value_stock ?? prev.last_unit_value_stock,
             average_cost: updates.average_cost ?? prev.average_cost,
@@ -924,9 +950,7 @@ export function Produtos() {
     overrideLabel?: string,
     overrideCode?: string,
   ) => {
-    const code = normalizeCustomUnitCode(
-      overrideCode ?? stockCustomUnitInput,
-    );
+    const code = normalizeCustomUnitCode(overrideCode ?? stockCustomUnitInput);
     const label = (overrideLabel ?? stockCustomUnitLabel).trim();
     if (!code) {
       toast.error("Informe um código de unidade válido (ex.: fd).");
@@ -1108,12 +1132,12 @@ export function Produtos() {
   }, [loadCustomUnitAliasOptions]);
 
   useEffect(() => {
-    if (!currentCompany?.id) return;
-    if (estoqueTab !== "catalogo") return;
-    void loadPendingPurchaseQuantities(currentCompany.id).then(
-      setPendingPurchaseByProduct,
-    );
-  }, [currentCompany?.id, estoqueTab]);
+    try {
+      localStorage.setItem(CATALOG_VIEW_STORAGE_KEY, catalogViewMode);
+    } catch {
+      /* ignore */
+    }
+  }, [catalogViewMode]);
 
   const loadAssignmentsForProduct = useCallback(async (productId: string) => {
     const { data } = await supabase
@@ -1131,9 +1155,29 @@ export function Produtos() {
     productSheetViewRef.current = productSheetView;
   }, [productSheetView]);
 
-  const fetchProducts = useCallback(async () => {
-    if (!currentCompany?.id) return;
+  useEffect(() => {
+    catalogLoadedForCompanyRef.current = null;
+    setProducts([]);
+    setProductsCount(0);
+    setProductsPage(1);
     setLoading(true);
+    setCatalogRefreshing(false);
+  }, [currentCompany?.id]);
+
+  const fetchProducts = useCallback(async () => {
+    const companyId = currentCompany?.id;
+    if (!companyId) return;
+
+    const requestSeq = ++productsFetchSeqRef.current;
+    const isInitialLoad = catalogLoadedForCompanyRef.current !== companyId;
+
+    if (isInitialLoad) {
+      setLoading(true);
+      setCatalogRefreshing(false);
+    } else {
+      setCatalogRefreshing(true);
+    }
+
     try {
       let categoryProductIds: string[] | null = null;
       if (filterCategoryId !== "all") {
@@ -1146,12 +1190,14 @@ export function Produtos() {
           ...new Set((links ?? []).map((l) => l.product_id)),
         ];
         if (categoryProductIds.length === 0) {
+          if (requestSeq !== productsFetchSeqRef.current) return;
           setProducts([]);
           setProductsCount(0);
           setProductCatalogMap({});
           setOperationalTypeByProduct({});
           setOperationalConfigByProduct({});
           setPendingPurchaseByProduct({});
+          catalogLoadedForCompanyRef.current = companyId;
           return;
         }
       }
@@ -1166,7 +1212,7 @@ export function Produtos() {
         let q = supabase
           .from("products")
           .select("*", { count: "exact" })
-          .eq("company_id", currentCompany.id)
+          .eq("company_id", companyId)
           .eq("listed_in_product_catalog", true)
           .order("name");
         if (categoryProductIds) {
@@ -1207,6 +1253,7 @@ export function Produtos() {
       };
 
       let rows: Product[];
+      let totalCount: number;
       if (purchasesFilter) {
         const all = await fetchAllInRange<Product>(buildBase());
         const filtered = all.filter((p) =>
@@ -1214,8 +1261,7 @@ export function Produtos() {
         );
         const from = (productsPage - 1) * PAGE_SIZE;
         rows = filtered.slice(from, from + PAGE_SIZE);
-        setProducts(rows);
-        setProductsCount(filtered.length);
+        totalCount = filtered.length;
       } else {
         const { data, count, error } = await buildBase().range(
           (productsPage - 1) * PAGE_SIZE,
@@ -1223,35 +1269,45 @@ export function Produtos() {
         );
         if (error) console.error(error);
         rows = (data ?? []) as Product[];
-        setProducts(rows);
-        setProductsCount(count ?? 0);
+        totalCount = count ?? 0;
       }
+
+      if (requestSeq !== productsFetchSeqRef.current) return;
+
+      setProducts(rows);
+      setProductsCount(totalCount);
 
       const [catalogMap, pendingMap, opCfg] = await Promise.all([
         fetchProductCatalogMap(
-          currentCompany.id,
+          companyId,
           rows.map((p) => p.id),
         ),
-        loadPendingPurchaseQuantities(currentCompany.id),
+        loadPendingPurchaseQuantities(companyId),
         rows.length > 0
           ? supabase
               .from("product_operational_config")
               .select(
                 "product_id, final_operational_type, suggested_operational_type, suggested_score, suggestion_reasons, configuration_status, configuration_completeness, linked_entry_breakdown_recipe_id",
               )
-              .eq("company_id", currentCompany.id)
+              .eq("company_id", companyId)
               .in(
                 "product_id",
                 rows.map((p) => p.id),
               )
           : Promise.resolve({ data: [], error: null }),
       ]);
+
+      if (requestSeq !== productsFetchSeqRef.current) return;
+
       setProductCatalogMap(catalogMap);
       setPendingPurchaseByProduct(pendingMap);
       const convMap = await fetchProductConversionMap(
-        currentCompany.id,
+        companyId,
         rows.map((p) => p.id),
       );
+
+      if (requestSeq !== productsFetchSeqRef.current) return;
+
       setProductConversionMap(convMap);
       if (opCfg.error) {
         console.error(opCfg.error);
@@ -1288,11 +1344,15 @@ export function Produtos() {
         setOperationalTypeByProduct(byId);
         setOperationalConfigByProduct(cfgById);
       }
+      catalogLoadedForCompanyRef.current = companyId;
     } finally {
-      setLoading(false);
+      if (requestSeq === productsFetchSeqRef.current) {
+        setLoading(false);
+        setCatalogRefreshing(false);
+      }
     }
   }, [
-    currentCompany,
+    currentCompany?.id,
     debouncedSearch,
     filterActive,
     filterCategoryId,
@@ -1308,15 +1368,16 @@ export function Produtos() {
 
   useEffect(() => {
     if (!purchasesFilter) return;
-    queueMicrotask(() => setProductsPage(1));
+    setProductsPage(1);
   }, [purchasesFilter]);
 
   const fetchLowStockCount = useCallback(async () => {
-    if (!currentCompany?.id) return;
+    const companyId = currentCompany?.id;
+    if (!companyId) return;
     const { count, error } = await supabase
       .from("products")
       .select("id", { count: "exact", head: true })
-      .eq("company_id", currentCompany.id)
+      .eq("company_id", companyId)
       .eq("stock_below_min_inclusive", true)
       .or("is_active.is.null,is_active.eq.true");
     if (error) {
@@ -1325,7 +1386,7 @@ export function Produtos() {
       return;
     }
     setLowStockCount(count ?? 0);
-  }, [currentCompany]);
+  }, [currentCompany?.id]);
 
   const handleStockExport = useCallback(
     async (mode: "filtered" | "all") => {
@@ -1379,7 +1440,7 @@ export function Produtos() {
   );
 
   useEffect(() => {
-    queueMicrotask(() => setProductsPage(1));
+    setProductsPage(1);
   }, [
     debouncedSearch,
     filterActive,
@@ -1391,6 +1452,10 @@ export function Produtos() {
     filterUpdatedFrom,
     filterUpdatedTo,
   ]);
+
+  useEffect(() => {
+    void fetchProducts();
+  }, [fetchProducts]);
 
   useEffect(() => {
     const est = searchParams.get("estoque");
@@ -1406,11 +1471,7 @@ export function Produtos() {
   }, [searchParams]);
 
   useEffect(() => {
-    queueMicrotask(() => void fetchProducts());
-  }, [fetchProducts]);
-
-  useEffect(() => {
-    queueMicrotask(() => void fetchLowStockCount());
+    void fetchLowStockCount();
   }, [fetchLowStockCount]);
 
   useEffect(() => {
@@ -2051,10 +2112,20 @@ export function Produtos() {
   };
 
   return (
-    <PageShell className="space-y-8" narrow>
+    <PageShell className="min-w-0 space-y-6 sm:space-y-8">
       <PageHeader
         title="Produtos e estoque"
-        description="Catálogo, CMV, movimentações, contagem (incluindo link pelo WhatsApp), compras, etiquetas, perdas e fichas técnicas."
+        description={
+          <>
+            <span className="hidden sm:inline">
+              Catálogo, CMV, movimentações, contagem (incluindo link pelo
+              WhatsApp), compras, etiquetas, perdas e fichas técnicas.
+            </span>
+            <span className="sm:hidden">
+              Catálogo, movimentações, contagem, compras e fichas técnicas.
+            </span>
+          </>
+        }
         icon={Package}
         action={
           estoqueTab === "catalogo" ? (
@@ -2081,34 +2152,36 @@ export function Produtos() {
         }
       />
 
-      <div className="-mx-1 flex gap-0.5 overflow-x-auto border-b border-border/80 pb-px scrollbar-thin">
-        {(
-          [
-            ["catalogo", "Catálogo", LayoutGrid],
-            ["movimentos", "Movimentações", SlidersHorizontal],
-            ["cmv", "CMV", Coins],
-            ["contagem", "Contagem", ClipboardList],
-            ["compras", "Compras", ShoppingCart],
-            ["etiquetas", "Etiquetas", Tag],
-            ["perdas", "Perdas", Trash2],
-            ["receitas", "Ficha Técnica", ChefHat],
-          ] as const
-        ).map(([id, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setEstoqueTab(id as EstoqueTab)}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-1.5 rounded-none border-b-2 px-2.5 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
-              estoqueTab === id
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            {label}
-          </button>
-        ))}
+      <div className="sticky top-0 z-10 -mx-1 border-b border-border/80 bg-background/95 pb-px backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex gap-0.5 overflow-x-auto scrollbar-thin">
+          {(
+            [
+              ["catalogo", "Catálogo", LayoutGrid],
+              ["movimentos", "Movimentações", SlidersHorizontal],
+              ["cmv", "CMV", Coins],
+              ["contagem", "Contagem", ClipboardList],
+              ["compras", "Compras", ShoppingCart],
+              ["etiquetas", "Etiquetas", Tag],
+              ["perdas", "Perdas", Trash2],
+              ["receitas", "Ficha Técnica", ChefHat],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setEstoqueTab(id as EstoqueTab)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-none border-b-2 px-2.5 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+                estoqueTab === id
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {currentCompany?.id && (
@@ -2140,9 +2213,15 @@ export function Produtos() {
           <Card>
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
               <div className="min-w-0 space-y-1.5">
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex flex-wrap items-center gap-2">
                   <Package className="h-5 w-5" />
                   Produtos cadastrados
+                  {catalogRefreshing ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Atualizando…
+                    </span>
+                  ) : null}
                 </CardTitle>
                 <CardDescription>
                   Vincule itens das despesas aos produtos para atualizar o
@@ -2217,195 +2296,41 @@ export function Produtos() {
                   </Button>
                 </div>
               )}
-              <div className="mb-4 space-y-3">
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="min-w-[min(100%,220px)] max-w-md flex-1 space-y-1.5">
-                    <Label
-                      htmlFor="prod-search"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Produto
-                    </Label>
-                    <Input
-                      id="prod-search"
-                      placeholder="Nome ou SKU..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="w-full min-w-[140px] max-w-[200px] space-y-1.5 sm:w-auto">
-                    <Label className="text-xs text-muted-foreground">
-                      Situação
-                    </Label>
-                    <Select
-                      value={filterActive}
-                      onValueChange={(v) =>
-                        setFilterActive(v as "all" | "active" | "inactive")
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="active">Ativos</SelectItem>
-                        <SelectItem value="inactive">Inativos</SelectItem>
-                        <SelectItem value="all">Todos</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-full min-w-[160px] max-w-[240px] space-y-1.5 sm:w-auto">
-                    <Label className="text-xs text-muted-foreground">
-                      Categoria
-                    </Label>
-                    <Select
-                      value={filterCategoryId}
-                      onValueChange={setFilterCategoryId}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Todas" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Todas</SelectItem>
-                        {companyProductCategories.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-full min-w-[180px] max-w-[260px] space-y-1.5 sm:w-auto">
-                    <Label className="text-xs text-muted-foreground">
-                      Alerta de estoque
-                    </Label>
-                    {lowStockOnly ? (
-                      <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                        Apenas ≤ mínimo (link estoque baixo)
-                      </p>
-                    ) : (
-                      <Select
-                        value={filterStockAlert}
-                        onValueChange={(v) =>
-                          setFilterStockAlert(
-                            v as "all" | "zero" | "below_min" | "any",
-                          )
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todos</SelectItem>
-                          <SelectItem value="any">Com alerta</SelectItem>
-                          <SelectItem value="zero">Estoque zerado</SelectItem>
-                          <SelectItem value="below_min">
-                            Abaixo do mínimo (com saldo)
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                  <div className="w-full min-w-[150px] max-w-[200px] space-y-1.5 sm:w-auto">
-                    <Label className="text-xs text-muted-foreground">
-                      Compõe CMV
-                    </Label>
-                    <Select
-                      value={filterComposesCmv}
-                      onValueChange={(v) =>
-                        setFilterComposesCmv(v as "all" | "yes" | "no")
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Todos</SelectItem>
-                        <SelectItem value="yes">Sim</SelectItem>
-                        <SelectItem value="no">Não</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-full min-w-[160px] max-w-[200px] space-y-1.5 sm:w-auto">
-                    <Label className="text-xs text-muted-foreground">
-                      Atualizado em
-                    </Label>
-                    <Select
-                      value={filterUpdatedPreset}
-                      onValueChange={(v) =>
-                        setFilterUpdatedPreset(
-                          v as "all" | "today" | "7d" | "30d" | "custom",
-                        )
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Qualquer data</SelectItem>
-                        <SelectItem value="today">Hoje</SelectItem>
-                        <SelectItem value="7d">Últimos 7 dias</SelectItem>
-                        <SelectItem value="30d">Últimos 30 dias</SelectItem>
-                        <SelectItem value="custom">Entre datas</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {filterUpdatedPreset === "custom" ? (
-                    <div className="flex flex-wrap items-end gap-2">
-                      <div className="space-y-1.5">
-                        <Label
-                          htmlFor="upd-from"
-                          className="text-xs text-muted-foreground"
-                        >
-                          De
-                        </Label>
-                        <Input
-                          id="upd-from"
-                          type="date"
-                          value={filterUpdatedFrom}
-                          onChange={(e) => setFilterUpdatedFrom(e.target.value)}
-                          className="w-[160px]"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label
-                          htmlFor="upd-to"
-                          className="text-xs text-muted-foreground"
-                        >
-                          Até
-                        </Label>
-                        <Input
-                          id="upd-to"
-                          type="date"
-                          value={filterUpdatedTo}
-                          onChange={(e) => setFilterUpdatedTo(e.target.value)}
-                          className="w-[160px]"
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => {
-                      setSearch("");
-                      setFilterCategoryId("all");
-                      setFilterStockAlert("all");
-                      setFilterComposesCmv("all");
-                      setFilterUpdatedPreset("all");
-                      setFilterUpdatedFrom("");
-                      setFilterUpdatedTo("");
-                    }}
-                  >
-                    Limpar filtros
-                  </Button>
-                </div>
-              </div>
-              {loading ? (
+              <ProductCatalogFiltersPanel
+                open={catalogFiltersOpen}
+                onOpenChange={setCatalogFiltersOpen}
+                search={search}
+                onSearchChange={setSearch}
+                filterActive={filterActive}
+                onFilterActiveChange={setFilterActive}
+                filterCategoryId={filterCategoryId}
+                onFilterCategoryIdChange={setFilterCategoryId}
+                filterStockAlert={filterStockAlert}
+                onFilterStockAlertChange={setFilterStockAlert}
+                filterComposesCmv={filterComposesCmv}
+                onFilterComposesCmvChange={setFilterComposesCmv}
+                filterUpdatedPreset={filterUpdatedPreset}
+                onFilterUpdatedPresetChange={setFilterUpdatedPreset}
+                filterUpdatedFrom={filterUpdatedFrom}
+                onFilterUpdatedFromChange={setFilterUpdatedFrom}
+                filterUpdatedTo={filterUpdatedTo}
+                onFilterUpdatedToChange={setFilterUpdatedTo}
+                lowStockOnly={lowStockOnly}
+                companyProductCategories={companyProductCategories}
+                viewMode={catalogViewMode}
+                onViewModeChange={setCatalogViewMode}
+                onClearFilters={() => {
+                  setSearch("");
+                  setFilterActive("active");
+                  setFilterCategoryId("all");
+                  setFilterStockAlert("all");
+                  setFilterComposesCmv("all");
+                  setFilterUpdatedPreset("all");
+                  setFilterUpdatedFrom("");
+                  setFilterUpdatedTo("");
+                }}
+              />
+              {loading && products.length === 0 ? (
                 <p className="text-muted-foreground">Carregando...</p>
               ) : products.length === 0 ? (
                 <p className="text-muted-foreground">
@@ -2414,303 +2339,37 @@ export function Produtos() {
                     : "Nenhum produto cadastrado"}
                 </p>
               ) : (
-                <ul className="list-none space-y-4 p-0">
-                  {products.map((p) => {
-                    const qNum = Number(p.current_quantity);
-                    const minNum = Number(p.min_quantity ?? 0);
-                    const stockIsNegative = qNum < 0;
-                    const stockIsZero =
-                      !stockIsNegative && (p.stock_is_zero ?? qNum <= 0);
-                    const stockBelowMinPositive =
-                      p.stock_below_min_positive ??
-                      (minNum > 0 && qNum > 0 && qNum <= minNum);
-                    const needsStockHighlight =
-                      p.stock_has_alert ??
-                      (stockIsNegative ||
-                        stockIsZero ||
-                        (minNum > 0 && qNum <= minNum));
-                    const qtyStr = Number(p.current_quantity).toLocaleString(
-                      "pt-BR",
-                    );
-                    const minStr =
-                      p.min_quantity > 0
-                        ? Number(p.min_quantity).toLocaleString("pt-BR")
-                        : "—";
-                    const {
-                      cmv,
-                      last,
-                      unit: unitCost,
-                      lastUnitCode,
-                    } = unitCostParts(p);
-                    const stockLineValue =
-                      unitCost != null
-                        ? Number(p.current_quantity) * unitCost
-                        : null;
-                    const operationalType =
-                      operationalTypeByProduct[p.id] ?? null;
-                    const catalogTags = productCatalogMap[p.id];
-                    const composesLabel = productComposesCmv(p)
-                      ? "Compõe CMV: Sim"
-                      : "Compõe CMV: Não";
-                    const catSegments =
-                      catalogTags && catalogTags.length > 0
-                        ? [...catalogTags.map((c) => c.name), composesLabel]
-                        : [composesLabel];
-                    const pendingPurchaseQty =
-                      pendingPurchaseByProduct[p.id] ?? 0;
-                    const convRows = productConversionMap[p.id] ?? [];
-                    return (
-                      <li key={p.id}>
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => openStockSheet(p)}
-                          onKeyDown={(e) =>
-                            e.key === "Enter" && openStockSheet(p)
-                          }
-                          className={cn(
-                            "group relative w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/25 text-left shadow-sm transition-all",
-                            "hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            "p-4 sm:p-5 md:p-6",
-                            p.is_active === false && "opacity-[0.82]",
-                            needsStockHighlight
-                              ? "border-destructive/35 bg-destructive/[0.04] ring-1 ring-inset ring-destructive/15"
-                              : "border-border/80",
-                          )}
-                        >
-                          <div className="flex gap-3 sm:gap-4">
-                            <div
-                              className={cn(
-                                "mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border shadow-sm sm:h-12 sm:w-12",
-                                needsStockHighlight
-                                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                  : "border-border/70 bg-muted/50 text-muted-foreground group-hover:border-primary/25 group-hover:bg-primary/5 group-hover:text-primary",
-                              )}
-                              aria-hidden
-                            >
-                              <Package
-                                className="h-5 w-5 sm:h-6 sm:w-6"
-                                strokeWidth={1.6}
-                              />
-                            </div>
-
-                            <div className="min-w-0 flex-1 space-y-3 sm:space-y-3.5">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1 space-y-2">
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                                    <h3 className="text-lg font-semibold leading-snug tracking-tight text-foreground sm:text-xl">
-                                      {p.name}
-                                    </h3>
-                                    {p.is_active === false && (
-                                      <Badge
-                                        variant="secondary"
-                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
-                                      >
-                                        <PowerOff className="h-3 w-3" />
-                                        Inativo
-                                      </Badge>
-                                    )}
-                                    {stockIsNegative && (
-                                      <Badge
-                                        variant="destructive"
-                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
-                                      >
-                                        <AlertTriangle className="h-3 w-3" />
-                                        Estoque negativo
-                                      </Badge>
-                                    )}
-                                    {stockIsZero && (
-                                      <Badge
-                                        variant="destructive"
-                                        className="h-6 gap-1 px-2 text-[0.7rem] font-normal"
-                                      >
-                                        <AlertTriangle className="h-3 w-3" />
-                                        Estoque zerado
-                                      </Badge>
-                                    )}
-                                    {stockBelowMinPositive && (
-                                      <Badge
-                                        variant="secondary"
-                                        className="h-6 gap-1 border-amber-500/40 bg-amber-500/10 px-2 text-[0.7rem] font-normal text-amber-950 dark:text-amber-50"
-                                      >
-                                        <AlertTriangle className="h-3 w-3" />
-                                        Abaixo do mínimo
-                                      </Badge>
-                                    )}
-                                    {pendingPurchaseQty > 0 && (
-                                      <Badge
-                                        variant="outline"
-                                        className="h-6 gap-1 border-blue-500/35 bg-blue-500/[0.08] px-2 text-[0.7rem] font-normal text-blue-950 dark:border-blue-400/35 dark:bg-blue-500/15 dark:text-blue-50"
-                                      >
-                                        <ShoppingCart className="h-3 w-3" />
-                                        Compra em andamento
-                                      </Badge>
-                                    )}
-                                    {(p.import_unit_needs_review === true ||
-                                      !isSystemUnitCode(p.unit)) && (
-                                      <Badge
-                                        variant="secondary"
-                                        className="h-6 gap-1 border-rose-500/40 bg-rose-500/10 px-2 text-[0.7rem] font-normal text-rose-950 dark:text-rose-100"
-                                      >
-                                        <AlertTriangle className="h-3 w-3" />
-                                        Revisar unidade
-                                      </Badge>
-                                    )}
-                                  </div>
-
-                                  {catSegments.length > 0 ? (
-                                    <div className="flex flex-wrap gap-2">
-                                      {operationalType ? (
-                                        <span
-                                          className={cn(
-                                            "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
-                                            "border-indigo-300/70 bg-indigo-500/10 text-indigo-950 dark:border-indigo-600/50 dark:bg-indigo-500/[0.14] dark:text-indigo-50",
-                                          )}
-                                        >
-                                          <span className="truncate">
-                                            Tipo final:{" "}
-                                            {operationalTypeLabel(
-                                              operationalType,
-                                            )}
-                                          </span>
-                                        </span>
-                                      ) : null}
-                                      {catSegments.map((seg, idx) => (
-                                        <span
-                                          key={`${p.id}-${idx}-${seg}`}
-                                          className={cn(
-                                            "inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium leading-none shadow-sm",
-                                            cmvCategoryTagClass(idx),
-                                          )}
-                                        >
-                                          <span className="truncate">
-                                            {seg}
-                                          </span>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : null}
-
-                                  <p className="text-xs text-muted-foreground sm:text-[0.8rem]">
-                                    {p.sku && (
-                                      <>
-                                        <span className="font-mono text-[0.8rem] sm:text-sm">
-                                          {p.sku ? p.sku : "—"}
-                                        </span>
-                                        <span className="mx-2 text-border">
-                                          ·
-                                        </span>
-                                      </>
-                                    )}
-                                    <span> Conversões: {convRows.length}</span>
-                                  </p>
-                                </div>
-
-                                <span
-                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary sm:h-10 sm:w-10"
-                                  aria-hidden
-                                >
-                                  <ChevronRight className="h-5 w-5" />
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
-                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
-                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Quantidade
-                                  </p>
-                                  <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
-                                    <span className="inline-flex flex-wrap items-baseline gap-x-1">
-                                      <span>{qtyStr}</span>
-                                      <span className="text-xs font-medium text-muted-foreground sm:text-sm">
-                                        {p.unit}
-                                      </span>
-                                    </span>
-                                    {pendingPurchaseQty > 0 ? (
-                                      <span className="mt-1.5 block text-xs font-normal tabular-nums leading-snug text-blue-700 dark:text-blue-300">
-                                        +
-                                        {pendingPurchaseQty.toLocaleString(
-                                          "pt-BR",
-                                        )}{" "}
-                                        {p.unit} em pedido de compra
-                                      </span>
-                                    ) : null}
-                                  </p>
-                                </div>
-                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
-                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Estoque mínimo
-                                  </p>
-                                  <p className="mt-2 text-lg font-semibold tabular-nums leading-none text-foreground sm:text-xl">
-                                    {minStr}
-                                    {p.min_quantity > 0 ? (
-                                      <span className="ml-1 text-xs font-medium text-muted-foreground sm:text-sm">
-                                        {p.unit}
-                                      </span>
-                                    ) : null}
-                                  </p>
-                                </div>
-                                <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5">
-                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Preço unitário
-                                  </p>
-                                  <p className="mt-2 text-sm font-semibold tabular-nums leading-tight text-foreground sm:text-base">
-                                    {cmv != null ? (
-                                      <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
-                                        <span className="whitespace-nowrap">
-                                          {formatCurrency(cmv)}
-                                        </span>
-                                        <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
-                                          /{p.unit} · médio
-                                        </span>
-                                      </span>
-                                    ) : last != null ? (
-                                      <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
-                                        <span className="whitespace-nowrap">
-                                          {formatCurrency(last)}
-                                        </span>
-                                        <span className="text-[0.65rem] font-normal text-muted-foreground sm:text-xs">
-                                          /{lastUnitCode ?? p.unit} · último
-                                        </span>
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted-foreground">
-                                        —
-                                      </span>
-                                    )}
-                                  </p>
-                                </div>
-                                <div
-                                  className={cn(
-                                    "rounded-xl border px-3 py-3 shadow-sm backdrop-blur-sm sm:px-4 sm:py-3.5",
-                                    stockLineValue != null && unitCost != null
-                                      ? "border-primary/25 bg-primary/[0.06]"
-                                      : "border-border/70 bg-background/70",
-                                  )}
-                                >
-                                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Valor em estoque
-                                  </p>
-                                  <p
-                                    className={cn(
-                                      "mt-2 text-base font-bold tabular-nums leading-snug sm:text-lg",
-                                      stockLineValue != null && unitCost != null
-                                        ? "text-foreground"
-                                        : "text-muted-foreground",
-                                    )}
-                                  >
-                                    {stockLineValue != null && unitCost != null
-                                      ? formatCurrency(stockLineValue)
-                                      : "—"}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
+                <ul
+                  className={cn(
+                    "list-none p-0 transition-opacity duration-150",
+                    catalogRefreshing && "opacity-80",
+                    catalogViewMode === "grid"
+                      ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+                      : "space-y-4",
+                  )}
+                >
+                  {products.map((p) => (
+                    <li
+                      key={p.id}
+                      className={
+                        catalogViewMode === "grid" ? "min-w-0" : undefined
+                      }
+                    >
+                      <ProductCatalogCard
+                        product={p}
+                        layout={catalogViewMode}
+                        formatCurrency={formatCurrency}
+                        onOpen={openStockSheet}
+                        operationalType={operationalTypeByProduct[p.id] ?? null}
+                        operationalTypeLabel={operationalTypeLabel}
+                        catalogTags={productCatalogMap[p.id]}
+                        pendingPurchaseQty={pendingPurchaseByProduct[p.id] ?? 0}
+                        conversionRowCount={
+                          (productConversionMap[p.id] ?? []).length
+                        }
+                      />
+                    </li>
+                  ))}
                 </ul>
               )}
               {!loading && (
@@ -3040,6 +2699,23 @@ export function Produtos() {
                           )
                         ) : null}
 
+                        {currentCompany?.id ? (
+                          <ProductMergeAuditSection
+                            companyId={currentCompany.id}
+                            product={stockProduct}
+                            className={SHEET_SECTION}
+                            onUndone={async () => {
+                              await fetchProducts();
+                              const { data } = await supabase
+                                .from("products")
+                                .select("*")
+                                .eq("id", stockProduct.id)
+                                .maybeSingle();
+                              if (data) setStockProduct(data as Product);
+                            }}
+                          />
+                        ) : null}
+
                         <div
                           className={cn(
                             SHEET_SECTION,
@@ -3092,9 +2768,22 @@ export function Produtos() {
                       <div className="space-y-4 p-6">
                         <ProductStockMovementHistorySection
                           productId={stockProduct.id}
+                          productName={stockProduct.name}
+                          companyId={currentCompany?.id ?? ""}
                           unit={stockProduct.unit}
                           active={productDetailTab === "historico"}
                           className={SHEET_SECTION}
+                          onStockChanged={() => {
+                            void fetchProducts();
+                            void supabase
+                              .from("products")
+                              .select("*")
+                              .eq("id", stockProduct.id)
+                              .maybeSingle()
+                              .then(({ data }) => {
+                                if (data) setStockProduct(data as Product);
+                              });
+                          }}
                         />
                       </div>
                     ) : (
@@ -3551,7 +3240,13 @@ export function Produtos() {
       )}
 
       {currentCompany?.id && estoqueTab === "movimentos" && (
-        <EstoqueMovimentacoesPanel companyId={currentCompany.id} />
+        <EstoqueMovimentacoesPanel
+          companyId={currentCompany.id}
+          onStockChanged={() => {
+            void fetchProducts();
+            void fetchLowStockCount();
+          }}
+        />
       )}
       {currentCompany?.id && estoqueTab === "cmv" && (
         <EstoqueCmvPanel companyId={currentCompany.id} />
