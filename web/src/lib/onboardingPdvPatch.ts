@@ -31,6 +31,9 @@ export async function patchCompanyOnboardingPdv(
     portal_message: string | null;
     import_status: OnboardingPdvImportStatus | null;
     import_error: string | null;
+    csv_import_job_id: string | null;
+    csv_storage_path: string | null;
+    import_started_at: string | null;
   }>,
 ): Promise<{ error?: string }> {
   const { data: row, error: readErr } = await supabase

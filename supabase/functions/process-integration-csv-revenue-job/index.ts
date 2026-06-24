@@ -23,7 +23,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
+import { scheduleCsvRevenueImportJob } from "../_shared/triggerCsvRevenueImportJob.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
   batchClassifyEpocProductKindWithOpenAi,
@@ -32,6 +32,7 @@ import {
   type EpocProductKind,
   type StoredEpocProductKind,
 } from "../_shared/epocCsvProductKindClassification.ts";
+import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
 import {
   batchClassifyRevenueLeavesWithOpenAi,
   classifyRevenueCategoryHeuristic,
@@ -46,8 +47,8 @@ import {
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
 import {
-  isOnboardingEpocCsvJobMetadata,
   patchOnboardingPdv,
+  resolveOnboardingCsvJobPatchEnabled,
 } from "../_shared/onboardingPdvPatch.ts";
 import {
   buildCanonicalProductIndex,
@@ -493,30 +494,10 @@ function scheduleResume(
   anonKey: string,
   jobId: string,
 ): void {
-  const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-integration-csv-revenue-job`;
-  const next = fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      apikey: anonKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ job_id: jobId, resume: true }),
-  }).catch((e) =>
-    console.error("[process-integration-csv-revenue-job] resume fetch", e),
-  );
-  try {
-    if (
-      typeof EdgeRuntime !== "undefined" &&
-      typeof EdgeRuntime.waitUntil === "function"
-    ) {
-      EdgeRuntime.waitUntil(next);
-    } else {
-      void next;
-    }
-  } catch {
-    void next;
-  }
+  scheduleCsvRevenueImportJob(supabaseUrl, serviceKey, anonKey, jobId, {
+    resume: true,
+    logTag: "[process-integration-csv-revenue-job]",
+  });
 }
 
 Deno.serve(async (req) => {
@@ -633,6 +614,22 @@ Deno.serve(async (req) => {
     metadata?: Record<string, unknown> | null;
   };
 
+  const jobMetaEarly =
+    job.metadata &&
+    typeof job.metadata === "object" &&
+    !Array.isArray(job.metadata)
+      ? (job.metadata as Record<string, unknown>)
+      : {};
+  const patchOnboardingEnabled = await resolveOnboardingCsvJobPatchEnabled(
+    admin,
+    job.company_id,
+    jobMetaEarly,
+  );
+  const onboardingPdvJobFields = {
+    csv_import_job_id: job.id,
+    csv_storage_path: job.storage_path,
+  };
+
   const fail = async (msg: string) => {
     await releaseCsvJobChunkLease(admin, jobId);
     const priorForFail =
@@ -650,7 +647,7 @@ Deno.serve(async (req) => {
       rowsSkippedNoProduct:
         Number(priorForFail.rows_skipped_no_product ?? 0) || 0,
     });
-    if (isOnboardingEpocCsvJobMetadata(priorForFail)) {
+    if (patchOnboardingEnabled) {
       await patchOnboardingPdv(
         admin,
         job.company_id,
@@ -658,6 +655,7 @@ Deno.serve(async (req) => {
           import_status: "failed",
           import_error: msg.slice(0, 500),
           sync: false,
+          ...onboardingPdvJobFields,
         },
         "[process-integration-csv-revenue-job]",
       );
@@ -718,7 +716,7 @@ Deno.serve(async (req) => {
         !Array.isArray(job.metadata)
           ? (job.metadata as Record<string, unknown>)
           : {};
-      const onboardingEmpty = isOnboardingEpocCsvJobMetadata(priorMetaEmpty);
+      const onboardingEmpty = patchOnboardingEnabled;
       if (onboardingEmpty) {
         await patchOnboardingPdv(
           admin,
@@ -728,6 +726,7 @@ Deno.serve(async (req) => {
             sales_sync: 0,
             import_status: "completed",
             sync: false,
+            ...onboardingPdvJobFields,
           },
           "[process-integration-csv-revenue-job]",
         );
@@ -835,13 +834,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const priorMetaEarly =
-      job.metadata &&
-      typeof job.metadata === "object" &&
-      !Array.isArray(job.metadata)
-        ? (job.metadata as Record<string, unknown>)
-        : {};
-    const onboardingCsvJob = isOnboardingEpocCsvJobMetadata(priorMetaEarly);
+    const onboardingCsvJob = patchOnboardingEnabled;
     if (onboardingCsvJob) {
       await patchOnboardingPdv(
         admin,
@@ -850,6 +843,7 @@ Deno.serve(async (req) => {
           sales_total: rows.length,
           sales_sync: startOffset,
           import_status: "processing",
+          ...onboardingPdvJobFields,
         },
         "[process-integration-csv-revenue-job]",
       );
@@ -1529,7 +1523,7 @@ Deno.serve(async (req) => {
         await patchOnboardingPdv(
           admin,
           job.company_id,
-          { sales_sync: nextOffset, import_status: "processing" },
+          { sales_sync: nextOffset, import_status: "processing", ...onboardingPdvJobFields },
           "[process-integration-csv-revenue-job]",
         );
       }
@@ -1596,6 +1590,7 @@ Deno.serve(async (req) => {
           sales_sync: rows.length,
           import_status: "completed",
           sync: false,
+          ...onboardingPdvJobFields,
         },
         "[process-integration-csv-revenue-job]",
       );
@@ -1642,13 +1637,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     await releaseCsvJobChunkLease(admin, jobId);
     const msg = e instanceof Error ? e.message : String(e);
-    const metaForCatch =
-      jobRow?.metadata &&
-      typeof jobRow.metadata === "object" &&
-      !Array.isArray(jobRow.metadata)
-        ? (jobRow.metadata as Record<string, unknown>)
-        : {};
-    if (isOnboardingEpocCsvJobMetadata(metaForCatch) && jobRow?.company_id) {
+    if (patchOnboardingEnabled && jobRow?.company_id) {
       await patchOnboardingPdv(
         admin,
         String(jobRow.company_id),
@@ -1656,6 +1645,11 @@ Deno.serve(async (req) => {
           import_status: "failed",
           import_error: msg.slice(0, 500),
           sync: false,
+          csv_import_job_id: jobId,
+          csv_storage_path:
+            typeof jobRow.storage_path === "string"
+              ? jobRow.storage_path
+              : null,
         },
         "[process-integration-csv-revenue-job]",
       );

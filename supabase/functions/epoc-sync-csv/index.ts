@@ -20,6 +20,7 @@ import {
 } from "../_shared/epocPortalFetch.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
+import { enqueueAndTriggerEpocCsvImport } from "../_shared/enqueueEpocCsvRevenueImportJob.ts";
 import {
   isOnboardingPdvSyncInProgress,
   patchOnboardingPdv,
@@ -247,42 +248,6 @@ function cookieNameList(jar: string): string {
 function previewText(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max)}… (${s.length} chars)`;
-}
-
-/** Dispara import de receitas a partir do CSV (não depende só do Database Webhook). */
-function scheduleProcessCsvRevenueJob(
-  supabaseUrl: string,
-  serviceKey: string,
-  anonKey: string,
-  jobId: string,
-): void {
-  const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/process-integration-csv-revenue-job`;
-  const trigger = fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      apikey: anonKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ job_id: jobId }),
-  }).catch((err) => {
-    console.error(LOG, "process_csv_revenue_job_trigger_falhou", {
-      job_id: jobId,
-      err: String(err),
-    });
-  });
-  try {
-    // @ts-ignore EdgeRuntime.waitUntil prolonga o isolate até o fetch terminar
-    if (
-      typeof EdgeRuntime !== "undefined" &&
-      typeof EdgeRuntime.waitUntil === "function"
-    ) {
-      // @ts-ignore
-      EdgeRuntime.waitUntil(trigger);
-    }
-  } catch {
-    void trigger;
-  }
 }
 
 const VOID_HTML = new Set([
@@ -1766,40 +1731,47 @@ Deno.serve(async (req) => {
 
   let csvRevenueImportJobId: string | null = null;
   let csvJobEnqueueFailed = false;
+  let csvJobTriggerFailed = false;
   const shouldEnqueueCsvImport = !!csvStoragePath && totalLinhasDados > 0;
+
+  if (totalLinhasDados > 0 && !csvStoragePath) {
+    csvJobEnqueueFailed = true;
+    log("csv_storage_ausente_com_linhas", { linhas_dados: totalLinhasDados });
+  }
+
   if (shouldEnqueueCsvImport) {
-    const { data: jobIns, error: jobErr } = await admin
-      .from("integration_csv_revenue_import_jobs")
-      .insert({
-        company_id: companyId,
-        requested_by: userIdForJob,
-        provider: "epoc",
-        storage_bucket: "company-setup",
-        storage_path: csvStoragePath,
-        status: "PENDING",
-        metadata: {
-          steps_prefix: stepsPrefix,
-          source: "epoc-sync-csv",
-          sync_mode: syncMode,
-          ...(manualConsultaDias?.length
-            ? { consulta_dias_br: manualConsultaDias }
-            : {}),
-        },
-      })
-      .select("id")
-      .maybeSingle();
-    if (jobErr) {
-      log("csv_revenue_job_enqueue_falhou", { message: jobErr.message });
+    const enqueue = await enqueueAndTriggerEpocCsvImport(admin, {
+      companyId,
+      requestedBy: userIdForJob,
+      storagePath: csvStoragePath,
+      metadata: {
+        steps_prefix: stepsPrefix,
+        source: "epoc-sync-csv",
+        sync_mode: syncMode,
+        linhas_dados: totalLinhasDados,
+        ...(manualConsultaDias?.length
+          ? { consulta_dias_br: manualConsultaDias }
+          : {}),
+      },
+      supabaseUrl,
+      serviceKey,
+      anonKey,
+      logTag: LOG,
+    });
+    if (!enqueue.jobId) {
       csvJobEnqueueFailed = true;
-    } else if (jobIns?.id) {
-      csvRevenueImportJobId = String(jobIns.id);
-      scheduleProcessCsvRevenueJob(
-        supabaseUrl,
-        serviceKey,
-        anonKey,
-        csvRevenueImportJobId,
-      );
-      log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
+      log("csv_revenue_job_enqueue_falhou", { message: enqueue.error });
+    } else {
+      csvRevenueImportJobId = enqueue.jobId;
+      if (!enqueue.triggerOk) {
+        csvJobTriggerFailed = true;
+        log("csv_revenue_job_trigger_falhou", {
+          job_id: csvRevenueImportJobId,
+          error: enqueue.triggerError,
+        });
+      } else {
+        log("csv_revenue_job_disparado", { job_id: csvRevenueImportJobId });
+      }
     }
   }
 
@@ -1815,10 +1787,42 @@ Deno.serve(async (req) => {
           sync: false,
           sales_total: 0,
           sales_sync: 0,
+          csv_import_job_id: null,
+          csv_storage_path: csvStoragePath,
         }
-      : {
-          import_status: csvRevenueImportJobId ? "pending" : null,
-        }),
+      : csvJobEnqueueFailed
+        ? {
+            import_status: "failed",
+            import_error:
+              totalLinhasDados > 0 && !csvStoragePath
+                ? "CSV gerado, mas não foi guardado no Storage. Tente «Tentar novamente»."
+                : "CSV exportado, mas não foi possível enfileirar a importação. Tente «Retomar importação».",
+            sync: false,
+            csv_import_job_id: null,
+            csv_storage_path: csvStoragePath,
+          }
+        : csvJobTriggerFailed
+          ? {
+              import_status: "pending",
+              import_error:
+                "CSV enfileirado; o processamento demorou a iniciar. Use «Retomar importação».",
+              csv_import_job_id: csvRevenueImportJobId,
+              csv_storage_path: csvStoragePath,
+              import_started_at: nowIso,
+            }
+          : csvRevenueImportJobId
+            ? {
+                import_status: "pending",
+                import_error: null,
+                csv_import_job_id: csvRevenueImportJobId,
+                csv_storage_path: csvStoragePath,
+                import_started_at: nowIso,
+              }
+            : {
+                import_status: null,
+                csv_import_job_id: null,
+                csv_storage_path: csvStoragePath,
+              }),
   });
 
   const flowDiagnostic = buildEpocSyncFlowDiagnostic({

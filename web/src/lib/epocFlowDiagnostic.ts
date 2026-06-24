@@ -14,7 +14,6 @@ export {
 import {
   buildEpocImportJobFlowDiagnostic,
   buildEpocSyncFlowDiagnostic,
-  EPOC_FLOW_PHASE_LABELS,
   type EpocFlowDiagnostic,
   type EpocFlowPhaseStatus,
 } from "../../../supabase/functions/_shared/epocFlowDiagnostic.ts";

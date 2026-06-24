@@ -1,9 +1,12 @@
 import type { EpocFlowDiagnostic } from "@/lib/epocFlowDiagnostic";
-import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
+import {
+  isOnboardingPdvImportInProgress,
+  isOnboardingPdvSyncInProgress,
+  shouldKeepOnboardingPdvSync,
+} from "@/lib/onboardingPdvDefaults";
 import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import { supabase } from "@/lib/supabase";
-import { shouldKeepOnboardingPdvSync } from "@/lib/onboardingPdvDefaults";
 import { toast } from "sonner";
 
 function coerceInvokeResponse(
@@ -44,6 +47,61 @@ async function messageFromInvokeFailure(
     return humanizeEpocRemoteError(error.message);
   }
   return "Falha ao executar sincronização.";
+}
+
+function onboardingPdvObject(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null;
+}
+
+/** Evita sobrescrever estado do servidor quando o sync ainda pode estar a correr. */
+async function patchOnboardingAfterInvokeFailure(
+  companyId: string,
+  message: string,
+): Promise<void> {
+  const { data: row } = await supabase
+    .from("companies")
+    .select("onboarding_pdv")
+    .eq("id", companyId)
+    .maybeSingle();
+  const ob = onboardingPdvObject(row?.onboarding_pdv);
+  if (
+    ob?.portal_busy === true ||
+    isOnboardingPdvImportInProgress(ob) ||
+    (isOnboardingPdvSyncInProgress(ob) &&
+      (ob?.portal_outcome === "success" || ob?.import_status === "pending"))
+  ) {
+    return;
+  }
+  await patchCompanyOnboardingPdv(companyId, {
+    sync: false,
+    portal_busy: false,
+    portal_outcome: "failed",
+    portal_message: message.slice(0, 500),
+  });
+}
+
+async function patchOnboardingAfterInvokeSuccess(
+  companyId: string,
+  data: EpocSyncCsvResponse,
+): Promise<void> {
+  if (!data.ok) return;
+  const patch: Parameters<typeof patchCompanyOnboardingPdv>[1] = {
+    portal_busy: false,
+    portal_outcome: "success",
+    portal_message: null,
+  };
+  if (data.storage_path) {
+    patch.csv_storage_path = data.storage_path;
+  }
+  if (data.csv_revenue_import_job_id) {
+    patch.csv_import_job_id = data.csv_revenue_import_job_id;
+    patch.import_status = "pending";
+    patch.import_error = null;
+    patch.import_started_at = new Date().toISOString();
+  }
+  await patchCompanyOnboardingPdv(companyId, patch);
 }
 
 /**
@@ -149,6 +207,9 @@ export async function invokeEpocCsvSync(
             portal_message: null,
             import_status: null,
             import_error: null,
+            csv_import_job_id: null,
+            csv_storage_path: null,
+            import_started_at: null,
           }
         : { portal_busy: true }),
     });
@@ -178,15 +239,10 @@ export async function invokeEpocCsvSync(
       });
     if (error) {
       if (isOnboardingFlow) {
-        await patchCompanyOnboardingPdv(companyId, {
-          sync: false,
-          portal_busy: false,
-          portal_outcome: "failed",
-          portal_message: (await messageFromInvokeFailure(error, response)).slice(
-            0,
-            500,
-          ),
-        });
+        await patchOnboardingAfterInvokeFailure(
+          companyId,
+          await messageFromInvokeFailure(error, response),
+        );
       }
       return {
         ok: false,
@@ -195,12 +251,10 @@ export async function invokeEpocCsvSync(
     }
     if (!data) {
       if (isOnboardingFlow) {
-        await patchCompanyOnboardingPdv(companyId, {
-          sync: false,
-          portal_busy: false,
-          portal_outcome: "failed",
-          portal_message: "Resposta vazia da função",
-        });
+        await patchOnboardingAfterInvokeFailure(
+          companyId,
+          "Resposta vazia da função",
+        );
       }
       return { ok: false, error: "Resposta vazia da função" };
     }
@@ -209,14 +263,12 @@ export async function invokeEpocCsvSync(
         data.error ?? "Falha na sincronização",
       );
       if (isOnboardingFlow) {
-        await patchCompanyOnboardingPdv(companyId, {
-          sync: false,
-          portal_busy: false,
-          portal_outcome: "failed",
-          portal_message: syncError.slice(0, 500),
-        });
+        await patchOnboardingAfterInvokeFailure(companyId, syncError);
       }
       return { ...data, error: syncError };
+    }
+    if (isOnboardingFlow) {
+      await patchOnboardingAfterInvokeSuccess(companyId, data);
     }
     return data;
   } catch (e) {
@@ -224,12 +276,7 @@ export async function invokeEpocCsvSync(
       e instanceof Error ? e.message : "Falha ao executar sincronização.",
     );
     if (isOnboardingFlow) {
-      await patchCompanyOnboardingPdv(companyId, {
-        sync: false,
-        portal_busy: false,
-        portal_outcome: "failed",
-        portal_message: msg.slice(0, 500),
-      });
+      await patchOnboardingAfterInvokeFailure(companyId, msg);
     }
     return { ok: false, error: msg };
   }

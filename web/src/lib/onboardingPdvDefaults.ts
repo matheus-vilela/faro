@@ -15,6 +15,9 @@ export const DEFAULT_ONBOARDING_PDV = {
   portal_message: null,
   import_status: null,
   import_error: null,
+  csv_import_job_id: null,
+  csv_storage_path: null,
+  import_started_at: null,
 } as const;
 
 export type OnboardingPdvSalesMetrics = {
@@ -44,6 +47,9 @@ export function mergeOnboardingPdv(
     portal_message: string | null;
     import_status: OnboardingPdvImportStatus | null;
     import_error: string | null;
+    csv_import_job_id: string | null;
+    csv_storage_path: string | null;
+    import_started_at: string | null;
   }>,
 ): Record<string, unknown> {
   const prev = onboardingPdvObject(raw) ?? {};

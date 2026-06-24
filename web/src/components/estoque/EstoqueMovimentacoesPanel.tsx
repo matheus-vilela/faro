@@ -247,9 +247,11 @@ export function EstoqueMovimentacoesPanel({
       return;
     }
 
-    let aggQuery: FilterableQuery = supabase
+    let aggQuery = supabase
       .from("stock_movements")
-      .select("quantity, type, unit_cost, reference_type", { count: "exact" });
+      .select("quantity, type, unit_cost, reference_type", {
+        count: "exact",
+      }) as unknown as FilterableQuery;
 
     if (productFilterId) {
       aggQuery = aggQuery.eq("product_id", productFilterId);
@@ -287,7 +289,12 @@ export function EstoqueMovimentacoesPanel({
     } = await (aggQuery as unknown as PromiseLike<{
       count: number | null;
       data:
-        | { quantity: number; type: string; unit_cost: number | null }[]
+        | {
+            quantity: number;
+            type: string;
+            unit_cost: number | null;
+            reference_type: string | null;
+          }[]
         | null;
       error: { message: string } | null;
     }>);

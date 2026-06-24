@@ -19,6 +19,12 @@ export type OnboardingPdvPatch = {
   portal_message?: string | null;
   import_status?: OnboardingPdvImportStatus | string | null;
   import_error?: string | null;
+  /** Job em `integration_csv_revenue_import_jobs` (rastreio / recuperação). */
+  csv_import_job_id?: string | null;
+  /** CSV exportado no Storage (rastreio / recuperação sem reler integração). */
+  csv_storage_path?: string | null;
+  /** ISO8601 — início da fila/import CSV (UI «Retomar importação» após 15 min). */
+  import_started_at?: string | null;
 };
 
 function numMetric(v: unknown): number {
@@ -31,6 +37,44 @@ export function isOnboardingEpocCsvJobMetadata(
 ): boolean {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
   return meta.sync_mode === "onboarding_initial";
+}
+
+/** Job EPOC deve atualizar `onboarding_pdv` (metadata ou fluxo PDV ainda ativo). */
+export async function resolveOnboardingCsvJobPatchEnabled(
+  admin: Admin,
+  companyId: string,
+  meta: Record<string, unknown> | null | undefined,
+): Promise<boolean> {
+  if (isOnboardingEpocCsvJobMetadata(meta)) return true;
+
+  const { data: row, error } = await admin
+    .from("companies")
+    .select("onboarding_pdv")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error || !row) return false;
+
+  const ob = row.onboarding_pdv;
+  if (!ob || typeof ob !== "object" || Array.isArray(ob)) return false;
+  const o = ob as Record<string, unknown>;
+  return (
+    o.sync === true ||
+    isOnboardingPdvImportInProgress(ob) ||
+    o.import_status === "pending" ||
+    o.import_status === "processing"
+  );
+}
+
+export function readOnboardingPdvCsvStoragePath(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = (raw as Record<string, unknown>).csv_storage_path;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+export function readOnboardingPdvCsvImportJobId(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = (raw as Record<string, unknown>).csv_import_job_id;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
 export function onboardingPdvPatchAllowed(raw: unknown): boolean {

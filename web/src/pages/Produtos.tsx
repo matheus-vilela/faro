@@ -13,6 +13,7 @@ import { ProductImportSheet } from "@/components/ProductImportSheet";
 import type { ProductCatalogLayout } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogCard } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalogFiltersPanel";
+import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
@@ -1513,29 +1514,6 @@ export function Produtos() {
       style: "currency",
       currency: "BRL",
     }).format(v);
-
-  /** CMV se houver; senão último preço — alinhado ao painel CMV e ao valor em estoque. */
-  const unitCostParts = (p: Product) => {
-    const cmv =
-      p.average_cost != null && p.average_cost > 0
-        ? Number(p.average_cost)
-        : null;
-    const last =
-      p.last_unit_value != null && p.last_unit_value > 0
-        ? Number(p.last_unit_value)
-        : null;
-    const lastStock =
-      p.last_unit_value_stock != null && p.last_unit_value_stock > 0
-        ? Number(p.last_unit_value_stock)
-        : last;
-    const unit = cmv ?? lastStock ?? null;
-    return {
-      cmv,
-      last,
-      unit,
-      lastUnitCode: p.last_unit_value_unit_code ?? p.unit,
-    };
-  };
 
   const stockPricePresentation = useMemo(
     () => productPriceFields(stockProduct),

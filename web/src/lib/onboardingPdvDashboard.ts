@@ -15,6 +15,7 @@ export type ParsedOnboardingPdv = {
   import_error: string | null;
   sales_total: number;
   sales_sync: number;
+  import_started_at: string | null;
 };
 
 function onboardingPdvObject(raw: unknown): Record<string, unknown> | null {
@@ -50,6 +51,10 @@ export function parseOnboardingPdv(raw: unknown): ParsedOnboardingPdv {
     typeof o?.import_error === "string" && o.import_error.trim()
       ? o.import_error.trim()
       : null;
+  const importStartedAt =
+    typeof o?.import_started_at === "string" && o.import_started_at.trim()
+      ? o.import_started_at.trim()
+      : null;
   return {
     completed: o?.completed === true,
     sync: o?.sync === true,
@@ -60,7 +65,45 @@ export function parseOnboardingPdv(raw: unknown): ParsedOnboardingPdv {
     import_error: importError,
     sales_total: sales.sales_total,
     sales_sync: sales.sales_sync,
+    import_started_at: importStartedAt,
   };
+}
+
+/** Tempo mínimo antes de mostrar «Retomar importação» (import preso sem %). */
+export const ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS = 15 * 60 * 1000;
+
+export function parseOnboardingPdvImportStartedAtMs(raw: unknown): number | null {
+  const o = onboardingPdvObject(raw);
+  const v = o?.import_started_at;
+  if (typeof v !== "string" || !v.trim()) return null;
+  const ms = Date.parse(v.trim());
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Ainda sem barra «X% foram processadas» (`sales_total` ainda zero). */
+export function isOnboardingPdvImportAwaitingSalesTotal(raw: unknown): boolean {
+  const o = parseOnboardingPdv(raw);
+  if (o.sales_total > 0) return false;
+  if (isOnboardingPdvConfirmPhase(raw)) return false;
+  return isOnboardingPdvImportActive(raw);
+}
+
+/** Mostrar «Retomar importação» após 15 min na fila sem progresso de linhas. */
+export function shouldShowOnboardingPdvResumeImportButton(
+  raw: unknown,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!isOnboardingPdvProcessingSales(raw)) return false;
+  if (isOnboardingPdvConfirmPhase(raw)) return false;
+  if (!isOnboardingPdvImportAwaitingSalesTotal(raw)) return false;
+
+  let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
+  if (startedMs == null && isOnboardingPdvImportActive(raw)) {
+    // Registos antigos sem `import_started_at`: permite retomar de imediato.
+    startedMs = 0;
+  }
+  if (startedMs == null) return false;
+  return nowMs - startedMs >= ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS;
 }
 
 /**

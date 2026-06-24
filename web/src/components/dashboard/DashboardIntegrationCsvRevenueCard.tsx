@@ -9,9 +9,11 @@ import {
   isOnboardingPdvProcessingSales,
   onboardingPdvDashboardProgressPercent,
   parseOnboardingPdv,
+  shouldShowOnboardingPdvResumeImportButton,
 } from "@/lib/onboardingPdvDashboard";
 import { completeCompanyOnboardingIntegrationPdvStep } from "@/services/companyOnboardingFlagsService";
 import { invokeEpocCsvSync } from "@/services/epocSyncCsvService";
+import { kickCsvRevenueImportJob } from "@/services/kickCsvRevenueImportService";
 import {
   AlertCircle,
   ArrowRight,
@@ -20,7 +22,7 @@ import {
   Loader2,
   RotateCcw,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -41,6 +43,10 @@ export function DashboardIntegrationCsvRevenueCard({
 
   const [retryBusy, setRetryBusy] = useState(false);
   const [completeIntegrationBusy, setCompleteIntegrationBusy] = useState(false);
+  const [kickBusy, setKickBusy] = useState(false);
+  const [resumeImportClockMs, setResumeImportClockMs] = useState(() =>
+    Date.now(),
+  );
 
   const confirmPhase = isOnboardingPdvConfirmPhase(onboardingPdv);
   const portalFailure = isOnboardingPdvPortalFailure(onboardingPdv);
@@ -49,6 +55,37 @@ export function DashboardIntegrationCsvRevenueCard({
   const importFailed = ob.import_status === "failed";
 
   const percent = onboardingPdvDashboardProgressPercent(onboardingPdv);
+
+  const showResumeImportButton = useMemo(
+    () =>
+      shouldShowOnboardingPdvResumeImportButton(
+        onboardingPdv,
+        resumeImportClockMs,
+      ),
+    [onboardingPdv, resumeImportClockMs],
+  );
+
+  useEffect(() => {
+    if (
+      !processingSales ||
+      confirmPhase ||
+      ob.sales_total > 0 ||
+      !isOnboardingPdvProcessingSales(onboardingPdv)
+    ) {
+      return;
+    }
+    if (showResumeImportButton) return;
+    const timer = window.setInterval(() => {
+      setResumeImportClockMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [
+    processingSales,
+    confirmPhase,
+    ob.sales_total,
+    onboardingPdv,
+    showResumeImportButton,
+  ]);
 
   const { title, subtitle, showSpinner, icon } = useMemo(() => {
     if (confirmPhase) {
@@ -175,6 +212,37 @@ export function DashboardIntegrationCsvRevenueCard({
     }
   }, [companyId, refetchCompanies]);
 
+  const resumeCsvImport = useCallback(async () => {
+    if (!companyId) return;
+    setKickBusy(true);
+    try {
+      const res = await kickCsvRevenueImportJob(companyId);
+      if (!res.ok) {
+        toast.error(
+          res.error?.slice(0, 240) ??
+            "Não foi possível retomar a importação do CSV.",
+        );
+        return;
+      }
+      if (res.action === "reconciled") {
+        toast.success(
+          "Importação já tinha sido concluída — o dashboard foi atualizado.",
+          { duration: 5000 },
+        );
+      } else if (res.action === "recreated") {
+        toast.success(
+          "Novo job de importação criado a partir do CSV exportado.",
+          { duration: 5000 },
+        );
+      } else {
+        toast.message("Importação do CSV retomada.", { duration: 4000 });
+      }
+      await refetchCompanies();
+    } finally {
+      setKickBusy(false);
+    }
+  }, [companyId, refetchCompanies]);
+
   if (isOnboardingPdvJsonCompleted(onboardingPdv)) {
     return null;
   }
@@ -239,6 +307,22 @@ export function DashboardIntegrationCsvRevenueCard({
                   <RotateCcw className="mr-2 h-4 w-4" />
                 )}
                 Tentar novamente
+              </Button>
+            )}
+            {showResumeImportButton && (
+              <Button
+                size="sm"
+                type="button"
+                variant="secondary"
+                disabled={kickBusy || ob.portal_busy}
+                onClick={() => void resumeCsvImport()}
+              >
+                {kickBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                )}
+                Retomar importação
               </Button>
             )}
             {confirmPhase ? (
