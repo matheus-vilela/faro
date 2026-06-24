@@ -1405,6 +1405,18 @@ export function ExpenseDetailSheet({
                                 <tr key={i} className="border-t">
                                   <td className="p-2">
                                     <span>{primary}</span>
+                                    {it.metadata_json?.product_merge ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="mt-1.5 text-xs font-normal"
+                                      >
+                                        Unificado de{" "}
+                                        {
+                                          it.metadata_json.product_merge
+                                            .from_product_name
+                                        }
+                                      </Badge>
+                                    ) : null}
                                     {catalogName &&
                                       (strippedLine !== catalogName ||
                                         rawLineName !== catalogName) && (

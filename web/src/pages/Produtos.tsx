@@ -27,6 +27,7 @@ import {
   parseProductStockLots,
   type ProductStockLotEntry,
 } from "@/lib/productStockLots";
+import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
 import { ProductSuppliersSection } from "@/components/products/ProductSuppliersSection";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
@@ -2688,6 +2689,23 @@ export function Produtos() {
                           )
                         ) : null}
 
+                        {currentCompany?.id ? (
+                          <ProductMergeAuditSection
+                            companyId={currentCompany.id}
+                            product={stockProduct}
+                            className={SHEET_SECTION}
+                            onUndone={async () => {
+                              await fetchProducts();
+                              const { data } = await supabase
+                                .from("products")
+                                .select("*")
+                                .eq("id", stockProduct.id)
+                                .maybeSingle();
+                              if (data) setStockProduct(data as Product);
+                            }}
+                          />
+                        ) : null}
+
                         <div
                           className={cn(
                             SHEET_SECTION,
@@ -2740,9 +2758,22 @@ export function Produtos() {
                       <div className="space-y-4 p-6">
                         <ProductStockMovementHistorySection
                           productId={stockProduct.id}
+                          productName={stockProduct.name}
+                          companyId={currentCompany?.id ?? ""}
                           unit={stockProduct.unit}
                           active={productDetailTab === "historico"}
                           className={SHEET_SECTION}
+                          onStockChanged={() => {
+                            void fetchProducts();
+                            void supabase
+                              .from("products")
+                              .select("*")
+                              .eq("id", stockProduct.id)
+                              .maybeSingle()
+                              .then(({ data }) => {
+                                if (data) setStockProduct(data as Product);
+                              });
+                          }}
                         />
                       </div>
                     ) : (

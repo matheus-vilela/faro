@@ -5,6 +5,8 @@ export type BoletoStatus = 'pending' | 'paid'
 /** Conta a pagar (saída) ou a receber (entrada) no fluxo de caixa. */
 export type BoletoFlowType = 'payable' | 'receivable'
 
+import type { ExpenseItemProductMergeMeta } from '@/types/productMergeAudit'
+
 export interface ExpenseItem {
   id?: string
   product_id?: string | null
@@ -14,6 +16,9 @@ export interface ExpenseItem {
   unit_value: number
   invoice_unit?: string | null
   stock_quantity?: number | null
+  metadata_json?: {
+    product_merge?: ExpenseItemProductMergeMeta
+  } | null
   products?: { id: string; name: string; current_quantity: number; min_quantity: number } | null
 }
 

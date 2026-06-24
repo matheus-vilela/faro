@@ -6,16 +6,31 @@ export type MovementActionFilter = MovementDirectionFilter;
 type FilterableQuery = {
   eq: (column: string, value: string) => FilterableQuery;
   or: (filters: string) => FilterableQuery;
+  not?: (
+    column: string,
+    operator: string,
+    value: string,
+  ) => FilterableQuery;
 };
 
-/** Filtro Tipo: somente entrada ou saída (perda conta como saída). */
+/** Filtro Tipo: somente entrada ou saída (perda conta como saída). Unificação fica de fora. */
 export function applyStockMovementDirectionFilter<T extends FilterableQuery>(
   query: T,
   directionFilter: MovementDirectionFilter,
 ): T {
   if (directionFilter === "all") return query;
-  if (directionFilter === "in") return query.eq("type", "in") as T;
-  return query.or("type.eq.out,type.eq.waste") as T;
+  if (directionFilter === "in") {
+    let next = query.eq("type", "in") as T;
+    if (query.not) {
+      next = query.not("reference_type", "eq", "product_merge") as T;
+    }
+    return next;
+  }
+  let next = query.or("type.eq.out,type.eq.waste") as T;
+  if (query.not) {
+    next = query.not("reference_type", "eq", "product_merge_undo") as T;
+  }
+  return next;
 }
 
 /** @deprecated use applyStockMovementDirectionFilter */

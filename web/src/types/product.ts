@@ -40,6 +40,8 @@ export interface Product {
   unit_conversions?: unknown
   /** Nomes de produtos unificados neste cadastro (importação automática). */
   merged_catalog_names?: string[]
+  /** Histórico de unificações (auditoria / undo). */
+  merge_audit?: unknown
   ncm?: string | null
   cfop?: string | null
   csosn?: string | null

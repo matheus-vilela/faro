@@ -14,7 +14,9 @@ export type MovementClassificationFilter =
   | "adjustment"
   | "manual"
   | "recipe"
-  | "recebimento";
+  | "recebimento"
+  | "product_merge"
+  | "product_merge_undo";
 
 export const MOVEMENT_CLASSIFICATION_FILTER_OPTIONS: {
   value: MovementClassificationFilter;
@@ -32,6 +34,7 @@ export const MOVEMENT_CLASSIFICATION_FILTER_OPTIONS: {
   { value: "manual", label: "Manual" },
   { value: "recipe", label: "Receita" },
   { value: "recebimento", label: "Recebimento" },
+  { value: "product_merge", label: "Unificação" },
 ];
 
 const REFERENCE_CLASSIFICATION_LABEL: Record<string, string> = {
@@ -47,6 +50,8 @@ const REFERENCE_CLASSIFICATION_LABEL: Record<string, string> = {
   manual: "Manual",
   import_breakdown: "Despesa",
   technical_sheet_backfill: "Ficha técnica",
+  product_merge: "Unificação de produtos",
+  product_merge_undo: "Desfazer unificação",
 };
 
 export type StockMovementClassificationRow = {
@@ -55,6 +60,8 @@ export type StockMovementClassificationRow = {
   metadata_json?: {
     classification?: string;
     movement_kind?: string;
+    loser_name?: string;
+    undone_at?: string;
   } | null;
 };
 
@@ -76,6 +83,18 @@ export function movementClassificationDisplayLabel(
 
   if (row.metadata_json?.movement_kind === "inventory") {
     return "Inventário";
+  }
+
+  if (row.metadata_json?.undone_at && row.reference_type === "product_merge") {
+    return "Unificação desfeita";
+  }
+
+  if (row.reference_type === "product_merge") {
+    return "Estoque somado na unificação";
+  }
+
+  if (row.reference_type === "product_merge_undo") {
+    return "Unificação revertida";
   }
 
   const fromRef = referenceClassificationLabel(row.reference_type);
@@ -117,6 +136,7 @@ export function resolveMovementClassificationFilterKey(
   if (ref === "adjustment") return "adjustment";
   if (ref === "manual") return "manual";
   if (ref === "waste") return "loss";
+  if (ref === "product_merge" || ref === "product_merge_undo") return "product_merge";
 
   if (row.type === "in") return "expense";
   if (row.type === "out" || row.type === "waste") return "sale";
@@ -188,6 +208,12 @@ export function applyStockMovementClassificationFilter<T extends FilterableQuery
       break;
     case "recebimento":
       parts.push("reference_type.eq.recebimento");
+      break;
+    case "product_merge":
+      parts.push(
+        "reference_type.eq.product_merge",
+        "reference_type.eq.product_merge_undo",
+      );
       break;
     default:
       return query;

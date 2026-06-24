@@ -16,8 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProductMergeMovementPair } from "@/components/estoque/ProductMergeMovementPair";
 import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
+import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
 import { RegisterManualStockMovementSheet } from "@/components/estoque/RegisterManualStockMovementSheet";
+import { ProductMergeMovementUndoButton } from "@/components/products/ProductMergeAuditSection";
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import {
   applyStockMovementClassificationFilter,
@@ -27,11 +30,15 @@ import {
 } from "@/lib/stockMovementClassification";
 import {
   applyStockMovementDirectionFilter,
-  stockMovementTypeLabel,
   type MovementDirectionFilter,
 } from "@/lib/stockMovementFilters";
+import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
-import { ArrowDownLeft, ArrowUpRight, Loader2, Plus, SlidersHorizontal } from "lucide-react";
+import {
+  stockMovementMergeUndoProps,
+  type StockMovementProductMergeMeta,
+} from "@/types/productMergeAudit";
+import { Loader2, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Row = {
@@ -43,11 +50,11 @@ type Row = {
   reference_id: string | null;
   created_at: string;
   unit_cost: number | null;
-  metadata_json: {
+  metadata_json: (StockMovementProductMergeMeta & {
     quantity_unit?: string;
     classification?: string;
     movement_kind?: string;
-  } | null;
+  }) | null;
   expense_id: string | null;
   products: { name: string; unit: string } | null;
 };
@@ -74,14 +81,37 @@ function movementQuantityUnit(row: Row): string {
   return fromMeta || fromProduct || "un";
 }
 
-function movementTypeDisplay(row: Row): {
-  label: string;
-  isIn: boolean;
-} {
-  return {
-    label: stockMovementTypeLabel(row),
-    isIn: row.type === "in",
-  };
+function summarizeMovements(
+  rows: {
+    quantity: number;
+    type: string;
+    unit_cost: number | null;
+    reference_type: string | null;
+  }[],
+): Omit<MovementStats, "totalCount"> {
+  let entriesValue = 0;
+  let exitsValue = 0;
+  let entriesHasCost = false;
+  let exitsHasCost = false;
+  for (const row of rows) {
+    if (
+      row.reference_type === "product_merge" ||
+      row.reference_type === "product_merge_undo"
+    ) {
+      continue;
+    }
+    const cost = row.unit_cost != null ? Number(row.unit_cost) : NaN;
+    if (!Number.isFinite(cost)) continue;
+    const value = movementLineValue(row);
+    if (row.type === "in") {
+      entriesHasCost = true;
+      entriesValue += value;
+    } else {
+      exitsHasCost = true;
+      exitsValue += value;
+    }
+  }
+  return { entriesValue, exitsValue, entriesHasCost, exitsHasCost };
 }
 
 type MovementStats = {
@@ -108,28 +138,6 @@ function movementLineValue(row: {
   const qty = Number(row.quantity);
   if (!Number.isFinite(cost) || !Number.isFinite(qty)) return 0;
   return qty * cost;
-}
-
-function summarizeMovements(
-  rows: { quantity: number; type: string; unit_cost: number | null }[],
-): Omit<MovementStats, "totalCount"> {
-  let entriesValue = 0;
-  let exitsValue = 0;
-  let entriesHasCost = false;
-  let exitsHasCost = false;
-  for (const row of rows) {
-    const cost = row.unit_cost != null ? Number(row.unit_cost) : NaN;
-    if (!Number.isFinite(cost)) continue;
-    const value = movementLineValue(row);
-    if (row.type === "in") {
-      entriesHasCost = true;
-      entriesValue += value;
-    } else {
-      exitsHasCost = true;
-      exitsValue += value;
-    }
-  }
-  return { entriesValue, exitsValue, entriesHasCost, exitsHasCost };
 }
 
 export function EstoqueMovimentacoesPanel({
@@ -226,7 +234,7 @@ export function EstoqueMovimentacoesPanel({
 
     let aggQuery = supabase
       .from("stock_movements")
-      .select("quantity, type, unit_cost", { count: "exact" });
+      .select("quantity, type, unit_cost, reference_type", { count: "exact" });
 
     if (productFilterId) {
       aggQuery = aggQuery.eq("product_id", productFilterId);
@@ -476,13 +484,15 @@ export function EstoqueMovimentacoesPanel({
                   <th className="p-2 font-medium">Classificação</th>
                   <th className="p-2 font-medium">Qtd</th>
                   <th className="p-2 font-medium">Custo un.</th>
+                  <th className="p-2 font-medium" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const name = r.products?.name ?? "—";
+                  const winnerName = r.products?.name ?? "—";
                   const qtyUnit = movementQuantityUnit(r);
-                  const typeDisplay = movementTypeDisplay(r);
+                  const mergeUndo = stockMovementMergeUndoProps(r);
+                  const mergePair = stockMovementMergePairDisplay(r, winnerName);
                   return (
                     <tr key={r.id} className="border-b border-border/60">
                       <td className="p-2 whitespace-nowrap text-muted-foreground">
@@ -493,26 +503,28 @@ export function EstoqueMovimentacoesPanel({
                           minute: "2-digit",
                         })}
                       </td>
-                      <td className="p-2 font-medium">{name}</td>
                       <td className="p-2">
-                        <Badge
-                          variant={typeDisplay.isIn ? "secondary" : "outline"}
-                          className="gap-1 font-normal"
-                        >
-                          {typeDisplay.isIn ? (
-                            <ArrowDownLeft className="h-3 w-3" />
-                          ) : (
-                            <ArrowUpRight className="h-3 w-3" />
-                          )}
-                          {typeDisplay.label}
-                        </Badge>
+                        {mergePair ? (
+                          <ProductMergeMovementPair {...mergePair} />
+                        ) : (
+                          <span className="font-medium">{winnerName}</span>
+                        )}
                       </td>
                       <td className="p-2">
-                        <StockMovementOriginCell
-                          referenceType={r.reference_type}
-                          expenseId={r.expense_id}
-                          label={movementClassificationDisplayLabel(r)}
-                        />
+                        <StockMovementTypeBadge row={r} />
+                      </td>
+                      <td className="p-2">
+                        {mergePair ? (
+                          <span className="text-muted-foreground">
+                            {movementClassificationDisplayLabel(r)}
+                          </span>
+                        ) : (
+                          <StockMovementOriginCell
+                            referenceType={r.reference_type}
+                            expenseId={r.expense_id}
+                            label={movementClassificationDisplayLabel(r)}
+                          />
+                        )}
                       </td>
                       <td className="p-2 tabular-nums">
                         {Number(r.quantity).toLocaleString("pt-BR")} {qtyUnit}
@@ -521,6 +533,25 @@ export function EstoqueMovimentacoesPanel({
                         {formatMoney(
                           r.unit_cost != null ? Number(r.unit_cost) : null,
                         )}
+                      </td>
+                      <td className="p-2 text-right">
+                        {mergeUndo.eventId ? (
+                          <ProductMergeMovementUndoButton
+                            companyId={companyId}
+                            eventId={mergeUndo.eventId}
+                            loserName={mergeUndo.loserName}
+                            undoneAt={mergeUndo.undoneAt}
+                            onUndone={() => {
+                              void load();
+                              onStockChanged?.();
+                            }}
+                          />
+                        ) : r.reference_type === "product_merge_undo" ||
+                          r.metadata_json?.undone_at ? (
+                          <Badge variant="outline" className="text-xs font-normal">
+                            Desfeita
+                          </Badge>
+                        ) : null}
                       </td>
                     </tr>
                   );
