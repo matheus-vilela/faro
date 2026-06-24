@@ -22,6 +22,10 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
 import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
+import {
+  inferEpocFlowDiagnosticFromLegacy,
+  type EpocFlowDiagnostic,
+} from "@/lib/epocFlowDiagnostic";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -48,6 +52,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { EpocFlowDiagnosticPanel } from "@/components/integrations/EpocFlowDiagnosticPanel";
 
 /** Fila após CSV gerado → importação de receitas. */
 type EpocImportJobHistoryRow = {
@@ -133,6 +138,8 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   >(null);
   const [historyDeleteLoading, setHistoryDeleteLoading] = useState(false);
   const [replayRunId, setReplayRunId] = useState<string | null>(null);
+  const [lastFlowDiagnostic, setLastFlowDiagnostic] =
+    useState<EpocFlowDiagnostic | null>(null);
   const [sheetConfigBaseline, setSheetConfigBaseline] =
     useState<EpocSheetConfigBaseline | null>(null);
 
@@ -502,6 +509,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setSyncingFull(false);
       await refetchCompanies();
     }
+    if (res.flow_diagnostic) {
+      setLastFlowDiagnostic(res.flow_diagnostic);
+    }
     if (res.steps?.length) {
       console.groupCollapsed(`[epoc-sync-csv] steps (${res.steps.length})`);
       for (const s of res.steps) {
@@ -519,10 +529,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       const downloadOnErr = lastFail?.download_url ?? res.download_url ?? null;
       const failName = lastFail?.label ?? lastFail?.name;
       const tail = failName ? ` Etapa com problema: ${failName}.` : "";
+      const diagHint = res.flow_diagnostic?.summary
+        ? ` ${res.flow_diagnostic.summary}`
+        : "";
       if (downloadOnErr) {
         toast.error(
           (res.error ?? "Falha na sincronização.") +
             tail +
+            diagHint +
             " A resposta foi guardada — abrindo o download.",
         );
         await load();
@@ -530,15 +544,21 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         return;
       }
       toast.error(
-        (res.error ?? "Falha na sincronização. Veja os logs da função.") + tail,
+        (res.error ?? "Falha na sincronização. Veja os logs da função.") +
+          tail +
+          diagHint,
       );
       return;
     }
-    toast.success(
-      res.csv_uploaded
-        ? "CSV guardado no armazenamento da unidade."
-        : "Sincronização concluída, mas o CSV não foi extraído automaticamente.",
-    );
+    if (res.flow_diagnostic?.blocked_at) {
+      toast.warning(res.flow_diagnostic.summary, { duration: 12_000 });
+    } else if (res.csv_uploaded) {
+      toast.success("CSV guardado no armazenamento da unidade.");
+    } else {
+      toast.success(
+        "Sincronização concluída, mas o CSV não foi extraído automaticamente.",
+      );
+    }
     await load();
     if (res.download_url) {
       window.open(res.download_url, "_blank", "noopener,noreferrer");
@@ -569,6 +589,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
       });
+      if (res.flow_diagnostic) {
+        setLastFlowDiagnostic(res.flow_diagnostic);
+      }
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
         for (const st of res.steps) {
@@ -974,6 +997,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     )}
                     Sincronizar agora (EPOC → Storage)
                   </Button>
+                  {lastFlowDiagnostic ? (
+                    <EpocFlowDiagnosticPanel
+                      diagnostic={lastFlowDiagnostic}
+                      compact
+                    />
+                  ) : null}
 
                   <div className="grid gap-2">
                     <Button
@@ -1065,6 +1094,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                             portalPorDia,
                             item.dates_consulted,
                           );
+                        const flowDiagnostic = inferEpocFlowDiagnosticFromLegacy({
+                          kind: "sync_run",
+                          outcome: item.outcome,
+                          summary: item.summary,
+                          metadata: item.metadata,
+                        });
                         return (
                           <div
                             key={`run-${item.id}`}
@@ -1106,6 +1141,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                             <p className="mt-2 text-sm text-foreground">
                               {item.summary}
                             </p>
+                            <div className="mt-3">
+                              <EpocFlowDiagnosticPanel
+                                diagnostic={flowDiagnostic}
+                                compact
+                              />
+                            </div>
                             {portalLinhas && portalLinhas.length > 1 ? (
                               <ul className="mt-2 space-y-1 border-t border-border/60 pt-2 text-xs text-muted-foreground">
                                 <li className="font-medium text-foreground/80">
@@ -1177,6 +1218,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                           : "company-setup";
                       const canDownloadIgnoredReport =
                         !!ignoredReportPath.trim();
+                      const flowDiagnostic = inferEpocFlowDiagnosticFromLegacy({
+                        kind: "import_job",
+                        status: item.status,
+                        errorMessage: item.error_message,
+                        metadata: meta,
+                      });
                       return (
                         <div
                           key={`job-${item.id}`}
@@ -1249,6 +1296,12 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                                 Erro: {item.error_message}
                               </p>
                             ) : null}
+                          </div>
+                          <div className="mt-3">
+                            <EpocFlowDiagnosticPanel
+                              diagnostic={flowDiagnostic}
+                              compact
+                            />
                           </div>
                           {canDownloadIgnoredReport ? (
                             <div className="mt-2">

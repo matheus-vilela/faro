@@ -6,6 +6,8 @@ interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
+  /** `profiles.is_admin` — só alterável via SQL no Supabase. */
+  isAdmin: boolean
   signOut: () => Promise<void>
 }
 
@@ -15,28 +17,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let cancelled = false
+
+    async function syncProfileAdmin(userId: string | undefined) {
+      if (!userId) {
+        setIsAdmin(false)
+        return
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', userId)
+        .maybeSingle()
+      if (cancelled) return
+      if (error) {
+        console.warn('[AuthContext] profiles.is_admin:', error.message)
+        setIsAdmin(false)
+        return
+      }
+      setIsAdmin(data?.is_admin === true)
+    }
+
+    void (async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (cancelled) return
       setSession(session)
       setUser(session?.user ?? null)
-      setLoading(false)
-    })
+      await syncProfileAdmin(session?.user?.id)
+      if (!cancelled) setLoading(false)
+    })()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
+      void syncProfileAdmin(session?.user?.id)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signOut = async () => {
+    setIsAdmin(false)
     await supabase.auth.signOut()
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, isAdmin, signOut }}>
       {children}
     </AuthContext.Provider>
   )

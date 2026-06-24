@@ -23,6 +23,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
   batchClassifyEpocProductKindWithOpenAi,
@@ -640,6 +641,15 @@ Deno.serve(async (req) => {
       !Array.isArray(job.metadata)
         ? (job.metadata as Record<string, unknown>)
         : {};
+    const flowDiagnostic = buildEpocImportJobFlowDiagnostic({
+      status: "FAILED",
+      errorMessage: msg,
+      csvTotalRows: Number(priorForFail.csv_total_data_rows ?? 0) || 0,
+      revenueCreated: Number(priorForFail.revenue_entries_created_total ?? 0) || 0,
+      rowsSkipped: Number(priorForFail.rows_skipped_total ?? 0) || 0,
+      rowsSkippedNoProduct:
+        Number(priorForFail.rows_skipped_no_product ?? 0) || 0,
+    });
     if (isOnboardingEpocCsvJobMetadata(priorForFail)) {
       await patchOnboardingPdv(
         admin,
@@ -657,10 +667,14 @@ Deno.serve(async (req) => {
       .update({
         status: "FAILED",
         error_message: msg.slice(0, 2000),
+        metadata: {
+          ...priorForFail,
+          flow_diagnostic: flowDiagnostic,
+        },
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);
-    return json({ ok: false, error: msg }, 422);
+    return json({ ok: false, error: msg, flow_diagnostic: flowDiagnostic }, 422);
   };
 
   try {
@@ -694,6 +708,64 @@ Deno.serve(async (req) => {
     const { headers, rows } = parseCsvSemicolon(text);
     if (headers.length === 0) {
       return await fail("CSV sem cabeçalho.");
+    }
+
+    if (rows.length === 0) {
+      await releaseCsvJobChunkLease(admin, jobId);
+      const priorMetaEmpty =
+        job.metadata &&
+        typeof job.metadata === "object" &&
+        !Array.isArray(job.metadata)
+          ? (job.metadata as Record<string, unknown>)
+          : {};
+      const onboardingEmpty = isOnboardingEpocCsvJobMetadata(priorMetaEmpty);
+      if (onboardingEmpty) {
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          {
+            sales_total: 0,
+            sales_sync: 0,
+            import_status: "completed",
+            sync: false,
+          },
+          "[process-integration-csv-revenue-job]",
+        );
+      }
+      const flowDiagnostic = buildEpocImportJobFlowDiagnostic({
+        status: "COMPLETED",
+        csvTotalRows: 0,
+        revenueCreated: 0,
+        rowsSkipped: 0,
+      });
+      const nowEmpty = new Date().toISOString();
+      await admin
+        .from("integration_csv_revenue_import_jobs")
+        .update({
+          status: "COMPLETED",
+          error_message: null,
+          csv_resume_row_index: 0,
+          metadata: {
+            ...priorMetaEmpty,
+            csv_total_data_rows: 0,
+            revenue_entries_created_total: 0,
+            rows_skipped_total: 0,
+            import_skipped_empty_csv: true,
+            flow_diagnostic: flowDiagnostic,
+          },
+          updated_at: nowEmpty,
+        })
+        .eq("id", jobId);
+      return json({
+        ok: true,
+        job_id: jobId,
+        phase: "completed",
+        total_rows: 0,
+        revenue_entries_created_total: 0,
+        rows_skipped_total: 0,
+        skipped_empty_csv: true,
+        flow_diagnostic: flowDiagnostic,
+      });
     }
 
     const normHeaders = headers.map(normalizeHeaderLabel);
@@ -1529,6 +1601,15 @@ Deno.serve(async (req) => {
       );
     }
 
+    const flowDiagnostic = buildEpocImportJobFlowDiagnostic({
+      status: "COMPLETED",
+      csvTotalRows: rows.length,
+      revenueCreated: prevCreated + createdChunk,
+      rowsSkipped: prevSkipped + skippedChunk,
+      rowsSkippedNoProduct: prevSkipNoProduct + skipNoProductChunk,
+    });
+    newMeta.flow_diagnostic = flowDiagnostic;
+
     await admin
       .from("integration_csv_revenue_import_jobs")
       .update({
@@ -1556,6 +1637,7 @@ Deno.serve(async (req) => {
       ignored_rows_report_storage_path: ignoredReportPath,
       ignored_rows_report_truncated: diagnosticsTruncated,
       batches: batchIdList.length,
+      flow_diagnostic: flowDiagnostic,
     });
   } catch (e) {
     await releaseCsvJobChunkLease(admin, jobId);

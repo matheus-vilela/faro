@@ -10,11 +10,22 @@ export const EPOC_REMOTE_CONNECTION_RESET_MESSAGE =
 export function isEpocRemoteConnectionResetError(message: string): boolean {
   const lower = message.trim().toLowerCase();
   if (!lower) return false;
-  return (
+  if (
     lower.includes("connection reset by peer") ||
+    lower.includes("connection closed before message completed") ||
     lower.includes("os error 104") ||
-    (lower.includes("sendrequest") && lower.includes("connection error")) ||
-    (lower.includes("error sending request") && lower.includes("connection error"))
+    lower.includes("broken pipe") ||
+    lower.includes("unexpected eof")
+  ) {
+    return true;
+  }
+  if (!lower.includes("error sending request")) return false;
+  return (
+    lower.includes("sendrequest") ||
+    lower.includes("connection error") ||
+    lower.includes("connection closed") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout")
   );
 }
 

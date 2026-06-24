@@ -61,7 +61,7 @@ type NavItem = {
   exact?: boolean;
 };
 
-const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
+const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] = [
   {
     label: "Principal",
     items: [
@@ -151,6 +151,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "Desenvolvimento",
+    adminOnly: true,
     items: [
       {
         title: "Ferramentas",
@@ -216,18 +217,24 @@ export function AppLayout() {
 }
 
 function AppLayoutContent() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { currentCompany, currentRole } = useCompany();
   const location = useLocation();
   const { isMobile } = useSidebar();
 
   const navSections = currentRole
-    ? NAV_SECTIONS.map((section) => ({
-        label: section.label,
-        items: section.items.filter((item) => item.roles.includes(currentRole)),
-      })).filter((section) => section.items.length > 0)
-    : NAV_SECTIONS.map((s) => ({ ...s, items: [...s.items] }));
+    ? NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin)
+        .map((section) => ({
+          label: section.label,
+          items: section.items.filter((item) =>
+            item.roles.includes(currentRole),
+          ),
+        }))
+        .filter((section) => section.items.length > 0)
+    : NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin).map(
+        (s) => ({ ...s, items: [...s.items] }),
+      );
   const initials = user?.email?.split("@")[0].slice(0, 2).toUpperCase() ?? "U";
 
   return (

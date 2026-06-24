@@ -1,4 +1,4 @@
-﻿-- Corrige merge/undo: inventory_count_listing_products usa PK (listing_id, product_id), sem coluna id.
+-- Corrige merge/undo: inventory_count_listing_products usa PK (listing_id, product_id), sem coluna id.
 
 -- ---------------------------------------------------------------------------
 -- merge_company_products (com auditoria)

@@ -62,6 +62,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { isAdmin, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p className="text-sm font-medium text-muted-foreground">
+          Carregando...
+        </p>
+      </div>
+    );
+  }
+  if (!isAdmin) return <Navigate to="/app" replace />;
+  return <>{children}</>;
+}
+
 function AuthenticatedLayout() {
   return (
     <CompanyProvider>
@@ -105,10 +121,21 @@ function AuthenticatedLayout() {
           <Route path="checklists" element={<Checklists />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="integracoes" element={<Integracoes />} />
-          <Route path="desenvolvimento" element={<Desenvolvimento />} />
+          <Route
+            path="desenvolvimento"
+            element={
+              <AdminRoute>
+                <Desenvolvimento />
+              </AdminRoute>
+            }
+          />
           <Route
             path="desenvolvimento/fornecedores"
-            element={<DesenvolvimentoFornecedoresGlobais />}
+            element={
+              <AdminRoute>
+                <DesenvolvimentoFornecedoresGlobais />
+              </AdminRoute>
+            }
           />
           <Route path="dre" element={<Dre />} />
           <Route path="configuracoes" element={<ConfiguracoesLayout />}>

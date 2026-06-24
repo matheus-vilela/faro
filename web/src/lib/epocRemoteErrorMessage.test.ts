@@ -21,6 +21,15 @@ describe("humanizeEpocRemoteError", () => {
     }
   });
 
+  it("maps connection closed before message completed", () => {
+    const raw =
+      "error sending request from 10.32.150.78:48104 for http://rac_coon.din.epoc.com.br:8751/acoes.php (35.199.118.63:8751): client error (SendRequest): connection closed before message completed";
+    expect(isEpocRemoteConnectionResetError(raw)).toBe(true);
+    expect(humanizeEpocRemoteError(raw)).toBe(
+      EPOC_REMOTE_CONNECTION_RESET_MESSAGE,
+    );
+  });
+
   it("keeps unrelated messages unchanged", () => {
     const raw = "Usuário ou senha inválidos.";
     expect(humanizeEpocRemoteError(raw)).toBe(raw);

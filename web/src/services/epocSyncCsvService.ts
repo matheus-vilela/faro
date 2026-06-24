@@ -1,3 +1,4 @@
+import type { EpocFlowDiagnostic } from "@/lib/epocFlowDiagnostic";
 import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
 import { humanizeEpocRemoteError } from "@/lib/epocRemoteErrorMessage";
 import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
@@ -97,6 +98,9 @@ export type EpocSyncCsvResponse = {
   download_url?: string | null;
   signed_url_expires_in?: number | null;
   csv_revenue_import_job_id?: string | null;
+  flow_diagnostic?: EpocFlowDiagnostic;
+  outcome?: string;
+  message?: string;
 };
 
 /** Invoca a edge e devolve a resposta (URLs assinadas após sucesso). */

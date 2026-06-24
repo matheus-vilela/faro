@@ -10,6 +10,14 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  buildEpocSyncFlowDiagnostic,
+  type EpocFlowDiagnostic,
+} from "../_shared/epocFlowDiagnostic.ts";
+import {
+  fetchEpocPortalPostWithRetry,
+  redactEpocFormBody,
+} from "../_shared/epocPortalFetch.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
 import {
@@ -957,13 +965,72 @@ Deno.serve(async (req) => {
     return step;
   }
 
+  async function recordEpocCsvSyncRun(input: {
+    outcome: "no_tbl_export" | "success" | "failed";
+    summary: string;
+    datesConsulted?: string[];
+    metadata?: Record<string, unknown>;
+    flowDiagnostic: EpocFlowDiagnostic;
+  }): Promise<string | null> {
+    const { data: histRow, error: histErr } = await admin
+      .from("epoc_csv_sync_runs")
+      .insert({
+        company_id: companyId,
+        requested_by: userIdForJob,
+        provider: "epoc",
+        sync_mode: syncMode,
+        outcome: input.outcome,
+        summary: input.summary,
+        dates_consulted: input.datesConsulted ?? [],
+        steps_prefix: stepsPrefix,
+        metadata: {
+          source: "epoc-sync-csv",
+          flow_diagnostic: input.flowDiagnostic,
+          ...(input.metadata ?? {}),
+        },
+      })
+      .select("id")
+      .maybeSingle();
+    if (histErr) {
+      log("epoc_csv_sync_runs_insert_falhou", { message: histErr.message });
+      return null;
+    }
+    return histRow?.id ? String(histRow.id) : null;
+  }
+
   async function failJson(
     httpStatus: number,
     error: string,
     extras: Record<string, unknown> = {},
-    opts?: { skipPortalPatch?: boolean },
+    opts?: {
+      skipPortalPatch?: boolean;
+      flowDiagnostic?: EpocFlowDiagnostic;
+      syncRun?: {
+        outcome: "failed";
+        summary: string;
+        datesConsulted?: string[];
+        metadata?: Record<string, unknown>;
+      };
+    },
   ): Promise<Response> {
     const friendlyError = humanizeEpocRemoteError(error);
+    const flowDiagnostic =
+      opts?.flowDiagnostic ??
+      buildEpocSyncFlowDiagnostic({
+        loginOk: steps.some((s) => s.name === "login" && s.status === "ok"),
+        syncOk: false,
+        syncError: friendlyError,
+      });
+    let epocCsvSyncRunId: string | null = null;
+    if (opts?.syncRun) {
+      epocCsvSyncRunId = await recordEpocCsvSyncRun({
+        outcome: opts.syncRun.outcome,
+        summary: opts.syncRun.summary,
+        datesConsulted: opts.syncRun.datesConsulted,
+        metadata: opts.syncRun.metadata,
+        flowDiagnostic,
+      });
+    }
     if (!opts?.skipPortalPatch) {
       await patchOb({
         portal_busy: false,
@@ -976,9 +1043,11 @@ Deno.serve(async (req) => {
       {
         ok: false,
         error: friendlyError,
+        flow_diagnostic: flowDiagnostic,
         steps_prefix: stepsPrefix,
         steps,
         signed_url_expires_in: signedTtl,
+        ...(epocCsvSyncRunId ? { epoc_csv_sync_run_id: epocCsvSyncRunId } : {}),
         ...extras,
       },
       httpStatus,
@@ -1022,9 +1091,22 @@ Deno.serve(async (req) => {
   });
 
   if (!loginResult.ok) {
-    return await failJson(502, loginResult.message, {
-      epoc_error_code: loginResult.errorCode,
+    const flowDiagnostic = buildEpocSyncFlowDiagnostic({
+      loginOk: false,
+      loginError: loginResult.message,
     });
+    return await failJson(
+      502,
+      loginResult.message,
+      { epoc_error_code: loginResult.errorCode },
+      {
+        flowDiagnostic,
+        syncRun: {
+          outcome: "failed",
+          summary: loginResult.message,
+        },
+      },
+    );
   }
 
   let cookies = loginResult.cookies;
@@ -1050,23 +1132,64 @@ Deno.serve(async (req) => {
 
   const validadorOzUrl = resolveUrlAgainstBase(baseUrl, PATH_VALIDADOR_OZ);
   const acoesUrl = resolveUrlAgainstBase(baseUrl, PATH_ACOES);
+  const refererValidador = validadorOzUrl;
   const validadorBody = new URLSearchParams({
     NaoMenu: naoMenu,
     token: tokenForBody,
   }).toString();
 
+  /** Renova sessão no portal antes de repetir `acoes.php`. */
+  async function refreshValidadorSession(phaseLabel: string): Promise<void> {
+    try {
+      const fetched = await fetchEpocPortalPostWithRetry(
+        validadorOzUrl,
+        {
+          method: "POST",
+          headers: headersValidador(cookies, origin, refererIndex),
+          body: validadorBody,
+          redirect: "follow",
+        },
+        {
+          label: `validadorOz.php (refresh ${phaseLabel})`,
+          attempts: 2,
+          baseDelayMs: 400,
+          log,
+        },
+      );
+      const more = collectSetCookieHeader(fetched.response.headers);
+      if (more) cookies = mergeCookieStrings(cookies, more);
+    } catch (e) {
+      log("validador_refresh_falhou", {
+        phase: phaseLabel,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
   /** Faz `validadorOz.php` e regista resposta. */
   async function callValidador(phaseLabel: string): Promise<StepRecord> {
     let res: Response;
+    let text: string;
     try {
-      res = await fetch(validadorOzUrl, {
-        method: "POST",
-        headers: headersValidador(cookies, origin, refererIndex),
-        body: validadorBody,
-        redirect: "follow",
-      });
+      const fetched = await fetchEpocPortalPostWithRetry(
+        validadorOzUrl,
+        {
+          method: "POST",
+          headers: headersValidador(cookies, origin, refererIndex),
+          body: validadorBody,
+          redirect: "follow",
+        },
+        {
+          label: `validadorOz.php (${phaseLabel})`,
+          log,
+        },
+      );
+      res = fetched.response;
+      text = fetched.text;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = humanizeEpocRemoteError(
+        e instanceof Error ? e.message : String(e),
+      );
       return recordStepWithoutUpload(
         `validador_${phaseLabel}`,
         `POST validadorOz.php (${phaseLabel})`,
@@ -1077,7 +1200,6 @@ Deno.serve(async (req) => {
       const more = collectSetCookieHeader(res.headers);
       if (more) cookies = mergeCookieStrings(cookies, more);
     }
-    const text = await res.text();
     return recordStepWithUpload(
       `validador_${phaseLabel}`,
       `POST validadorOz.php (${phaseLabel})`,
@@ -1103,20 +1225,45 @@ Deno.serve(async (req) => {
     bodyPairs: Record<string, string>,
   ): Promise<{ step: StepRecord; text: string; ok: boolean }> {
     let res: Response;
+    let text: string;
     const body = new URLSearchParams(bodyPairs).toString();
     try {
-      res = await fetch(acoesUrl, {
-        method: "POST",
-        headers: headersAcoes(cookies, origin, refererIndex),
-        body,
-        redirect: "follow",
-      });
+      const fetched = await fetchEpocPortalPostWithRetry(
+        acoesUrl,
+        {
+          method: "POST",
+          headers: headersAcoes(cookies, origin, refererValidador),
+          body,
+          redirect: "follow",
+        },
+        {
+          label: `acoes.php (${phaseLabel})`,
+          log,
+          attempts: 5,
+          baseDelayMs: 1200,
+          onBeforeRetry: async (nextAttempt) => {
+            log("acoes_retry_refresh_validador", {
+              phase: phaseLabel,
+              next_attempt: nextAttempt,
+            });
+            await refreshValidadorSession(phaseLabel);
+          },
+        },
+      );
+      res = fetched.response;
+      text = fetched.text;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = humanizeEpocRemoteError(
+        e instanceof Error ? e.message : String(e),
+      );
       const step = recordStepWithoutUpload(
         `acoes_${phaseLabel}`,
         `POST acoes.php (${phaseLabel})`,
-        { status: "fail", message: msg, detalhes: { body } },
+        {
+          status: "fail",
+          message: msg,
+          detalhes: { body: redactEpocFormBody(body) },
+        },
       );
       return { step, text: "", ok: false };
     }
@@ -1124,7 +1271,6 @@ Deno.serve(async (req) => {
       const more = collectSetCookieHeader(res.headers);
       if (more) cookies = mergeCookieStrings(cookies, more);
     }
-    const text = await res.text();
     const insight = inspectResponseHtml(text);
     const ct = res.headers.get("Content-Type") ?? "text/html; charset=utf-8";
     const step = await recordStepWithUpload(
@@ -1140,7 +1286,7 @@ Deno.serve(async (req) => {
         detalhes: {
           previa: previewText(text, 800),
           final_url: res.url,
-          body,
+          body: redactEpocFormBody(body),
           ...insight,
         },
       },
@@ -1177,9 +1323,22 @@ Deno.serve(async (req) => {
     log("conteudo_tela_nao_encontrado", {
       previa: previewText(acoes1.text, 800),
     });
+    const flowDiagnostic = buildEpocSyncFlowDiagnostic({
+      loginOk: true,
+      conteudoTelaOk: false,
+    });
     return await failJson(
       502,
       "Verifique credenciais, NaoMenu e o módulo configurado.",
+      {},
+      {
+        flowDiagnostic,
+        syncRun: {
+          outcome: "failed",
+          summary:
+            "Portal respondeu, mas o módulo de relatório não carregou (sem ConteudoTela).",
+        },
+      },
     );
   }
   recordStepWithoutUpload(
@@ -1410,35 +1569,27 @@ Deno.serve(async (req) => {
       },
     });
 
-    let epocCsvSyncRunId: string | null = null;
-    const { data: histRow, error: histErr } = await admin
-      .from("epoc_csv_sync_runs")
-      .insert({
-        company_id: companyId,
-        requested_by: userIdForJob,
-        provider: "epoc",
-        sync_mode: syncMode,
-        outcome: "no_tbl_export",
-        summary,
-        dates_consulted: diasConsulta,
-        steps_prefix: stepsPrefix,
-        metadata: {
-          dias_consulta_label: diasConsultaLabel,
-          tbl_export_found: false,
-          source: "epoc-sync-csv",
-          manual_consulta: !!manualConsultaDias?.length,
-          ...(Object.keys(mensagemPortalPorDiaBr).length > 0
-            ? { portal_por_dia: mensagemPortalPorDiaBr }
-            : {}),
-        },
-      })
-      .select("id")
-      .maybeSingle();
-    if (histErr) {
-      log("epoc_csv_sync_runs_insert_falhou", { message: histErr.message });
-    } else if (histRow?.id) {
-      epocCsvSyncRunId = String(histRow.id);
-    }
+    const flowDiagnostic = buildEpocSyncFlowDiagnostic({
+      loginOk: true,
+      tblExportFound: false,
+      portalSearchSummary: summary,
+      diasConsultados: diasConsulta.length,
+    });
+
+    const epocCsvSyncRunId = await recordEpocCsvSyncRun({
+      outcome: "no_tbl_export",
+      summary,
+      datesConsulted: diasConsulta,
+      flowDiagnostic,
+      metadata: {
+        dias_consulta_label: diasConsultaLabel,
+        tbl_export_found: false,
+        manual_consulta: !!manualConsultaDias?.length,
+        ...(Object.keys(mensagemPortalPorDiaBr).length > 0
+          ? { portal_por_dia: mensagemPortalPorDiaBr }
+          : {}),
+      },
+    });
 
     await patchOb({
       portal_busy: false,
@@ -1482,6 +1633,7 @@ Deno.serve(async (req) => {
         tblExport_found: false,
         dias_consultados: diasConsulta.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
+        flow_diagnostic: flowDiagnostic,
         steps_prefix: stepsPrefix,
         steps,
         signed_url_expires_in: signedTtl,
@@ -1497,7 +1649,10 @@ Deno.serve(async (req) => {
         epoc_csv_sync_run_id: epocCsvSyncRunId,
         outcome: "no_tbl_export",
       },
-      { skipPortalPatch: true },
+      {
+        skipPortalPatch: true,
+        flowDiagnostic,
+      },
     );
   }
 
@@ -1610,7 +1765,9 @@ Deno.serve(async (req) => {
   }
 
   let csvRevenueImportJobId: string | null = null;
-  if (csvStoragePath) {
+  let csvJobEnqueueFailed = false;
+  const shouldEnqueueCsvImport = !!csvStoragePath && totalLinhasDados > 0;
+  if (shouldEnqueueCsvImport) {
     const { data: jobIns, error: jobErr } = await admin
       .from("integration_csv_revenue_import_jobs")
       .insert({
@@ -1633,6 +1790,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (jobErr) {
       log("csv_revenue_job_enqueue_falhou", { message: jobErr.message });
+      csvJobEnqueueFailed = true;
     } else if (jobIns?.id) {
       csvRevenueImportJobId = String(jobIns.id);
       scheduleProcessCsvRevenueJob(
@@ -1645,16 +1803,61 @@ Deno.serve(async (req) => {
     }
   }
 
+  const importFinalizedEmpty = !!csvStoragePath && totalLinhasDados === 0;
+
   await patchOb({
     portal_busy: false,
     portal_outcome: "success",
     portal_message: null,
-    import_status: csvRevenueImportJobId ? "pending" : null,
+    ...(importFinalizedEmpty
+      ? {
+          import_status: "completed",
+          sync: false,
+          sales_total: 0,
+          sales_sync: 0,
+        }
+      : {
+          import_status: csvRevenueImportJobId ? "pending" : null,
+        }),
+  });
+
+  const flowDiagnostic = buildEpocSyncFlowDiagnostic({
+    loginOk: true,
+    tblExportFound: true,
+    csvUploaded: !!csvStoragePath,
+    csvEmpty: !csvStoragePath,
+    diasComTabela: totalDiasComTabela,
+    linhasDados: totalLinhasDados,
+    csvRevenueImportJobId,
+    csvJobEnqueueFailed,
+  });
+
+  const successSummary =
+    csvStoragePath && totalLinhasDados > 0
+      ? `CSV exportado com ${totalLinhasDados} linha(s) em ${totalDiasComTabela} dia(s).`
+      : csvStoragePath
+        ? "CSV exportado, mas sem linhas de dados após filtro."
+        : "Sincronização concluída sem CSV guardado.";
+
+  const epocCsvSyncRunId = await recordEpocCsvSyncRun({
+    outcome: "success",
+    summary: successSummary,
+    datesConsulted: diasConsulta,
+    flowDiagnostic,
+    metadata: {
+      tbl_export_found: true,
+      dias_com_tabela: totalDiasComTabela,
+      linhas_dados: totalLinhasDados,
+      csv_storage_path: csvStoragePath,
+      csv_revenue_import_job_id: csvRevenueImportJobId,
+      dias_consulta_label: diasConsultaLabel,
+    },
   });
 
   log("concluido", {
     steps: steps.length,
     csv_revenue_import_job_id: csvRevenueImportJobId,
+    flow_blocked_at: flowDiagnostic.blocked_at,
   });
 
   return json({
@@ -1670,5 +1873,7 @@ Deno.serve(async (req) => {
     signed_url_expires_in: signedTtl,
     /** Job para fila + Database Webhook → `process-integration-csv-revenue-job`. */
     csv_revenue_import_job_id: csvRevenueImportJobId,
+    flow_diagnostic: flowDiagnostic,
+    epoc_csv_sync_run_id: epocCsvSyncRunId,
   });
 });

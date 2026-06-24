@@ -2,6 +2,7 @@
  * Login no portal EPOC até obter cookies de sessão + token (mesma sequência que epoc-sync-csv).
  * Usado por epoc-validate-login (sem gravação de steps) e por epoc-sync-csv (com hooks de trace).
  */
+import { fetchEpocPortalPostWithRetry } from "./epocPortalFetch.ts";
 import { humanizeEpocRemoteError } from "./epocRemoteErrorMessage.ts";
 
 export type EpocPortalLoginErrorCode =
@@ -864,19 +865,28 @@ export async function performEpocPortalLogin(
 
     const validadorOzUrl = resolveUrlAgainstBase(normalized, PATH_VALIDADOR_OZ);
     const acoesUrl = resolveUrlAgainstBase(normalized, PATH_ACOES);
+    const refererValidador = validadorOzUrl;
     const validadorBody = new URLSearchParams({
       NaoMenu: naoMenu,
       token: tokenForBody,
     }).toString();
 
     try {
-      const vRes = await fetch(validadorOzUrl, {
-        method: "POST",
-        headers: headersValidador(jar, origin, refererIndex),
-        body: validadorBody,
-        redirect: "follow",
-        signal,
-      });
+      const vFetched = await fetchEpocPortalPostWithRetry(
+        validadorOzUrl,
+        {
+          method: "POST",
+          headers: headersValidador(jar, origin, refererIndex),
+          body: validadorBody,
+          redirect: "follow",
+          signal,
+        },
+        {
+          label: "validadorOz.php (fase1 probe)",
+          attempts: 3,
+        },
+      );
+      const vRes = vFetched.response;
       const moreV = collectSetCookieHeader(vRes.headers);
       if (moreV) jar = mergeCookieStrings(jar, moreV);
       if (!vRes.ok) {
@@ -904,16 +914,40 @@ export async function performEpocPortalLogin(
     }).toString();
 
     try {
-      const aRes = await fetch(acoesUrl, {
-        method: "POST",
-        headers: headersAcoes(jar, origin, refererIndex),
-        body: acoesBody,
-        redirect: "follow",
-        signal,
-      });
+      const aFetched = await fetchEpocPortalPostWithRetry(
+        acoesUrl,
+        {
+          method: "POST",
+          headers: headersAcoes(jar, origin, refererValidador),
+          body: acoesBody,
+          redirect: "follow",
+          signal,
+        },
+        {
+          label: "acoes.php (fase1 probe)",
+          attempts: 5,
+          baseDelayMs: 1200,
+          onBeforeRetry: async () => {
+            const refresh = await fetchEpocPortalPostWithRetry(
+              validadorOzUrl,
+              {
+                method: "POST",
+                headers: headersValidador(jar, origin, refererIndex),
+                body: validadorBody,
+                redirect: "follow",
+                signal,
+              },
+              { label: "validadorOz refresh (probe)", attempts: 2 },
+            );
+            const moreRefresh = collectSetCookieHeader(refresh.response.headers);
+            if (moreRefresh) jar = mergeCookieStrings(jar, moreRefresh);
+          },
+        },
+      );
+      const aRes = aFetched.response;
+      const acoesText = aFetched.text;
       const moreA = collectSetCookieHeader(aRes.headers);
       if (moreA) jar = mergeCookieStrings(jar, moreA);
-      const acoesText = await aRes.text();
       if (!aRes.ok) {
         return {
           ok: false,
