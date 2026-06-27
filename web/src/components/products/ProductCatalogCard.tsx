@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { isSystemUnitCode } from "@/lib/companyUnits/productUnitOptions";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
@@ -61,6 +62,9 @@ export function ProductCatalogCard({
   catalogTags,
   pendingPurchaseQty,
   conversionRowCount,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   product: Product;
   layout: ProductCatalogLayout;
@@ -71,6 +75,9 @@ export function ProductCatalogCard({
   catalogTags?: { id: string; name: string }[];
   pendingPurchaseQty: number;
   conversionRowCount: number;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (productId: string) => void;
 }) {
   const isGrid = layout === "grid";
   const qNum = Number(p.current_quantity);
@@ -275,11 +282,28 @@ export function ProductCatalogCard({
         "hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isGrid ? "flex h-full flex-col p-3 sm:p-4" : "p-4 sm:p-5 md:p-6",
         p.is_active === false && "opacity-[0.82]",
+        selected && "border-primary/50 ring-2 ring-primary/25",
         needsStockHighlight
           ? "border-destructive/35 bg-destructive/[0.04] ring-1 ring-inset ring-destructive/15"
           : "border-border/80",
       )}
     >
+      {selectable ? (
+        <div
+          className={cn(
+            "absolute z-10",
+            isGrid ? "left-2 top-2" : "left-3 top-3 sm:left-4 sm:top-4",
+          )}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            checked={selected ?? false}
+            aria-label={`Selecionar ${p.name}`}
+            onCheckedChange={() => onToggleSelect?.(p.id)}
+          />
+        </div>
+      ) : null}
       <div
         className={cn(
           "flex gap-3",
