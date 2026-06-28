@@ -56,6 +56,7 @@ import {
 import {
   fetchMergedPayableBoletosInRange,
   fetchSeriesMastersWithAnchorBoletos,
+  suppressProjectedMonth,
 } from "@/lib/expenseSeriesApi";
 import {
   filterBoletosBySearch,
@@ -73,7 +74,7 @@ import type {
 } from "@/types/expenseSeries";
 import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
-import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus } from "lucide-react";
+import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -165,6 +166,8 @@ export function FluxoBoletosPage({
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
+  const [deleteBoletoDialogOpen, setDeleteBoletoDialogOpen] = useState(false);
+  const [deletingBoleto, setDeletingBoleto] = useState(false);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
   );
@@ -473,6 +476,75 @@ export function FluxoBoletosPage({
         ? "Conta marcada como paga."
         : "Conta marcada como recebida.",
     );
+  }, [boletoResumo, companyId, refreshAll]);
+
+  const canDeleteBoletoResumo =
+    !!boletoResumo &&
+    (isProjectedBoleto(boletoResumo) || boletoResumo.status === "pending");
+
+  const boletoDeleteDescription = useMemo(() => {
+    if (!boletoResumo) return "";
+    if (isProjectedBoleto(boletoResumo)) {
+      return "Esta ocorrência projetada deixará de aparecer no calendário. A série continua ativa.";
+    }
+    if (boletoResumo.revenue_entry_id) {
+      return "A venda vinculada e os boletos a receber associados serão excluídos.";
+    }
+    if (boletoResumo.expense_id) {
+      return "A conta será removida do fluxo. Se houver nota fiscal vinculada, ela permanece em Despesas.";
+    }
+    return "Esta conta será excluída permanentemente.";
+  }, [boletoResumo]);
+
+  const confirmDeleteBoleto = useCallback(async () => {
+    if (!boletoResumo || !companyId) return;
+    const projected = isProjectedBoleto(boletoResumo);
+    setDeletingBoleto(true);
+    try {
+      if (projected) {
+        const masterId = boletoResumo.series_master_expense_id;
+        if (!masterId) {
+          toast.error("Série não encontrada.");
+          return;
+        }
+        await suppressProjectedMonth(
+          masterId,
+          boletoResumo.due_date.slice(0, 7),
+        );
+      } else if (boletoResumo.revenue_entry_id) {
+        const { error } = await supabase.rpc("delete_revenue_entry", {
+          p_entry_id: boletoResumo.revenue_entry_id,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("boletos")
+          .delete()
+          .eq("id", boletoResumo.id)
+          .eq("company_id", companyId);
+        if (error) throw error;
+      }
+      setDeleteBoletoDialogOpen(false);
+      setBoletoResumo(null);
+      setCalendarDayList((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.filter((b) => b.id !== boletoResumo.id),
+        };
+      });
+      refreshAll();
+      void syncCompanyAlerts(companyId);
+      toast.success(
+        projected ? "Ocorrência removida da projeção." : "Conta excluída.",
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível excluir a conta.",
+      );
+    } finally {
+      setDeletingBoleto(false);
+    }
   }, [boletoResumo, companyId, refreshAll]);
 
   const resolveSeriesMaster = (
@@ -1240,6 +1312,22 @@ export function FluxoBoletosPage({
                       Ver nota fiscal
                     </Button>
                   )}
+                {canDeleteBoletoResumo && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                    disabled={deletingBoleto}
+                    onClick={() => setDeleteBoletoDialogOpen(true)}
+                  >
+                    {deletingBoleto ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    Excluir conta
+                  </Button>
+                )}
               </div>
             </>
           )}
@@ -1325,6 +1413,62 @@ export function FluxoBoletosPage({
                 </>
               ) : (
                 "Confirmar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteBoletoDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && deletingBoleto) return;
+          setDeleteBoletoDialogOpen(open);
+        }}
+      >
+        <DialogContent
+          overlayClassName="z-[80]"
+          className="z-[80]"
+          onPointerDownOutside={(e) => deletingBoleto && e.preventDefault()}
+          onEscapeKeyDown={(e) => deletingBoleto && e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Excluir conta</DialogTitle>
+            <DialogDescription>{boletoDeleteDescription}</DialogDescription>
+          </DialogHeader>
+          {boletoResumo && (
+            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+              <p className="font-medium">
+                {formatBoletoFluxoDescription(boletoResumo)}
+              </p>
+              <p className="text-muted-foreground tabular-nums">
+                {formatCurrency(boletoResumo.amount)} · venc.{" "}
+                {formatDate(boletoResumo.due_date)}
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deletingBoleto}
+              onClick={() => setDeleteBoletoDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deletingBoleto}
+              onClick={() => void confirmDeleteBoleto()}
+            >
+              {deletingBoleto ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Excluindo…
+                </>
+              ) : (
+                "Excluir"
               )}
             </Button>
           </DialogFooter>
