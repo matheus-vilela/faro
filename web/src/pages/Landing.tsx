@@ -77,7 +77,7 @@ export function Landing() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-linear-to-t from-background to-transparent" />
       </div>
 
-      <header className="sticky top-0 z-50 border-b border-border/50 bg-background/75 backdrop-blur-xl transition-[background,box-shadow] duration-500 supports-[backdrop-filter]:bg-background/65 dark:border-white/10 sticky">
+      <header className="sticky top-[var(--faro-dev-banner-height,0px)] z-50 border-b border-border/50 bg-background/75 backdrop-blur-xl transition-[background,box-shadow] duration-500 supports-[backdrop-filter]:bg-background/65 dark:border-white/10 sticky">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link
             to="/"

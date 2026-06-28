@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "env": "node scripts/switch-env.mjs",
     "build": "tsc -b && vite build && yarn deploy:hosting",
     "test": "vitest run",
     "deploy:hosting": "firebase deploy --only hosting",
