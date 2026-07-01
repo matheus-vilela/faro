@@ -1,6 +1,6 @@
 /**
  * Processa `integration_csv_revenue_import_jobs` em **várias invocações** (cursor
- * `csv_resume_row_index` + auto-disparo com `resume: true` e `EdgeRuntime.waitUntil`),
+ * `csv_resume_row_index` + continuação via fila pgmq `csv_revenue_import_continue`),
  * até percorrer todo o CSV: coluna "Total recebido(R$)" + `data_consumo`.
  * Lançamento: **venda de produto** (`entry_mode: product_sale`), produto pelo nome
  * (coluna Produto / Nome do produto, igual ao cadastro), **quantidade** na coluna **Quant.** (aliases),
@@ -17,13 +17,18 @@
  * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
- * Corpo inicial (webhook): `{ "job_id" }` ou `{ "record": { "id" } }`.
- * Continuação (interna): `{ "job_id", "resume": true }`.
+ * Corpo inicial: `{ "job_id" }` ou `{ "record": { "id" } }`.
+ * Continuação: mensagem na fila pgmq + `{ "consume_queue": true }` (consumer).
+ * Compatível: `{ "job_id", "resume": true }` (retomada direta).
  */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { scheduleCsvRevenueImportJob } from "../_shared/triggerCsvRevenueImportJob.ts";
+import {
+  deleteCsvRevenueImportContinueMessage,
+  enqueueCsvRevenueImportContinue,
+  readCsvRevenueImportContinueMessages,
+} from "../_shared/csvRevenueImportQueue.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
   batchClassifyEpocProductKindWithOpenAi,
@@ -488,50 +493,45 @@ async function releaseCsvJobChunkLease(
     .eq("id", jobId);
 }
 
-function scheduleResume(
-  supabaseUrl: string,
-  serviceKey: string,
-  anonKey: string,
-  jobId: string,
-): void {
-  scheduleCsvRevenueImportJob(supabaseUrl, serviceKey, anonKey, jobId, {
-    resume: true,
-    logTag: "[process-integration-csv-revenue-job]",
-  });
+function intFromEnv(
+  name: string,
+  defaultVal: number,
+  min: number,
+  max: number,
+): number {
+  const raw = Deno.env.get(name)?.trim();
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return defaultVal;
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+async function enqueueCsvRevenueContinue(
+  admin: ReturnType<typeof createClient>,
+  jobId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<void> {
+  const enqueue = await enqueueCsvRevenueImportContinue(admin, jobId, {
+    triggerWorker: true,
+    supabaseUrl,
+    serviceKey,
+    logTag: "[process-integration-csv-revenue-job]",
+  });
+  if (!enqueue.ok) {
+    console.error("[process-integration-csv-revenue-job] fila_continuacao_falhou", {
+      job_id: jobId,
+      error: enqueue.error ?? null,
+    });
   }
-  if (req.method !== "POST") {
-    return json({ ok: false, error: "Use POST" }, 405);
-  }
+}
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  if (!supabaseUrl || !serviceKey) {
-    return json(
-      { ok: false, error: "Configuração do servidor incompleta" },
-      500,
-    );
-  }
-
-  const authHeader = req.headers.get("Authorization") ?? "";
-  if (authHeader !== `Bearer ${serviceKey}`) {
-    return json({ ok: false, error: "Não autorizado" }, 401);
-  }
-
-  const admin = createClient(supabaseUrl, serviceKey);
-
-  let body: Record<string, unknown> = {};
-  try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
-    return json({ ok: false, error: "JSON inválido" }, 400);
-  }
-
+async function runCsvRevenueImportForJob(
+  admin: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
+  _anonKey: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
   const jobId = extractJobId(body);
   if (!jobId) {
     return json(
@@ -1537,7 +1537,7 @@ Deno.serve(async (req) => {
         })
         .eq("id", jobId);
 
-      scheduleResume(supabaseUrl, serviceKey, anonKey, jobId);
+      await enqueueCsvRevenueContinue(admin, jobId, supabaseUrl, serviceKey);
 
       return json({
         ok: true,
@@ -1664,4 +1664,117 @@ Deno.serve(async (req) => {
       .eq("id", jobId);
     return json({ ok: false, error: msg }, 500);
   }
+}
+
+async function consumeCsvRevenueImportQueue(
+  admin: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
+  anonKey: string,
+): Promise<Response> {
+  const maxMessages = intFromEnv("CSV_REVENUE_IMPORT_QUEUE_MAX", 1, 1, 5);
+  const queueVtSeconds = intFromEnv(
+    "CSV_REVENUE_IMPORT_QUEUE_VT",
+    300,
+    30,
+    3600,
+  );
+  const messages = await readCsvRevenueImportContinueMessages(
+    admin,
+    maxMessages,
+    queueVtSeconds,
+  );
+  const outcomes: Array<Record<string, unknown>> = [];
+
+  for (const msg of messages) {
+    const jobId = String(msg.message?.job_id ?? "").trim();
+    if (!jobId) {
+      await deleteCsvRevenueImportContinueMessage(admin, msg.msg_id);
+      continue;
+    }
+
+    const res = await runCsvRevenueImportForJob(
+      admin,
+      supabaseUrl,
+      serviceKey,
+      anonKey,
+      { job_id: jobId, resume: true },
+    );
+    let data: Record<string, unknown> = {};
+    try {
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+
+    const leaseBusy =
+      data.skipped === true && data.reason === "chunk_lease_busy";
+    if (res.ok && !leaseBusy) {
+      await deleteCsvRevenueImportContinueMessage(admin, msg.msg_id);
+    }
+
+    outcomes.push({
+      msg_id: msg.msg_id,
+      job_id: jobId,
+      status: res.status,
+      body: data,
+    });
+  }
+
+  return json({
+    ok: true,
+    consumed: outcomes.length,
+    queue_vt_seconds: queueVtSeconds,
+    outcomes,
+  });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+  if (req.method !== "POST") {
+    return json({ ok: false, error: "Use POST" }, 405);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  if (!supabaseUrl || !serviceKey) {
+    return json(
+      { ok: false, error: "Configuração do servidor incompleta" },
+      500,
+    );
+  }
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (authHeader !== `Bearer ${serviceKey}`) {
+    return json({ ok: false, error: "Não autorizado" }, 401);
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ ok: false, error: "JSON inválido" }, 400);
+  }
+
+  if (body.consume_queue === true) {
+    return consumeCsvRevenueImportQueue(
+      admin,
+      supabaseUrl,
+      serviceKey,
+      anonKey,
+    );
+  }
+
+  return runCsvRevenueImportForJob(
+    admin,
+    supabaseUrl,
+    serviceKey,
+    anonKey,
+    body,
+  );
 });

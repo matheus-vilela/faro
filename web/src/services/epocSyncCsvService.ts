@@ -100,6 +100,21 @@ async function patchOnboardingAfterInvokeSuccess(
     patch.import_status = "pending";
     patch.import_error = null;
     patch.import_started_at = new Date().toISOString();
+  } else {
+    const importPhase = data.flow_diagnostic?.phases?.csv_import;
+    const emptyOrSkippedImport =
+      importPhase?.status === "ok" ||
+      importPhase?.status === "skipped" ||
+      (importPhase?.message?.includes("Nenhuma linha") ?? false);
+    if (emptyOrSkippedImport) {
+      patch.import_status = "completed";
+      patch.import_error = null;
+      patch.csv_import_job_id = null;
+      patch.import_started_at = null;
+      patch.sync = false;
+      patch.sales_total = 0;
+      patch.sales_sync = 0;
+    }
   }
   await patchCompanyOnboardingPdv(companyId, patch);
 }

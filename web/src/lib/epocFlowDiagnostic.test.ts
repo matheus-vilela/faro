@@ -82,4 +82,14 @@ describe("buildEpocImportJobFlowDiagnostic", () => {
     expect(d.blocked_at).toBe("csv_import");
     expect(d.phases.csv_import.status).toBe("warn");
   });
+
+  it("não marca interpretação em curso quando CSV tem 0 linhas", () => {
+    const d = buildEpocImportJobFlowDiagnostic({
+      status: "PROCESSING",
+      csvTotalRows: 0,
+    });
+    expect(d.phases.csv_import.status).toBe("ok");
+    expect(d.phases.csv_import.message).toContain("Nenhuma linha");
+    expect(d.blocked_at).toBeNull();
+  });
 });

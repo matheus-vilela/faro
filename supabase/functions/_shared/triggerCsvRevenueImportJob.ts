@@ -1,4 +1,4 @@
-/** Dispara `process-integration-csv-revenue-job` (claim inicial ou resume). */
+/** Dispara `process-integration-csv-revenue-job` (claim inicial). Continuações usam fila pgmq. */
 
 export type TriggerCsvRevenueImportResult = {
   ok: boolean;
@@ -13,7 +13,6 @@ export async function triggerCsvRevenueImportJob(
   _anonKey: string,
   jobId: string,
   opts?: {
-    resume?: boolean;
     timeoutMs?: number;
     logTag?: string;
   },
@@ -34,10 +33,7 @@ export async function triggerCsvRevenueImportJob(
         apikey: serviceKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        job_id: jobId,
-        ...(opts?.resume ? { resume: true } : {}),
-      }),
+      body: JSON.stringify({ job_id: jobId }),
       signal: controller.signal,
     });
     const raw = await res.text();
@@ -70,40 +66,4 @@ export async function triggerCsvRevenueImportJob(
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** Fire-and-forget com waitUntil (retomadas entre chunks). */
-export function scheduleCsvRevenueImportJob(
-  supabaseUrl: string,
-  serviceKey: string,
-  anonKey: string,
-  jobId: string,
-  opts?: { resume?: boolean; logTag?: string },
-): void {
-  const run = triggerCsvRevenueImportJob(
-    supabaseUrl,
-    serviceKey,
-    anonKey,
-    jobId,
-    opts,
-  ).catch((err) => {
-    console.error(opts?.logTag ?? "[scheduleCsvRevenueImportJob]", {
-      job_id: jobId,
-      err: String(err),
-    });
-  });
-  try {
-    // @ts-ignore EdgeRuntime.waitUntil
-    if (
-      typeof EdgeRuntime !== "undefined" &&
-      typeof EdgeRuntime.waitUntil === "function"
-    ) {
-      // @ts-ignore
-      EdgeRuntime.waitUntil(run);
-      return;
-    }
-  } catch {
-    /* ignore */
-  }
-  void run;
 }

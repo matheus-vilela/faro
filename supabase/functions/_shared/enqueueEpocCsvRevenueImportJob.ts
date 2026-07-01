@@ -9,6 +9,9 @@ import {
   readOnboardingPdvCsvStoragePath,
 } from "./onboardingPdvPatch.ts";
 import {
+  resumeCsvRevenueImportViaQueue,
+} from "./csvRevenueImportQueue.ts";
+import {
   triggerCsvRevenueImportJob,
   type TriggerCsvRevenueImportResult,
 } from "./triggerCsvRevenueImportJob.ts";
@@ -304,13 +307,29 @@ export async function recoverEpocCsvRevenueImport(
 
   if (activeJob?.id) {
     const jobId = String(activeJob.id);
-    const resume = activeJob.status === "PROCESSING";
+    if (activeJob.status === "PROCESSING") {
+      const enqueue = await resumeCsvRevenueImportViaQueue(admin, jobId, {
+        supabaseUrl: input.supabaseUrl,
+        serviceKey: input.serviceKey,
+        logTag,
+      });
+      if (!enqueue.ok) {
+        return {
+          ok: false,
+          action: "triggered",
+          job_id: jobId,
+          error: enqueue.error ?? "Falha ao enfileirar retomada.",
+        };
+      }
+      return { ok: true, action: "triggered", job_id: jobId };
+    }
+
     const trigger = await triggerCsvRevenueImportJob(
       input.supabaseUrl,
       input.serviceKey,
       input.anonKey,
       jobId,
-      { resume, logTag },
+      { logTag },
     );
     if (!trigger.ok) {
       return {

@@ -91,7 +91,10 @@ export function DashboardIntegrationCsvRevenueCard({
     if (confirmPhase) {
       return {
         title: "Sincronização concluída",
-        subtitle: `${ob.sales_total > 0 ? ob.sales_total : ob.sales_sync} vendas processadas. Foram cadastradas as movimentações de vendas, fichas técnicas, produtos e o estoque respectivo.`,
+        subtitle:
+          ob.sales_total > 0
+            ? `${ob.sales_total} vendas processadas. Foram cadastradas as movimentações de vendas, fichas técnicas, produtos e o estoque respectivo.`
+            : "Não havia vendas no período consultado no portal EPOC. Pode confirmar e fechar esta etapa.",
         showSpinner: false,
         icon: "success" as const,
       };

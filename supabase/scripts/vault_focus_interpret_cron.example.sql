@@ -1,4 +1,6 @@
 -- Secrets para `cron_invoke_focus_get_sync_nfe_interpret()` (pg_cron → net.http_post).
+-- Continuações entre chunks usam pgmq (`focus_interpret_staging_continue`); o cron continua
+-- como consumer periódico e rede de segurança para jobs órfãos.
 -- Executar no SQL Editor (produção) ou após `supabase db reset` em dev, com valores reais.
 --
 -- Nomes **exatos** (coluna `name` em vault.secrets / visão decrypted_secrets):

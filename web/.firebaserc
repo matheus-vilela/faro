@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "prod": "finance-2eb98",
+    "default": "finance-2eb98"
+  },
+  "targets": {
+    "finance-2eb98": {
+      "hosting": {
+        "faroia": [
+          "faroia"
+        ]
+      }
+    }
+  }
+}
