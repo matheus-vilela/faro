@@ -22,18 +22,18 @@ if (!fs.existsSync(envPath)) {
   process.exit(1);
 }
 
-const DEV_MARKER = "# --- DEV ---";
-const PROD_MARKER = "# --- PRODUÇÃO ---";
+const isDevMarker = (line) => /^#\s*---\s*DEV\b/.test(line.trim());
+const isProdMarker = (line) => /^#\s*---\s*PRODUÇÃO\b/.test(line.trim());
 
 const raw = fs.readFileSync(envPath, "utf8");
 const lines = raw.split("\n");
 
-const devIdx = lines.findIndex((l) => l.trim() === DEV_MARKER);
-const prodIdx = lines.findIndex((l) => l.trim() === PROD_MARKER);
+const devIdx = lines.findIndex((l) => isDevMarker(l));
+const prodIdx = lines.findIndex((l) => isProdMarker(l));
 
 if (devIdx < 0 || prodIdx < 0 || prodIdx <= devIdx) {
   console.error(
-    `Marcadores esperados em .env:\n  ${DEV_MARKER}\n  ${PROD_MARKER}`,
+    "Marcadores esperados em .env (ex.: `# --- DEV ---` e `# --- PRODUÇÃO ---`).",
   );
   process.exit(1);
 }
