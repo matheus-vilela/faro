@@ -34,6 +34,7 @@ import {
   BarChart3,
   Bell,
   Building2,
+  FileText,
   FlaskConical,
   LayoutDashboard,
   ListChecks,
@@ -47,7 +48,6 @@ import {
   TrendingDown,
   TrendingUp,
   Truck,
-  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
@@ -77,9 +77,9 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
     label: "Operação",
     items: [
       {
-        title: "Despesas",
+        title: "Notas Fiscais",
         url: "/app/despesas",
-        icon: Wallet,
+        icon: FileText,
         roles: ["operador", "gestor", "owner"],
       },
 

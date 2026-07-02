@@ -47,7 +47,7 @@ export function StockMovementOriginCell({
       <Link
         to={stockMovementExpenseHref(expenseId)}
         className={linkClass}
-        title="Abrir despesa"
+        title="Abrir nota fiscal"
         onClick={(e) => e.stopPropagation()}
       >
         {label}

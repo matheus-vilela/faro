@@ -106,7 +106,7 @@ export function PendingWhatsappExpensesCard() {
                 <MessageCircle className="h-5 w-5" />
               </div>
               <div>
-                <CardTitle className="text-lg">Despesas WhatsApp</CardTitle>
+                <CardTitle className="text-lg">Notas fiscais WhatsApp</CardTitle>
                 <CardDescription>
                   Importações aguardando sua aprovação para liberar recebimento
                 </CardDescription>
@@ -114,7 +114,7 @@ export function PendingWhatsappExpensesCard() {
             </div>
             <Button variant="outline" size="sm" asChild className="shrink-0">
               <Link to="/app/despesas">
-                Ver despesas
+                Ver notas fiscais
                 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </Button>

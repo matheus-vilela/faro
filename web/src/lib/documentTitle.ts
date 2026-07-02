@@ -47,7 +47,7 @@ export function getDocumentTitle(pathname: string): string {
   }
 
   const underApp: { prefix: string; label: string }[] = [
-    { prefix: "/app/despesas", label: "Despesas" },
+    { prefix: "/app/despesas", label: "Notas Fiscais" },
     { prefix: "/app/vendas", label: "Vendas" },
     { prefix: "/app/contas-a-pagar", label: "Contas a pagar" },
     { prefix: "/app/vendas-realizadas", label: "Vendas realizadas" },

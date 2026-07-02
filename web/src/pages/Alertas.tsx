@@ -273,7 +273,7 @@ export function Alertas() {
     <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Alertas"
-        description="Estoque, recebimentos, despesas sem boleto e contas a pagar (D-3 / D-1) com vencimento em boletos"
+        description="Estoque, recebimentos, notas fiscais sem boleto e contas a pagar (D-3 / D-1) com vencimento em boletos"
         icon={Bell}
         action={
           <div className="flex flex-wrap items-center gap-2">

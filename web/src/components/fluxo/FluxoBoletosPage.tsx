@@ -491,7 +491,7 @@ export function FluxoBoletosPage({
       return "A venda vinculada e os boletos a receber associados serão excluídos.";
     }
     if (boletoResumo.expense_id) {
-      return "A conta será removida do fluxo. Se houver nota fiscal vinculada, ela permanece em Despesas.";
+      return "A conta será removida do fluxo. Se houver nota fiscal vinculada, ela permanece em Notas Fiscais.";
     }
     return "Esta conta será excluída permanentemente.";
   }, [boletoResumo]);

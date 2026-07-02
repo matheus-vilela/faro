@@ -594,7 +594,7 @@ export function Recebimento() {
                 ? "Nenhum recebimento pendente no momento."
                 : statusFilter === "received"
                   ? "Nenhum recebimento confirmado encontrado."
-                  : "Nenhum card de recebimento. Use «Novo recebimento» para vincular a uma despesa existente ou crie uma despesa em Despesas (gera card automaticamente)."}
+                  : "Nenhum card de recebimento. Use «Novo recebimento» para vincular a uma nota fiscal existente ou crie uma nota fiscal em Notas Fiscais (gera card automaticamente)."}
             </p>
           ) : (
             <div className="space-y-3">

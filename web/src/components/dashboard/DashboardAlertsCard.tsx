@@ -630,7 +630,7 @@ export function DashboardAlertsCard({
                 Alertas da operação
               </CardTitle>
               <CardDescription className="mt-1">
-                Estoque, recebimentos e despesas — toque para abrir só aquele
+                Estoque, recebimentos e notas fiscais — toque para abrir só aquele
                 tipo.
               </CardDescription>
             </div>
@@ -956,7 +956,7 @@ export function DashboardAlertsCard({
                                       <Link
                                         to={`/app/despesas?expense=${encodeURIComponent(r.expense_id)}`}
                                       >
-                                        Abrir despesa
+                                        Abrir nota fiscal
                                       </Link>
                                     </Button>
                                   ) : null}
@@ -1046,7 +1046,7 @@ export function DashboardAlertsCard({
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-900 dark:text-amber-400">
                     <FileText className="h-4 w-4" />
                   </span>
-                  <span className="truncate">Despesas sem boleto</span>
+                  <span className="truncate">Notas fiscais sem boleto</span>
                 </span>
                 <span className="shrink-0 rounded-md bg-background px-2.5 py-1 text-sm font-bold tabular-nums shadow-sm">
                   {withoutBoleto}
