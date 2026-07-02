@@ -10,7 +10,7 @@ export const CONTAS_A_PAGAR_FLUXO_CONFIG: FluxoBoletosPageConfig = {
   listTitle: "Contas a pagar",
   listDescription:
     "Saídas agendadas do mês, separadas entre valores prontos para pagamento e valores aguardando recebimento de mercadoria (NF/romaneio)",
-  searchPlaceholder: "Filtrar por descrição ou beneficiário...",
+  searchPlaceholder: "Filtrar por descrição, fornecedor ou beneficiário...",
   emptyListMessage: "Nenhuma conta a pagar neste mês",
   addButtonLabel: "Adicionar conta a pagar",
   calendarViewMode: "payable",

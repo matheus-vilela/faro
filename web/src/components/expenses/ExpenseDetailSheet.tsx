@@ -139,7 +139,7 @@ function BoletoUnlinkedBlock() {
         Sem boleto vinculado
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
-        Nenhum boleto associado a esta despesa.
+        Nenhum boleto associado a esta nota fiscal.
       </p>
     </div>
   );
@@ -331,7 +331,7 @@ export function ExpenseDetailSheet({
       .eq("id", expenseId)
       .single();
     if (expErr || !exp) {
-      toast.error("Despesa não encontrada.");
+      toast.error("Nota fiscal não encontrada.");
       onCloseRef.current();
       return;
     }
@@ -499,7 +499,7 @@ export function ExpenseDetailSheet({
       toast.error(error.message ?? "Não foi possível recusar");
       return;
     }
-    toast.success("Despesa recusada.");
+    toast.success("Nota fiscal recusada.");
     const { data: updated } = await supabase
       .from("expenses")
       .select(EXPENSE_SELECT)
@@ -526,7 +526,7 @@ export function ExpenseDetailSheet({
       toast.error(res?.error ?? "Não foi possível aprovar");
       return;
     }
-    toast.success("Despesa aprovada. O recebimento foi liberado.");
+    toast.success("Nota fiscal aprovada. O recebimento foi liberado.");
     const { data: updated } = await supabase
       .from("expenses")
       .select(EXPENSE_SELECT)
@@ -565,11 +565,11 @@ export function ExpenseDetailSheet({
       await supabase.from("expenses").delete().eq("id", detailExpense.id);
       setDeleteDialogOpen(false);
       setBoletoResumo(null);
-      toast.success("Despesa excluída");
+      toast.success("Nota fiscal excluída");
       onClose();
       onRefresh?.();
     } catch {
-      toast.error("Erro ao excluir despesa");
+      toast.error("Erro ao excluir nota fiscal");
     } finally {
       setDeleting(false);
     }
@@ -676,7 +676,7 @@ export function ExpenseDetailSheet({
     }
     if (duplicateId) {
       toast.error(
-        "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+        "Já existe uma nota fiscal com o mesmo fornecedor e identificação do documento.",
       );
       setEditSaving(false);
       return;
@@ -705,7 +705,7 @@ export function ExpenseDetailSheet({
       console.error(expErr);
       if (expErr.code === "23505") {
         toast.error(
-          "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+          "Já existe uma nota fiscal com o mesmo fornecedor e identificação do documento.",
         );
       } else {
         toast.error(expErr.message ?? "Não foi possível salvar.");
@@ -798,7 +798,7 @@ export function ExpenseDetailSheet({
     setDetailEditMode(false);
     setEditSaving(false);
     onRefresh?.();
-    toast.success("Despesa atualizada.");
+    toast.success("Nota fiscal atualizada.");
     onClose();
   };
 
@@ -837,7 +837,7 @@ export function ExpenseDetailSheet({
               <SheetHeader>
                 <div className="flex items-center justify-between pr-8">
                   <SheetTitle>
-                    {detailEditMode ? "Editar despesa" : "Dados da despesa"}
+                    {detailEditMode ? "Editar nota fiscal" : "Dados da nota fiscal"}
                   </SheetTitle>
                   {!detailEditMode && (
                     <div className="flex items-center gap-2">
@@ -915,7 +915,7 @@ export function ExpenseDetailSheet({
               !detailExpense.parent_expense_id &&
               !detailEditMode ? (
                 <p className="mt-3 rounded-md border border-amber-600/25 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-                  Esta é a despesa principal da série. Excluí-la remove toda a
+                  Esta é a nota fiscal principal da série. Excluí-la remove toda a
                   recorrência/parcelamento e exceções vinculadas. Gerencie
                   ocorrências futuras em Contas a pagar.
                 </p>
@@ -1336,7 +1336,7 @@ export function ExpenseDetailSheet({
                         />
                         {!detailExpense.financial_reconciliation_json && (
                           <p className="text-sm text-muted-foreground">
-                            Sem dados de impostos e totais para esta despesa.
+                            Sem dados de impostos e totais para esta nota fiscal.
                           </p>
                         )}
                       </CollapsibleContent>
@@ -1366,7 +1366,7 @@ export function ExpenseDetailSheet({
                   {(detailExpense.expense_items?.length ?? 0) > 0 && (
                     <div>
                       <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Itens da despesa
+                        Itens da nota fiscal
                       </p>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
@@ -1475,7 +1475,7 @@ export function ExpenseDetailSheet({
                     isOwner && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
                         <p className="text-sm">
-                          Esta despesa só entra no recebimento e nos alertas
+                          Esta nota fiscal só entra no recebimento e nos alertas
                           depois da sua aprovação.
                         </p>
                         <div className="flex flex-wrap gap-2">
@@ -1487,7 +1487,7 @@ export function ExpenseDetailSheet({
                           >
                             {approvingWhatsapp
                               ? "Aprovando…"
-                              : "Aprovar despesa"}
+                              : "Aprovar nota fiscal"}
                           </Button>
                           <Button
                             type="button"
@@ -1576,7 +1576,7 @@ export function ExpenseDetailSheet({
                         >
                           <img
                             src={comprovanteUrl}
-                            alt="Comprovante da despesa"
+                            alt="Comprovante da nota fiscal"
                             className="max-h-80 w-full rounded-md border object-contain bg-muted/30"
                           />
                         </a>
@@ -1745,20 +1745,20 @@ export function ExpenseDetailSheet({
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Excluir despesa</DialogTitle>
+            <DialogTitle>Excluir nota fiscal</DialogTitle>
             <DialogDescription>
               {detailExpense &&
               (detailExpense.series_type === "recurring" ||
                 detailExpense.series_type === "installment") &&
               !detailExpense.parent_expense_id ? (
                 <>
-                  Esta é a despesa principal da série. Ao excluir, toda a
+                  Esta é a nota fiscal principal da série. Ao excluir, toda a
                   recorrência ou parcelamento será removida, incluindo exceções
                   materializadas (filhas) e boletos vinculados.
                 </>
               ) : (
                 <>
-                  Tem certeza que deseja excluir esta despesa? O recebimento e
+                  Tem certeza que deseja excluir esta nota fiscal? O recebimento e
                   boleto vinculados serão excluídos. Se o recebimento já foi
                   confirmado, as quantidades serão deduzidas do estoque.
                 </>

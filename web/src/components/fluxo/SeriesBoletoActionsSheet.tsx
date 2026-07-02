@@ -86,6 +86,7 @@ export function SeriesBoletoActionsSheet({
           anchorBoleto: master.anchor_boleto,
           masterDisplayName: master.display_name,
           supplierName: master.supplier_name,
+          supplierId: master.anchor_boleto.supplier_id ?? null,
         });
         toast.success("Ocorrência materializada como despesa real.");
       } else if (scope === "from_month") {

@@ -10,6 +10,9 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
+import { ProductBulkEditDialog } from "@/components/products/ProductBulkEditDialog";
+import { ProductBulkEditSelectionBar } from "@/components/products/ProductBulkEditSelectionBar";
+import { ProductBulkEditUndoBanner } from "@/components/products/ProductBulkEditUndoBanner";
 import type { ProductCatalogLayout } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogCard } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalogFiltersPanel";
@@ -102,6 +105,9 @@ import {
 import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
+import { getUndoableProductBulkEdit } from "@/lib/productBulkEdit";
+import { canGestorAccess } from "@/lib/roles";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import {
   matchesPurchasesMetric,
@@ -125,6 +131,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
+import type { BulkEditOperationSummary } from "@/types/productBulkEdit";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
@@ -410,7 +417,7 @@ export function Produtos() {
     return Number(digits) / 100;
   };
 
-  const { currentCompany } = useCompany();
+  const { currentCompany, currentRole } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const lowStockOnly = searchParams.get("estoque") === "baixo";
   const purchasesFilter = parsePurchasesMetricParam(
@@ -455,6 +462,17 @@ export function Produtos() {
     () => lowStockOnly || purchasesFilter != null,
   );
   const [stockExportLoading, setStockExportLoading] = useState(false);
+  const canBulkEditCatalog = canGestorAccess(currentRole ?? "operador");
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkEditDialogOpen, setBulkEditDialogOpen] = useState(false);
+  const [bulkSelectAllLoading, setBulkSelectAllLoading] = useState(false);
+  const [undoableBulkEdit, setUndoableBulkEdit] =
+    useState<BulkEditOperationSummary | null>(null);
+  const [cmvCategoryOptions, setCmvCategoryOptions] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [productSheetOpen, setProductSheetOpen] = useState(false);
   const [importSheetOpen, setImportSheetOpen] = useState(false);
@@ -1100,6 +1118,127 @@ export function Produtos() {
     setCompanyProductCategories((data ?? []) as CompanyProductCategory[]);
   }, [currentCompany?.id]);
 
+  const loadCmvCategoryOptions = useCallback(async () => {
+    if (!currentCompany?.id) {
+      setCmvCategoryOptions([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("company_categories")
+      .select("id, name, parent_id")
+      .eq("company_id", currentCompany.id)
+      .eq("natureza", "DESPESA")
+      .eq("tipo", "CMV")
+      .eq("ativo", true)
+      .order("name", { ascending: true });
+    if (error) {
+      console.error(error);
+      setCmvCategoryOptions([]);
+      return;
+    }
+    const rows = (data ?? []) as Array<{
+      id: string;
+      name: string;
+      parent_id: string | null;
+    }>;
+    const parentIds = new Set(
+      rows.map((r) => r.parent_id).filter((id): id is string => !!id),
+    );
+    setCmvCategoryOptions(
+      rows.filter((r) => !parentIds.has(r.id)).map((r) => ({ id: r.id, name: r.name })),
+    );
+  }, [currentCompany?.id]);
+
+  const refreshUndoableBulkEdit = useCallback(async () => {
+    if (!currentCompany?.id || !canBulkEditCatalog) {
+      setUndoableBulkEdit(null);
+      return;
+    }
+    const op = await getUndoableProductBulkEdit(currentCompany.id);
+    setUndoableBulkEdit(op);
+  }, [canBulkEditCatalog, currentCompany?.id]);
+
+  const toggleProductSelection = useCallback((productId: string) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }, []);
+
+  const selectCurrentPageProducts = useCallback(() => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      for (const p of products) next.add(p.id);
+      return next;
+    });
+  }, [products]);
+
+  const resolveCategoryFilterProductIds = useCallback(async (): Promise<
+    string[] | null
+  > => {
+    if (!currentCompany?.id || filterCategoryId === "all") return null;
+    const { data: links, error } = await supabase
+      .from("product_category_assignments")
+      .select("product_id")
+      .eq("category_id", filterCategoryId);
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return [...new Set((links ?? []).map((l) => l.product_id))];
+  }, [currentCompany?.id, filterCategoryId]);
+
+  const selectAllFilteredProducts = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    setBulkSelectAllLoading(true);
+    try {
+      const categoryProductIds = await resolveCategoryFilterProductIds();
+      if (categoryProductIds && categoryProductIds.length === 0) {
+        toast.message("Nenhum produto corresponde ao filtro atual.");
+        return;
+      }
+      const bounds = updatedAtFilterBounds(
+        filterUpdatedPreset,
+        filterUpdatedFrom,
+        filterUpdatedTo,
+      );
+      const ids = await fetchCatalogProductIds({
+        companyId: currentCompany.id,
+        categoryProductIds,
+        search: debouncedSearch,
+        filterActive,
+        filterComposesCmv,
+        bounds,
+        lowStockOnly,
+        filterStockAlert,
+        purchasesFilter,
+      });
+      setSelectedProductIds(new Set(ids));
+    } finally {
+      setBulkSelectAllLoading(false);
+    }
+  }, [
+    currentCompany?.id,
+    debouncedSearch,
+    filterActive,
+    filterComposesCmv,
+    filterStockAlert,
+    filterUpdatedFrom,
+    filterUpdatedPreset,
+    filterUpdatedTo,
+    lowStockOnly,
+    purchasesFilter,
+    resolveCategoryFilterProductIds,
+  ]);
+
+  const pageFullySelected = useMemo(
+    () =>
+      products.length > 0 && products.every((p) => selectedProductIds.has(p.id)),
+    [products, selectedProductIds],
+  );
+
   const loadCustomUnitAliasOptions = useCallback(async () => {
     if (!currentCompany?.id) {
       setCustomUnitAliasOptions([]);
@@ -1126,7 +1265,18 @@ export function Produtos() {
   useEffect(() => {
     if (!currentCompany?.id) return;
     void loadCompanyProductCategories();
-  }, [currentCompany?.id, loadCompanyProductCategories]);
+    void loadCmvCategoryOptions();
+    void refreshUndoableBulkEdit();
+  }, [
+    currentCompany?.id,
+    loadCompanyProductCategories,
+    loadCmvCategoryOptions,
+    refreshUndoableBulkEdit,
+  ]);
+
+  useEffect(() => {
+    setSelectedProductIds(new Set());
+  }, [currentCompany?.id]);
 
   useEffect(() => {
     void loadCustomUnitAliasOptions();
@@ -2308,6 +2458,29 @@ export function Produtos() {
                   setFilterUpdatedTo("");
                 }}
               />
+              {canBulkEditCatalog && undoableBulkEdit && currentCompany?.id ? (
+                <ProductBulkEditUndoBanner
+                  companyId={currentCompany.id}
+                  operation={undoableBulkEdit}
+                  className="mb-4"
+                  onUndone={() => {
+                    void refreshUndoableBulkEdit();
+                    void fetchProducts();
+                  }}
+                />
+              ) : null}
+              {canBulkEditCatalog ? (
+                <ProductBulkEditSelectionBar
+                  selectedCount={selectedProductIds.size}
+                  filteredCount={productsCount}
+                  selectAllLoading={bulkSelectAllLoading}
+                  onSelectPage={selectCurrentPageProducts}
+                  onSelectAllFiltered={() => void selectAllFilteredProducts()}
+                  onClear={() => setSelectedProductIds(new Set())}
+                  onEdit={() => setBulkEditDialogOpen(true)}
+                  pageFullySelected={pageFullySelected}
+                />
+              ) : null}
               {loading && products.length === 0 ? (
                 <p className="text-muted-foreground">Carregando...</p>
               ) : products.length === 0 ? (
@@ -2345,6 +2518,9 @@ export function Produtos() {
                         conversionRowCount={
                           (productConversionMap[p.id] ?? []).length
                         }
+                        selectable={canBulkEditCatalog}
+                        selected={selectedProductIds.has(p.id)}
+                        onToggleSelect={toggleProductSelection}
                       />
                     </li>
                   ))}
@@ -2359,6 +2535,22 @@ export function Produtos() {
               )}
             </CardContent>
           </Card>
+
+          {canBulkEditCatalog && currentCompany?.id ? (
+            <ProductBulkEditDialog
+              open={bulkEditDialogOpen}
+              onOpenChange={setBulkEditDialogOpen}
+              companyId={currentCompany.id}
+              productIds={[...selectedProductIds]}
+              companyProductCategories={companyProductCategories}
+              cmvCategories={cmvCategoryOptions}
+              onApplied={() => {
+                setSelectedProductIds(new Set());
+                void fetchProducts();
+                void refreshUndoableBulkEdit();
+              }}
+            />
+          ) : null}
 
           <Sheet
             open={!!stockProduct}

@@ -30,7 +30,7 @@ export async function fetchSeriesMastersWithAnchorBoletos(
   const ids = list.map((m) => m.id);
   const { data: boletos, error: bErr } = await supabase
     .from("boletos")
-    .select("*")
+    .select("*, supplier:suppliers(id, name, document)")
     .eq("company_id", companyId)
     .eq("flow_type", "payable")
     .in("expense_id", ids)
@@ -143,7 +143,7 @@ export async function fetchMergedPayableBoletosInRange(
     fetchSeriesMastersWithAnchorBoletos(companyId),
     supabase
       .from("boletos")
-      .select("*")
+      .select("*, supplier:suppliers(id, name, document)")
       .eq("company_id", companyId)
       .eq("flow_type", "payable")
       .gte("due_date", rangeStartYmd)
@@ -246,6 +246,7 @@ export async function materializeSeriesMonth(input: {
   anchorBoleto: Boleto;
   masterDisplayName: string | null;
   supplierName: string | null;
+  supplierId?: string | null;
 }): Promise<{ expenseId: string; boletoId: string }> {
   const monthKey = input.occurrenceMonth.slice(0, 7);
   const occurrenceMonth = `${monthKey}-01`;
@@ -280,6 +281,8 @@ export async function materializeSeriesMonth(input: {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const anchorBoleto = input.anchorBoleto;
+
   const { data: childExp, error: expErr } = await supabase
     .from("expenses")
     .insert({
@@ -291,6 +294,7 @@ export async function materializeSeriesMonth(input: {
       series_type: "single",
       display_name: input.description,
       supplier_name: input.supplierName,
+      supplier_id: input.supplierId ?? anchorBoleto.supplier_id ?? null,
       status: "approved",
       expense_source: "manual",
       reference_date: input.dueDate,
@@ -311,7 +315,7 @@ export async function materializeSeriesMonth(input: {
     stock_added: false,
   });
 
-  const b = input.anchorBoleto;
+  const b = anchorBoleto;
   const { data: childBol, error: bolErr } = await supabase
     .from("boletos")
     .insert({
@@ -333,6 +337,7 @@ export async function materializeSeriesMonth(input: {
       agency: b.agency,
       account: b.account,
       account_type: b.account_type,
+      supplier_id: input.supplierId ?? b.supplier_id ?? null,
       status: "pending",
     })
     .select("id")

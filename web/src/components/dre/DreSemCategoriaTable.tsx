@@ -44,7 +44,7 @@ function actionLink(b: DreSemCategoriaBoleto): { to: string; label: string } | n
   if (b.expense_id) {
     return {
       to: `/app/despesas?expense=${b.expense_id}`,
-      label: "Abrir despesa",
+      label: "Abrir nota fiscal",
     };
   }
   if (b.revenue_entry_id) {

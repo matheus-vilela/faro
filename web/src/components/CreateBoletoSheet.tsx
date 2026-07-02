@@ -1,4 +1,5 @@
 import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
+import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,11 +29,12 @@ import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
+import type { Supplier } from "@/types/supplier";
 import type {
   ExpenseSeriesType,
   RecurrenceFrequency,
 } from "@/types/expenseSeries";
-import { FileText } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -95,6 +97,67 @@ const ACCOUNT_TYPES = [
   { value: "poupanca", label: "Poupança" },
 ];
 
+function mapSupplierRow(
+  row: Supplier & { supplier_payment_info?: Supplier["payment_info"] | Supplier["payment_info"][] },
+): Supplier {
+  const paymentInfo = Array.isArray(row.supplier_payment_info)
+    ? row.supplier_payment_info[0]
+    : row.supplier_payment_info;
+  return {
+    ...row,
+    payment_info: paymentInfo ?? null,
+  };
+}
+
+function suggestPaymentFromSupplier(
+  supplier: Supplier,
+  setters: {
+    setPaymentType: (v: PaymentType) => void;
+    setPixKeyType: (v: string) => void;
+    setPixKey: (v: string) => void;
+    setBankName: (v: string) => void;
+    setBankCode: (v: string) => void;
+    setAgency: (v: string) => void;
+    setAccount: (v: string) => void;
+    setAccountType: (v: string) => void;
+    setProvider: (v: string) => void;
+  },
+): boolean {
+  const info = supplier.payment_info;
+  if (!info) return false;
+
+  if (info.pix_key?.trim() && info.pix_type?.trim()) {
+    setters.setPaymentType("pix");
+    setters.setPixKeyType(info.pix_type);
+    const key = info.pix_key;
+    if (info.pix_type === "cpf" || info.pix_type === "cnpj") {
+      setters.setPixKey(maskCpfCnpj(key));
+    } else if (info.pix_type === "phone") {
+      setters.setPixKey(maskPhone(key));
+    } else {
+      setters.setPixKey(key);
+    }
+    return true;
+  }
+
+  if (
+    info.bank_name?.trim() &&
+    info.agency?.trim() &&
+    info.account?.trim()
+  ) {
+    setters.setPaymentType("ted");
+    setters.setBankName(info.bank_name ?? "");
+    setters.setBankCode(info.bank_code ?? "");
+    setters.setAgency(info.agency ?? "");
+    setters.setAccount(info.account ?? "");
+    setters.setAccountType(info.account_type ?? "conta_corrente");
+    setters.setProvider(supplier.name);
+    return true;
+  }
+
+  return false;
+}
+
 interface CreateBoletoSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -153,6 +216,10 @@ export function CreateBoletoSheet({
     useState<RecurrenceFrequency>("monthly");
   const [installmentCount, setInstallmentCount] = useState("12");
 
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierId, setSupplierId] = useState("");
+  const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     if (!expenseId) {
@@ -208,6 +275,56 @@ export function CreateBoletoSheet({
     void loadCategories({ selectDefault: true });
   }, [open, companyId, loadCategories]);
 
+  const loadSuppliers = useCallback(async () => {
+    if (!companyId) return;
+    const { data, error } = await supabase
+      .from("suppliers")
+      .select("*, supplier_payment_info (*)")
+      .eq("company_id", companyId)
+      .order("name");
+    if (error) {
+      console.error(error);
+      setSuppliers([]);
+      return;
+    }
+    setSuppliers(((data ?? []) as Supplier[]).map(mapSupplierRow));
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!open || !companyId || expenseId || effectiveFlow !== "payable") return;
+    void loadSuppliers();
+  }, [open, companyId, expenseId, effectiveFlow, loadSuppliers]);
+
+  const applySupplierSelection = (supplier: Supplier | undefined, id: string) => {
+    setSupplierId(id);
+    if (!supplier) return;
+    const suggested = suggestPaymentFromSupplier(supplier, {
+      setPaymentType,
+      setPixKeyType,
+      setPixKey,
+      setBankName,
+      setBankCode,
+      setAgency,
+      setAccount,
+      setAccountType,
+      setProvider,
+    });
+    if (suggested) {
+      toast.info("Dados de pagamento sugeridos a partir do fornecedor");
+    }
+  };
+
+  const handleSupplierChange = (value: string) => {
+    if (value === "__create__") {
+      setCreateSupplierOpen(true);
+      return;
+    }
+    applySupplierSelection(
+      suppliers.find((s) => s.id === value),
+      value,
+    );
+  };
+
   const canSubmit =
     companyCategoryId.trim() !== "" &&
     !categoriesLoading &&
@@ -232,6 +349,19 @@ export function CreateBoletoSheet({
     } = await supabase.auth.getUser();
 
     let linkedExpenseId = expenseId ?? null;
+    const selectedSupplier = supplierId
+      ? suppliers.find((s) => s.id === supplierId)
+      : null;
+
+    let resolvedSupplierId = selectedSupplier?.id ?? null;
+    if (expenseId && !resolvedSupplierId) {
+      const { data: expRow } = await supabase
+        .from("expenses")
+        .select("supplier_id")
+        .eq("id", expenseId)
+        .maybeSingle();
+      resolvedSupplierId = (expRow?.supplier_id as string | null) ?? null;
+    }
 
     if (
       !linkedExpenseId &&
@@ -262,6 +392,9 @@ export function CreateBoletoSheet({
           installment_count: installments,
           recurrence_status: seriesType === "recurring" ? "active" : null,
           series_anchor_due_date: dueDate,
+          supplier_id: selectedSupplier?.id ?? null,
+          supplier_name: selectedSupplier?.name ?? null,
+          supplier_document: selectedSupplier?.document ?? null,
         })
         .select("id")
         .single();
@@ -292,6 +425,7 @@ export function CreateBoletoSheet({
       flow_type: effectiveFlow,
     };
     if (linkedExpenseId) payload.expense_id = linkedExpenseId;
+    if (resolvedSupplierId) payload.supplier_id = resolvedSupplierId;
 
     if (requiresPaymentDetails) {
       payload.payment_type = paymentType;
@@ -350,6 +484,7 @@ export function CreateBoletoSheet({
     setPaymentType("boleto");
     setAccountFlow(fixedAccountFlow ?? "payable");
     setCompanyCategoryId("");
+    setSupplierId("");
     onOpenChange(false);
     toast.success("Conta cadastrada com sucesso.");
     void syncCompanyAlerts(companyId);
@@ -471,6 +606,46 @@ export function CreateBoletoSheet({
                 Busque, escolha ou crie uma categoria sem sair desta tela.
               </p>
             </div>
+            {requiresPaymentDetails && !expenseId && (
+              <div>
+                <Label>Fornecedor</Label>
+                <Select
+                  value={supplierId === "__create__" ? "" : supplierId}
+                  onValueChange={handleSupplierChange}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione o fornecedor (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                        {s.document ? ` — ${s.document}` : ""}
+                      </SelectItem>
+                    ))}
+                    <SelectItem
+                      value="__create__"
+                      className="text-primary font-medium"
+                    >
+                      <Plus className="h-4 w-4 inline mr-2" />
+                      Criar fornecedor
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {suppliers.length === 0 && !supplierId && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Nenhum fornecedor cadastrado.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setCreateSupplierOpen(true)}
+                      className="text-primary underline"
+                    >
+                      Criar fornecedor
+                    </button>
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -633,6 +808,27 @@ export function CreateBoletoSheet({
           </SheetFooter>
         </form>
       </SheetContent>
+      <CreateSupplierSheet
+        open={createSupplierOpen}
+        onOpenChange={setCreateSupplierOpen}
+        companyId={companyId}
+        onSuccess={async (supplier) => {
+          const { data } = await supabase
+            .from("suppliers")
+            .select("*, supplier_payment_info (*)")
+            .eq("id", supplier.id)
+            .single();
+          const mapped = data
+            ? mapSupplierRow(data as Supplier & { supplier_payment_info?: Supplier["payment_info"] | Supplier["payment_info"][] })
+            : supplier;
+          setSuppliers((prev) =>
+            [...prev.filter((s) => s.id !== mapped.id), mapped].sort((a, b) =>
+              a.name.localeCompare(b.name, "pt-BR"),
+            ),
+          );
+          applySupplierSelection(mapped, mapped.id);
+        }}
+      />
     </Sheet>
   );
 }

@@ -90,7 +90,6 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  Wallet,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -513,7 +512,7 @@ export function Despesas() {
     }
     if (duplicateId) {
       toast.error(
-        "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+        "Já existe uma nota fiscal com o mesmo fornecedor e identificação do documento.",
       );
       return;
     }
@@ -548,10 +547,10 @@ export function Despesas() {
       console.error(expErr);
       if (expErr.code === "23505") {
         toast.error(
-          "Já existe uma despesa com o mesmo fornecedor e identificação do documento.",
+          "Já existe uma nota fiscal com o mesmo fornecedor e identificação do documento.",
         );
       } else {
-        toast.error(expErr.message ?? "Não foi possível criar a despesa.");
+        toast.error(expErr.message ?? "Não foi possível criar a nota fiscal.");
       }
       return;
     }
@@ -574,7 +573,7 @@ export function Despesas() {
           .eq("id", exp.id);
       } else {
         console.error(upErr);
-        toast.error("Despesa criada, mas o comprovante não foi enviado.");
+        toast.error("Nota fiscal criada, mas o comprovante não foi enviado.");
       }
     }
     for (const it of items) {
@@ -850,13 +849,13 @@ export function Despesas() {
   return (
     <PageShell className="space-y-8 pb-0 " narrow>
       <PageHeader
-        title="Despesas"
+        title="Notas Fiscais"
         description={
           isGestor
-            ? "Revisar despesas registradas e vincular contas a pagar"
-            : "Registrar despesas e vincular contas a pagar"
+            ? "Revisar notas fiscais registradas e vincular contas a pagar"
+            : "Registrar notas fiscais e vincular contas a pagar"
         }
-        icon={Wallet}
+        icon={FileText}
         action={
           <Button
             type="button"
@@ -864,7 +863,7 @@ export function Despesas() {
             className="h-10 w-full shrink-0 sm:w-auto"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Nova despesa
+            Nova nota fiscal
           </Button>
         }
       />
@@ -872,7 +871,7 @@ export function Despesas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pelo mês de competência da despesa"
+        description="Lista filtrada pelo mês de competência da nota fiscal"
       />
 
       <Sheet
@@ -894,8 +893,8 @@ export function Despesas() {
         <SheetContent className="overflow-y-auto sm:max-w-xl">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
-              <Wallet className="h-5 w-5" />
-              Nova despesa
+              <FileText className="h-5 w-5" />
+              Nova nota fiscal
             </SheetTitle>
             <SheetDescription>
               {showFullExpenseForm ? (
@@ -1472,7 +1471,7 @@ export function Despesas() {
 
                 <SheetFooter>
                   <Button type="submit" disabled={!canSubmit}>
-                    Registrar despesa
+                    Registrar nota fiscal
                   </Button>
                 </SheetFooter>
               </>
@@ -1503,7 +1502,7 @@ export function Despesas() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Todas as despesas
+              Todas as notas fiscais
             </CardTitle>
             <CardDescription>
               {onlyPendingApproval
@@ -1539,8 +1538,8 @@ export function Despesas() {
           ) : expenses.length === 0 ? (
             <p className="text-muted-foreground">
               {onlyPendingApproval
-                ? "Nenhuma despesa aguardando aprovação do proprietário."
-                : "Nenhuma despesa cadastrada"}
+                ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
+                : "Nenhuma nota fiscal cadastrada"}
             </p>
           ) : (
             <div className="space-y-3">
@@ -1747,7 +1746,7 @@ export function Despesas() {
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Vincular boleto à despesa</DialogTitle>
+            <DialogTitle>Vincular boleto à nota fiscal</DialogTitle>
             <DialogDescription>
               Selecione uma conta a pagar para vincular ou cadastre uma nova no
               Fluxo de Caixa.

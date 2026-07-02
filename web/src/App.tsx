@@ -15,6 +15,7 @@ import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
 import { ConfiguracoesFiscal } from "@/pages/ConfiguracoesFiscal";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
+import { ConfiguracoesContasBancarias } from "@/pages/ConfiguracoesContasBancarias";
 import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
 import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
@@ -146,6 +147,10 @@ function AuthenticatedLayout() {
               element={<ConfiguracoesUsuariosMembros />}
             />
             <Route path="categorias" element={<ConfiguracoesCategorias />} />
+            <Route
+              path="contas-bancarias"
+              element={<ConfiguracoesContasBancarias />}
+            />
             <Route
               path="impostos-receita"
               element={<ConfiguracoesImpostosReceita />}

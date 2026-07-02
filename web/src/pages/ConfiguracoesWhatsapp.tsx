@@ -227,7 +227,7 @@ export function ConfiguracoesWhatsapp() {
           />
           <CardHeader>
             <CardTitle className="text-[#075E54] dark:text-emerald-200">
-              Despesas por mídia ou texto
+              Notas fiscais por mídia ou texto
             </CardTitle>
             <CardDescription>
               Registro assistido por IA quando o recurso estiver ativo no
@@ -247,7 +247,7 @@ export function ConfiguracoesWhatsapp() {
               <strong>aguardando aprovação do proprietário</strong> antes de
               integrar recebimento e estoque; acompanhe em{" "}
               <Link to="/app/despesas" className={linkWa}>
-                Despesas
+                Notas Fiscais
               </Link>{" "}
               e no painel de alertas.
             </p>
