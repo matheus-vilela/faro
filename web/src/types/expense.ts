@@ -116,6 +116,15 @@ export interface Boleto {
   exclude_from_fluxo?: boolean
   revenue_entry_id?: string | null
   supplier_id?: string | null
+  /** Data em que o pagamento foi realizado (contas quitadas). */
+  paid_at?: string | null
+  /** Competência do pagamento (primeiro dia do mês, YYYY-MM-01). */
+  competence_date?: string | null
+  company_bank_account_id?: string | null
+  interest_amount?: number
+  discount_amount?: number
+  /** Valor efetivamente pago (original + juros - desconto). */
+  paid_amount?: number | null
   created_at: string
   updated_at: string
 }

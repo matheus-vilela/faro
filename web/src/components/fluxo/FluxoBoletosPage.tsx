@@ -6,6 +6,7 @@ import {
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
+import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatCompetenceLabel } from "@/lib/boletoPayment";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
@@ -65,6 +67,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
+import type { CompanyBankAccount } from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import { isBoletoPayable } from "@/types/expense";
@@ -177,6 +180,9 @@ export function FluxoBoletosPage({
   );
   const [payableReceiptContext, setPayableReceiptContext] =
     useState<PayableReceiptContext>(EMPTY_PAYABLE_RECEIPT_CONTEXT);
+  const [bankAccountsById, setBankAccountsById] = useState<
+    Map<string, CompanyBankAccount>
+  >(new Map());
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -203,6 +209,25 @@ export function FluxoBoletosPage({
         setCompanyCategories((data as CompanyCategory[]) ?? []);
       });
   }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || flowType !== "payable") {
+      queueMicrotask(() => setBankAccountsById(new Map()));
+      return;
+    }
+    void supabase
+      .from("company_bank_accounts")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true })
+      .then(({ data }) => {
+        const map = new Map<string, CompanyBankAccount>();
+        for (const row of (data ?? []) as CompanyBankAccount[]) {
+          map.set(row.id, row);
+        }
+        setBankAccountsById(map);
+      });
+  }, [companyId, flowType, boletosList]);
 
   const fetchCalendarBoletos = useCallback(async () => {
     if (!companyId || isReceivableFlow) return;
@@ -438,7 +463,30 @@ export function FluxoBoletosPage({
       currency: "BRL",
     }).format(v);
 
-  const confirmMarkBoletoAsPaid = useCallback(async () => {
+  const handlePayBoletoSuccess = useCallback(
+    (updated: Boleto) => {
+      const merged: FluxoBoletoRow = {
+        ...updated,
+        supplier: boletoResumo?.supplier,
+      };
+      setBoletoResumo(merged);
+      setCalendarDayList((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((b) =>
+            b.id === merged.id ? { ...b, ...merged } : b,
+          ),
+        };
+      });
+      setMarkPaidDialogOpen(false);
+      refreshAll();
+      if (companyId) void syncCompanyAlerts(companyId);
+    },
+    [boletoResumo?.supplier, companyId, refreshAll],
+  );
+
+  const confirmMarkReceivableAsPaid = useCallback(async () => {
     if (!boletoResumo || !companyId) return;
     if (isProjectedBoleto(boletoResumo)) {
       toast.error(
@@ -475,11 +523,7 @@ export function FluxoBoletosPage({
     });
     setMarkPaidDialogOpen(false);
     refreshAll();
-    toast.success(
-      isBoletoPayable(updated)
-        ? "Conta marcada como paga."
-        : "Conta marcada como recebida.",
-    );
+    toast.success("Conta marcada como recebida.");
   }, [boletoResumo, companyId, refreshAll]);
 
   const canDeleteBoletoResumo =
@@ -1143,8 +1187,20 @@ export function FluxoBoletosPage({
                         : "text-emerald-600 dark:text-emerald-400",
                     )}
                   >
-                    {formatCurrency(boletoResumo.amount)}
+                    {formatCurrency(
+                      boletoResumo.status === "paid" &&
+                        boletoResumo.paid_amount != null
+                        ? boletoResumo.paid_amount
+                        : boletoResumo.amount,
+                    )}
                   </p>
+                  {boletoResumo.status === "paid" &&
+                    boletoResumo.paid_amount != null &&
+                    boletoResumo.paid_amount !== boletoResumo.amount && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Valor original: {formatCurrency(boletoResumo.amount)}
+                      </p>
+                    )}
                   <p className="text-sm text-muted-foreground mt-1">
                     Vencimento: {formatDate(boletoResumo.due_date)}
                   </p>
@@ -1209,6 +1265,38 @@ export function FluxoBoletosPage({
                           recebimento confirmado. Confirme a mercadoria antes de
                           pagar.
                         </p>
+                      </div>
+                    )}
+                  {boletoResumo.status === "paid" &&
+                    isBoletoPayable(boletoResumo) &&
+                    boletoResumo.paid_at && (
+                      <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground space-y-1">
+                        <p>Pago em {formatDate(boletoResumo.paid_at)}</p>
+                        {boletoResumo.competence_date ? (
+                          <p>
+                            Competência:{" "}
+                            {formatCompetenceLabel(boletoResumo.competence_date)}
+                          </p>
+                        ) : null}
+                        {boletoResumo.company_bank_account_id &&
+                        bankAccountsById.get(
+                          boletoResumo.company_bank_account_id,
+                        ) ? (
+                          <p>
+                            Conta:{" "}
+                            {
+                              bankAccountsById.get(
+                                boletoResumo.company_bank_account_id,
+                              )!.name
+                            }
+                          </p>
+                        ) : null}
+                        {boletoResumo.paid_amount != null ? (
+                          <p>
+                            Valor pago:{" "}
+                            {formatCurrency(boletoResumo.paid_amount)}
+                          </p>
+                        ) : null}
                       </div>
                     )}
                 </div>
@@ -1375,8 +1463,27 @@ export function FluxoBoletosPage({
         onRefresh={closeExpenseDetail}
       />
 
+      <PayBoletoDialog
+        open={
+          markPaidDialogOpen &&
+          !!boletoResumo &&
+          isBoletoPayable(boletoResumo)
+        }
+        onOpenChange={setMarkPaidDialogOpen}
+        boleto={boletoResumo}
+        companyId={companyId ?? ""}
+        supplierName={
+          boletoResumo ? fluxoBoletoSupplierLabel(boletoResumo) : null
+        }
+        onSuccess={handlePayBoletoSuccess}
+      />
+
       <Dialog
-        open={markPaidDialogOpen}
+        open={
+          markPaidDialogOpen &&
+          !!boletoResumo &&
+          !isBoletoPayable(boletoResumo)
+        }
         onOpenChange={(open) => {
           if (!open && markingPaid) return;
           setMarkPaidDialogOpen(open);
@@ -1423,7 +1530,7 @@ export function FluxoBoletosPage({
             <Button
               type="button"
               disabled={markingPaid}
-              onClick={() => void confirmMarkBoletoAsPaid()}
+              onClick={() => void confirmMarkReceivableAsPaid()}
             >
               {markingPaid ? (
                 <>
