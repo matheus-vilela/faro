@@ -241,7 +241,7 @@ function AppLayoutContent() {
     <div className="relative flex  w-full">
       <header
         className={cn(
-          "fixed top-0 z-50 flex w-full h-12 shrink-0 items-center gap-1 sm:gap-2 px-2 border-b border-border bg-card backdrop-blur supports-backdrop-filter:bg-card",
+          "fixed top-[var(--faro-dev-banner-height,0px)] z-50 flex w-full h-12 shrink-0 items-center gap-1 sm:gap-2 px-2 border-b border-border bg-card backdrop-blur supports-backdrop-filter:bg-card",
         )}
       >
         {isMobile && (
@@ -346,7 +346,10 @@ function AppLayoutContent() {
         </div>
       </header>
 
-      <Sidebar collapsible="icon" className="top-12 bottom-0 h-auto min-h-0">
+      <Sidebar
+        collapsible="icon"
+        className="top-[calc(3rem+var(--faro-dev-banner-height,0px))] bottom-0 h-auto min-h-0"
+      >
         {isMobile && (
           <SidebarHeader className="flex items-start justify-center ">
             <Link
@@ -419,7 +422,7 @@ function AppLayoutContent() {
           ))}
         </SidebarContent>
       </Sidebar>
-      <SidebarInset className="mt-12 ">
+      <SidebarInset className="mt-[calc(3rem+var(--faro-dev-banner-height,0px))] ">
         <main className="flex-1 py-4 px-4 sm:px-8 w-full">
           <Outlet />
         </main>

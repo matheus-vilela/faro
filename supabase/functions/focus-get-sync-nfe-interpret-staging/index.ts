@@ -1,5 +1,5 @@
 /**
- * Processa jobs da fila `focus_get_sync_nfe_interpret_jobs` (enfileirados por `focus-get-sync-nfe`
+ * Processa jobs da tabela `focus_get_sync_nfe_interpret_jobs` (enfileirados por `focus-get-sync-nfe`
  * quando há linhas em `focus_get_sync_nfe_staging` com XML).
  *
  * **Disparo:** pg_cron → `cron_invoke_focus_get_sync_nfe_interpret()` → `net.http_post` (Vault) com Bearer secret.
@@ -7,24 +7,28 @@
  * (staging vazio ou offset já completo) e `pending` sem linhas em staging.
  *
  * **Timeout / volume:** fatias (`FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK`, default 5). O job permanece em
- * **`processing`**: após cada fatia atualiza `staging_process_offset` e agenda **nova invocação** desta
- * mesma função com body `{ "continue_job_id": "<job uuid>", "chain_depth": N }` via `fetch` +
- * `EdgeRuntime.waitUntil` (sem esperar o próximo cron). `attempts` só sobe na primeira fatia (RPC claim).
+ * **`processing`**: após cada fatia atualiza `staging_process_offset` e enfileira continuação em
+ * `pgmq` (`focus_interpret_staging_continue`) + dispara consumer via `waitUntil`. `attempts` só sobe
+ * na primeira fatia (RPC claim).
  *
- * **Continuação:** POST com o mesmo Bearer + JSON acima; não usa `claim` — carrega o job por id e segue
- * a partir de `staging_process_offset` (progresso) até `staging_xml_total` (XMLs com conteúdo em staging).
- * `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` limita encadeamentos.
+ * **Continuação:** consumer lê mensagens da fila pgmq, processa o chunk e remove a mensagem.
+ * Fallback: job reposto em `pending` se o enqueue falhar; cron retoma.
  *
- * Env: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` (para o POST encadeado no gateway),
+ * Env: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` (apikey do trigger imediato),
  * `FOCUS_NFE_RECEBIDAS_CRON_SECRET`.
  * Opcional: `FOCUS_GET_SYNC_INTERPRET_MAX_JOBS` (default 2), `FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK` (default 5),
- * `FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH` (default 120).
+ * `FOCUS_GET_SYNC_INTERPRET_QUEUE_VT` (visibility timeout em segundos, default 300).
  * Opcional (LLM): `OPENAI_API_KEY`, `OPENAI_PRODUCT_MATCH_MODEL`.
  * Catálogo global `unified_supplier_*` é atualizado aqui (parse XML por nota), não em `focus-get-sync-nfe`.
  * Onboarding: `companies.onboarding_fiscal.nfes_sync` = `staging_process_offset` (teto `max_nfes_sync`), não +chunk.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  deleteInterpretStagingContinueMessage,
+  enqueueInterpretStagingContinue,
+  readInterpretStagingContinueMessages,
+} from "../_shared/interpretStagingQueue.ts";
 import {
   interpretStagingNfeXmlForLog,
   type StagingNfeInterpretLog,
@@ -92,21 +96,6 @@ function intFromEnv(
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-function scheduleWaitUntil(p: Promise<unknown>): void {
-  try {
-    // @ts-ignore Edge
-    const ER = globalThis.EdgeRuntime;
-    if (ER && typeof ER.waitUntil === "function") {
-      // @ts-ignore
-      ER.waitUntil(p);
-      return;
-    }
-  } catch {
-    /* ignore */
-  }
-  void p.catch(() => undefined);
-}
-
 type InterpretJobRow = {
   id: string;
   exec_id: string;
@@ -128,7 +117,7 @@ type JobSummary = {
   staging_xml_total?: number;
   chunk_offset_start?: number;
   continua?: boolean;
-  chain_depth?: number;
+  queue_msg_id?: number;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -485,35 +474,318 @@ async function runInterpretStagingChunk(
   };
 }
 
-function scheduleContinueChain(
+async function applyChunkOutcome(
+  admin: Admin,
+  row: InterpretJobRow,
+  chunk: ChunkOk,
   supabaseUrl: string,
-  anonKey: string,
   bearerSecret: string,
-  jobId: string,
-  chainDepth: number,
-): void {
-  const base = supabaseUrl.replace(/\/$/, "");
-  const url = `${base}/functions/v1/focus-get-sync-nfe-interpret-staging`;
-  const p = fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${bearerSecret}`,
-      apikey: anonKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      continue_job_id: jobId,
-      chain_depth: chainDepth,
-    }),
-  }).catch((e) =>
-    logPhase("chain_fetch_erro", { job_id: jobId, error: String(e) })
+  apiKey: string,
+): Promise<{
+  done: boolean;
+  err?: string;
+  fell_back_to_pending?: boolean;
+}> {
+  const isOnboardingJob = row.onboarding === true;
+
+  logPhase("chunk_outcome_inicio", {
+    job_id: row.id,
+    has_more: chunk.hasMore,
+    next_offset: chunk.nextOffset,
+    onboarding: isOnboardingJob,
+  });
+
+  if (chunk.hasMore) {
+    const { error: partialErr } = await admin
+      .from("focus_get_sync_nfe_interpret_jobs")
+      .update({
+        status: "processing",
+        staging_process_offset: chunk.nextOffset,
+        last_error: null,
+      })
+      .eq("id", row.id);
+
+    if (partialErr) {
+      await finalizeJobFailed(admin, row.id, partialErr.message);
+      return { done: false, err: partialErr.message };
+    }
+
+    await setOnboardingInterpretNfesSyncProgress(
+      admin,
+      row.company_id,
+      isOnboardingJob,
+      chunk.nextOffset,
+    );
+
+    const enqueue = await enqueueInterpretStagingContinue(admin, row.id, {
+      triggerWorker: true,
+      supabaseUrl,
+      bearerSecret,
+      apiKey,
+      log: logPhase,
+    });
+
+    if (!enqueue.ok) {
+      const { error: pendErr } = await admin
+        .from("focus_get_sync_nfe_interpret_jobs")
+        .update({
+          status: "pending",
+          staging_process_offset: chunk.nextOffset,
+          last_error:
+            `fila_continuacao_falhou: ${enqueue.error ?? "desconhecido"}; retoma no cron.`,
+        })
+        .eq("id", row.id);
+      if (pendErr) {
+        await finalizeJobFailed(admin, row.id, pendErr.message);
+        return { done: false, err: pendErr.message };
+      }
+      logPhase("job_reposto_pending_fila_falhou", {
+        job_id: row.id,
+        error: enqueue.error ?? null,
+      });
+      return { done: false, fell_back_to_pending: true };
+    }
+
+    logPhase("chunk_parcial_continua", {
+      job_id: row.id,
+      next_offset: chunk.nextOffset,
+      msg_id: enqueue.msgId ?? null,
+    });
+    return { done: false };
+  }
+
+  await setOnboardingInterpretNfesSyncProgress(
+    admin,
+    row.company_id,
+    isOnboardingJob,
+    chunk.nextOffset,
   );
 
-  scheduleWaitUntil(p);
-  logPhase("continuacao_agendada", {
-    job_id: jobId,
-    chain_depth_next: chainDepth,
+  const doneErr = await completeInterpretJobAndEndOnboardingSync(admin, row);
+  if (doneErr) {
+    await finalizeJobFailed(admin, row.id, doneErr);
+    logPhase("job_finalizar_erro", { job_id: row.id, error: doneErr });
+    return { done: true, err: doneErr };
+  }
+  logPhase("job_concluido", { job_id: row.id, company_id: row.company_id });
+  return { done: true };
+}
+
+type ProcessJobResult = {
+  summary?: JobSummary;
+  processed?: boolean;
+  failed?: boolean;
+};
+
+async function processOneInterpretJobRow(
+  admin: Admin,
+  row: InterpretJobRow,
+  stagingChunk: number,
+  supabaseUrl: string,
+  bearerSecret: string,
+  apiKey: string,
+): Promise<ProcessJobResult> {
+  const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
+
+  if (chunk.kind === "fail") {
+    logPhase("job_falhou", { job_id: row.id, error: chunk.message });
+    await finalizeJobFailed(admin, row.id, chunk.message);
+    return { failed: true };
+  }
+
+  if (chunk.kind === "empty_done") {
+    const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
+    if (err) {
+      await finalizeJobFailed(admin, row.id, err);
+      return { failed: true };
+    }
+    return {
+      processed: true,
+      summary: {
+        job_id: row.id,
+        exec_id: row.exec_id,
+        company_id: row.company_id,
+        staging_rows: 0,
+        interpretacoes: 0,
+        staging_total: 0,
+        staging_xml_total: row.staging_xml_total ?? 0,
+        chunk_offset_start: 0,
+        continua: false,
+      },
+    };
+  }
+
+  if (chunk.kind === "offset_done") {
+    const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
+    if (err) {
+      await finalizeJobFailed(admin, row.id, err);
+      return { failed: true };
+    }
+    return {
+      processed: true,
+      summary: {
+        job_id: row.id,
+        exec_id: row.exec_id,
+        company_id: row.company_id,
+        staging_rows: 0,
+        interpretacoes: 0,
+        staging_total: 0,
+        staging_xml_total: row.staging_xml_total ?? 0,
+        chunk_offset_start: Math.floor(
+          Number(row.staging_process_offset ?? 0) || 0,
+        ),
+        continua: false,
+      },
+    };
+  }
+
+  const out = await applyChunkOutcome(
+    admin,
+    row,
+    chunk,
+    supabaseUrl,
+    bearerSecret,
+    apiKey,
+  );
+
+  const summary: JobSummary = {
+    job_id: row.id,
+    exec_id: row.exec_id,
+    company_id: row.company_id,
+    staging_rows: chunk.listLen,
+    interpretacoes: chunk.interpretacoes.length,
+    staging_total: chunk.total,
+    staging_xml_total: row.staging_xml_total ?? chunk.total,
+    chunk_offset_start: chunk.offset,
+    continua: chunk.hasMore,
+  };
+
+  if (out.done && !out.err) {
+    return { processed: true, summary };
+  }
+  return { summary };
+}
+
+async function consumeInterpretStagingQueue(
+  admin: Admin,
+  maxMessages: number,
+  stagingChunk: number,
+  queueVtSeconds: number,
+  supabaseUrl: string,
+  bearerSecret: string,
+  apiKey: string,
+  onActiveJob: (jobId: string | null) => void,
+): Promise<{
+  summaries: JobSummary[];
+  processed: string[];
+  attempted: number;
+}> {
+  const summaries: JobSummary[] = [];
+  const processed: string[] = [];
+  const messages = await readInterpretStagingContinueMessages(
+    admin,
+    maxMessages,
+    queueVtSeconds,
+  );
+
+  logPhase("fila_leitura", {
+    count: messages.length,
+    max: maxMessages,
+    vt_seconds: queueVtSeconds,
   });
+
+  for (const msg of messages) {
+    onActiveJob(null);
+    const jobId = String(msg.message?.job_id ?? "").trim();
+    if (!UUID_RE.test(jobId)) {
+      await deleteInterpretStagingContinueMessage(admin, msg.msg_id);
+      logPhase("fila_skip", {
+        msg_id: msg.msg_id,
+        reason: "job_id_invalido",
+      });
+      continue;
+    }
+
+    const { data: jobRow, error: loadErr } = await admin
+      .from("focus_get_sync_nfe_interpret_jobs")
+      .select(
+        "id,exec_id,company_id,status,attempts,staging_process_offset,staging_xml_total,onboarding",
+      )
+      .eq("id", jobId)
+      .maybeSingle();
+
+    if (loadErr) {
+      logPhase("fila_job_load_erro", {
+        job_id: jobId,
+        msg_id: msg.msg_id,
+        error: loadErr.message,
+      });
+      continue;
+    }
+
+    if (!jobRow) {
+      await deleteInterpretStagingContinueMessage(admin, msg.msg_id);
+      logPhase("fila_skip", {
+        msg_id: msg.msg_id,
+        job_id: jobId,
+        reason: "job_nao_encontrado",
+      });
+      continue;
+    }
+
+    const st = String((jobRow as InterpretJobRow).status ?? "");
+    if (st !== "processing") {
+      await deleteInterpretStagingContinueMessage(admin, msg.msg_id);
+      logPhase("fila_skip", {
+        msg_id: msg.msg_id,
+        job_id: jobId,
+        reason: `status_${st}`,
+      });
+      continue;
+    }
+
+    const row = jobRow as InterpretJobRow;
+    onActiveJob(row.id);
+    logPhase("fila_job_processando", {
+      job_id: row.id,
+      msg_id: msg.msg_id,
+      offset: row.staging_process_offset ?? 0,
+    });
+
+    try {
+      const result = await processOneInterpretJobRow(
+        admin,
+        row,
+        stagingChunk,
+        supabaseUrl,
+        bearerSecret,
+        apiKey,
+      );
+      await deleteInterpretStagingContinueMessage(admin, msg.msg_id);
+
+      if (result.summary) {
+        summaries.push({ ...result.summary, queue_msg_id: msg.msg_id });
+      }
+      if (result.processed) {
+        processed.push(row.id);
+      }
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logPhase("fila_processamento_erro", {
+        job_id: row.id,
+        msg_id: msg.msg_id,
+        error: errMsg,
+      });
+    } finally {
+      onActiveJob(null);
+    }
+  }
+
+  return {
+    summaries,
+    processed,
+    attempted: messages.length,
+  };
 }
 
 async function finalizeJobDone(
@@ -583,9 +855,8 @@ async function recoverOrphanInterpretJobs(
   admin: Admin,
   stagingChunk: number,
   supabaseUrl: string,
-  anonKey: string,
   bearerSecret: string,
-  maxChainDepth: number,
+  apiKey: string,
 ): Promise<RecoverSummary> {
   const result: RecoverSummary = {
     finalized: [],
@@ -613,43 +884,27 @@ async function recoverOrphanInterpretJobs(
         offset: row.staging_process_offset ?? 0,
       });
 
-      const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
-
-      if (chunk.kind === "fail") {
-        await finalizeJobFailed(admin, row.id, chunk.message);
-        continue;
-      }
-
-      if (chunk.kind === "empty_done" || chunk.kind === "offset_done") {
-        const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
-        if (!err) {
-          result.finalized.push(row.id);
-          logPhase("recover_job_finalizado", {
-            job_id: row.id,
-            reason:
-              chunk.kind === "empty_done"
-                ? "staging_vazio"
-                : "offset_ja_completo",
-          });
-        } else {
-          await finalizeJobFailed(admin, row.id, err);
-        }
-        continue;
-      }
-
-      const out = await applyChunkOutcome(
+      const jobResult = await processOneInterpretJobRow(
         admin,
         row,
-        chunk,
-        0,
+        stagingChunk,
         supabaseUrl,
-        anonKey,
         bearerSecret,
-        maxChainDepth,
+        apiKey,
       );
-      if (out.done && !out.err) result.finalized.push(row.id);
-      else if (out.fell_back_to_pending) result.reposted.push(row.id);
-      else result.continued.push(row.id);
+      if (jobResult.processed) {
+        result.finalized.push(row.id);
+        logPhase("recover_job_finalizado", {
+          job_id: row.id,
+          reason: "recover_processing",
+        });
+      } else if (jobResult.summary?.continua) {
+        result.continued.push(row.id);
+      } else if (jobResult.failed) {
+        /* já marcado failed */
+      } else {
+        result.reposted.push(row.id);
+      }
     }
     logPhase("recover_processing_fim", { ...result });
   }
@@ -704,136 +959,6 @@ async function recoverOrphanInterpretJobs(
   return result;
 }
 
-async function applyChunkOutcome(
-  admin: Admin,
-  row: InterpretJobRow,
-  chunk: ChunkOk,
-  chainDepth: number,
-  supabaseUrl: string,
-  anonKey: string,
-  bearerSecret: string,
-  maxChainDepth: number,
-): Promise<{
-  done: boolean;
-  err?: string;
-  fell_back_to_pending?: boolean;
-}> {
-  const isOnboardingJob = row.onboarding === true;
-
-  logPhase("chunk_outcome_inicio", {
-    job_id: row.id,
-    has_more: chunk.hasMore,
-    chain_depth: chainDepth,
-    next_offset: chunk.nextOffset,
-    onboarding: isOnboardingJob,
-  });
-
-  if (chunk.hasMore) {
-    if (chainDepth >= maxChainDepth) {
-      logPhase("chain_cap", {
-        job_id: row.id,
-        chain_depth: chainDepth,
-        max_chain_depth: maxChainDepth,
-        next_offset: chunk.nextOffset,
-      });
-      const { error: pendErr } = await admin
-        .from("focus_get_sync_nfe_interpret_jobs")
-        .update({
-          status: "pending",
-          staging_process_offset: chunk.nextOffset,
-          last_error:
-            "chain_depth_cap: retoma no próximo cron (ou aumente FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH).",
-        })
-        .eq("id", row.id);
-      if (pendErr) {
-        await finalizeJobFailed(admin, row.id, pendErr.message);
-        return { done: false, err: pendErr.message };
-      }
-      await setOnboardingInterpretNfesSyncProgress(
-        admin,
-        row.company_id,
-        isOnboardingJob,
-        chunk.nextOffset,
-      );
-      logPhase("job_reposto_pending_chain_cap", { job_id: row.id });
-      return { done: false, fell_back_to_pending: true };
-    }
-
-    const { error: partialErr } = await admin
-      .from("focus_get_sync_nfe_interpret_jobs")
-      .update({
-        status: "processing",
-        staging_process_offset: chunk.nextOffset,
-        last_error: null,
-      })
-      .eq("id", row.id);
-
-    if (partialErr) {
-      await finalizeJobFailed(admin, row.id, partialErr.message);
-      return { done: false, err: partialErr.message };
-    }
-
-    await setOnboardingInterpretNfesSyncProgress(
-      admin,
-      row.company_id,
-      isOnboardingJob,
-      chunk.nextOffset,
-    );
-
-    if (!anonKey.trim()) {
-      logPhase("chain_skip_sem_anon", {
-        job_id: row.id,
-        hint: "defina SUPABASE_ANON_KEY na função",
-      });
-      const { error: pend2 } = await admin
-        .from("focus_get_sync_nfe_interpret_jobs")
-        .update({
-          status: "pending",
-          staging_process_offset: chunk.nextOffset,
-          last_error:
-            "encadeamento automático omitido (SUPABASE_ANON_KEY ausente); retoma no cron.",
-        })
-        .eq("id", row.id);
-      if (pend2) {
-        await finalizeJobFailed(admin, row.id, pend2.message);
-        return { done: false, err: pend2.message };
-      }
-      logPhase("job_reposto_pending_sem_anon", { job_id: row.id });
-      return { done: false, fell_back_to_pending: true };
-    }
-
-    scheduleContinueChain(
-      supabaseUrl,
-      anonKey,
-      bearerSecret,
-      row.id,
-      chainDepth + 1,
-    );
-    logPhase("chunk_parcial_continua", {
-      job_id: row.id,
-      next_offset: chunk.nextOffset,
-      chain_depth_next: chainDepth + 1,
-    });
-    return { done: false };
-  }
-
-  await setOnboardingInterpretNfesSyncProgress(
-    admin,
-    row.company_id,
-    isOnboardingJob,
-    chunk.nextOffset,
-  );
-
-  const doneErr = await completeInterpretJobAndEndOnboardingSync(admin, row);
-  if (doneErr) {
-    await finalizeJobFailed(admin, row.id, doneErr);
-    logPhase("job_finalizar_erro", { job_id: row.id, error: doneErr });
-    return { done: true, err: doneErr };
-  }
-  logPhase("job_concluido", { job_id: row.id, company_id: row.company_id });
-  return { done: true };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -870,355 +995,140 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const apiKey = anonKey || serviceKey;
   let activeJobId: string | null = null;
   try {
-  const maxJobs = intFromEnv("FOCUS_GET_SYNC_INTERPRET_MAX_JOBS", 2, 1, 50);
-  const stagingChunk = intFromEnv(
-    "FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK",
-    5,
-    1,
-    50,
-  );
-  const maxChainDepth = intFromEnv(
-    "FOCUS_GET_SYNC_INTERPRET_MAX_CHAIN_DEPTH",
-    120,
-    1,
-    500,
-  );
-
-  const bodyRaw = await req.json().catch(() => ({}));
-  const body =
-    bodyRaw && typeof bodyRaw === "object" && !Array.isArray(bodyRaw)
-      ? (bodyRaw as Record<string, unknown>)
-      : {};
-  const continueJobId = String(body.continue_job_id ?? "").trim();
-  const chainDepthRaw = body.chain_depth;
-  const chainDepth = Number.isFinite(Number(chainDepthRaw))
-    ? Math.max(0, Math.floor(Number(chainDepthRaw)))
-    : 0;
-
-  logPhase("exec_inicio", {
-    mode: continueJobId ? "continue" : "claim",
-    continue_job_id: continueJobId || null,
-    chain_depth: chainDepth,
-    max_jobs: maxJobs,
-    staging_chunk: stagingChunk,
-    max_chain_depth: maxChainDepth,
-  });
-
-  /** Modo continuação: mesmo job em `processing`, sem claim. */
-  if (continueJobId) {
-    if (!UUID_RE.test(continueJobId)) {
-      logPhase("continue_rejeitado", { reason: "continue_job_id_invalido" });
-      return json({ ok: false, error: "continue_job_id inválido." }, 400);
-    }
-    if (chainDepth > maxChainDepth) {
-      logPhase("continue_rejeitado", {
-        reason: "chain_depth_excedido",
-        chain_depth: chainDepth,
-        max_chain_depth: maxChainDepth,
-      });
-      return json(
-        {
-          ok: false,
-          error: `chain_depth > max (${maxChainDepth}).`,
-          continue_job_id: continueJobId,
-        },
-        429,
-      );
-    }
-
-    const { data: jobRow, error: loadErr } = await admin
-      .from("focus_get_sync_nfe_interpret_jobs")
-      .select(
-        "id,exec_id,company_id,status,attempts,staging_process_offset,staging_xml_total,onboarding",
-      )
-      .eq("id", continueJobId)
-      .maybeSingle();
-
-    if (loadErr) {
-      logPhase("continue_job_load_erro", {
-        job_id: continueJobId,
-        error: loadErr.message,
-      });
-      return json({ ok: false, error: loadErr.message }, 500);
-    }
-    if (!jobRow) {
-      logPhase("continue_skip", {
-        job_id: continueJobId,
-        reason: "job_nao_encontrado",
-      });
-      return json({
-        ok: true,
-        mode: "continue",
-        skipped: true,
-        reason: "job_nao_encontrado",
-      });
-    }
-
-    const st = String((jobRow as InterpretJobRow).status ?? "");
-    if (st !== "processing") {
-      logPhase("continue_skip", {
-        job_id: continueJobId,
-        reason: `status_${st}`,
-      });
-      return json({
-        ok: true,
-        mode: "continue",
-        skipped: true,
-        reason: `status_${st}`,
-        job_id: continueJobId,
-      });
-    }
-
-    const row = jobRow as InterpretJobRow;
-    activeJobId = row.id;
-    logPhase("continue_job_carregado", {
-      job_id: row.id,
-      exec_id: row.exec_id,
-      company_id: row.company_id,
-      offset: row.staging_process_offset ?? 0,
-      staging_xml_total: row.staging_xml_total ?? 0,
-      attempts: row.attempts,
-      onboarding: row.onboarding === true,
-    });
-    const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
-
-    if (chunk.kind === "fail") {
-      logPhase("continue_chunk_falhou", {
-        job_id: row.id,
-        error: chunk.message,
-      });
-      await finalizeJobFailed(admin, row.id, chunk.message);
-      return json(
-        { ok: false, mode: "continue", error: chunk.message, job_id: row.id },
-        500,
-      );
-    }
-
-    if (chunk.kind === "empty_done") {
-      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
-      if (err) await finalizeJobFailed(admin, row.id, err);
-      return json({
-        ok: true,
-        mode: "continue",
-        job_id: row.id,
-        outcome: "empty_staging",
-      });
-    }
-
-    if (chunk.kind === "offset_done") {
-      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
-      if (err) await finalizeJobFailed(admin, row.id, err);
-      return json({
-        ok: true,
-        mode: "continue",
-        job_id: row.id,
-        outcome: "offset_already_complete",
-      });
-    }
-
-    const out = await applyChunkOutcome(
-      admin,
-      row,
-      chunk,
-      chainDepth,
-      supabaseUrl,
-      anonKey,
-      expected,
-      maxChainDepth,
+    const maxJobs = intFromEnv("FOCUS_GET_SYNC_INTERPRET_MAX_JOBS", 2, 1, 50);
+    const stagingChunk = intFromEnv(
+      "FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK",
+      5,
+      1,
+      50,
+    );
+    const queueVtSeconds = intFromEnv(
+      "FOCUS_GET_SYNC_INTERPRET_QUEUE_VT",
+      300,
+      30,
+      3600,
     );
 
+    logPhase("exec_inicio", {
+      max_jobs: maxJobs,
+      staging_chunk: stagingChunk,
+      queue_vt_seconds: queueVtSeconds,
+    });
+
+    const queueOutcome = await consumeInterpretStagingQueue(
+      admin,
+      maxJobs,
+      stagingChunk,
+      queueVtSeconds,
+      supabaseUrl,
+      expected,
+      apiKey,
+      (id) => {
+        activeJobId = id;
+      },
+    );
+
+    const summaries: JobSummary[] = [...queueOutcome.summaries];
+    const processed: string[] = [...queueOutcome.processed];
+    let slotsRemaining = maxJobs - queueOutcome.attempted;
+    let recoveredOnEmptyClaim: RecoverSummary | null = null;
+
+    for (let slot = 0; slotsRemaining > 0; slot++) {
+      let row: InterpretJobRow | null = null;
+      const { data: rows, error: claimErr } = await admin.rpc(
+        "focus_get_sync_nfe_interpret_claim_job",
+      );
+      if (claimErr) {
+        logPhase("claim_erro", { error: claimErr.message, slot });
+        return json({ ok: false, error: claimErr.message, processed }, 500);
+      }
+      row = (Array.isArray(rows) ? rows[0] : null) as InterpretJobRow | null;
+
+      if (!row?.id) {
+        logPhase("claim_vazio", { slot });
+        if (slot === 0 && !recoveredOnEmptyClaim) {
+          recoveredOnEmptyClaim = await recoverOrphanInterpretJobs(
+            admin,
+            stagingChunk,
+            supabaseUrl,
+            expected,
+            apiKey,
+          );
+          if (
+            recoveredOnEmptyClaim.finalized.length > 0 ||
+            recoveredOnEmptyClaim.reposted.length > 0
+          ) {
+            const { data: retryRows, error: retryErr } = await admin.rpc(
+              "focus_get_sync_nfe_interpret_claim_job",
+            );
+            if (retryErr) {
+              logPhase("claim_retry_erro", { error: retryErr.message });
+            } else {
+              row = (
+                Array.isArray(retryRows) ? retryRows[0] : null
+              ) as InterpretJobRow | null;
+              if (row?.id) {
+                logPhase("claim_retry_ok", { job_id: row.id });
+              }
+            }
+          }
+        }
+        if (!row?.id) {
+          activeJobId = null;
+          break;
+        }
+      }
+
+      activeJobId = row.id;
+      logPhase("job_reclamado", {
+        job_id: row.id,
+        exec_id: row.exec_id,
+        company_id: row.company_id,
+        attempts: row.attempts,
+        offset: row.staging_process_offset ?? 0,
+        staging_xml_total: row.staging_xml_total ?? 0,
+        onboarding: row.onboarding === true,
+        slot,
+      });
+
+      const jobResult = await processOneInterpretJobRow(
+        admin,
+        row,
+        stagingChunk,
+        supabaseUrl,
+        expected,
+        apiKey,
+      );
+
+      if (jobResult.summary) {
+        summaries.push(jobResult.summary);
+      }
+      if (jobResult.processed) {
+        processed.push(row.id);
+      }
+
+      slotsRemaining--;
+    }
+
     logPhase("exec_fim", {
-      mode: "continue",
-      job_id: row.id,
-      chain_depth: chainDepth,
-      staging_rows: chunk.listLen,
-      continua: chunk.hasMore,
-      job_finished: out.done,
-      warn: out.err ?? null,
+      queue_attempted: queueOutcome.attempted,
+      jobs_processed: processed.length,
+      job_ids: processed,
+      summaries_count: summaries.length,
+      recovered: recoveredOnEmptyClaim,
     });
 
     return json({
       ok: true,
-      mode: "continue",
-      job_id: row.id,
-      chain_depth: chainDepth,
-      staging_rows: chunk.listLen,
-      interpretacoes: chunk.interpretacoes.length,
-      staging_total: chunk.total,
-      chunk_offset_start: chunk.offset,
-      continua: chunk.hasMore,
-      job_finished: out.done,
-      chain_scheduled:
-        chunk.hasMore &&
-        !out.err &&
-        !out.fell_back_to_pending &&
-        chainDepth < maxChainDepth,
-      warn: out.err,
+      queue_attempted: queueOutcome.attempted,
+      jobs_processed: processed.length,
+      job_ids: processed,
+      summaries,
+      recovered: recoveredOnEmptyClaim,
     });
-  }
-
-  const processed: string[] = [];
-  const summaries: JobSummary[] = [];
-  let recoveredOnEmptyClaim: RecoverSummary | null = null;
-
-  for (let i = 0; i < maxJobs; i++) {
-    let row: InterpretJobRow | null = null;
-    const { data: rows, error: claimErr } = await admin.rpc(
-      "focus_get_sync_nfe_interpret_claim_job",
-    );
-    if (claimErr) {
-      logPhase("claim_erro", { error: claimErr.message, slot: i });
-      return json({ ok: false, error: claimErr.message, processed }, 500);
-    }
-    row = (Array.isArray(rows) ? rows[0] : null) as InterpretJobRow | null;
-
-    if (!row?.id) {
-      logPhase("claim_vazio", { slot: i });
-      if (i === 0 && !recoveredOnEmptyClaim) {
-        recoveredOnEmptyClaim = await recoverOrphanInterpretJobs(
-          admin,
-          stagingChunk,
-          supabaseUrl,
-          anonKey,
-          expected,
-          maxChainDepth,
-        );
-        if (
-          recoveredOnEmptyClaim.finalized.length > 0 ||
-          recoveredOnEmptyClaim.reposted.length > 0
-        ) {
-          const { data: retryRows, error: retryErr } = await admin.rpc(
-            "focus_get_sync_nfe_interpret_claim_job",
-          );
-          if (retryErr) {
-            logPhase("claim_retry_erro", { error: retryErr.message });
-          } else {
-            row = (
-              Array.isArray(retryRows) ? retryRows[0] : null
-            ) as InterpretJobRow | null;
-            if (row?.id) {
-              logPhase("claim_retry_ok", { job_id: row.id });
-            }
-          }
-        }
-      }
-      if (!row?.id) {
-        activeJobId = null;
-        break;
-      }
-    }
-
-    activeJobId = row.id;
-    logPhase("job_reclamado", {
-      job_id: row.id,
-      exec_id: row.exec_id,
-      company_id: row.company_id,
-      attempts: row.attempts,
-      offset: row.staging_process_offset ?? 0,
-      staging_xml_total: row.staging_xml_total ?? 0,
-      onboarding: row.onboarding === true,
-      slot: i,
-    });
-    const chunk = await runInterpretStagingChunk(admin, row, stagingChunk);
-
-    if (chunk.kind === "fail") {
-      logPhase("job_falhou", { job_id: row.id, error: chunk.message });
-      await finalizeJobFailed(admin, row.id, chunk.message);
-      continue;
-    }
-
-    if (chunk.kind === "empty_done") {
-      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
-      if (!err) {
-        processed.push(row.id);
-        summaries.push({
-          job_id: row.id,
-          exec_id: row.exec_id,
-          company_id: row.company_id,
-          staging_rows: 0,
-          interpretacoes: 0,
-          staging_total: 0,
-          staging_xml_total: row.staging_xml_total ?? 0,
-          chunk_offset_start: 0,
-          continua: false,
-          chain_depth: 0,
-        });
-      } else {
-        await finalizeJobFailed(admin, row.id, err);
-      }
-      continue;
-    }
-
-    if (chunk.kind === "offset_done") {
-      const err = await completeInterpretJobAndEndOnboardingSync(admin, row);
-      if (!err) {
-        processed.push(row.id);
-        summaries.push({
-          job_id: row.id,
-          exec_id: row.exec_id,
-          company_id: row.company_id,
-          staging_rows: 0,
-          interpretacoes: 0,
-          staging_total: 0,
-          staging_xml_total: row.staging_xml_total ?? 0,
-          chunk_offset_start: Math.floor(
-            Number(row.staging_process_offset ?? 0) || 0,
-          ),
-          continua: false,
-          chain_depth: 0,
-        });
-      } else {
-        await finalizeJobFailed(admin, row.id, err);
-      }
-      continue;
-    }
-
-    summaries.push({
-      job_id: row.id,
-      exec_id: row.exec_id,
-      company_id: row.company_id,
-      staging_rows: chunk.listLen,
-      interpretacoes: chunk.interpretacoes.length,
-      staging_total: chunk.total,
-      staging_xml_total: row.staging_xml_total ?? chunk.total,
-      chunk_offset_start: chunk.offset,
-      continua: chunk.hasMore,
-      chain_depth: 0,
-    });
-
-    const out = await applyChunkOutcome(
-      admin,
-      row,
-      chunk,
-      0,
-      supabaseUrl,
-      anonKey,
-      expected,
-      maxChainDepth,
-    );
-
-    if (out.done && !out.err) {
-      processed.push(row.id);
-    }
-  }
-
-  logPhase("exec_fim", {
-    mode: "claim",
-    jobs_processed: processed.length,
-    job_ids: processed,
-    summaries_count: summaries.length,
-    recovered: recoveredOnEmptyClaim,
-  });
-
-  return json({
-    ok: true,
-    jobs_processed: processed.length,
-    job_ids: processed,
-    summaries,
-    recovered: recoveredOnEmptyClaim,
-  });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logPhase("fatal_catch", {

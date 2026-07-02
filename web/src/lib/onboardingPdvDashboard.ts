@@ -114,7 +114,9 @@ export function isOnboardingPdvConfirmPhase(raw: unknown): boolean {
   const o = parseOnboardingPdv(raw);
   if (o.completed) return false;
   if (o.import_status !== "completed") return false;
-  if (o.sales_total <= 0) return false;
+  if (o.sales_total <= 0) {
+    return o.portal_outcome === "success";
+  }
   return o.sales_sync >= o.sales_total;
 }
 

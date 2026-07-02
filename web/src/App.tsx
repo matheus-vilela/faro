@@ -1,3 +1,4 @@
+import { DevEnvironmentBanner } from "@/components/DevEnvironmentBanner";
 import { AppLayout } from "@/components/AppLayout";
 import { ConfiguracoesLayout } from "@/components/ConfiguracoesLayout";
 import { RouteDocumentTitle } from "@/components/RouteDocumentTitle";
@@ -210,7 +211,7 @@ function ThemeAwareToaster() {
       position="top-right"
       closeButton
       richColors
-      offset="1.5rem"
+      offset="calc(1.5rem + var(--faro-dev-banner-height, 0px))"
       toastOptions={{
         style: {
           borderRadius: "0.75rem",
@@ -227,6 +228,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
+        <DevEnvironmentBanner />
         <RouteDocumentTitle />
         <AuthProvider>
           <TooltipProvider>

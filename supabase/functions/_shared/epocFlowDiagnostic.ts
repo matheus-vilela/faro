@@ -296,6 +296,22 @@ export function buildEpocImportJobFlowDiagnostic(
   }
 
   if (input.status === "PENDING" || input.status === "PROCESSING") {
+    if (csvRows === 0) {
+      return buildDiagnostic(
+        {
+          portal_login: phase("portal_login", "ok"),
+          portal_search: priorOk,
+          csv_creation: phase("csv_creation", "warn", "CSV sem linhas de dados."),
+          csv_import: phase(
+            "csv_import",
+            "ok",
+            "Nenhuma linha a importar; fluxo concluído.",
+          ),
+        },
+        null,
+        "CSV sem linhas de dados; importação não necessária.",
+      );
+    }
     return buildDiagnostic(
       {
         portal_login: phase("portal_login", "ok"),
