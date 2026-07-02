@@ -43,6 +43,7 @@ export type FluxoBoletoRow = Boleto & {
   series_master_expense_id?: string | null;
   occurrence_month?: string | null;
   is_series_exception?: boolean;
+  supplier?: { id: string; name: string; document: string | null } | null;
 };
 
 export type SeriesEditScope = "single_month" | "from_month" | "until_next_adjustment";

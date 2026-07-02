@@ -92,6 +92,10 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
+function fluxoBoletoSupplierLabel(b: FluxoBoletoRow): string | null {
+  return b.supplier?.name?.trim() || null;
+}
+
 export type FluxoBoletosPageConfig = {
   flowType: BoletoFlowType;
   title: string;
@@ -631,6 +635,11 @@ export function FluxoBoletosPage({
               {boletoCategoryLabel(b)}
             </span>
           </div>
+          {fluxoBoletoSupplierLabel(b) ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {fluxoBoletoSupplierLabel(b)}
+            </p>
+          ) : null}
           {b.provider ? (
             <p className="mt-2 text-sm text-muted-foreground">{b.provider}</p>
           ) : null}
@@ -719,6 +728,11 @@ export function FluxoBoletosPage({
           <p className="mt-1.5 truncate text-xs text-muted-foreground">
             {formatBoletoFluxoDescription(b)}
           </p>
+          {fluxoBoletoSupplierLabel(b) ? (
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {fluxoBoletoSupplierLabel(b)}
+            </p>
+          ) : null}
           {pendingReceipt && (
             <p className="mt-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200">
               NF ou romaneio sem recebimento da mercadoria confirmado.
@@ -1171,6 +1185,11 @@ export function FluxoBoletosPage({
                       >
                         {STATUS_LABELS[boletoResumo.status]}
                       </Badge>
+                    )}
+                    {fluxoBoletoSupplierLabel(boletoResumo) && (
+                      <span className="text-sm text-muted-foreground">
+                        {fluxoBoletoSupplierLabel(boletoResumo)}
+                      </span>
                     )}
                     {boletoResumo.provider && (
                       <span className="text-sm text-muted-foreground">

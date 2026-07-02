@@ -367,7 +367,7 @@ export function filterBoletosBySearch(
   const term = search.trim().toLowerCase();
   if (!term) return rows;
   return rows.filter((b) => {
-    const hay = `${b.description} ${b.provider ?? ""}`.toLowerCase();
+    const hay = `${b.description} ${b.provider ?? ""} ${b.supplier?.name ?? ""}`.toLowerCase();
     return hay.includes(term);
   });
 }
