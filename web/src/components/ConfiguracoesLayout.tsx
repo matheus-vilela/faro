@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   FileKey,
   FolderTree,
+  Landmark,
   MessageCircle,
   Percent,
   Settings2,
@@ -47,6 +48,11 @@ const SUB_LINKS = [
     to: "/app/configuracoes/categorias",
     label: "Categorias",
     icon: FolderTree,
+  },
+  {
+    to: "/app/configuracoes/contas-bancarias",
+    label: "Contas bancárias",
+    icon: Landmark,
   },
   {
     to: "/app/configuracoes/impostos-receita",
