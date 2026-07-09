@@ -1,199 +1,215 @@
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { PasswordInput } from "@/components/ui/password-input";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { SetupCertificateState } from "@/types/companySetup";
-import { CheckCircle2, FileKey, FileUp, Loader2, Trash2 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import type {
+  CertificateFiscalMode,
+  SetupCertificateState,
+} from "@/types/companySetup";
+import { Check, Copy, Link2, Loader2, ShieldCheck, SkipForward } from "lucide-react";
+import { CertificateUploadFields } from "./CertificateUploadFields";
+
+const FISCAL_OPTIONS: {
+  mode: CertificateFiscalMode;
+  title: string;
+  description: string;
+  icon: typeof ShieldCheck;
+}[] = [
+  {
+    mode: "upload_now",
+    title: "Enviar certificado A1 agora",
+    description:
+      "Conecta a SEFAZ neste passo. O certificado não fica salvo na Faro.",
+    icon: ShieldCheck,
+  },
+  {
+    mode: "skip",
+    title: "Continuar sem enviar certificado",
+    description: "Você pode conectar depois em Configurações → Fiscal.",
+    icon: SkipForward,
+  },
+  {
+    mode: "delegate_link",
+    title: "Enviar link para outra pessoa conectar o certificado",
+    description: "Gere um link único para quem cuida do certificado.",
+    icon: Link2,
+  },
+];
 
 export function StepCertificateForm({
-  companyId,
   cert,
   password,
   onPasswordChange,
   onPickFile,
   onRemoveCertificate,
+  onModeChange,
   busy,
-  lockWhenValid = true,
+  delegationLinkUrl,
+  onGenerateLink,
+  linkGenerating,
+  onCopyLink,
+  linkCopied,
 }: {
-  /** `null` enquanto a unidade ainda não existe na Faro (passos 1–2 antes da Focus). */
-  companyId: string | null;
   cert: SetupCertificateState | undefined;
   password: string;
   onPasswordChange: (v: string) => void;
   onPickFile: (file: File) => void;
-  /** Quando o certificado está válido: remove e libera novo envio + senha. */
   onRemoveCertificate?: () => void;
+  onModeChange: (mode: CertificateFiscalMode) => void;
   busy: boolean;
-  /** Quando false, mantém upload/senha ativos mesmo com status válido. */
-  lockWhenValid?: boolean;
+  delegationLinkUrl?: string | null;
+  onGenerateLink?: () => void;
+  linkGenerating?: boolean;
+  onCopyLink?: () => void;
+  linkCopied?: boolean;
 }) {
-  const fileInputId = useId();
+  const mode: CertificateFiscalMode = cert?.mode ?? "undecided";
   const status = cert?.status ?? "not_sent";
-  const lockedAfterValid = lockWhenValid && status === "valid";
-  const hasFile = Boolean(cert?.file_name);
-  const [dragOver, setDragOver] = useState(false);
-  const dragDepth = useRef(0);
 
   return (
-    <div className="space-y-4" data-setup-company={companyId ?? ""}>
+    <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Envie o certificado digital A1 (PFX/P12) e informe a senha. <br />
-        Esse passo é necessário para identificar notas recebidas ou emitidas
-        automaticamente.
-        <br />
+        Escolha como deseja conectar o certificado digital A1 (PFX/P12) à SEFAZ.
         Por segurança, a senha e o conteúdo do certificado não são gravados na
         Faro.
       </p>
 
-      {!lockedAfterValid ? (
-        <div
-          className={cn(
-            "flex flex-col items-center justify-center gap-3 rounded-xl border-2 px-6 py-10 transition-[border-color,box-shadow,background-color]",
-            hasFile
-              ? "border-primary/50 bg-primary/5 shadow-sm"
-              : dragOver
-                ? "border-dashed border-primary/60 bg-primary/5"
-                : "border-dashed border-muted-foreground/30 bg-muted/20",
-            !hasFile && !dragOver && "hover:border-muted-foreground/50 hover:bg-muted/30",
-          )}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragDepth.current += 1;
-            setDragOver(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragDepth.current -= 1;
-            if (dragDepth.current <= 0) {
-              dragDepth.current = 0;
-              setDragOver(false);
-            }
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragDepth.current = 0;
-            setDragOver(false);
-            const f = e.dataTransfer.files[0];
-            if (f) onPickFile(f);
-          }}
-        >
-          {hasFile ? (
-            <>
-              <div
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary"
-                aria-hidden
-              >
-                <CheckCircle2 className="h-7 w-7" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-foreground">
-                  Arquivo carregado
-                </p>
-                <p
-                  className="mt-1 break-all text-sm text-muted-foreground"
-                  title={cert?.file_name}
-                >
-                  {cert?.file_name}
-                </p>
-                <label
-                  htmlFor={fileInputId}
-                  className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-                >
-                  <FileUp className="h-4 w-4" />
-                  Escolher outro arquivo
-                </label>
-              </div>
-            </>
-          ) : (
-            <>
-              <FileKey
-                className={cn(
-                  "h-10 w-10",
-                  dragOver ? "text-primary" : "text-muted-foreground",
-                )}
-                aria-hidden
-              />
-              <div className="text-center text-sm">
-                <span className="font-medium">
-                  {dragOver
-                    ? "Solte o arquivo aqui"
-                    : "Arraste o certificado ou "}
-                </span>
-                {!dragOver ? (
-                  <label
-                    htmlFor={fileInputId}
-                    className="cursor-pointer text-primary underline"
-                  >
-                    escolha um arquivo
-                  </label>
-                ) : null}
-              </div>
-            </>
-          )}
-          <input
-            id={fileInputId}
-            type="file"
-            accept=".pfx,.p12"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onPickFile(f);
-            }}
-          />
-        </div>
-      ) : (
-        <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm">
-          <p className="font-medium">Certificado válido</p>
-          {cert?.file_name ? (
-            <p className="text-muted-foreground">Arquivo: {cert.file_name}</p>
-          ) : null}
-          {onRemoveCertificate ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              onClick={onRemoveCertificate}
+      <div className="space-y-3">
+        {FISCAL_OPTIONS.map((opt) => {
+          const selected = mode === opt.mode;
+          const Icon = opt.icon;
+          return (
+            <Card
+              key={opt.mode}
+              className={cn(
+                "overflow-hidden transition-shadow",
+                selected
+                  ? "border-primary ring-1 ring-primary/20 bg-primary/5"
+                  : "border-border/80",
+              )}
             >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Remover certificado
-            </Button>
-          ) : null}
-        </div>
-      )}
+              <button
+                type="button"
+                onClick={() => onModeChange(opt.mode)}
+                className={cn(
+                  "flex w-full items-start gap-4 p-4 text-left transition-colors sm:p-5",
+                  "hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                )}
+                aria-pressed={selected}
+              >
+                <div
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
+                    selected
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-muted/50 text-muted-foreground",
+                  )}
+                >
+                  <Icon className="h-5 w-5" aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground sm:text-base">
+                    {opt.title}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {opt.description}
+                  </p>
+                </div>
+                {selected ? (
+                  <Check
+                    className="h-5 w-5 shrink-0 text-primary"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
 
-      {!lockedAfterValid ? (
-        <div className="space-y-2">
-          <Label htmlFor="cert-pass">Senha do certificado</Label>
-          <PasswordInput
-            id="cert-pass"
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
-      ) : null}
+              {opt.mode === "upload_now" && selected ? (
+                <div className="border-t border-border/60 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
+                  <CertificateUploadFields
+                    cert={cert}
+                    password={password}
+                    onPasswordChange={onPasswordChange}
+                    onPickFile={onPickFile}
+                    busy={busy}
+                    lockWhenValid={false}
+                  />
+                  {status === "valid" && onRemoveCertificate ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={onRemoveCertificate}
+                    >
+                      Remover certificado
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground">Status:</span>
-        <span className="font-medium capitalize">
-          {status === "not_sent" && "Não enviado"}
-          {status === "uploaded" && "Enviado"}
-          {status === "validating" && "Validando"}
-          {status === "valid" && "Válido"}
-          {status === "invalid" && "Inválido"}
-        </span>
-        {busy || status === "validating" ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : null}
+              {opt.mode === "delegate_link" && selected ? (
+                <div className="border-t border-border/60 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
+                  {delegationLinkUrl ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Compartilhe este link com quem vai enviar o certificado.
+                        Ele expira em 72 horas e só pode ser usado uma vez.
+                      </p>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          type="text"
+                          readOnly
+                          value={delegationLinkUrl}
+                          className="min-w-0 flex-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm"
+                          aria-label="Link para envio do certificado"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={onCopyLink}
+                        >
+                          {linkCopied ? (
+                            <>
+                              <Check className="mr-2 h-4 w-4" />
+                              Copiado
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="mr-2 h-4 w-4" />
+                              Copiar link
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Gere um link único para outra pessoa enviar o certificado
+                        sem acessar o Faro.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={linkGenerating || !onGenerateLink}
+                        onClick={onGenerateLink}
+                      >
+                        {linkGenerating ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Gerando link…
+                          </>
+                        ) : (
+                          "Gerar link"
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

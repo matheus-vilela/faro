@@ -79,10 +79,19 @@ export type CertificateUploadStatus =
   | "uploaded"
   | "validating"
   | "valid"
-  | "invalid";
+  | "invalid"
+  | "delegated_pending";
+
+export type CertificateFiscalMode =
+  | "undecided"
+  | "upload_now"
+  | "skip"
+  | "delegate_link";
 
 export type SetupCertificateState = {
   status: CertificateUploadStatus;
+  mode?: CertificateFiscalMode;
+  delegation_link_id?: string;
   storage_path?: string;
   file_name?: string;
   error_message?: string;
@@ -125,8 +134,16 @@ export type SetupXmlZipImportState = {
 
 export type EpocWizardMode = "undecided" | "no" | "credentials";
 
+export type PdvSalesOption =
+  | "undecided"
+  | "epoc"
+  | "other_system"
+  | "no_system";
+
 export type SetupEpocState = {
   mode: EpocWizardMode;
+  pdv_option?: PdvSalesOption;
+  other_system_name?: string;
   /** Rascunho local antes de gravar em company_integrations */
   enabled?: boolean;
   username?: string;

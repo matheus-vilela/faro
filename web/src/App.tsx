@@ -36,6 +36,7 @@ import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
+import { CertificadoOnboardingPublic } from "@/pages/CertificadoOnboardingPublic";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
 import { RedirectInventorySlug } from "@/pages/RedirectInventorySlug";
@@ -194,6 +195,10 @@ function AppRoutes() {
       <Route path="/k/:slug" element={<RedirectChecklistSlug />} />
       <Route path="/i/:slug" element={<RedirectInventorySlug />} />
       <Route path="/contagem-estoque/:token" element={<ContagemEstoquePublic />} />
+      <Route
+        path="/certificado-onboarding/:token"
+        element={<CertificadoOnboardingPublic />}
+      />
       <Route path="/checklist/:token" element={<ExecutarChecklist />} />
       <Route
         path="/*"

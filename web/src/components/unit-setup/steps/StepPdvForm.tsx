@@ -1,281 +1,139 @@
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Switch } from "@/components/ui/switch";
+import { resolvePdvOption } from "@/lib/setup/validation";
 import { cn } from "@/lib/utils";
-import type { SetupEpocState } from "@/types/companySetup";
 import type { EpocValidateLoginErrorCode } from "@/lib/setup/epocStep3ValidationGate";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { PdvSalesOption, SetupEpocState } from "@/types/companySetup";
+import { Check, NotebookPen, Plug, Store } from "lucide-react";
+import { EpocIntegrationFields } from "./EpocIntegrationFields";
+
+const PDV_OPTIONS: {
+  option: PdvSalesOption;
+  title: string;
+  description: string;
+  icon: typeof Plug;
+}[] = [
+  {
+    option: "epoc",
+    title: "Epoc",
+    description: "Integração automática de vendas via portal Epoc.",
+    icon: Plug,
+  },
+  {
+    option: "other_system",
+    title: "Outro sistema",
+    description: "Informe qual sistema você usa hoje.",
+    icon: Store,
+  },
+  {
+    option: "no_system",
+    title: "Não utilizo sistema (Caderno/Maquininha)",
+    description: "Siga sem conectar um PDV agora.",
+    icon: NotebookPen,
+  },
+];
 
 export function StepPdvForm({
   epoc,
   onEpocChange,
+  onPdvOptionChange,
   validationError,
 }: {
   epoc: SetupEpocState | undefined;
   onEpocChange: (patch: Partial<SetupEpocState>) => void;
+  onPdvOptionChange: (option: PdvSalesOption) => void;
   validationError?: {
     message: string;
     errorCode: EpocValidateLoginErrorCode | string;
   } | null;
 }) {
-  const mode = epoc?.mode ?? "undecided";
-  const enabled = epoc?.enabled ?? false;
-  const [accordionOpen, setAccordionOpen] = useState(mode === "credentials");
-
-  useEffect(() => {
-    if (mode === "credentials") setAccordionOpen(true);
-  }, [mode]);
-
-  const patchFields = (patch: Partial<SetupEpocState>) => {
-    if (
-      patch.password !== undefined &&
-      patch.password &&
-      patch.password.length > 0
-    ) {
-      onEpocChange({ ...patch, password_on_server: false });
-      return;
-    }
-    onEpocChange(patch);
-  };
+  const selectedOption = resolvePdvOption(epoc);
 
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Conecte o ponto de venda (PDV) desta unidade ao Faro para importar
-        vendas e manter os dados alinhados. Indique se há integração com algum
-        PDV ou se prefere seguir sem essa conexão.
-      </p>
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant={mode === "no" ? "default" : "outline"}
-          onClick={() => onEpocChange({ mode: "no" })}
-        >
-          Não utilizo
-        </Button>
-        <Button
-          type="button"
-          variant={mode === "credentials" ? "default" : "outline"}
-          onClick={() =>
-            onEpocChange({
-              mode: "credentials",
-              enabled: epoc?.enabled ?? true,
-            })
-          }
-        >
-          Utilizo PDV
-        </Button>
-      </div>
-
-      {mode === "credentials" ? (
-        <Collapsible open={accordionOpen} onOpenChange={setAccordionOpen}>
-          <Card
-            className={cn(
-              "overflow-hidden transition-shadow",
-              enabled
-                ? "border-emerald-500/35 ring-1 ring-emerald-500/20"
-                : "border-border/80",
-            )}
-          >
-            <CollapsibleTrigger asChild>
+    <div className="space-y-4">
+      <div className="space-y-3">
+        {PDV_OPTIONS.map((opt) => {
+          const selected = selectedOption === opt.option;
+          const Icon = opt.icon;
+          return (
+            <Card
+              key={opt.option}
+              className={cn(
+                "overflow-hidden transition-shadow",
+                selected
+                  ? "border-primary ring-1 ring-primary/20 bg-primary/5"
+                  : "border-border/80",
+              )}
+            >
               <button
                 type="button"
+                onClick={() => onPdvOptionChange(opt.option)}
                 className={cn(
-                  "flex w-full items-center gap-4 p-5 text-left transition-colors",
-                  "hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  "flex w-full items-start gap-4 p-4 text-left transition-colors sm:p-5",
+                  "hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 )}
+                aria-pressed={selected}
               >
                 <div
                   className={cn(
-                    "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-sm font-bold tracking-tight",
-                    enabled
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border",
+                    selected
+                      ? "border-primary/40 bg-primary/10 text-primary"
                       : "border-border bg-muted/50 text-muted-foreground",
                   )}
                 >
-                  E
+                  <Icon className="h-5 w-5" aria-hidden />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-base font-semibold tracking-tight text-foreground">
-                    EPOC
+                  <p className="text-sm font-semibold text-foreground sm:text-base">
+                    {opt.title}
                   </p>
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    URL, usuário, senha e filial. O Faro importa as receitas de
-                    vendas após o login no portal.
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {opt.description}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {enabled ? (
-                    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]"
-                        aria-hidden
-                      />
-                      Ativo
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      <span
-                        className="h-2 w-2 rounded-full bg-muted-foreground/50"
-                        aria-hidden
-                      />
-                      Inativo
-                    </span>
-                  )}
-                  <ChevronDown
-                    className={cn(
-                      "h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200",
-                      accordionOpen && "rotate-180",
-                    )}
+                {selected ? (
+                  <Check
+                    className="h-5 w-5 shrink-0 text-primary"
                     aria-hidden
                   />
-                </div>
-              </button>
-            </CollapsibleTrigger>
-
-            <CollapsibleContent>
-              <div className="space-y-5 border-t border-border/80 px-5 py-5">
-                {validationError ? (
-                  <div
-                    role="alert"
-                    className="space-y-3 rounded-lg border border-destructive/35 bg-destructive/5 px-4 py-4 text-sm"
-                  >
-                    <p className="font-semibold text-destructive">
-                      Falha ao validar acesso ao EPOC
-                    </p>
-                    <p className="text-muted-foreground">
-                      Não foi possível confirmar a conexão com o EPOC. Revise os
-                      dados abaixo e tente novamente.
-                    </p>
-                    {validationError.message ? (
-                      <p className="text-foreground/90">
-                        {validationError.message}
-                      </p>
-                    ) : null}
-                    <ul className="list-inside list-disc space-y-1.5 text-muted-foreground">
-                      <li>
-                        Verifique se a URL do EPOC está correta.
-                      </li>
-                      <li>
-                        Confirme se o login e a senha estão corretos.
-                      </li>
-                      <li>
-                        Verifique se o servidor do EPOC está disponível.
-                      </li>
-                    </ul>
-                  </div>
                 ) : null}
-                <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/25 px-3 py-3">
-                  <div>
-                    <Label
-                      htmlFor="pdv-epoc-enabled"
-                      className="text-sm font-medium"
-                    >
-                      Integração ativa
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Quando ativo, o Faro usa estas credenciais na rotina
-                      diária.
-                    </p>
-                  </div>
-                  <Switch
-                    id="pdv-epoc-enabled"
-                    checked={enabled}
-                    onCheckedChange={(v) => patchFields({ enabled: v })}
-                  />
-                </div>
+              </button>
+            </Card>
+          );
+        })}
+      </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="pdv-epoc-base-url">
-                    URL base (portal EPOC)
-                  </Label>
-                  <Input
-                    id="pdv-epoc-base-url"
-                    type="url"
-                    placeholder="https://… ou http://…:porta"
-                    value={epoc?.base_url ?? ""}
-                    onChange={(e) => patchFields({ base_url: e.target.value })}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="pdv-epoc-user">Usuário</Label>
-                    <Input
-                      id="pdv-epoc-user"
-                      autoComplete="username"
-                      value={epoc?.username ?? ""}
-                      onChange={(e) =>
-                        patchFields({ username: e.target.value })
-                      }
-                      placeholder="Usuário no portal"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="pdv-epoc-pass">Senha</Label>
-                    <PasswordInput
-                      id="pdv-epoc-pass"
-                      autoComplete="current-password"
-                      value={epoc?.password ?? ""}
-                      onChange={(e) =>
-                        patchFields({ password: e.target.value })
-                      }
-                      placeholder={
-                        epoc?.password_on_server
-                          ? "Deixe em branco para manter a atual"
-                          : "Senha"
-                      }
-                    />
-                  </div>
-                  {/* <div className="space-y-2">
-                    <Label htmlFor="pdv-epoc-filial">Código da filial</Label>
-                    <Input
-                      id="pdv-epoc-filial"
-                      value={epoc?.codigo_filial ?? ""}
-                      onChange={(e) =>
-                        patchFields({ codigo_filial: e.target.value })
-                      }
-                      placeholder="Ex.: 123A (NaoMenu); vazio = 123A"
-                    />
-                  </div> */}
-                  {/* <div className="space-y-2">
-                    <Label>Ambiente</Label>
-                    <Select
-                      value={epoc?.ambiente ?? "producao"}
-                      onValueChange={(v) =>
-                        patchFields({ ambiente: v as EpocAmbiente })
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent position="popper" sideOffset={4} className="z-200">
-                        <SelectItem value="producao">Produção</SelectItem>
-                        <SelectItem value="homologacao">Homologação</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div> */}
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
+      {selectedOption === "epoc" ? (
+        <EpocIntegrationFields
+          epoc={epoc}
+          onEpocChange={onEpocChange}
+          validationError={validationError}
+        />
       ) : null}
 
-      {mode === "no" ? (
+      {selectedOption === "other_system" ? (
+        <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-4 sm:p-5">
+          <Label htmlFor="pdv-other-system-name">
+            Qual sistema você utiliza?
+          </Label>
+          <Input
+            id="pdv-other-system-name"
+            value={epoc?.other_system_name ?? ""}
+            onChange={(e) =>
+              onEpocChange({ other_system_name: e.target.value })
+            }
+            placeholder="Digite o nome do sistema"
+            autoComplete="off"
+          />
+        </div>
+      ) : null}
+
+      {selectedOption === "no_system" ? (
         <p className="text-sm text-muted-foreground">
-          Esta etapa será marcada como concluída sem integração com PDV.
+          Você pode avançar sem conectar um ponto de venda agora. Esta etapa
+          será marcada como concluída.
         </p>
       ) : null}
     </div>

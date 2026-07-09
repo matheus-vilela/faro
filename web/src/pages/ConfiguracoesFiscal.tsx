@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { StepCertificateForm } from "@/components/unit-setup/steps/StepCertificateForm";
+import { CertificateUploadFields } from "@/components/unit-setup/steps/CertificateUploadFields";
 import { useCompany } from "@/contexts/CompanyContext";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { supabase } from "@/lib/supabase";
@@ -380,18 +380,12 @@ export function ConfiguracoesFiscal() {
                 </div>
               </div>
             ) : (
-              <StepCertificateForm
-                companyId={companyId}
+              <CertificateUploadFields
                 cert={certView}
                 password={certPassword}
                 onPasswordChange={setCertPassword}
                 onPickFile={(f) => void handleCertFile(f)}
                 lockWhenValid={false}
-                onRemoveCertificate={
-                  hasEmpresaFocus && certAtivo && !certSaving
-                    ? () => setRemoveCertOpen(true)
-                    : undefined
-                }
                 busy={certSaving}
               />
             )}

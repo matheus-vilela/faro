@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -11,7 +10,6 @@ import {
 import { maskCpfCnpj } from "@/lib/masks";
 import type { EmpresaMap } from "@/types/companySetup";
 import { REGIME_TRIBUTARIO_OPTIONS } from "@/types/companySetup";
-import { Loader2 } from "lucide-react";
 
 const REGIME_VALUES = new Set(REGIME_TRIBUTARIO_OPTIONS.map((o) => o.value));
 
@@ -38,8 +36,6 @@ export function StepCompanyForm({
   empresa,
   onEmpresaChange,
   lockedEmpresaKeys,
-  cnpjValidating,
-  onValidarCnpj,
   cnpjValidated,
 }: {
   groupName: string;
@@ -48,8 +44,6 @@ export function StepCompanyForm({
   empresa: EmpresaMap;
   onEmpresaChange: (patch: Partial<EmpresaMap>) => void;
   lockedEmpresaKeys?: readonly string[];
-  cnpjValidating?: boolean;
-  onValidarCnpj?: () => void;
   cnpjValidated?: boolean;
 }) {
   return (
@@ -68,43 +62,29 @@ export function StepCompanyForm({
 
       <div className="space-y-2">
         <Label htmlFor="cnpj">CNPJ *</Label>
-        <div className="flex flex-wrap items-end gap-2">
-          <Input
-            id="cnpj"
-            className="min-w-[12rem] flex-1"
-            inputMode="numeric"
-            autoComplete="off"
-            value={maskCpfCnpj(empresa.cnpj_cpf ?? "")}
-            onChange={(e) =>
-              onEmpresaChange({
-                cnpj_cpf: e.target.value.replace(/\D/g, ""),
-              })
-            }
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            className="shrink-0"
-            disabled={cnpjValidating || !onValidarCnpj}
-            onClick={() => onValidarCnpj?.()}
-          >
-            {cnpjValidating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Validando…
-              </>
-            ) : (
-              "Validar"
-            )}
-          </Button>
-        </div>
+        <Input
+          id="cnpj"
+          className="w-full"
+          inputMode="numeric"
+          autoComplete="off"
+          value={maskCpfCnpj(empresa.cnpj_cpf ?? "")}
+          onChange={(e) =>
+            onEmpresaChange({
+              cnpj_cpf: e.target.value.replace(/\D/g, ""),
+            })
+          }
+        />
       </div>
 
-      {!cnpjValidated ? (
-        <p className="text-sm text-muted-foreground">
-          Valide o CNPJ para liberar os demais campos da empresa.
+      {cnpjValidated ? (
+        <p className="text-sm text-green-600 dark:text-green-500">
+          ✓ Encontramos seu negócio na Receita. Confira os dados abaixo.
         </p>
-      ) : null}
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Informe o CNPJ e busque na Receita para liberar os demais campos.
+        </p>
+      )}
 
       {cnpjValidated ? (
         <>
@@ -132,16 +112,6 @@ export function StepCompanyForm({
               }
             />
           </div>
-          {/* <div className="space-y-2">
-            <Label htmlFor="ie">Inscrição estadual</Label>
-            <Input
-              id="ie"
-              value={empresa.inscricao_estadual ?? ""}
-              onChange={(e) =>
-                onEmpresaChange({ inscricao_estadual: e.target.value })
-              }
-            />
-          </div> */}
           <div className="space-y-2">
             <Label>Regime tributário *</Label>
             <Select

@@ -1,10 +1,13 @@
 import { isValidCnpj } from "@/lib/cnpj";
 import { unmask } from "@/lib/masks";
 import type {
+  CertificateFiscalMode,
   EmpresaMap,
   EnderecoPrincipalMap,
+  EpocWizardMode,
   FocusCnpjLockState,
   FocusNfeMap,
+  PdvSalesOption,
   SetupCertificateState,
   SetupEpocState,
   SetupXmlZipImportState,
@@ -36,7 +39,7 @@ export function validateStep1Empresa(
   if (opts?.requireFocusCnpjValidation) {
     const lock = opts.focusCnpjLock;
     if (!lock?.validated_cnpj_digits || lock.validated_cnpj_digits !== cnpj) {
-      return "Valide o CNPJ pelo botão «Validar» antes de avançar.";
+      return "Busque o CNPJ na Receita antes de avançar.";
     }
   }
   const razao = (e.nome_razao_social ?? "").trim();
@@ -126,7 +129,38 @@ export function isStep3FocusNfeComplete(f: FocusNfeMap): boolean {
 export function isStep4CertificateComplete(
   cert: SetupCertificateState | undefined,
 ): boolean {
+  if (cert?.mode === "skip") return true;
   return cert?.status === "valid";
+}
+
+/** Passo fiscal: pode avançar no wizard conforme o modo escolhido. */
+export function isFiscalStepAdvanceAllowed(
+  cert: SetupCertificateState | undefined,
+  secrets: { certBase64: string; certPassword: string },
+  opts?: { companyId?: string | null },
+): string | null {
+  const mode: CertificateFiscalMode = cert?.mode ?? "undecided";
+  if (mode === "undecided") {
+    return "Escolha como deseja conectar o certificado digital.";
+  }
+  if (mode === "skip") return null;
+  if (mode === "upload_now") {
+    if (cert?.status === "valid") return null;
+    if (!isStep3CertificatePayloadComplete(cert, secrets)) {
+      return "Envie o certificado A1 (PFX/P12) e informe a senha.";
+    }
+    return null;
+  }
+  if (mode === "delegate_link") {
+    if (!cert?.delegation_link_id) {
+      return "Gere o link para enviar a outra pessoa antes de continuar.";
+    }
+    if (!opts?.companyId) {
+      return "Aguarde a criação da unidade para gerar o link.";
+    }
+    return null;
+  }
+  return "Opção de certificado inválida.";
 }
 
 /** Passo 3 antes de existir `companyId`: arquivo escolhido + base64 e senha só em memória. */
@@ -146,26 +180,74 @@ export function isStep5XmlZipComplete(
   return xmlZip?.phase === "done";
 }
 
+export function resolvePdvOption(epoc?: SetupEpocState): PdvSalesOption {
+  if (epoc?.pdv_option) return epoc.pdv_option;
+  if (epoc?.mode === "credentials") return "epoc";
+  if (epoc?.mode === "no") {
+    return hasText(epoc.other_system_name) ? "other_system" : "no_system";
+  }
+  return "undecided";
+}
+
+export function pdvOptionToMode(option: PdvSalesOption): EpocWizardMode {
+  if (option === "epoc") return "credentials";
+  if (option === "no_system" || option === "other_system") return "no";
+  return "undecided";
+}
+
+function isEpocCredentialsComplete(epoc: SetupEpocState): boolean {
+  const userOk = hasText(epoc.username);
+  const baseOk = !epoc.enabled || hasText(epoc.base_url);
+  const enabled = epoc.enabled ?? false;
+  const pwdOk =
+    !enabled || hasText(epoc.password) || epoc.password_on_server === true;
+  return userOk && baseOk && pwdOk;
+}
+
+/** Passo PDV: pode avançar no wizard conforme a opção escolhida. */
+export function isPdvStepAdvanceAllowed(
+  epoc: SetupEpocState | undefined,
+): string | null {
+  const option = resolvePdvOption(epoc);
+  if (option === "undecided") {
+    return "Escolha como você registra suas vendas.";
+  }
+  if (option === "other_system") {
+    if (!hasText(epoc?.other_system_name)) {
+      return "Informe o nome do sistema que você utiliza.";
+    }
+    return null;
+  }
+  if (option === "no_system") return null;
+  if (!epoc || !isEpocCredentialsComplete(epoc)) {
+    return "Preencha os dados da integração Epoc antes de concluir.";
+  }
+  return null;
+}
+
 /**
  * PDV (integração EPOC):
- * - "no" => ignorado/concluído
- * - credenciais => usuário obrigatório; com integração ativa, senha nova ou já salva
+ * - no_system => ignorado/concluído
+ * - other_system => concluído com nome do sistema
+ * - epoc => credenciais obrigatórias quando ativo
  */
 /** Passo 5 do wizard (PDV / EPOC). */
 export function getStep6EpocState(
   epoc: SetupEpocState | undefined,
 ): { completed: boolean; skipped: boolean } {
-  const mode = epoc?.mode ?? "undecided";
-  if (mode === "no") return { completed: true, skipped: true };
-  if (mode === "credentials") {
-    const userOk = hasText(epoc?.username);
-    const baseOk = !epoc?.enabled || hasText(epoc?.base_url);
-    const enabled = epoc?.enabled ?? false;
-    const pwdOk =
-      !enabled ||
-      hasText(epoc?.password) ||
-      epoc?.password_on_server === true;
-    return { completed: userOk && baseOk && pwdOk, skipped: false };
+  const option = resolvePdvOption(epoc);
+  if (option === "no_system") return { completed: true, skipped: true };
+  if (option === "other_system") {
+    return {
+      completed: hasText(epoc?.other_system_name),
+      skipped: false,
+    };
+  }
+  if (option === "epoc" && epoc) {
+    return {
+      completed: isEpocCredentialsComplete(epoc),
+      skipped: false,
+    };
   }
   return { completed: false, skipped: false };
 }
