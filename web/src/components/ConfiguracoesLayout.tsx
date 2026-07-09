@@ -177,7 +177,7 @@ export function ConfiguracoesLayout() {
                   .update({
                     setup: {
                       status: "not_started",
-                      setup_schema_version: 5,
+                      setup_schema_version: 6,
                       current_step: 1,
                       completed_steps: [],
                       skipped_steps: [],

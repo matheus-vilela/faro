@@ -1,6 +1,7 @@
 import type { UserCompanyRole } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyGroup } from "@/types/companyGroup";
+import type { CompanyNotificationEntry } from "@/types/companyNotification";
 import {
   createContext,
   useCallback,
@@ -60,6 +61,8 @@ export interface Company {
     import_status?: string | null;
     import_error?: string | null;
   } | null;
+  /** Preferências de notificação WhatsApp (número + regras). */
+  notification?: CompanyNotificationEntry[] | null;
 }
 
 export interface UserCompany {

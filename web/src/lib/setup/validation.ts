@@ -1,5 +1,10 @@
 import { isValidCnpj } from "@/lib/cnpj";
 import { unmask } from "@/lib/masks";
+import { validateAndNormalizePhone } from "@/lib/whatsappPhone";
+import type {
+  CompanyNotificationEntry,
+  CompanyNotificationRule,
+} from "@/types/companyNotification";
 import type {
   CertificateFiscalMode,
   EmpresaMap,
@@ -250,5 +255,29 @@ export function getStep6EpocState(
     };
   }
   return { completed: false, skipped: false };
+}
+
+export function buildNotificationPayload(
+  phoneDigits: string,
+  rules: CompanyNotificationRule[],
+): CompanyNotificationEntry[] {
+  const v = validateAndNormalizePhone(phoneDigits);
+  if (!v.ok) return [];
+  return [{ number: v.normalized, rules: [...rules] }];
+}
+
+export function isWhatsappStepAdvanceAllowed(phoneDigits: string): string | null {
+  const v = validateAndNormalizePhone(phoneDigits);
+  if (!v.ok) return v.error;
+  return null;
+}
+
+export function getStep4WhatsappState(
+  notification?: CompanyNotificationEntry[],
+): { completed: boolean; skipped: boolean } {
+  const entry = notification?.[0];
+  if (!entry?.number) return { completed: false, skipped: false };
+  const v = validateAndNormalizePhone(entry.number);
+  return { completed: v.ok, skipped: false };
 }
 

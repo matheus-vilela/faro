@@ -25,9 +25,12 @@ import {
 } from "@/lib/setup/setupProgress";
 import { shouldValidateEpocBeforeStep3Complete } from "@/lib/setup/epocStep3ValidationGate";
 import {
+  buildNotificationPayload,
+  getStep4WhatsappState,
   getStep6EpocState,
   isFiscalStepAdvanceAllowed,
   isPdvStepAdvanceAllowed,
+  isWhatsappStepAdvanceAllowed,
   isStep1EmpresaComplete,
   isStep2EnderecoComplete,
   isStep3CertificatePayloadComplete,
@@ -36,6 +39,7 @@ import {
   resolvePdvOption,
   validateStep1Empresa,
 } from "@/lib/setup/validation";
+import { formatNormalizedForDisplay } from "@/lib/whatsappPhone";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { invokeValidateEpocLogin } from "@/services/epocValidateLoginService";
@@ -69,6 +73,12 @@ import {
   patchCompanyMaps,
 } from "@/services/unitSetupService";
 import {
+  NOTIFICATION_RULE_LABELS,
+  parseCompanyNotification,
+  type CompanyNotificationEntry,
+  type CompanyNotificationRule,
+} from "@/types/companyNotification";
+import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
   type EpocIntegrationSettings,
@@ -99,6 +109,7 @@ import { StepCertificateForm } from "./steps/StepCertificateForm";
 import { StepCompanyForm } from "./steps/StepCompanyForm";
 import { StepGroupForm } from "./steps/StepGroupForm";
 import { StepPdvForm } from "./steps/StepPdvForm";
+import { StepWhatsappForm } from "./steps/StepWhatsappForm";
 
 type Phase = "wizard" | "finalize_loading" | "finalize_summary";
 
@@ -186,12 +197,20 @@ export function UnitSetupWizard({
     message: string;
     errorCode: string;
   } | null>(null);
+  const [companyNotification, setCompanyNotification] = useState<
+    CompanyNotificationEntry[]
+  >([]);
+  const [whatsappPhoneDigits, setWhatsappPhoneDigits] = useState("");
+  const [whatsappRules, setWhatsappRules] = useState<CompanyNotificationRule[]>(
+    [],
+  );
 
   /** Passo extra só ao criar um novo grupo (não ao retomar). */
   const includeGroupStep = createNewGroup && !resumeCompanyId;
   const empresaWizardStep = includeGroupStep ? 2 : 1;
   const certWizardStep = includeGroupStep ? 3 : 2;
   const pdvWizardStep = includeGroupStep ? 4 : 3;
+  const whatsappWizardStep = includeGroupStep ? 5 : 4;
   const totalWizardSteps = wizardStepCount(includeGroupStep);
   const cnpjValidated =
     !!setup.focus_cnpj_lock?.validated_cnpj_digits &&
@@ -271,18 +290,48 @@ export function UnitSetupWizard({
     }
 
     setSetup(su);
+    const notification = parseCompanyNotification(
+      (c as { notification?: unknown }).notification,
+    );
+    setCompanyNotification(notification);
+    if (notification[0]?.number) {
+      setWhatsappPhoneDigits(notification[0].number);
+      setWhatsappRules(notification[0].rules);
+    } else {
+      const phonePrefill = (
+        empresaRow.telefone ??
+        c.phone ??
+        ""
+      ).replace(/\D/g, "");
+      setWhatsappPhoneDigits(phonePrefill);
+      setWhatsappRules([]);
+    }
     const setupStep = Math.min(
-      3,
+      4,
       Math.max(1, su.current_step ?? getNextPendingStep(su)),
     );
     setActiveStep(
-      includeGroupStep ? Math.min(4, setupStep + 1) : setupStep,
+      includeGroupStep ? Math.min(5, setupStep + 1) : setupStep,
     );
   }, [resumeCompanyId, includeGroupStep]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  useEffect(() => {
+    if (activeStep !== whatsappWizardStep) return;
+    if (whatsappPhoneDigits.trim()) return;
+    if (companyNotification[0]?.number) return;
+    const fromEmpresa = (empresa.telefone ?? "").replace(/\D/g, "");
+    if (fromEmpresa) setWhatsappPhoneDigits(fromEmpresa);
+  }, [
+    activeStep,
+    whatsappWizardStep,
+    empresa.telefone,
+    whatsappPhoneDigits,
+    companyNotification,
+  ]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -297,6 +346,7 @@ export function UnitSetupWizard({
       base: CompanySetupMap,
       overrides?: Partial<CompanySetupMap>,
       certSecrets?: { certBase64: string; certPassword: string },
+      notificationOverride?: CompanyNotificationEntry[],
     ): CompanySetupMap => {
       const merged = mergeSetupPatch(base, overrides ?? {});
       const s1 = isStep1EmpresaComplete(empresa, {
@@ -321,21 +371,26 @@ export function UnitSetupWizard({
           : isStep3CertificatePayloadComplete(merged.certificate, sec);
       }
       const s3ep = getStep6EpocState(merged.epoc);
+      const s4wa = getStep4WhatsappState(
+        notificationOverride ?? companyNotification,
+      );
 
       let completed = merged.completed_steps ?? [];
       let skipped = merged.skipped_steps ?? [];
       completed = upsertStep(completed, 1, s1);
       completed = upsertStep(completed, 2, s2cert);
       completed = upsertStep(completed, 3, s3ep.completed);
+      completed = upsertStep(completed, 4, s4wa.completed);
       skipped = upsertStep(skipped, 2, s2skipped);
       skipped = upsertStep(skipped, 3, s3ep.skipped);
+      skipped = upsertStep(skipped, 4, s4wa.skipped);
 
       return mergeSetupPatch(merged, {
         completed_steps: completed,
         skipped_steps: skipped,
       });
     },
-    [companyId, empresa, certFileBase64, certPassword],
+    [companyId, empresa, certFileBase64, certPassword, companyNotification],
   );
 
   const applyEmpresaPatch = useCallback(
@@ -1140,6 +1195,50 @@ export function UnitSetupWizard({
         return;
       }
       setSetup(nextSetup);
+      setActiveStep(whatsappWizardStep);
+      return;
+    }
+
+    if (activeStep === whatsappWizardStep) {
+      if (!companyId) {
+        toast.error("Conclua os passos anteriores para criar a unidade.");
+        return;
+      }
+      const waErr = isWhatsappStepAdvanceAllowed(whatsappPhoneDigits);
+      if (waErr) {
+        setStepError(waErr);
+        return;
+      }
+      setStepError(null);
+
+      const notification = buildNotificationPayload(
+        whatsappPhoneDigits,
+        whatsappRules,
+      );
+      if (notification.length === 0) {
+        setStepError("Informe um WhatsApp válido.");
+        return;
+      }
+
+      setSaving(true);
+      const nextSetup = syncCompletionState(
+        mergeSetupPatch(setup, { current_step: 4 }),
+        undefined,
+        undefined,
+        notification,
+      );
+      const res = await patchCompanyMaps(companyId, {
+        notification,
+        setup: nextSetup,
+        focusnfe: stripFocusnfeSecrets(focusnfe),
+      });
+      setSaving(false);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      setCompanyNotification(notification);
+      setSetup(nextSetup);
       setPhase("finalize_loading");
       await finalizeRun(nextSetup, focusnfe);
       return;
@@ -1189,6 +1288,7 @@ export function UnitSetupWizard({
       return;
     }
     if (activeStep === pdvWizardStep) setEpocValidateError(null);
+    if (activeStep === whatsappWizardStep) setStepError(null);
     setActiveStep((s) => s - 1);
   };
 
@@ -1366,6 +1466,25 @@ export function UnitSetupWizard({
               Importações.
             </p>
           </div>
+          <div>
+            <p className="font-medium">WhatsApp</p>
+            <p className="text-muted-foreground">
+              {companyNotification[0]?.number
+                ? formatNormalizedForDisplay(companyNotification[0].number)
+                : "—"}
+            </p>
+            {companyNotification[0]?.rules?.length ? (
+              <ul className="mt-1 list-inside list-disc text-sm text-muted-foreground">
+                {companyNotification[0].rules.map((rule) => (
+                  <li key={rule}>{NOTIFICATION_RULE_LABELS[rule].title}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Nenhum alerta selecionado
+              </p>
+            )}
+          </div>
           <p className="pt-2 font-semibold">
             Progresso final: {setup.progress_percent?.toFixed(0) ?? 0}%
           </p>
@@ -1392,18 +1511,28 @@ export function UnitSetupWizard({
     activeStep === pdvWizardStep &&
     isPdvStepAdvanceAllowed(setup.epoc) != null;
 
+  const whatsappAdvanceBlocked =
+    activeStep === whatsappWizardStep &&
+    isWhatsappStepAdvanceAllowed(whatsappPhoneDigits) != null;
+
+  const handleWhatsappRuleToggle = (rule: CompanyNotificationRule) => {
+    setWhatsappRules((prev) =>
+      prev.includes(rule) ? prev.filter((r) => r !== rule) : [...prev, rule],
+    );
+  };
+
   const getPrimaryButtonLabel = (): string => {
     if (saving) {
-      return activeStep === pdvWizardStep
-        ? "A validar e a concluir…"
-        : "Salvando…";
+      if (activeStep === pdvWizardStep) return "A validar…";
+      if (activeStep === whatsappWizardStep) return "Ativando WhatsApp…";
+      return "Salvando…";
     }
     if (cnpjValidating) return "Buscando na Receita...";
     if (activeStep === empresaWizardStep) {
       if (!cnpjValidated) return "Buscar meu CNPJ →";
       return "Confirmar e continuar";
     }
-    if (activeStep === pdvWizardStep) return "Concluir";
+    if (activeStep === whatsappWizardStep) return "Ativar WhatsApp";
     return "Continuar";
   };
 
@@ -1508,16 +1637,26 @@ export function UnitSetupWizard({
               }}
             />
           ) : null}
+          {activeStep === whatsappWizardStep ? (
+            <StepWhatsappForm
+              phoneDigits={whatsappPhoneDigits}
+              rules={whatsappRules}
+              onPhoneChange={setWhatsappPhoneDigits}
+              onRuleToggle={handleWhatsappRuleToggle}
+            />
+          ) : null}
         </div>
       </div>
 
       <div
         className={cn(
           "flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:pt-5",
-          activeStep === pdvWizardStep ? "sm:justify-between" : "sm:justify-end",
+          activeStep === pdvWizardStep || activeStep === whatsappWizardStep
+            ? "sm:justify-between"
+            : "sm:justify-end",
         )}
       >
-        {activeStep === pdvWizardStep ? (
+        {activeStep === pdvWizardStep || activeStep === whatsappWizardStep ? (
           <Button
             type="button"
             variant="ghost"
@@ -1551,7 +1690,8 @@ export function UnitSetupWizard({
               certBusy ||
               cnpjValidating ||
               fiscalAdvanceBlocked ||
-              pdvAdvanceBlocked
+              pdvAdvanceBlocked ||
+              whatsappAdvanceBlocked
             }
           >
             {saving || cnpjValidating ? (

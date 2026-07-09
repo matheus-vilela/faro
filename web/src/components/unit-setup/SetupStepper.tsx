@@ -11,6 +11,7 @@ export const SETUP_STEP_LABELS: Record<SetupStepNumber, string> = {
   1: "Unidade",
   2: "Fiscal",
   3: "Suas Vendas",
+  4: "WhatsApp",
 };
 
 /** Uma linha de contexto para o cabeçalho da página (etapa atual). */
@@ -18,10 +19,11 @@ export const SETUP_STEP_HINTS: Record<SetupStepNumber, string> = {
   1: "CNPJ, nome fantasia e dados da unidade (endereço pela validação do CNPJ).",
   2: "Conecte a SEFAZ uma vez. Toda nota emitida contra seu CNPJ entra sozinha no contas a pagar.",
   3: "O Faro puxa suas vendas todo dia. Sem digitar nada. É isso que destrava o CMV real.",
+  4: "Alertas de vencimento, resumo semanal e envio de notas por foto. Tudo pelo WhatsApp.",
 };
 
 export function wizardStepCount(includeGroupStep: boolean): number {
-  return includeGroupStep ? 4 : 3;
+  return includeGroupStep ? 5 : 4;
 }
 
 export function wizardStepLabel(
@@ -56,6 +58,7 @@ export function wizardPageTitle(
   ) as SetupStepNumber;
   if (setupStep === 2) return "Deixe o Faro farejar suas notas";
   if (setupStep === 3) return "Conecte seu ponto de venda";
+  if (setupStep === 4) return "Onde o Faro fala com você";
   return "Configurar unidade";
 }
 
