@@ -37,7 +37,7 @@ import {
 } from "@/lib/whatsappPhone";
 import type { CompanyMember } from "@/types/companyMember";
 import { cn } from "@/lib/utils";
-import { Info, Loader2, Pencil, Plus, Shield, UserCircle, Users } from "lucide-react";
+import { Info, Loader2, Pencil, Plus, Shield, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -76,14 +76,9 @@ export function ConfiguracoesUsuarios() {
     }
   };
 
-  const [ownerNameDisplay, setOwnerNameDisplay] = useState("");
-  const [loadingOwner, setLoadingOwner] = useState(true);
-
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const [ownerPhoneDigits, setOwnerPhoneDigits] = useState("");
 
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<CompanyMember | null>(
@@ -101,32 +96,6 @@ export function ConfiguracoesUsuarios() {
     () => members.filter((m) => m.is_active).length,
     [members],
   );
-
-  const loadOwner = useCallback(async () => {
-    if (!companyId) return;
-    setLoadingOwner(true);
-    const { data: uc, error: ucErr } = await supabase
-      .from("user_companies")
-      .select("user_id")
-      .eq("company_id", companyId)
-      .eq("role", "owner")
-      .maybeSingle();
-
-    if (ucErr || !uc?.user_id) {
-      setOwnerNameDisplay("");
-      setLoadingOwner(false);
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", uc.user_id)
-      .maybeSingle();
-
-    setOwnerNameDisplay(profile?.full_name?.trim() ?? "");
-    setLoadingOwner(false);
-  }, [companyId]);
 
   const loadMembers = useCallback(async () => {
     if (!companyId) return;
@@ -147,87 +116,8 @@ export function ConfiguracoesUsuarios() {
   }, [companyId]);
 
   useEffect(() => {
-    queueMicrotask(() => loadOwner());
-  }, [loadOwner]);
-
-  useEffect(() => {
     queueMicrotask(() => loadMembers());
   }, [loadMembers]);
-
-  useEffect(() => {
-    if (!currentCompany) return;
-    queueMicrotask(() => {
-      const ownerNorm = currentCompany.owner_whatsapp_normalized;
-      setOwnerPhoneDigits(ownerNorm ?? "");
-    });
-  }, [currentCompany]);
-
-  const saveOwnerPhone = async () => {
-    if (!currentCompany?.id || !isOwner) return;
-    if (!ownerPhoneDigits.trim()) {
-      setSaving(true);
-      const { error } = await supabase
-        .from("companies")
-        .update({
-          owner_whatsapp_normalized: null,
-          owner_whatsapp_display: null,
-        })
-        .eq("id", currentCompany.id);
-      setSaving(false);
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-      toast.success("WhatsApp do proprietário removido.");
-      setOwnerPhoneDigits("");
-      await refetchCompanies();
-      return;
-    }
-
-    const v = validateAndNormalizePhone(ownerPhoneDigits);
-    if (!v.ok) {
-      toast.error(v.error);
-      return;
-    }
-    setSaving(true);
-
-    const { error } = await supabase
-      .from("companies")
-      .update({
-        owner_whatsapp_normalized: v.normalized,
-        owner_whatsapp_display: null,
-      })
-      .eq("id", currentCompany.id);
-
-    setSaving(false);
-    if (error) {
-      toast.error(mapSupabaseError(error.message));
-      return;
-    }
-    toast.success("Número salvo com DDI 55 e formato internacional.");
-    await refetchCompanies();
-    setOwnerPhoneDigits(v.normalized);
-  };
-
-  const clearOwnerPhone = async () => {
-    if (!currentCompany?.id || !isOwner) return;
-    setSaving(true);
-    const { error } = await supabase
-      .from("companies")
-      .update({
-        owner_whatsapp_normalized: null,
-        owner_whatsapp_display: null,
-      })
-      .eq("id", currentCompany.id);
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("WhatsApp do proprietário removido.");
-    setOwnerPhoneDigits("");
-    await refetchCompanies();
-  };
 
   const openAddMember = () => {
     if (activeCount >= 3) {
@@ -418,90 +308,7 @@ export function ConfiguracoesUsuarios() {
         <PermissionProfilesSection />
       ) : (
         <>
-      <Card className="shadow-sm border-primary/15">
-        <CardHeader className="space-y-1">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserCircle className="h-5 w-5 text-primary" />
-            Proprietário
-          </CardTitle>
-          <CardDescription>
-            Você é o proprietário desta empresa no Faro.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-6 sm:grid-cols-2 sm:gap-8 sm:items-start">
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">
-                Nome do proprietário
-              </Label>
-              <div
-                className="flex  items-center rounded-md border border-border bg-muted/40 px-3 py-2 text-sm font-medium leading-snug"
-                aria-live="polite"
-              >
-                {loadingOwner ? (
-                  <span className="text-muted-foreground">Carregando…</span>
-                ) : ownerNameDisplay ? (
-                  ownerNameDisplay
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Igual ao nome do seu perfil no Faro. <br />
-                Para alterar, use os dados da sua conta.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="ownerPhone">WhatsApp do proprietário</Label>
-              <Input
-                id="ownerPhone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="+55 (11) 98765-4321"
-                className="font-mono text-base"
-                value={maskWhatsappBrInput(ownerPhoneDigits)}
-                onChange={(e) =>
-                  setOwnerPhoneDigits(
-                    applyWhatsappPhoneMaskChange(
-                      ownerPhoneDigits,
-                      e.target.value,
-                    ),
-                  )
-                }
-                disabled={saving}
-              />
-              <p className="text-xs text-muted-foreground">
-                Digite com DDI, se você não informar o código do país,{" "}
-                <strong>55</strong> (Brasil) é adicionado automaticamente.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button type="button" onClick={saveOwnerPhone} disabled={saving}>
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Salvar telefone"
-              )}
-            </Button>
-            {ownerPhoneDigits.trim() ||
-            currentCompany?.owner_whatsapp_normalized ? (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={clearOwnerPhone}
-              >
-                Remover telefone
-              </Button>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-
-      <PlatformAccessSection />
+      {isOwner ? <PlatformAccessSection /> : null}
 
       <Card className="shadow-sm">
         <CardHeader className="space-y-3">

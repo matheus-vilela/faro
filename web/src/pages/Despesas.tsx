@@ -374,6 +374,7 @@ export function Despesas() {
     const { start, end } = getMonthRange(period.month, period.year);
     const startDate = start.slice(0, 10);
     const endDate = end.slice(0, 10);
+    const searchActive = debouncedSearch.trim().length > 0;
     let exQuery = supabase
       .from("expenses")
       .select(
@@ -385,19 +386,22 @@ export function Despesas() {
         { count: "estimated" },
       )
       .eq("company_id", companyId)
-      .gte("reference_date", startDate)
-      .lte("reference_date", endDate)
       .order("reference_date", { ascending: false })
       .order("created_at", { ascending: false });
+    if (!searchActive) {
+      exQuery = exQuery
+        .gte("reference_date", startDate)
+        .lte("reference_date", endDate);
+    }
     if (onlyPendingApproval) {
       exQuery = exQuery
         .eq("expense_source", "whatsapp")
         .eq("status", "pending");
     }
-    if (debouncedSearch.trim()) {
+    if (searchActive) {
       const term = `%${debouncedSearch.trim()}%`;
       exQuery = exQuery.or(
-        `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term}`,
+        `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term},supplier_document.ilike.${term}`,
       );
     }
     const { data: ex, count } = await exQuery.range(
@@ -870,7 +874,11 @@ export function Despesas() {
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
-        description="Lista filtrada pelo mês de competência da nota fiscal"
+        description={
+          debouncedSearch.trim()
+            ? "Com filtro de texto ativo, a busca considera todas as competências"
+            : "Lista filtrada pelo mês de competência da nota fiscal"
+        }
       />
 
       <Sheet
@@ -1538,7 +1546,9 @@ export function Despesas() {
             <p className="text-muted-foreground">
               {onlyPendingApproval
                 ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
-                : "Nenhuma nota fiscal cadastrada"}
+                : debouncedSearch.trim()
+                  ? "Nenhuma nota fiscal encontrada para este filtro. A conta a pagar pode existir com vencimento em outro mês — confira em Contas a pagar ou altere o mês de competência acima."
+                  : "Nenhuma nota fiscal cadastrada neste mês de competência."}
             </p>
           ) : (
             <div className="space-y-3">

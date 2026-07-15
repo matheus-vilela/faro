@@ -189,6 +189,74 @@ export async function revokePlatformAccess(
   return {};
 }
 
+export type CompanyPlatformOwner = {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
+export async function fetchCompanyPlatformOwner(
+  companyId: string,
+): Promise<{ owner: CompanyPlatformOwner | null; error?: string }> {
+  const { data: uc, error: ucErr } = await supabase
+    .from("user_companies")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .eq("role", "owner")
+    .maybeSingle();
+
+  if (ucErr) return { owner: null, error: ucErr.message };
+  if (!uc?.user_id) return { owner: null };
+
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", uc.user_id)
+    .maybeSingle();
+
+  if (profileErr) return { owner: null, error: profileErr.message };
+
+  return {
+    owner: {
+      user_id: uc.user_id,
+      full_name: profile?.full_name?.trim() ?? null,
+      email: null,
+    },
+  };
+}
+
+export async function updateCollaboratorPermissionProfile(input: {
+  companyId: string;
+  accessId: string;
+  permissionProfileId: string;
+  userId?: string | null;
+}): Promise<{ error?: string }> {
+  const { error: accessErr } = await supabase
+    .from("company_platform_access")
+    .update({
+      permission_profile_id: input.permissionProfileId,
+    })
+    .eq("id", input.accessId)
+    .eq("company_id", input.companyId);
+
+  if (accessErr) return { error: accessErr.message };
+
+  if (input.userId) {
+    const { error: memberErr } = await supabase
+      .from("user_companies")
+      .update({
+        permission_profile_id: input.permissionProfileId,
+      })
+      .eq("user_id", input.userId)
+      .eq("company_id", input.companyId)
+      .eq("role", "member");
+
+    if (memberErr) return { error: memberErr.message };
+  }
+
+  return {};
+}
+
 export async function getDefaultMemberProfileId(
   companyId: string,
 ): Promise<string | null> {
