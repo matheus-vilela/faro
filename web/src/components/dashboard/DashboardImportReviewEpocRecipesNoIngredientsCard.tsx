@@ -12,7 +12,9 @@ import {
 } from "@/components/ui/card";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
+  dashboardImportReviewConfirmOutboundAsRecipe,
   dashboardImportReviewEpocRecipeRevertToProduct,
+  dashboardImportReviewSetResolution,
   fetchDashboardImportReviewEpocRecipesNoIngredients,
   type DashboardEpocRecipeNoIngredientsRow,
 } from "@/lib/dashboardImportReview";
@@ -28,18 +30,22 @@ const PENDING_LIST_VIEWPORT_MIN_HEIGHT = "max-h-[min(70vh,720px)]";
 const DESKTOP_GRID_MIN_HEIGHT = "max-h-[min(70vh,720px)]";
 const MOBILE_LIST_MAX_HEIGHT = "max-h-[min(50vh,400px)]";
 
+function rowKey(row: DashboardEpocRecipeNoIngredientsRow): string {
+  return row.product_id;
+}
+
 function RecipeListItem({
   row,
   isSelected,
   busyId,
   onSelect,
-  onRevert,
+  onDismiss,
 }: {
   row: DashboardEpocRecipeNoIngredientsRow;
   isSelected: boolean;
   busyId: string | null;
-  onSelect: (recipeId: string) => void;
-  onRevert: (productId: string) => void;
+  onSelect: (row: DashboardEpocRecipeNoIngredientsRow) => void;
+  onDismiss: (row: DashboardEpocRecipeNoIngredientsRow) => void;
 }) {
   return (
     <li>
@@ -54,7 +60,7 @@ function RecipeListItem({
         <button
           type="button"
           className="min-w-0 flex-1 text-left"
-          onClick={() => onSelect(row.recipe_id)}
+          onClick={() => onSelect(row)}
         >
           <p className="truncate font-medium text-foreground">{row.name}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -72,7 +78,7 @@ function RecipeListItem({
           size="sm"
           className="shrink-0 text-muted-foreground"
           disabled={busyId === row.product_id}
-          onClick={() => onRevert(row.product_id)}
+          onClick={() => onDismiss(row)}
         >
           <Package className="mr-1 h-3.5 w-3.5" />
           Não é ficha
@@ -96,6 +102,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<DashboardEpocRecipeNoIngredientsRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const recipePanelRef = useRef<EstoqueReceitasPanelHandle>(null);
   /** Evita spinner no card quando o próprio save/revert disparou refreshSignal. */
@@ -155,27 +162,44 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   }, [load, reloadQuiet, refreshSignal]);
 
   useEffect(() => {
-    if (
-      selectedRecipeId &&
-      !rows.some((r) => r.recipe_id === selectedRecipeId)
-    ) {
+    if (selectedRowKey && !rows.some((r) => rowKey(r) === selectedRowKey)) {
+      setSelectedRowKey(null);
       setSelectedRecipeId(null);
     }
-  }, [rows, selectedRecipeId]);
+  }, [rows, selectedRowKey]);
 
-  const revertToProduct = async (productId: string) => {
-    setBusyId(productId);
-    const res = await dashboardImportReviewEpocRecipeRevertToProduct(
-      supabase,
-      companyId,
-      productId,
-    );
-    setBusyId(null);
-    if (!res.ok) {
-      toast.error(res.error ?? "Não foi possível converter em produto.");
-      return;
+  const dismissAsProduct = async (row: DashboardEpocRecipeNoIngredientsRow) => {
+    setBusyId(row.product_id);
+    if (row.recipe_id) {
+      const res = await dashboardImportReviewEpocRecipeRevertToProduct(
+        supabase,
+        companyId,
+        row.product_id,
+      );
+      if (!res.ok) {
+        setBusyId(null);
+        toast.error(res.error ?? "Não foi possível converter em produto.");
+        return;
+      }
+    } else {
+      const res = await dashboardImportReviewSetResolution(supabase, {
+        companyId,
+        productId: row.product_id,
+        bucket: "EXIT_NO_ENTRY",
+        resolution: "DISMISSED",
+      });
+      if (!res.ok) {
+        setBusyId(null);
+        toast.error(res.error ?? "Não foi possível dispensar o item.");
+        return;
+      }
     }
-    toast.success("Item reclassificado como produto de venda.");
+    setBusyId(null);
+    toast.success("Item mantido como produto de venda.");
+    if (selectedRowKey === rowKey(row)) {
+      setSelectedRowKey(null);
+      setSelectedRecipeId(null);
+    }
     refreshAfterLocalChange();
   };
 
@@ -183,15 +207,46 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
     return null;
   }
 
-  const selectRecipe = async (recipeId: string) => {
-    if (recipeId === selectedRecipeId) return;
+  const selectRow = async (row: DashboardEpocRecipeNoIngredientsRow) => {
+    const key = rowKey(row);
+    if (key === selectedRowKey) return;
     if (selectedRecipeId) {
       const leave =
         (await recipePanelRef.current?.confirmLeaveIfDirty()) ?? "proceed";
       if (leave === "cancel") return;
     }
+
+    let recipeId = row.recipe_id;
+    if (!recipeId) {
+      setBusyId(row.product_id);
+      const res = await dashboardImportReviewConfirmOutboundAsRecipe(
+        supabase,
+        companyId,
+        row.product_id,
+      );
+      setBusyId(null);
+      if (!res.ok) {
+        toast.error(
+          res.error ?? "Não foi possível preparar a ficha técnica deste item.",
+        );
+        return;
+      }
+      recipeId = res.recipe_id ?? null;
+      if (!recipeId) {
+        toast.error(
+          "Ficha técnica criada, mas não foi possível abrir o editor.",
+        );
+        void reloadQuiet();
+        return;
+      }
+      await reloadQuiet();
+    }
+
+    setSelectedRowKey(key);
     setSelectedRecipeId(recipeId);
   };
+
+  const selectedRow = rows.find((r) => rowKey(r) === selectedRowKey) ?? null;
 
   const recipeEditor = selectedRecipeId ? (
     <EstoqueReceitasPanel
@@ -201,9 +256,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       embedInline={!isMobile}
       ingredientsOnly
       initialOpenRecipeId={selectedRecipeId}
-      contextOutputProductId={
-        rows.find((r) => r.recipe_id === selectedRecipeId)?.product_id ?? null
-      }
+      contextOutputProductId={selectedRow?.product_id ?? null}
       onSheetOpenChange={(open) => {
         if (!open) setSelectedRecipeId(null);
       }}
@@ -227,12 +280,12 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
       >
         {rows.map((r) => (
           <RecipeListItem
-            key={r.recipe_id}
+            key={rowKey(r)}
             row={r}
-            isSelected={selectedRecipeId === r.recipe_id}
+            isSelected={selectedRowKey === rowKey(r)}
             busyId={busyId}
-            onSelect={selectRecipe}
-            onRevert={(pid) => void revertToProduct(pid)}
+            onSelect={(item) => void selectRow(item)}
+            onDismiss={(item) => void dismissAsProduct(item)}
           />
         ))}
       </ul>
@@ -257,21 +310,21 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
               </div>
               <div className="min-w-0 space-y-1">
                 <CardTitle className="text-lg leading-snug">
-                  Fichas técnicas sem produto vinculado
+                  Fichas técnicas pendentes
                 </CardTitle>
                 <CardDescription className="text-pretty">
-                  Itens classificados como <strong>ficha técnica</strong> na
-                  importação do EPOC (ex.: caipirinha, balde de cerveja).{" "}
+                  Produtos com <strong>movimentação só de saída</strong> (vendas
+                  sem entrada de estoque) — candidatos a ficha técnica.{" "}
                   {isMobile ? (
                     <>
-                      Toque em uma ficha para abrir o editor ou use{" "}
-                      <strong>Não é ficha</strong> para tratar como produto de
+                      Toque em um item para montar os insumos ou use{" "}
+                      <strong>Não é ficha</strong> para manter como produto de
                       venda.
                     </>
                   ) : (
                     <>
-                      Clique em uma ficha à esquerda para montar os produtos à
-                      direita, ou use <strong>Não é ficha</strong> para tratar
+                      Selecione um item à esquerda para montar os produtos à
+                      direita, ou use <strong>Não é ficha</strong> para manter
                       como produto de venda.
                     </>
                   )}
@@ -304,7 +357,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
           ) : (
             <div
               className={cn(
-                "grid flex-1 pb-20 items-stretch gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]",
+                "grid flex-1  items-stretch gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]",
                 DESKTOP_GRID_MIN_HEIGHT,
               )}
             >
@@ -321,8 +374,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
                   <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 px-6 py-12 text-center text-sm text-muted-foreground">
                     <ChefHat className="h-10 w-10 opacity-40" />
                     <p>
-                      Selecione uma ficha na lista para montar os produtos
-                      aqui.
+                      Selecione uma ficha na lista para montar os produtos aqui.
                     </p>
                   </div>
                 )}

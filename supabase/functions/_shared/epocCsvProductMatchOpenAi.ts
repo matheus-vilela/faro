@@ -12,7 +12,6 @@ export type EpocRecipeCatalogEntry = {
 
 export type EpocOpenAiCreateHint = {
   catalog_name: string;
-  kind: "PRODUCT" | "RECIPE";
   unit: string;
   instructions: string;
   /** Quantidade de UN por 1 unidade de estoque (ex.: 1 cx = 12 un → 12). */
@@ -25,7 +24,6 @@ export type EpocOpenAiMatchAssignment = {
     | "MATCH_PRODUCT"
     | "MATCH_RECIPE"
     | "CREATE_PRODUCT"
-    | "CREATE_RECIPE"
     | "MANUAL_REVIEW";
   product_id?: string | null;
   recipe_id?: string | null;
@@ -71,14 +69,15 @@ export async function batchResolveEpocUnmatchedWithOpenAi(input: {
   const sys =
     "Você reconcilia linhas de venda EPOC (PDV) com o cadastro existente de produtos e fichas técnicas (receitas). " +
     "Todas as vendas EPOC são lançadas em UN (unidade). " +
-    'Responda APENAS JSON válido: {"assignments":[{"idx":0,"action":"MATCH_PRODUCT"|"MATCH_RECIPE"|"CREATE_PRODUCT"|"CREATE_RECIPE"|"MANUAL_REVIEW",...}]}. ' +
+    'Responda APENAS JSON válido: {"assignments":[{"idx":0,"action":"MATCH_PRODUCT"|"MATCH_RECIPE"|"CREATE_PRODUCT"|"MANUAL_REVIEW",...}]}. ' +
     "idx = índice em csv_lines (0-based). " +
     "Regras: " +
     "(1) MATCH_PRODUCT/MATCH_RECIPE só com id existente no catálogo enviado; o nome do CSV deve ser o MESMO item (mesmo produto de venda), não apenas mesma categoria. " +
     '(2) "AGUA COM GAS" NÃO é o mesmo que "AGUA MINERAL CRYSTAL COM GAS" — prefira CREATE ou MANUAL_REVIEW. ' +
-    "(3) CREATE_*: create.catalog_name (nome de cadastro limpo), create.kind (PRODUCT=revenda/insumo embalado, RECIPE=preparo/ficha), create.unit (unidade de estoque, prefira un se incerto), create.instructions (passos curtos em PT), create.un_per_stock_unit se unit≠un (quantas UN equivalem a 1 unidade de estoque). " +
+    "(3) CREATE_PRODUCT: create.catalog_name (nome de cadastro limpo), create.unit (unidade de estoque, prefira un se incerto), create.instructions (passos curtos em PT), create.un_per_stock_unit se unit≠un (quantas UN equivalem a 1 unidade de estoque). " +
     "(4) MANUAL_REVIEW: sem match seguro; instructions explica o que o usuário deve fazer. " +
-    "(5) MATCH_RECIPE: recipe_id + product_id (output do produto da ficha).";
+    "(5) MATCH_RECIPE: recipe_id + product_id (output do produto da ficha). " +
+    "(6) Não crie fichas técnicas novas; candidatos a ficha são tratados depois pelo dashboard.";
 
   const user = JSON.stringify(
     {
@@ -118,17 +117,17 @@ export async function batchResolveEpocUnmatchedWithOpenAi(input: {
     for (const a of parsed.assignments) {
       const idx = Number(a.idx);
       if (!Number.isInteger(idx) || idx < 0 || idx >= csvLines.length) continue;
-      const action = a.action;
+      const action =
+        a.action === "CREATE_RECIPE" ? "CREATE_PRODUCT" : a.action;
       if (
         action !== "MATCH_PRODUCT" &&
         action !== "MATCH_RECIPE" &&
         action !== "CREATE_PRODUCT" &&
-        action !== "CREATE_RECIPE" &&
         action !== "MANUAL_REVIEW"
       ) {
         continue;
       }
-      out.set(idx, a);
+      out.set(idx, { ...a, action });
     }
   } catch {
     /* ignore */
