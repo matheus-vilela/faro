@@ -71,7 +71,7 @@ describe("productBulkEditFields v1", () => {
 
 describe("BULK_EDIT_ERROR_MESSAGES", () => {
   it("mapeia códigos conhecidos do RPC", () => {
-    expect(BULK_EDIT_ERROR_MESSAGES.forbidden).toContain("gestor");
+    expect(BULK_EDIT_ERROR_MESSAGES.forbidden).toContain("permissão");
     expect(BULK_EDIT_ERROR_MESSAGES.invalid_field).toContain("permitido");
     expect(BULK_EDIT_ERROR_MESSAGES.expired).toContain("24");
   });

@@ -146,7 +146,7 @@ export function EstoqueHistoricoContagem({
 
   const renderRow = (r: SessionRow, variant: "open" | "submitted") => {
     const origin = r.company_member_id
-      ? "WhatsApp (membro)"
+      ? "WhatsApp (operador)"
       : r.created_by_user_id
         ? "Painel"
         : "WhatsApp (proprietário)";

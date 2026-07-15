@@ -1,4 +1,5 @@
 import { DevEnvironmentBanner } from "@/components/DevEnvironmentBanner";
+import { PermissionRouteGuard } from "@/components/PermissionRouteGuard";
 import { AppLayout } from "@/components/AppLayout";
 import { ConfiguracoesLayout } from "@/components/ConfiguracoesLayout";
 import { RouteDocumentTitle } from "@/components/RouteDocumentTitle";
@@ -16,7 +17,7 @@ import { ConfiguracoesFiscal } from "@/pages/ConfiguracoesFiscal";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesContasBancarias } from "@/pages/ConfiguracoesContasBancarias";
-import { ConfiguracoesUsuariosMembros } from "@/pages/ConfiguracoesUsuariosMembros";
+import { ConfiguracoesUsuarios } from "@/pages/ConfiguracoesUsuarios";
 import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
 import { Dashboard } from "@/pages/Dashboard";
@@ -95,9 +96,9 @@ function AuthenticatedLayout() {
             element={<UnitSetupLegacyOpen />}
           />
           <Route path="/app" element={<AppLayout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="despesas" element={<Despesas />} />
-          <Route path="vendas" element={<Receitas />} />
+          <Route index element={<PermissionRouteGuard permission="dashboard"><Dashboard /></PermissionRouteGuard>} />
+          <Route path="despesas" element={<PermissionRouteGuard permission="despesas"><Despesas /></PermissionRouteGuard>} />
+          <Route path="vendas" element={<PermissionRouteGuard permission="vendas_realizadas"><Receitas /></PermissionRouteGuard>} />
           <Route
             path="receitas"
             element={<Navigate to="/app/vendas" replace />}
@@ -106,23 +107,23 @@ function AuthenticatedLayout() {
             path="lancamento-receitas"
             element={<Navigate to="/app/vendas" replace />}
           />
-          <Route path="contas-a-pagar" element={<ContasAPagar />} />
-          <Route path="vendas-realizadas" element={<VendasRealizadasFluxo />} />
-          <Route path="fluxo-de-caixa" element={<FluxoDeCaixa />} />
+          <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
+          <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
+          <Route path="fluxo-de-caixa" element={<PermissionRouteGuard permission="contas_a_pagar"><FluxoDeCaixa /></PermissionRouteGuard>} />
           <Route
             path="boletos"
             element={<Navigate to="/app/contas-a-pagar" replace />}
           />
-          <Route path="fornecedores" element={<Fornecedores />} />
-          <Route path="produtos" element={<Produtos />} />
-          <Route path="recebimento" element={<Recebimento />} />
+          <Route path="fornecedores" element={<PermissionRouteGuard permission="fornecedores"><Fornecedores /></PermissionRouteGuard>} />
+          <Route path="produtos" element={<PermissionRouteGuard permission="produtos"><Produtos /></PermissionRouteGuard>} />
+          <Route path="recebimento" element={<PermissionRouteGuard permission="recebimento"><Recebimento /></PermissionRouteGuard>} />
           <Route
             path="importacoes"
             element={<Navigate to="/app" replace />}
           />
-          <Route path="checklists" element={<Checklists />} />
-          <Route path="alertas" element={<Alertas />} />
-          <Route path="integracoes" element={<Integracoes />} />
+          <Route path="checklists" element={<PermissionRouteGuard permission="checklists"><Checklists /></PermissionRouteGuard>} />
+          <Route path="alertas" element={<PermissionRouteGuard permission="alertas"><Alertas /></PermissionRouteGuard>} />
+          <Route path="integracoes" element={<PermissionRouteGuard permission="integracoes"><Integracoes /></PermissionRouteGuard>} />
           <Route
             path="desenvolvimento"
             element={
@@ -139,12 +140,17 @@ function AuthenticatedLayout() {
               </AdminRoute>
             }
           />
-          <Route path="dre" element={<Dre />} />
-          <Route path="configuracoes" element={<ConfiguracoesLayout />}>
-            <Route index element={<Navigate to="usuarios-membros" replace />} />
+          <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
+          <Route path="configuracoes" element={<PermissionRouteGuard permission="configuracoes"><ConfiguracoesLayout /></PermissionRouteGuard>}>
+            <Route index element={<Navigate to="usuarios" replace />} />
+            <Route path="usuarios" element={<ConfiguracoesUsuarios />} />
+            <Route
+              path="acessos"
+              element={<Navigate to="/app/configuracoes/usuarios" replace />}
+            />
             <Route
               path="usuarios-membros"
-              element={<ConfiguracoesUsuariosMembros />}
+              element={<Navigate to="/app/configuracoes/usuarios" replace />}
             />
             <Route path="categorias" element={<ConfiguracoesCategorias />} />
             <Route

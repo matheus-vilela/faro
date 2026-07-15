@@ -1,4 +1,3 @@
-import { canGestorAccess, type UserCompanyRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -14,7 +13,6 @@ type QuickItem = {
   label: string;
   description: string;
   icon: LucideIcon;
-  gestorOnly?: boolean;
 };
 
 const ITEMS: QuickItem[] = [
@@ -24,7 +22,6 @@ const ITEMS: QuickItem[] = [
     description: "Vencimentos e saídas",
     icon: FileText,
   },
-
   {
     to: "/app/checklists",
     label: "Checklists",
@@ -45,16 +42,7 @@ const ITEMS: QuickItem[] = [
   },
 ];
 
-export function DashboardQuickLinks({
-  role,
-}: {
-  role: UserCompanyRole | null;
-}) {
-  const visible = ITEMS.filter((item) => {
-    if (!item.gestorOnly) return true;
-    return role ? canGestorAccess(role) : false;
-  });
-
+export function DashboardQuickLinks() {
   return (
     <div className="@container min-w-0">
       <div className="flex h-full flex-col rounded-2xl border border-border/80 bg-card/50 p-4 shadow-sm ring-1 ring-border/40">
@@ -71,11 +59,10 @@ export function DashboardQuickLinks({
         <ul
           className={cn(
             "grid gap-2",
-            /* Coluna estreita (ex.: metade do dashboard): 2×2; só em faixa larga vira 1×4 */
             "grid-cols-2 @[520px]:grid-cols-4",
           )}
         >
-          {visible.map((item) => (
+          {ITEMS.map((item) => (
             <li key={item.to}>
               <Link
                 to={item.to}

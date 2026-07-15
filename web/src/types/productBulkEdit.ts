@@ -62,7 +62,7 @@ export const BULK_EDIT_MAX_PRODUCTS = 500;
 
 export const BULK_EDIT_ERROR_MESSAGES: Record<string, string> = {
   not_authenticated: "Sessão expirada. Entre novamente.",
-  forbidden: "Sem permissão. Apenas gestor ou proprietário pode editar em lote.",
+  forbidden: "Sem permissão para editar produtos em lote nesta unidade.",
   empty_selection: "Selecione ao menos um produto.",
   too_many_products: `Limite de ${BULK_EDIT_MAX_PRODUCTS} produtos por operação.`,
   no_valid_products: "Nenhum produto válido encontrado na seleção.",

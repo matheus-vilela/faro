@@ -43,7 +43,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
@@ -59,7 +59,6 @@ import {
 } from "@/lib/expenseDivergenceUi";
 import { maskCpfCnpj } from "@/lib/masks";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
-import { canGestorAccess } from "@/lib/roles";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type {
@@ -182,12 +181,12 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 export function Despesas() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const companyId = currentCompany?.id ?? "";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightExpenseId = searchParams.get("expense");
-  const isGestor = currentRole && canGestorAccess(currentRole);
+  const isGestor = useHasPermission("despesas");
 
   const now = new Date();
   const [period, setPeriod] = useState<MonthYear>({

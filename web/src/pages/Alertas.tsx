@@ -25,12 +25,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import {
   dismissCompanyAlert,
   syncCompanyAlerts,
 } from "@/lib/companyAlerts/syncCompanyAlerts";
-import { canGestorAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyAlertKind, CompanyAlertRow } from "@/types/companyAlert";
@@ -137,9 +136,9 @@ function KindIcon({ kind }: { kind: CompanyAlertKind }) {
 }
 
 export function Alertas() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
-  const canSee = currentRole ? canGestorAccess(currentRole) : false;
+  const canSee = useHasPermission("alertas");
   const [searchParams, setSearchParams] = useSearchParams();
 
   const kindFilter = useMemo(() => {
@@ -261,7 +260,7 @@ export function Alertas() {
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
             <CardDescription>
-              Apenas gestores e proprietários visualizam esta página.
+              Você não tem permissão para visualizar alertas nesta unidade.
             </CardDescription>
           </CardHeader>
         </Card>

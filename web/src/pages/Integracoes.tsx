@@ -7,14 +7,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useCompany } from "@/contexts/CompanyContext";
-import { canGestorAccess } from "@/lib/roles";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { Plug } from "lucide-react";
 
 export function Integracoes() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
-  const canManage = currentRole ? canGestorAccess(currentRole) : false;
+  const canManage = useHasPermission("integracoes");
 
   if (!canManage) {
     return (
@@ -28,7 +27,7 @@ export function Integracoes() {
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
             <CardDescription>
-              Apenas gestores e proprietários configuram integrações.
+              Você não tem permissão para configurar integrações nesta unidade.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -40,7 +39,7 @@ export function Integracoes() {
     <PageShell className="space-y-8" narrow>
       <PageHeader
         title="Integrações"
-        description="Conecte sistemas externos ao Faro. As credenciais ficam vinculadas a esta empresa e visíveis apenas para gestores e proprietários."
+        description="Conecte sistemas externos ao Faro. As credenciais ficam vinculadas a esta empresa e visíveis apenas para quem tem permissão de integrações."
         icon={Plug}
       />
 

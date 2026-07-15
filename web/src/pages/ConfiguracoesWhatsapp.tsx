@@ -75,9 +75,9 @@ export function ConfiguracoesWhatsapp() {
               O sistema descobre <strong>qual empresa você representa</strong>{" "}
               pelo <strong>número de WhatsApp</strong> cadastrado: o do{" "}
               <strong>proprietário</strong> ou de{" "}
-              <strong>membros ativos</strong> em{" "}
-              <Link to="/app/configuracoes/usuarios-membros" className={linkWa}>
-                Configurações → Usuários e membros
+              <strong>operadores ativos</strong> em{" "}
+              <Link to="/app/configuracoes/usuarios" className={linkWa}>
+                Configurações → Usuários e acessos
               </Link>
               . Por isso o celular precisa ser o mesmo que envia as mensagens.
             </p>
@@ -189,12 +189,12 @@ export function ConfiguracoesWhatsapp() {
               <li>
                 <span className={cmdPill}>estoque</span> ou{" "}
                 <span className={cmdPill}>inventario</span> — recebe um link
-                para contagem de estoque. Membros precisam da permissão em{" "}
+                para contagem de estoque. Operadores precisam da permissão em{" "}
                 <Link
-                  to="/app/configuracoes/usuarios-membros"
+                  to="/app/configuracoes/usuarios"
                   className={linkWa}
                 >
-                  Usuários e membros
+                  Usuários e acessos
                 </Link>
                 .
               </li>
@@ -266,7 +266,7 @@ export function ConfiguracoesWhatsapp() {
                 Cadastro de números
               </CardTitle>
               <CardDescription>
-                Garanta que o WhatsApp do proprietário e dos membros esteja
+                Garanta que o WhatsApp do proprietário e dos operadores esteja
                 correto para o agente reconhecer a empresa e as permissões
                 (checklist, estoque, etc.).
               </CardDescription>
@@ -274,13 +274,13 @@ export function ConfiguracoesWhatsapp() {
           </CardHeader>
           <CardContent>
             <Link
-              to="/app/configuracoes/usuarios-membros"
+              to="/app/configuracoes/usuarios"
               className={cn(
                 "inline-flex rounded-lg bg-[#25D366] px-4 py-2 text-sm font-semibold text-white shadow-md transition-colors hover:bg-[#20bd5a]",
                 "dark:bg-emerald-500 dark:hover:bg-emerald-400",
               )}
             >
-              Abrir Usuários e membros →
+              Abrir Usuários e acessos →
             </Link>
           </CardContent>
         </Card>

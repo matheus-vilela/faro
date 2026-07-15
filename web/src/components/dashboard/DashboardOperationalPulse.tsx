@@ -1,6 +1,5 @@
 import { DashboardWhatsappPulseTile } from "@/components/dashboard/DashboardWhatsappPulseTile";
 import { Button } from "@/components/ui/button";
-import { canGestorAccess, type UserCompanyRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
   ArrowRight,
@@ -13,7 +12,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 export function DashboardOperationalPulse({
-  role,
+  canSeeAlerts,
   loadingBoletos,
   todayCount,
   todayTotal,
@@ -23,7 +22,7 @@ export function DashboardOperationalPulse({
   totalAlerts,
   formatCurrency,
 }: {
-  role: UserCompanyRole | null;
+  canSeeAlerts: boolean;
   loadingBoletos: boolean;
   todayCount: number;
   todayTotal: number;
@@ -33,85 +32,83 @@ export function DashboardOperationalPulse({
   totalAlerts: number;
   formatCurrency: (v: number) => string;
 }) {
-  const canAlerts = role ? canGestorAccess(role) : false;
-
   return (
     <div className="min-w-0">
       <div className="grid grid-cols-2 gap-3">
-      <PulseTile
-        icon={CalendarDays}
-        label="Vencem hoje"
-        loading={loadingBoletos}
-        primary={String(todayCount)}
-        secondary={
-          todayCount > 0 ? formatCurrency(todayTotal) : "Sem pendências"
-        }
-        tone="primary"
-        action={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs"
-            asChild
-          >
-            <Link to="/app/contas-a-pagar">
-              Contas
-              <ArrowRight className="ml-1 h-3 w-3" />
-            </Link>
-          </Button>
-        }
-      />
-      <PulseTile
-        icon={CalendarClock}
-        label="Vencem amanhã"
-        loading={loadingBoletos}
-        primary={String(tomorrowCount)}
-        secondary={
-          tomorrowCount > 0 ? formatCurrency(tomorrowTotal) : "Sem pendências"
-        }
-        tone="muted"
-        action={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs"
-            asChild
-          >
-            <Link to="/app/contas-a-pagar">
-              Contas
-              <ArrowRight className="ml-1 h-3 w-3" />
-            </Link>
-          </Button>
-        }
-      />
-      {canAlerts ? (
-        <>
-          <PulseTile
-            icon={Bell}
-            label="Alertas abertos"
-            loading={loadingAlerts}
-            primary={totalAlerts > 0 ? String(totalAlerts) : "0"}
-            secondary={totalAlerts === 0 ? "Nada pendente" : "Itens a conferir"}
-            tone={totalAlerts > 0 ? "amber" : "muted"}
-            action={
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs"
-                asChild
-              >
-                <Link to="/app/alertas">
-                  Lista
-                  <ArrowRight className="ml-1 h-3 w-3" />
-                </Link>
-              </Button>
-            }
-          />
+        <PulseTile
+          icon={CalendarDays}
+          label="Vencem hoje"
+          loading={loadingBoletos}
+          primary={String(todayCount)}
+          secondary={
+            todayCount > 0 ? formatCurrency(todayTotal) : "Sem pendências"
+          }
+          tone="primary"
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs"
+              asChild
+            >
+              <Link to="/app/contas-a-pagar">
+                Contas
+                <ArrowRight className="ml-1 h-3 w-3" />
+              </Link>
+            </Button>
+          }
+        />
+        <PulseTile
+          icon={CalendarClock}
+          label="Vencem amanhã"
+          loading={loadingBoletos}
+          primary={String(tomorrowCount)}
+          secondary={
+            tomorrowCount > 0 ? formatCurrency(tomorrowTotal) : "Sem pendências"
+          }
+          tone="muted"
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs"
+              asChild
+            >
+              <Link to="/app/contas-a-pagar">
+                Contas
+                <ArrowRight className="ml-1 h-3 w-3" />
+              </Link>
+            </Button>
+          }
+        />
+        {canSeeAlerts ? (
+          <>
+            <PulseTile
+              icon={Bell}
+              label="Alertas abertos"
+              loading={loadingAlerts}
+              primary={totalAlerts > 0 ? String(totalAlerts) : "0"}
+              secondary={totalAlerts === 0 ? "Nada pendente" : "Itens a conferir"}
+              tone={totalAlerts > 0 ? "amber" : "muted"}
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                  asChild
+                >
+                  <Link to="/app/alertas">
+                    Lista
+                    <ArrowRight className="ml-1 h-3 w-3" />
+                  </Link>
+                </Button>
+              }
+            />
+            <DashboardWhatsappPulseTile />
+          </>
+        ) : (
           <DashboardWhatsappPulseTile />
-        </>
-      ) : (
-        <DashboardWhatsappPulseTile />
-      )}
+        )}
       </div>
     </div>
   );

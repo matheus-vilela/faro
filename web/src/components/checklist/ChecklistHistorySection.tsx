@@ -289,10 +289,10 @@ export function ChecklistHistorySection({
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os membros</SelectItem>
+                <SelectItem value="all">Todos os operadores</SelectItem>
                 {members.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
-                    {m.name?.trim() || "Membro"}
+                    {m.name?.trim() || "Operador"}
                   </SelectItem>
                 ))}
               </SelectContent>

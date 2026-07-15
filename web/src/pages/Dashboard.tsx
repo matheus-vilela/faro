@@ -7,7 +7,7 @@ import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/Dashb
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
 import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
 import { LayoutDashboard } from "lucide-react";
@@ -23,10 +23,10 @@ function formatLongDate(d: Date): string {
 }
 
 export function Dashboard() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany, isCompanyOwner } = useCompany();
   const companyId = currentCompany?.id;
-  const canSeeAlerts = currentRole === "gestor" || currentRole === "owner";
-  const isOwner = currentRole === "owner";
+  const canSeeAlerts = useHasPermission("alertas");
+  const isOwner = isCompanyOwner;
   const [importReviewSeq, setImportReviewSeq] = useState(0);
 
   const bumpImportReviewPipeline = useCallback(() => {

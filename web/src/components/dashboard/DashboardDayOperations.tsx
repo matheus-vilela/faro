@@ -344,7 +344,7 @@ export function DashboardDayOperations() {
           const m = row.company_members as { name?: string } | null;
           pendingList.push({
             checklistTitle: checklist.title,
-            memberName: m?.name?.trim() || "Membro",
+            memberName: m?.name?.trim() || "Operador",
             expected,
             actual,
           });
@@ -598,7 +598,7 @@ export function DashboardDayOperations() {
                       {r.checklists?.title ?? "Checklist"}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {r.company_members?.name?.trim() || "Membro"} ·{" "}
+                      {r.company_members?.name?.trim() || "Operador"} ·{" "}
                       {formatDt(r.submitted_at)}
                     </p>
                   </div>

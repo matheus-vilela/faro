@@ -35,8 +35,14 @@ export function getDocumentTitle(pathname: string): string {
   if (path.startsWith("/app/configuracoes/whatsapp")) {
     return tab("WhatsApp");
   }
-  if (path.startsWith("/app/configuracoes/usuarios-membros")) {
-    return tab("Usuários e membros");
+  if (path.startsWith("/app/configuracoes/usuarios")) {
+    return tab("Usuários e acessos");
+  }
+  if (
+    path.startsWith("/app/configuracoes/acessos") ||
+    path.startsWith("/app/configuracoes/usuarios-membros")
+  ) {
+    return tab("Usuários e acessos");
   }
   if (path.startsWith("/app/configuracoes")) {
     return tab("Configurações");

@@ -193,7 +193,7 @@ export function ChecklistPerformanceSection({
           </div>
         ) : stats.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nenhuma atribuição com checklist ativo. Atribua membros aos
+            Nenhuma atribuição com checklist ativo. Atribua operadores aos
             checklists para ver a meta e o desempenho.
           </p>
         ) : (
