@@ -162,7 +162,7 @@ export function ConfiguracoesImpostosReceita() {
 
   if (!isOwner) {
     return (
-      <PageShell narrow>
+      <PageShell>
         <Card>
           <CardHeader>
             <CardTitle>Impostos na receita</CardTitle>
@@ -176,7 +176,7 @@ export function ConfiguracoesImpostosReceita() {
   }
 
   return (
-    <PageShell narrow className="space-y-8">
+    <PageShell className="space-y-8">
       <PageHeader
         icon={Percent}
         title="Impostos na receita"

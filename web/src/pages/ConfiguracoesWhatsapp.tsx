@@ -36,7 +36,7 @@ export function ConfiguracoesWhatsapp() {
   const waMeHref = getWhatsappAgentWaMeHref();
 
   return (
-    <PageShell narrow>
+    <PageShell>
       <div
         className={cn(
           "space-y-6 rounded-2xl border-2 border-[#25D366]/30 bg-linear-to-br p-4 sm:p-6 sm:space-y-8",

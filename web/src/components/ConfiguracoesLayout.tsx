@@ -95,7 +95,7 @@ export function ConfiguracoesLayout() {
   );
 
   return (
-    <PageShell narrow className="space-y-8">
+    <PageShell className="space-y-8">
       <PageHeader
         icon={Settings2}
         title="Configurações"
