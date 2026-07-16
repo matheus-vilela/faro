@@ -48,6 +48,7 @@ export function StepCertificateForm({
   linkGenerating,
   onCopyLink,
   linkCopied,
+  compact = false,
 }: {
   cert: SetupCertificateState | undefined;
   password: string;
@@ -61,12 +62,13 @@ export function StepCertificateForm({
   linkGenerating?: boolean;
   onCopyLink?: () => void;
   linkCopied?: boolean;
+  compact?: boolean;
 }) {
   const mode: CertificateFiscalMode = cert?.mode ?? "undecided";
   const status = cert?.status ?? "not_sent";
 
   return (
-    <div className="space-y-4">
+    <div className={cn(compact ? "space-y-3" : "space-y-4")}>
       <p className="text-sm text-muted-foreground">
         Escolha como deseja conectar o certificado digital A1 (PFX/P12) à SEFAZ.
         Por segurança, a senha e o conteúdo do certificado não são gravados na
@@ -91,7 +93,8 @@ export function StepCertificateForm({
                 type="button"
                 onClick={() => onModeChange(opt.mode)}
                 className={cn(
-                  "flex w-full items-start gap-4 p-4 text-left transition-colors sm:p-5",
+                  "flex w-full items-start gap-4 text-left transition-colors",
+                  compact ? "p-3 sm:p-4" : "p-4 sm:p-5",
                   "hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 )}
                 aria-pressed={selected}
@@ -123,7 +126,14 @@ export function StepCertificateForm({
               </button>
 
               {opt.mode === "upload_now" && selected ? (
-                <div className="border-t border-border/60 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
+                <div
+                  className={cn(
+                    "border-t border-border/60 pt-2",
+                    compact
+                      ? "px-3 pb-3 sm:px-4 sm:pb-4"
+                      : "px-4 pb-4 sm:px-5 sm:pb-5",
+                  )}
+                >
                   <CertificateUploadFields
                     cert={cert}
                     password={password}
@@ -131,6 +141,8 @@ export function StepCertificateForm({
                     onPickFile={onPickFile}
                     busy={busy}
                     lockWhenValid={false}
+                    compact={compact}
+                    showStatus={!compact}
                   />
                   {status === "valid" && onRemoveCertificate ? (
                     <Button
@@ -147,7 +159,14 @@ export function StepCertificateForm({
               ) : null}
 
               {opt.mode === "delegate_link" && selected ? (
-                <div className="border-t border-border/60 px-4 pb-4 pt-2 sm:px-5 sm:pb-5">
+                <div
+                  className={cn(
+                    "border-t border-border/60 pt-2",
+                    compact
+                      ? "px-3 pb-3 sm:px-4 sm:pb-4"
+                      : "px-4 pb-4 sm:px-5 sm:pb-5",
+                  )}
+                >
                   {delegationLinkUrl ? (
                     <div className="space-y-3">
                       <p className="text-sm text-muted-foreground">

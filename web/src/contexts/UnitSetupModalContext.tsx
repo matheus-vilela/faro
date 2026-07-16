@@ -165,7 +165,7 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
       >
         <DialogContent
           showCloseButton={false}
-          className="z-[60] max-h-[min(92vh,880px)] w-[calc(100vw-1.5rem)] max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl"
+          className="z-[60] max-h-[min(88vh,720px)] w-[calc(100vw-1.5rem)] max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
           onFocusOutside={(e) => e.preventDefault()}
@@ -174,7 +174,7 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
             requestLeaveConfirm(() => closeModal());
           }}
         >
-          <div className="flex max-h-[min(92vh,880px)] min-h-0 flex-col">
+          <div className="flex max-h-[min(88vh,720px)] min-h-0 flex-col">
             <div className="flex shrink-0 justify-end px-3 pt-3">
               <button
                 type="button"
@@ -185,7 +185,7 @@ export function UnitSetupModalProvider({ children }: { children: ReactNode }) {
                 <XIcon />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+            <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 sm:px-6 sm:pb-6">
               <DialogHeader className="sr-only">
                 <DialogTitle>Configurar unidade</DialogTitle>
                 <DialogDescription>

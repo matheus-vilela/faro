@@ -1536,7 +1536,7 @@ export function UnitSetupWizard({
     return "Continuar";
   };
 
-  const wizardBody = (
+  const wizardHeader = (
     <>
       <div className="space-y-3" aria-label="Faro">
         <img
@@ -1574,142 +1574,162 @@ export function UnitSetupWizard({
           {stepError}
         </p>
       ) : null}
+    </>
+  );
 
-      <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
-        <div className="p-4 sm:p-6">
-          {includeGroupStep && activeStep === 1 ? (
-            <StepGroupForm
-              groupName={groupName}
-              onGroupNameChange={setGroupName}
-            />
-          ) : null}
-          {activeStep === empresaWizardStep ? (
-            <StepCompanyForm
-              groupName={groupName}
-              onGroupNameChange={setGroupName}
-              showGroupName={false}
-              empresa={{
-                ...empresa,
-                cnpj_cpf: empresa.cnpj_cpf ?? "",
-                telefone: empresa.telefone ?? "",
-              }}
-              onEmpresaChange={applyEmpresaPatch}
-              lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
-              cnpjValidated={cnpjValidated}
-            />
-          ) : null}
-          {activeStep === certWizardStep ? (
-            <StepCertificateForm
-              cert={setup.certificate}
-              password={certPassword}
-              onPasswordChange={(v) => {
-                setCertPassword(v);
-                setSetup((s) =>
-                  syncCompletionState(s, undefined, {
-                    certBase64: certFileBase64,
-                    certPassword: v,
-                  }),
-                );
-              }}
-              onPickFile={(f) => void handleCertFile(f)}
-              onRemoveCertificate={() => void handleRemoveCertificate()}
-              onModeChange={handleCertModeChange}
-              busy={certBusy}
-              delegationLinkUrl={delegationLinkUrl}
-              onGenerateLink={() => void handleGenerateDelegationLink()}
-              linkGenerating={linkGenerating}
-              onCopyLink={() => void handleCopyDelegationLink()}
-              linkCopied={linkCopied}
-            />
-          ) : null}
-          {activeStep === pdvWizardStep ? (
-            <StepPdvForm
-              epoc={setup.epoc}
-              validationError={epocValidateError}
-              onPdvOptionChange={handlePdvOptionChange}
-              onEpocChange={(patch) => {
-                setEpocValidateError(null);
-                setSetup((s) =>
-                  mergeSetupPatch(s, {
-                    epoc: { ...(s.epoc ?? { mode: "undecided" }), ...patch },
-                  }),
-                );
-              }}
-            />
-          ) : null}
-          {activeStep === whatsappWizardStep ? (
-            <StepWhatsappForm
-              phoneDigits={whatsappPhoneDigits}
-              rules={whatsappRules}
-              onPhoneChange={setWhatsappPhoneDigits}
-              onRuleToggle={handleWhatsappRuleToggle}
-            />
-          ) : null}
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          "flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:pt-5",
-          activeStep === pdvWizardStep || activeStep === whatsappWizardStep
-            ? "sm:justify-between"
-            : "sm:justify-end",
-        )}
-      >
-        {activeStep === pdvWizardStep || activeStep === whatsappWizardStep ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-full text-muted-foreground sm:w-auto"
-            onClick={() => void handlePause()}
-            disabled={saving}
-          >
-            Pausar e continuar depois
-          </Button>
+  const wizardStepCard = (
+    <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
+      <div className="p-4 sm:p-6">
+        {includeGroupStep && activeStep === 1 ? (
+          <StepGroupForm
+            groupName={groupName}
+            onGroupNameChange={setGroupName}
+          />
         ) : null}
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={
-              activeStep === 1
-                ? () => requestLeaveConfirm(() => exitApp())
-                : handleBack
-            }
-            disabled={saving || (lockStepsOneToTwo && activeStep === pdvWizardStep)}
-          >
-            {activeStep === 1 ? "Cancelar" : "Voltar"}
-          </Button>
-          <Button
-            type="button"
-            className="w-full min-w-32 sm:w-auto"
-            onClick={() => void handleNext()}
-            disabled={
-              saving ||
-              certBusy ||
-              cnpjValidating ||
-              fiscalAdvanceBlocked ||
-              pdvAdvanceBlocked ||
-              whatsappAdvanceBlocked
-            }
-          >
-            {saving || cnpjValidating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {getPrimaryButtonLabel()}
-              </>
-            ) : (
-              getPrimaryButtonLabel()
-            )}
-          </Button>
-        </div>
+        {activeStep === empresaWizardStep ? (
+          <StepCompanyForm
+            groupName={groupName}
+            onGroupNameChange={setGroupName}
+            showGroupName={false}
+            empresa={{
+              ...empresa,
+              cnpj_cpf: empresa.cnpj_cpf ?? "",
+              telefone: empresa.telefone ?? "",
+            }}
+            onEmpresaChange={applyEmpresaPatch}
+            lockedEmpresaKeys={setup.focus_cnpj_lock?.locked_empresa_keys}
+            cnpjValidated={cnpjValidated}
+          />
+        ) : null}
+        {activeStep === certWizardStep ? (
+          <StepCertificateForm
+            compact={isModal}
+            cert={setup.certificate}
+            password={certPassword}
+            onPasswordChange={(v) => {
+              setCertPassword(v);
+              setSetup((s) =>
+                syncCompletionState(s, undefined, {
+                  certBase64: certFileBase64,
+                  certPassword: v,
+                }),
+              );
+            }}
+            onPickFile={(f) => void handleCertFile(f)}
+            onRemoveCertificate={() => void handleRemoveCertificate()}
+            onModeChange={handleCertModeChange}
+            busy={certBusy}
+            delegationLinkUrl={delegationLinkUrl}
+            onGenerateLink={() => void handleGenerateDelegationLink()}
+            linkGenerating={linkGenerating}
+            onCopyLink={() => void handleCopyDelegationLink()}
+            linkCopied={linkCopied}
+          />
+        ) : null}
+        {activeStep === pdvWizardStep ? (
+          <StepPdvForm
+            epoc={setup.epoc}
+            validationError={epocValidateError}
+            onPdvOptionChange={handlePdvOptionChange}
+            onEpocChange={(patch) => {
+              setEpocValidateError(null);
+              setSetup((s) =>
+                mergeSetupPatch(s, {
+                  epoc: { ...(s.epoc ?? { mode: "undecided" }), ...patch },
+                }),
+              );
+            }}
+          />
+        ) : null}
+        {activeStep === whatsappWizardStep ? (
+          <StepWhatsappForm
+            phoneDigits={whatsappPhoneDigits}
+            rules={whatsappRules}
+            onPhoneChange={setWhatsappPhoneDigits}
+            onRuleToggle={handleWhatsappRuleToggle}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+
+  const wizardFooter = (
+    <div
+      className={cn(
+        "flex flex-col-reverse gap-3 sm:flex-row sm:items-center",
+        !isModal && "border-t border-border/60 pt-4 sm:pt-5",
+        activeStep === pdvWizardStep || activeStep === whatsappWizardStep
+          ? "sm:justify-between"
+          : "sm:justify-end",
+      )}
+    >
+      {activeStep === pdvWizardStep || activeStep === whatsappWizardStep ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full text-muted-foreground sm:w-auto"
+          onClick={() => void handlePause()}
+          disabled={saving}
+        >
+          Pausar e continuar depois
+        </Button>
+      ) : null}
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full sm:w-auto"
+          onClick={
+            activeStep === 1
+              ? () => requestLeaveConfirm(() => exitApp())
+              : handleBack
+          }
+          disabled={saving || (lockStepsOneToTwo && activeStep === pdvWizardStep)}
+        >
+          {activeStep === 1 ? "Cancelar" : "Voltar"}
+        </Button>
+        <Button
+          type="button"
+          className="w-full min-w-32 sm:w-auto"
+          onClick={() => void handleNext()}
+          disabled={
+            saving ||
+            certBusy ||
+            cnpjValidating ||
+            fiscalAdvanceBlocked ||
+            pdvAdvanceBlocked ||
+            whatsappAdvanceBlocked
+          }
+        >
+          {saving || cnpjValidating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {getPrimaryButtonLabel()}
+            </>
+          ) : (
+            getPrimaryButtonLabel()
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+
+  const wizardBody = (
+    <>
+      {wizardHeader}
+      {wizardStepCard}
+      {wizardFooter}
     </>
   );
 
   return isModal ? (
-    <div className="space-y-5">{wizardBody}</div>
+    <div className="flex h-[min(82vh,680px)] min-h-[min(82vh,560px)] flex-col gap-4">
+      <div className="shrink-0 space-y-3">{wizardHeader}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{wizardStepCard}</div>
+      <div className="shrink-0 border-t border-border/60 bg-background pt-4">
+        {wizardFooter}
+      </div>
+    </div>
   ) : (
     <PageShell className="max-w-2xl space-y-6">{wizardBody}</PageShell>
   );

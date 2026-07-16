@@ -13,6 +13,7 @@ export function CertificateUploadFields({
   busy,
   showStatus = true,
   lockWhenValid = true,
+  compact = false,
 }: {
   cert: SetupCertificateState | undefined;
   password: string;
@@ -21,6 +22,7 @@ export function CertificateUploadFields({
   busy?: boolean;
   showStatus?: boolean;
   lockWhenValid?: boolean;
+  compact?: boolean;
 }) {
   const fileInputId = useId();
   const status = cert?.status ?? "not_sent";
@@ -30,19 +32,33 @@ export function CertificateUploadFields({
   const dragDepth = useRef(0);
 
   return (
-    <div className="space-y-4">
+    <div className={cn(compact ? "space-y-3" : "space-y-4")}>
       {!lockedAfterValid ? (
         <div
           className={cn(
-            "flex flex-col items-center justify-center gap-3 rounded-xl border-2 px-6 py-10 transition-[border-color,box-shadow,background-color]",
-            hasFile
-              ? "border-primary/50 bg-primary/5 shadow-sm"
-              : dragOver
-                ? "border-dashed border-primary/60 bg-primary/5"
-                : "border-dashed border-muted-foreground/30 bg-muted/20",
-            !hasFile &&
-              !dragOver &&
-              "hover:border-muted-foreground/50 hover:bg-muted/30",
+            "rounded-xl border-2 transition-[border-color,box-shadow,background-color]",
+            compact
+              ? hasFile
+                ? "flex items-center gap-3 border-primary/50 bg-primary/5 px-3 py-3 shadow-sm"
+                : cn(
+                    "flex flex-col items-center justify-center gap-2 px-4 py-5",
+                    dragOver
+                      ? "border-dashed border-primary/60 bg-primary/5"
+                      : "border-dashed border-muted-foreground/30 bg-muted/20",
+                    !dragOver &&
+                      "hover:border-muted-foreground/50 hover:bg-muted/30",
+                  )
+              : cn(
+                  "flex flex-col items-center justify-center gap-3 px-6 py-10",
+                  hasFile
+                    ? "border-primary/50 bg-primary/5 shadow-sm"
+                    : dragOver
+                      ? "border-dashed border-primary/60 bg-primary/5"
+                      : "border-dashed border-muted-foreground/30 bg-muted/20",
+                  !hasFile &&
+                    !dragOver &&
+                    "hover:border-muted-foreground/50 hover:bg-muted/30",
+                ),
           )}
           onDragEnter={(e) => {
             e.preventDefault();
@@ -73,37 +89,66 @@ export function CertificateUploadFields({
           }}
         >
           {hasFile ? (
-            <>
-              <div
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary"
-                aria-hidden
-              >
-                <CheckCircle2 className="h-7 w-7" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-foreground">
-                  Arquivo carregado
-                </p>
-                <p
-                  className="mt-1 break-all text-sm text-muted-foreground"
-                  title={cert?.file_name}
+            compact ? (
+              <>
+                <div
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary"
+                  aria-hidden
                 >
-                  {cert?.file_name}
-                </p>
+                  <CheckCircle2 className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    Arquivo carregado
+                  </p>
+                  <p
+                    className="truncate text-sm text-muted-foreground"
+                    title={cert?.file_name}
+                  >
+                    {cert?.file_name}
+                  </p>
+                </div>
                 <label
                   htmlFor={fileInputId}
-                  className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-medium text-primary hover:underline"
                 >
                   <FileUp className="h-4 w-4" />
-                  Escolher outro arquivo
+                  Escolher outro
                 </label>
-              </div>
-            </>
+              </>
+            ) : (
+              <>
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary"
+                  aria-hidden
+                >
+                  <CheckCircle2 className="h-7 w-7" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-foreground">
+                    Arquivo carregado
+                  </p>
+                  <p
+                    className="mt-1 break-all text-sm text-muted-foreground"
+                    title={cert?.file_name}
+                  >
+                    {cert?.file_name}
+                  </p>
+                  <label
+                    htmlFor={fileInputId}
+                    className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                  >
+                    <FileUp className="h-4 w-4" />
+                    Escolher outro arquivo
+                  </label>
+                </div>
+              </>
+            )
           ) : (
             <>
               <FileKey
                 className={cn(
-                  "h-10 w-10",
+                  compact ? "h-8 w-8" : "h-10 w-10",
                   dragOver ? "text-primary" : "text-muted-foreground",
                 )}
                 aria-hidden
