@@ -1,4 +1,8 @@
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import {
+  BOLETO_CATEGORY_LABELS,
+  BOLETO_CATEGORY_ORDER,
+  formatBoletoCategoryLabel,
+} from "@/lib/boletoCategory";
 import {
   companyCategoryDisplayName,
 } from "@/lib/companyCategoryLabels";
@@ -8,6 +12,7 @@ import {
   type PayableReceiptExpense,
 } from "@/lib/payableBoletoReceipt";
 import type { CompanyCategory, TipoCategoria } from "@/types/category";
+import type { BoletoCategory } from "@/types/expense";
 import type { FluxoBoletoRow } from "@/types/expenseSeries";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -148,6 +153,72 @@ export type PayableCategoryGroup = {
   subgroups: PayableCategorySubgroup[];
 };
 
+const LEGACY_TIPO: Partial<Record<BoletoCategory, TipoCategoria>> = {
+  insumos: "CMV",
+  fornecedores: "CMV",
+  custo_fixo: "FIXA",
+  estabelecimento: "FIXA",
+  outros: "OPERACIONAL",
+};
+
+type ResolvedCategoryGroup = {
+  groupKey: string;
+  groupName: string;
+  tipo: TipoCategoria | null;
+  sortOrder: number;
+  subgroupKey: string;
+  subgroupLabel: string;
+  subgroupSortOrder: number;
+};
+
+/** company_category_id → enum legado → Outros (mesmo fallback de formatBoletoCategoryLabel). */
+function resolveCategoryGroupForBoleto(
+  b: Pick<FluxoBoletoRow, "category" | "company_category_id">,
+  byId: Map<string, CompanyCategory>,
+): ResolvedCategoryGroup {
+  const root = rootCategoryForBoleto(b, byId);
+  if (root) {
+    const leaf = leafCategoryForBoleto(b, byId);
+    return {
+      groupKey: root.id,
+      groupName: companyCategoryDisplayName(root),
+      tipo: root.tipo ?? null,
+      sortOrder: root.sort_order ?? root.ordem ?? 9999,
+      subgroupKey: leaf?.id ?? `${root.id}:self`,
+      subgroupLabel: leaf
+        ? companyCategoryDisplayName(leaf)
+        : companyCategoryDisplayName(root),
+      subgroupSortOrder: leaf?.sort_order ?? leaf?.ordem ?? 9999,
+    };
+  }
+
+  const legacy = b.category;
+  if (legacy && legacy in BOLETO_CATEGORY_LABELS) {
+    const key = legacy as BoletoCategory;
+    const orderIdx = BOLETO_CATEGORY_ORDER.indexOf(key);
+    const label = BOLETO_CATEGORY_LABELS[key];
+    return {
+      groupKey: `legacy:${key}`,
+      groupName: label,
+      tipo: LEGACY_TIPO[key] ?? null,
+      sortOrder: orderIdx >= 0 ? orderIdx : 9999,
+      subgroupKey: `legacy:${key}`,
+      subgroupLabel: label,
+      subgroupSortOrder: 0,
+    };
+  }
+
+  return {
+    groupKey: "outros",
+    groupName: BOLETO_CATEGORY_LABELS.outros,
+    tipo: LEGACY_TIPO.outros ?? null,
+    sortOrder: 9999,
+    subgroupKey: "outros",
+    subgroupLabel: BOLETO_CATEGORY_LABELS.outros,
+    subgroupSortOrder: 0,
+  };
+}
+
 export function groupPayablesByCategory(
   boletos: FluxoBoletoRow[],
   byId: Map<string, CompanyCategory>,
@@ -168,25 +239,23 @@ export function groupPayablesByCategory(
   >();
 
   for (const b of boletos) {
-    const root = rootCategoryForBoleto(b, byId);
-    const leaf = leafCategoryForBoleto(b, byId);
-    const groupKey = root?.id ?? "outros";
-    const groupName = root
-      ? companyCategoryDisplayName(root)
-      : "Outros";
-    const subgroupKey = leaf?.id ?? (root ? `${root.id}:self` : "outros");
-    const subgroupLabel = leaf
-      ? companyCategoryDisplayName(leaf)
-      : root
-        ? companyCategoryDisplayName(root)
-        : "Outros";
+    const resolved = resolveCategoryGroupForBoleto(b, byId);
+    const {
+      groupKey,
+      groupName,
+      tipo,
+      sortOrder,
+      subgroupKey,
+      subgroupLabel,
+      subgroupSortOrder,
+    } = resolved;
 
     let group = groupMap.get(groupKey);
     if (!group) {
       group = {
         name: groupName,
-        tipo: root?.tipo ?? null,
-        sortOrder: root?.sort_order ?? root?.ordem ?? 9999,
+        tipo,
+        sortOrder,
         amount: 0,
         count: 0,
         subgroupMap: new Map(),
@@ -201,7 +270,7 @@ export function groupPayablesByCategory(
     if (!sub) {
       sub = {
         label: subgroupLabel,
-        sortOrder: leaf?.sort_order ?? leaf?.ordem ?? 9999,
+        sortOrder: subgroupSortOrder,
         items: [],
       };
       group.subgroupMap.set(subgroupKey, sub);
