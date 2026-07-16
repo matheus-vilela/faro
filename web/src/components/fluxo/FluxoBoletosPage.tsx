@@ -69,6 +69,7 @@ import {
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
 import type { PayableListView } from "@/lib/payableListViews";
+import { sortPayablesPaidLast } from "@/lib/payableListViews";
 import {
   computePayableTotals,
   EMPTY_PAYABLE_TOTALS,
@@ -175,6 +176,8 @@ export function FluxoBoletosPage({
   const debouncedSearch = useDebounce(boletosSearch, 300);
   const [loadingList, setLoadingList] = useState(true);
   const [listView, setListView] = useState<PayableListView>("category");
+  const [calendarDayListView, setCalendarDayListView] =
+    useState<PayableListView>("category");
 
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
   const [createBoletoDefaultDueDate, setCreateBoletoDefaultDueDate] = useState<
@@ -877,6 +880,11 @@ export function FluxoBoletosPage({
 
   const calendarDayItems = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
 
+  const calendarDayItemsSorted = useMemo(
+    () => sortPayablesPaidLast(calendarDayItems),
+    [calendarDayItems],
+  );
+
   const calendarDayBuckets = useMemo(() => {
     const items = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
     if (flowType !== "payable") {
@@ -1152,9 +1160,14 @@ export function FluxoBoletosPage({
       {!isReceivableFlow && (
         <Sheet
           open={!!calendarDayList}
-          onOpenChange={(o) => !o && setCalendarDayList(null)}
+          onOpenChange={(o) => {
+            if (!o) {
+              setCalendarDayList(null);
+              setCalendarDayListView("category");
+            }
+          }}
         >
-          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
             <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
               <SheetTitle className="capitalize">
                 Lançamentos neste dia
@@ -1190,55 +1203,87 @@ export function FluxoBoletosPage({
                 </div>
               )}
               {calendarDayItems.length > 0 && (
-                <div className="space-y-5">
-                  {flowType === "payable" &&
-                    calendarDayBuckets.ready.length > 0 && (
-                      <div className="space-y-2">
-                        <div>
-                          <h3 className="text-sm font-semibold">
-                            Valores a pagar
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            Liberadas para pagamento neste dia.
-                          </p>
+                <div className="space-y-4">
+                  <PayableListViewToggle
+                    value={calendarDayListView}
+                    onChange={setCalendarDayListView}
+                  />
+                  {calendarDayListView === "category" && (
+                    <PayableByCategoryView
+                      boletos={calendarDayItemsSorted}
+                      categoriesById={categoriesById}
+                      expenseById={payableReceiptContext.expenseById}
+                      todayYmd={todayYmd}
+                      loading={false}
+                      emptyMessage="Nenhum lançamento com vencimento neste dia."
+                      formatCurrency={formatCurrency}
+                      onSelect={(b) => {
+                        setCalendarDayList(null);
+                        setBoletoResumo(b);
+                      }}
+                    />
+                  )}
+                  {calendarDayListView === "due" && (
+                    <PayableByDueDateView
+                      boletos={calendarDayItemsSorted}
+                      categoriesById={categoriesById}
+                      expenseById={payableReceiptContext.expenseById}
+                      todayYmd={todayYmd}
+                      loading={false}
+                      emptyMessage="Nenhum lançamento com vencimento neste dia."
+                      formatCurrency={formatCurrency}
+                      onSelect={(b) => {
+                        setCalendarDayList(null);
+                        setBoletoResumo(b);
+                      }}
+                    />
+                  )}
+                  {calendarDayListView === "status" && (
+                    <div className="space-y-5">
+                      {calendarDayBuckets.ready.length > 0 && (
+                        <div className="space-y-2">
+                          <div>
+                            <h3 className="text-sm font-semibold">
+                              Valores a pagar
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              Liberadas para pagamento neste dia.
+                            </p>
+                          </div>
+                          {calendarDayBuckets.ready.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
                         </div>
-                        {calendarDayBuckets.ready.map((b) =>
-                          renderCalendarDayCompactCard(b),
-                        )}
-                      </div>
-                    )}
-                  {flowType === "payable" &&
-                    calendarDayBuckets.pending.length > 0 && (
-                      <div className="space-y-2">
-                        <div>
-                          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                            Valores a confirmar
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            NF ou romaneio aguardando recebimento da mercadoria.
-                          </p>
+                      )}
+                      {calendarDayBuckets.pending.length > 0 && (
+                        <div className="space-y-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                              Valores a confirmar
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              NF ou romaneio aguardando recebimento da
+                              mercadoria.
+                            </p>
+                          </div>
+                          {calendarDayBuckets.pending.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
                         </div>
-                        {calendarDayBuckets.pending.map((b) =>
-                          renderCalendarDayCompactCard(b),
-                        )}
-                      </div>
-                    )}
-                  {(flowType !== "payable" ||
-                    calendarDayBuckets.other.length > 0) && (
-                    <div className="space-y-2">
-                      {flowType === "payable" &&
-                        calendarDayBuckets.other.length > 0 && (
+                      )}
+                      {calendarDayBuckets.other.length > 0 && (
+                        <div className="space-y-2">
                           <div>
                             <h3 className="text-sm font-semibold">Quitadas</h3>
                             <p className="text-xs text-muted-foreground">
                               Contas já pagas com vencimento neste dia.
                             </p>
                           </div>
-                        )}
-                      {(flowType === "payable"
-                        ? calendarDayBuckets.other
-                        : calendarDayItems
-                      ).map((b) => renderCalendarDayCompactCard(b))}
+                          {calendarDayBuckets.other.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1251,6 +1296,7 @@ export function FluxoBoletosPage({
                   if (!calendarDayList) return;
                   const dk = calendarDayList.dateKey;
                   setCalendarDayList(null);
+                  setCalendarDayListView("category");
                   setCreateBoletoDefaultDueDate(dk);
                   setBoletoSheetOpen(true);
                 }}

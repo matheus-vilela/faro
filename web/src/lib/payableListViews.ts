@@ -285,9 +285,7 @@ export function groupPayablesByCategory(
         key: subKey,
         label: sub.label,
         sortOrder: sub.sortOrder,
-        items: sub.items.sort((a, b) =>
-          String(a.due_date).localeCompare(String(b.due_date)),
-        ),
+        items: sortPayablesPaidLast(sub.items),
       }))
       .sort(
         (a, b) =>
@@ -313,14 +311,23 @@ export function groupPayablesByCategory(
   );
 }
 
-export function sortPayablesByDueDate(
+export function sortPayablesPaidLast(
   boletos: FluxoBoletoRow[],
 ): FluxoBoletoRow[] {
   return [...boletos].sort((a, b) => {
+    const aPaid = a.status === "paid" && !isProjectedBoleto(a) ? 1 : 0;
+    const bPaid = b.status === "paid" && !isProjectedBoleto(b) ? 1 : 0;
+    if (aPaid !== bPaid) return aPaid - bPaid;
     const dueCmp = String(a.due_date).localeCompare(String(b.due_date));
     if (dueCmp !== 0) return dueCmp;
     return (Number(a.amount) || 0) - (Number(b.amount) || 0);
   });
+}
+
+export function sortPayablesByDueDate(
+  boletos: FluxoBoletoRow[],
+): FluxoBoletoRow[] {
+  return sortPayablesPaidLast(boletos);
 }
 
 export function categoryTipoIcon(tipo: TipoCategoria | null): LucideIcon {
