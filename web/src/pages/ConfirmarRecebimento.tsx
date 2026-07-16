@@ -457,7 +457,7 @@ export function ConfirmarRecebimento() {
           {/* {hasMemberRef && (
             <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">
-                Membro de referência:{" "}
+                Operador de referência:{" "}
               </span>
               {data?.assigned_member_name?.trim() || "—"}
               <p className="mt-1 text-xs">

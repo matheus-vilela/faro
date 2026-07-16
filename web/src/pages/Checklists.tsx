@@ -246,7 +246,7 @@ export function Checklists() {
         checklistId: cid,
         checklistTitle: checklist.title,
         memberId: mid,
-        memberName: m?.name?.trim() || "Membro",
+        memberName: m?.name?.trim() || "Operador",
         recurrenceSummary: formatRecurrenceSummary(rowToMeta(checklist)),
         expected7,
         actual7,
@@ -550,8 +550,8 @@ export function Checklists() {
               <CardHeader>
                 <CardTitle className="text-base">Checklists</CardTitle>
                 <CardDescription>
-                  Membros ativos aparecem na atribuição. Apenas números
-                  cadastrados em membros recebem o fluxo no WhatsApp.
+                  Operadores ativos aparecem na atribuição. Apenas números
+                  cadastrados como operadores recebem o fluxo no WhatsApp.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -748,11 +748,11 @@ export function Checklists() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Membros atribuídos</Label>
+              <Label>Operadores atribuídos</Label>
               <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border p-2">
                 {members.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    Cadastre membros em Configurações.
+                    Cadastre operadores em Configurações → Usuários e acessos.
                   </p>
                 ) : (
                   members.map((m) => (

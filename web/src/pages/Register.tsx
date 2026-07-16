@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { humanizeAuthError } from '@/lib/authErrorMessage'
 import { supabase } from '@/lib/supabase'
+import { acceptMyPendingPlatformAccess } from "@/services/companyAccessService";
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -33,9 +35,10 @@ export function Register() {
         options: { data: { full_name: fullName } },
       })
       if (error) throw error
+      await acceptMyPendingPlatformAccess()
       navigate('/empresas', { replace: true })
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erro ao criar conta')
+      setError(humanizeAuthError(err, 'signup'))
     } finally {
       setLoading(false)
     }

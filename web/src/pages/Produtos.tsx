@@ -86,7 +86,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
@@ -107,7 +107,6 @@ import type { OperationalItemType } from "@/lib/itemClassification/operationalIt
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
 import { getUndoableProductBulkEdit } from "@/lib/productBulkEdit";
-import { canGestorAccess } from "@/lib/roles";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import {
   matchesPurchasesMetric,
@@ -417,7 +416,7 @@ export function Produtos() {
     return Number(digits) / 100;
   };
 
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const lowStockOnly = searchParams.get("estoque") === "baixo";
   const purchasesFilter = parsePurchasesMetricParam(
@@ -462,7 +461,7 @@ export function Produtos() {
     () => lowStockOnly || purchasesFilter != null,
   );
   const [stockExportLoading, setStockExportLoading] = useState(false);
-  const canBulkEditCatalog = canGestorAccess(currentRole ?? "operador");
+  const canBulkEditCatalog = useHasPermission("produtos");
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
     () => new Set(),
   );

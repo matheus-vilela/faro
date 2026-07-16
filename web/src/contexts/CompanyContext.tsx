@@ -1,4 +1,13 @@
+import {
+  acceptMyPendingPlatformAccess,
+} from "@/services/companyAccessService";
+import {
+  hasPermission,
+  parsePermissionKeys,
+  type PermissionKey,
+} from "@/lib/permissions";
 import type { UserCompanyRole } from "@/lib/roles";
+import { isOwnerRole } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyGroup } from "@/types/companyGroup";
 import type { CompanyNotificationEntry } from "@/types/companyNotification";
@@ -18,12 +27,9 @@ interface OnboardingFiscalMetrics {
   max_nfes_sync: number;
   nfes_sync: number;
   nfes_ignored: number;
-  /** Etapa fiscal concluída (confirmação manual no dashboard). */
   completed?: boolean;
-  /** SEFAZ/Focus sem resposta no sync de onboarding. */
   sefaz_unavailable?: boolean;
   sefaz_unavailable_at?: string | null;
-  /** Próxima tentativa automática (cron 30 min). */
   sefaz_retry_at?: string | null;
 }
 
@@ -33,23 +39,18 @@ export interface Company {
   document: string | null;
   email: string | null;
   phone: string | null;
-  /** WhatsApp: proprietário (normalizado para validação webhook). */
   owner_whatsapp_normalized?: string | null;
   owner_whatsapp_display?: string | null;
   group_id: string;
   created_at: string;
   updated_at: string;
-  /** Maps JSON persistidos pelo assistente de configuração (quando existirem). */
   empresa?: Record<string, unknown> | null;
   endereco_principal?: Record<string, unknown> | null;
   focusnfe?: Record<string, unknown> | null;
   setup?: Record<string, unknown> | null;
   focus_cnpj_consulta?: Record<string, unknown> | null;
-  /** Onboarding: ver migration `company_onboarding_flags`; `onboarding_completed` é derivado no Postgres. */
   onboarding_completed?: boolean;
-  /** Métricas do card NF-e recebidas (sync, completed, max_nfes_sync, nfes_sync, nfes_ignored). */
   onboarding_fiscal?: OnboardingFiscalMetrics | null;
-  /** Onboarding PDV/EPOC: `completed`, `sync`. */
   onboarding_pdv?: {
     completed?: boolean;
     sync?: boolean;
@@ -68,6 +69,9 @@ export interface Company {
 export interface UserCompany {
   company: Company;
   role: UserCompanyRole;
+  permissionProfileId: string | null;
+  permissionProfileName: string | null;
+  permissions: string[];
 }
 
 export interface GroupWithCompanies {
@@ -78,15 +82,14 @@ export interface GroupWithCompanies {
 interface CompanyContextType {
   companies: Company[];
   userCompanies: UserCompany[];
-  /** Grupos distintos aos quais o usuário tem acesso (via empresas). */
   groups: CompanyGroup[];
-  /** Grupos com empresas aninhadas (para UI). */
   groupsWithCompanies: GroupWithCompanies[];
   currentCompany: Company | null;
   currentRole: UserCompanyRole | null;
-  /** Grupo da empresa atualmente selecionada. */
+  currentPermissions: string[];
+  currentProfileName: string | null;
+  isCompanyOwner: boolean;
   currentGroup: CompanyGroup | null;
-  /** Usuário logado é dono do grupo atual (pode renomear grupo e gerenciar unidades). */
   isGroupOwner: boolean;
   loading: boolean;
   setCurrentCompany: (company: Company | null) => void;
@@ -96,21 +99,38 @@ interface CompanyContextType {
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 const LAST_COMPANY_KEY = "faro-last-company";
 
-/** Chave usada para lembrar a última empresa selecionada (localStorage). */
 export function getLastCompanyStorageKey(userId: string) {
   return `${LAST_COMPANY_KEY}-${userId}`;
 }
 
-const VALID_ROLES = ["operador", "gestor", "owner"] as const;
+
 function parseRole(r: unknown): UserCompanyRole {
-  return VALID_ROLES.includes(r as UserCompanyRole)
-    ? (r as UserCompanyRole)
-    : "operador";
+  if (r === "owner") return "owner";
+  return "member";
 }
 
 type CompanyRow = Company & {
   company_groups: CompanyGroup | CompanyGroup[] | null;
 };
+
+type UcRow = {
+  company_id: string;
+  role: string;
+  permission_profile_id: string | null;
+  company_permission_profiles: {
+    id: string;
+    name: string;
+    permissions: unknown;
+  } | null;
+};
+
+function permissionsForRole(
+  role: UserCompanyRole,
+  profilePerms: PermissionKey[],
+): string[] {
+  if (isOwnerRole(role)) return ["*"];
+  return profilePerms;
+}
 
 function normalizeGroupEmbed(
   raw: CompanyRow["company_groups"],
@@ -136,7 +156,19 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     null,
   );
   const [currentRole, setCurrentRole] = useState<UserCompanyRole | null>(null);
+  const [currentPermissions, setCurrentPermissions] = useState<string[]>([]);
+  const [currentProfileName, setCurrentProfileName] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
+
+  const applyActiveMembership = useCallback((uc: UserCompany | undefined) => {
+    setCurrentRole(uc?.role ?? null);
+    setCurrentPermissions(uc?.permissions ?? []);
+    setCurrentProfileName(
+      isOwnerRole(uc?.role) ? "Proprietário" : (uc?.permissionProfileName ?? null),
+    );
+  }, []);
 
   const fetchCompanies = useCallback(async () => {
     if (!user) {
@@ -145,13 +177,19 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       setGroups([]);
       setCurrentCompanyState(null);
       setCurrentRole(null);
+      setCurrentPermissions([]);
+      setCurrentProfileName(null);
       setLoading(false);
       return;
     }
 
+    await acceptMyPendingPlatformAccess();
+
     const { data: ucData } = await supabase
       .from("user_companies")
-      .select("company_id, role")
+      .select(
+        "company_id, role, permission_profile_id, company_permission_profiles(id, name, permissions)",
+      )
       .eq("user_id", user.id);
 
     if (!ucData?.length) {
@@ -160,6 +198,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       setGroups([]);
       setCurrentCompanyState(null);
       setCurrentRole(null);
+      setCurrentPermissions([]);
+      setCurrentProfileName(null);
       setLoading(false);
       return;
     }
@@ -176,6 +216,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       setGroups([]);
       setCurrentCompanyState(null);
       setCurrentRole(null);
+      setCurrentPermissions([]);
+      setCurrentProfileName(null);
     } else {
       const rows = (data ?? []) as CompanyRow[];
       const companyList: Company[] = rows.map((row) => {
@@ -195,8 +237,17 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       setGroups(groupList);
 
       const ucs: UserCompany[] = companyList.map((c) => {
-        const uc = ucData.find((u) => u.company_id === c.id);
-        return { company: c, role: parseRole(uc?.role) };
+        const uc = ucData.find((u) => u.company_id === c.id) as UcRow | undefined;
+        const role = parseRole(uc?.role);
+        const profile = uc?.company_permission_profiles ?? null;
+        const profilePerms = parsePermissionKeys(profile?.permissions);
+        return {
+          company: c,
+          role,
+          permissionProfileId: uc?.permission_profile_id ?? null,
+          permissionProfileName: profile?.name ?? null,
+          permissions: permissionsForRole(role, profilePerms),
+        };
       });
       setUserCompanies(ucs);
 
@@ -204,13 +255,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       const lastUserCompany = lastId
         ? ucs.find((uc) => uc.company.id === lastId)
         : null;
-      setCurrentCompanyState(
-        lastUserCompany?.company ?? companyList[0] ?? null,
-      );
-      setCurrentRole(lastUserCompany?.role ?? ucs[0]?.role ?? null);
+      const active = lastUserCompany ?? ucs[0] ?? null;
+      setCurrentCompanyState(active?.company ?? companyList[0] ?? null);
+      applyActiveMembership(active ?? ucs[0]);
     }
     setLoading(false);
-  }, [user]);
+  }, [user, applyActiveMembership]);
 
   const groupsWithCompanies = useMemo(
     () =>
@@ -230,6 +280,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     if (!user || !currentGroup) return false;
     return currentGroup.owner_user_id === user.id;
   }, [user, currentGroup]);
+
+  const isCompanyOwner = isOwnerRole(currentRole);
 
   useEffect(() => {
     fetchCompanies();
@@ -267,7 +319,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  /** Postgres changes na empresa selecionada (ex.: onboarding_fiscal, focusnfe). */
   useEffect(() => {
     const companyId = currentCompany?.id;
     if (!companyId || !user) return;
@@ -315,12 +366,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         ? userCompanies.find((u) => u.company.id === company.id)
         : null;
       setCurrentCompanyState(company);
-      setCurrentRole(uc?.role ?? null);
+      applyActiveMembership(uc ?? undefined);
       if (user && company) {
         localStorage.setItem(getLastCompanyStorageKey(user.id), company.id);
       }
     },
-    [user, userCompanies],
+    [user, userCompanies, applyActiveMembership],
   );
 
   return (
@@ -332,6 +383,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         groupsWithCompanies,
         currentCompany,
         currentRole,
+        currentPermissions,
+        currentProfileName,
+        isCompanyOwner,
         currentGroup,
         isGroupOwner,
         loading,
@@ -350,4 +404,10 @@ export function useCompany() {
     throw new Error("useCompany must be used within a CompanyProvider");
   }
   return context;
+}
+
+export function useHasPermission(key: PermissionKey): boolean {
+  const { currentPermissions, isCompanyOwner } = useCompany();
+  if (isCompanyOwner) return true;
+  return hasPermission(currentPermissions, key);
 }

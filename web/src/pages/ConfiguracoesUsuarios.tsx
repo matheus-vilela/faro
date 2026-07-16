@@ -1,3 +1,5 @@
+import { PermissionProfilesSection } from "@/components/configuracoes/PermissionProfilesSection";
+import { PlatformAccessSection } from "@/components/configuracoes/PlatformAccessSection";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useCompany } from "@/contexts/CompanyContext";
-import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import {
   applyWhatsappPhoneMaskChange,
@@ -35,36 +36,49 @@ import {
   validateAndNormalizePhone,
 } from "@/lib/whatsappPhone";
 import type { CompanyMember } from "@/types/companyMember";
-import { Info, Loader2, Pencil, Plus, UserCircle, Users } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Info, Loader2, Pencil, Plus, Shield, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+
+type UsuariosTab = "acessos" | "permissoes";
 
 function mapSupabaseError(message: string): string {
   if (message.includes("Limite de 3")) {
-    return "Limite de 3 membros ativos por empresa.";
+    return "Limite de 3 operadores ativos por empresa.";
   }
   if (message.includes("proprietário")) {
     return "Este número já é o do proprietário ou conflita com ele.";
   }
   if (message.includes("23505")) {
-    return "Já existe um membro ativo com este telefone.";
+    return "Já existe um operador ativo com este telefone.";
   }
   return message;
 }
 
-export function ConfiguracoesUsuariosMembros() {
-  const { currentCompany, currentRole, refetchCompanies } = useCompany();
+export function ConfiguracoesUsuarios() {
+  const { currentCompany, isCompanyOwner, refetchCompanies } = useCompany();
   const companyId = currentCompany?.id;
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
+  const isOwner = isCompanyOwner;
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [ownerNameDisplay, setOwnerNameDisplay] = useState("");
-  const [loadingOwner, setLoadingOwner] = useState(true);
+  const activeTab: UsuariosTab =
+    isOwner && searchParams.get("aba") === "permissoes"
+      ? "permissoes"
+      : "acessos";
+
+  const setActiveTab = (tab: UsuariosTab) => {
+    if (tab === "acessos") {
+      setSearchParams({}, { replace: true });
+    } else {
+      setSearchParams({ aba: "permissoes" }, { replace: true });
+    }
+  };
 
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const [ownerPhoneDigits, setOwnerPhoneDigits] = useState("");
 
   const [memberSheetOpen, setMemberSheetOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<CompanyMember | null>(
@@ -72,42 +86,16 @@ export function ConfiguracoesUsuariosMembros() {
   );
   const [memberName, setMemberName] = useState("");
   const [memberPhoneDigits, setMemberPhoneDigits] = useState("");
-  /** Membro pode usar *estoque* / *inventario* no WhatsApp (além do proprietário). */
+  /** Operador pode usar *estoque* / *inventario* no WhatsApp (além do proprietário). */
   const [memberCanInventoryCount, setMemberCanInventoryCount] =
     useState(false);
-  /** Só no fluxo de edição: membro autorizado no webhook (limite 3 ativos). */
+  /** Só no fluxo de edição: operador autorizado no webhook (limite 3 ativos). */
   const [memberIsActive, setMemberIsActive] = useState(true);
 
   const activeCount = useMemo(
     () => members.filter((m) => m.is_active).length,
     [members],
   );
-
-  const loadOwner = useCallback(async () => {
-    if (!companyId) return;
-    setLoadingOwner(true);
-    const { data: uc, error: ucErr } = await supabase
-      .from("user_companies")
-      .select("user_id")
-      .eq("company_id", companyId)
-      .eq("role", "owner")
-      .maybeSingle();
-
-    if (ucErr || !uc?.user_id) {
-      setOwnerNameDisplay("");
-      setLoadingOwner(false);
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", uc.user_id)
-      .maybeSingle();
-
-    setOwnerNameDisplay(profile?.full_name?.trim() ?? "");
-    setLoadingOwner(false);
-  }, [companyId]);
 
   const loadMembers = useCallback(async () => {
     if (!companyId) return;
@@ -119,7 +107,7 @@ export function ConfiguracoesUsuariosMembros() {
       .order("created_at", { ascending: true });
 
     if (error) {
-      toast.error("Erro ao carregar membros: " + error.message);
+      toast.error("Erro ao carregar operadores: " + error.message);
       setMembers([]);
     } else {
       setMembers((data ?? []) as CompanyMember[]);
@@ -128,92 +116,13 @@ export function ConfiguracoesUsuariosMembros() {
   }, [companyId]);
 
   useEffect(() => {
-    queueMicrotask(() => loadOwner());
-  }, [loadOwner]);
-
-  useEffect(() => {
     queueMicrotask(() => loadMembers());
   }, [loadMembers]);
-
-  useEffect(() => {
-    if (!currentCompany) return;
-    queueMicrotask(() => {
-      const ownerNorm = currentCompany.owner_whatsapp_normalized;
-      setOwnerPhoneDigits(ownerNorm ?? "");
-    });
-  }, [currentCompany]);
-
-  const saveOwnerPhone = async () => {
-    if (!currentCompany?.id || !isOwner) return;
-    if (!ownerPhoneDigits.trim()) {
-      setSaving(true);
-      const { error } = await supabase
-        .from("companies")
-        .update({
-          owner_whatsapp_normalized: null,
-          owner_whatsapp_display: null,
-        })
-        .eq("id", currentCompany.id);
-      setSaving(false);
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-      toast.success("WhatsApp do proprietário removido.");
-      setOwnerPhoneDigits("");
-      await refetchCompanies();
-      return;
-    }
-
-    const v = validateAndNormalizePhone(ownerPhoneDigits);
-    if (!v.ok) {
-      toast.error(v.error);
-      return;
-    }
-    setSaving(true);
-
-    const { error } = await supabase
-      .from("companies")
-      .update({
-        owner_whatsapp_normalized: v.normalized,
-        owner_whatsapp_display: null,
-      })
-      .eq("id", currentCompany.id);
-
-    setSaving(false);
-    if (error) {
-      toast.error(mapSupabaseError(error.message));
-      return;
-    }
-    toast.success("Número salvo com DDI 55 e formato internacional.");
-    await refetchCompanies();
-    setOwnerPhoneDigits(v.normalized);
-  };
-
-  const clearOwnerPhone = async () => {
-    if (!currentCompany?.id || !isOwner) return;
-    setSaving(true);
-    const { error } = await supabase
-      .from("companies")
-      .update({
-        owner_whatsapp_normalized: null,
-        owner_whatsapp_display: null,
-      })
-      .eq("id", currentCompany.id);
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("WhatsApp do proprietário removido.");
-    setOwnerPhoneDigits("");
-    await refetchCompanies();
-  };
 
   const openAddMember = () => {
     if (activeCount >= 3) {
       toast.error(
-        "Limite de 3 membros ativos atingido. Desative um membro para adicionar outro.",
+        "Limite de 3 operadores ativos atingido. Desative um operador para adicionar outro.",
       );
       return;
     }
@@ -258,7 +167,7 @@ export function ConfiguracoesUsuariosMembros() {
         activeCount >= 3
       ) {
         toast.error(
-          "Limite de 3 membros ativos. Desative outro membro primeiro.",
+          "Limite de 3 operadores ativos. Desative outro operador primeiro.",
         );
         return;
       }
@@ -284,7 +193,7 @@ export function ConfiguracoesUsuariosMembros() {
         toast.error(mapSupabaseError(error.message));
         return;
       }
-      toast.success("Membro atualizado.");
+      toast.success("Operador atualizado.");
     } else {
       const { error } = await supabase.from("company_members").insert({
         company_id: currentCompany.id,
@@ -300,7 +209,7 @@ export function ConfiguracoesUsuariosMembros() {
         toast.error(mapSupabaseError(error.message));
         return;
       }
-      toast.success("Membro adicionado.");
+      toast.success("Operador adicionado.");
     }
     await loadMembers();
     await refetchCompanies();
@@ -310,7 +219,7 @@ export function ConfiguracoesUsuariosMembros() {
     if (!currentCompany?.id || !isOwner) return;
     if (active && activeCount >= 3 && !m.is_active) {
       toast.error(
-        "Limite de 3 membros ativos. Desative outro membro primeiro.",
+        "Limite de 3 operadores ativos. Desative outro operador primeiro.",
       );
       return;
     }
@@ -325,7 +234,7 @@ export function ConfiguracoesUsuariosMembros() {
       toast.error(mapSupabaseError(error.message));
       return;
     }
-    toast.success(active ? "Membro ativado." : "Membro desativado.");
+    toast.success(active ? "Operador ativado." : "Operador desativado.");
     await loadMembers();
   };
 
@@ -347,7 +256,7 @@ export function ConfiguracoesUsuariosMembros() {
     }
     toast.success(
       allowed
-        ? "Membro pode solicitar contagem de estoque pelo WhatsApp."
+        ? "Operador pode solicitar contagem de estoque pelo WhatsApp."
         : "Permissão de contagem de estoque removida.",
     );
     await loadMembers();
@@ -356,103 +265,60 @@ export function ConfiguracoesUsuariosMembros() {
   return (
     <PageShell className="space-y-8 pb-0">
       <PageHeader
-        title="Usuários e membros"
-        description="Dados do proprietário com acesso ao sistema e membros que interagem apenas pelo WhatsApp (sem login no Faro)."
+        title="Usuários e acessos"
+        description="Proprietário, colaboradores com login no Faro e operadores que interagem pelo WhatsApp (sem login na plataforma)."
         icon={Users}
       />
 
-      <Card className="shadow-sm border-primary/15">
-        <CardHeader className="space-y-1">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserCircle className="h-5 w-5 text-primary" />
-            Proprietário
-          </CardTitle>
-          <CardDescription>
-            Você é o proprietário desta empresa no Faro.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-6 sm:grid-cols-2 sm:gap-8 sm:items-start">
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">
-                Nome do proprietário
-              </Label>
-              <div
-                className="flex  items-center rounded-md border border-border bg-muted/40 px-3 py-2 text-sm font-medium leading-snug"
-                aria-live="polite"
-              >
-                {loadingOwner ? (
-                  <span className="text-muted-foreground">Carregando…</span>
-                ) : ownerNameDisplay ? (
-                  ownerNameDisplay
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Igual ao nome do seu perfil no Faro. <br />
-                Para alterar, use os dados da sua conta.
-              </p>
-            </div>
+      {isOwner ? (
+        <nav
+          className="flex flex-wrap gap-2 border-b border-border pb-px"
+          aria-label="Seções de usuários e acessos"
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab("acessos")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+              activeTab === "acessos"
+                ? "border-border bg-background text-foreground shadow-sm"
+                : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )}
+          >
+            <Users className="h-4 w-4 shrink-0" />
+            Acessos
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("permissoes")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+              activeTab === "permissoes"
+                ? "border-border bg-background text-foreground shadow-sm"
+                : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )}
+          >
+            <Shield className="h-4 w-4 shrink-0" />
+            Permissões
+          </button>
+        </nav>
+      ) : null}
 
-            <div className="space-y-2">
-              <Label htmlFor="ownerPhone">WhatsApp do proprietário</Label>
-              <Input
-                id="ownerPhone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="+55 (11) 98765-4321"
-                className="font-mono text-base"
-                value={maskWhatsappBrInput(ownerPhoneDigits)}
-                onChange={(e) =>
-                  setOwnerPhoneDigits(
-                    applyWhatsappPhoneMaskChange(
-                      ownerPhoneDigits,
-                      e.target.value,
-                    ),
-                  )
-                }
-                disabled={saving}
-              />
-              <p className="text-xs text-muted-foreground">
-                Digite com DDI, se você não informar o código do país,{" "}
-                <strong>55</strong> (Brasil) é adicionado automaticamente.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button type="button" onClick={saveOwnerPhone} disabled={saving}>
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Salvar telefone"
-              )}
-            </Button>
-            {ownerPhoneDigits.trim() ||
-            currentCompany?.owner_whatsapp_normalized ? (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={clearOwnerPhone}
-              >
-                Remover telefone
-              </Button>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+      {activeTab === "permissoes" && isOwner ? (
+        <PermissionProfilesSection />
+      ) : (
+        <>
+      {isOwner ? <PlatformAccessSection /> : null}
 
       <Card className="shadow-sm">
         <CardHeader className="space-y-3">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
               <CardTitle className="text-base">
-                Membros (somente WhatsApp)
+                Operadores (somente WhatsApp)
               </CardTitle>
               <CardDescription className="max-w-xl">
-                Membros <strong>não recebem acesso</strong> ao sistema Faro (sem
+                Operadores <strong>não recebem acesso</strong> ao sistema Faro (sem
                 login). Eles aparecem aqui para autorizar o{" "}
                 <strong>número de WhatsApp</strong> e, se você permitir, o
                 comando de <strong>contagem de estoque</strong> (*estoque* /
@@ -466,13 +332,13 @@ export function ConfiguracoesUsuariosMembros() {
               disabled={saving || activeCount >= 3}
             >
               <Plus className="h-4 w-4 mr-1" />
-              Adicionar membro
+              Adicionar operador
             </Button>
           </div>
           <div className="flex gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-950 dark:text-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10">
             <Info className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <p>
-              Ao adicionar um membro, informe o{" "}
+              Ao adicionar um operador, informe o{" "}
               <strong>número do WhatsApp</strong> (com DDD).
               <br />
               Esse número será validado nas mensagens recebidas
@@ -484,7 +350,7 @@ export function ConfiguracoesUsuariosMembros() {
             <p className="text-sm text-muted-foreground">Carregando...</p>
           ) : members.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nenhum membro cadastrado.
+              Nenhum operador cadastrado.
             </p>
           ) : (
             <div className="rounded-lg border bg-card overflow-x-auto">
@@ -549,7 +415,7 @@ export function ConfiguracoesUsuariosMembros() {
                             variant="ghost"
                             size="icon"
                             onClick={() => openEditMember(m)}
-                            aria-label="Editar membro"
+                            aria-label="Editar operador"
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -563,7 +429,7 @@ export function ConfiguracoesUsuariosMembros() {
             </div>
           )}
           <p className="text-xs text-muted-foreground mt-4">
-            Membros ativos autorizados no webhook: {activeCount} / 3
+            Operadores ativos autorizados no webhook: {activeCount} / 3
           </p>
         </CardContent>
       </Card>
@@ -572,12 +438,12 @@ export function ConfiguracoesUsuariosMembros() {
         <SheetContent className="flex flex-col gap-0 sm:max-w-md">
           <SheetHeader>
             <SheetTitle>
-              {editingMember ? "Editar membro" : "Novo membro"}
+              {editingMember ? "Editar operador" : "Novo operador"}
             </SheetTitle>
             <SheetDescription>
               Cadastre o <strong>nome</strong> e o{" "}
               <strong>número de WhatsApp</strong> (celular com WhatsApp ativo).
-              Este membro <strong>não terá login</strong> no Faro — apenas este
+              Este operador <strong>não terá login</strong> no Faro — apenas este
               número poderá enviar mensagens autorizadas pela integração.
             </SheetDescription>
           </SheetHeader>
@@ -619,7 +485,7 @@ export function ConfiguracoesUsuariosMembros() {
                   Contagem de estoque (WhatsApp)
                 </Label>
                 <p className="text-xs text-muted-foreground leading-snug">
-                  Se ativo, este membro pode enviar <strong>*estoque*</strong> ou{" "}
+                  Se ativo, este operador pode enviar <strong>*estoque*</strong> ou{" "}
                   <strong>*inventario*</strong> para receber o link de contagem.
                   O proprietário sempre pode.
                 </p>
@@ -636,11 +502,11 @@ export function ConfiguracoesUsuariosMembros() {
               <div className="flex items-start justify-between gap-4 rounded-lg border border-border/80 bg-muted/30 px-4 py-3">
                 <div className="space-y-1 min-w-0">
                   <Label htmlFor="mActive" className="text-sm font-medium">
-                    Membro ativo
+                    Operador ativo
                   </Label>
                   <p className="text-xs text-muted-foreground leading-snug">
-                    Membros inativos não são autorizados no webhook. Limite de{" "}
-                    <strong>3 membros ativos</strong> por empresa.
+                    Operadores inativos não são autorizados no webhook. Limite de{" "}
+                    <strong>3 operadores ativos</strong> por empresa.
                   </p>
                 </div>
                 <Switch
@@ -662,12 +528,14 @@ export function ConfiguracoesUsuariosMembros() {
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                "Salvar membro"
+                "Salvar operador"
               )}
             </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
+        </>
+      )}
     </PageShell>
   );
 }

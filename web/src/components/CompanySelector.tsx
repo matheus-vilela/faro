@@ -134,7 +134,8 @@ export function CompanySelector() {
                 </span>
               ) : null} */}
             </div>
-            {unitsInCurrentGroup.map(({ company, role }) => (
+            {unitsInCurrentGroup.map(
+              ({ company, role, permissionProfileName }) => (
               <DropdownMenuItem
                 key={company.id}
                 onClick={() => handleSelectUnit(company)}
@@ -151,14 +152,17 @@ export function CompanySelector() {
                     {company.name}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {ROLE_LABELS[role]}
+                    {role === "owner"
+                      ? ROLE_LABELS.owner
+                      : permissionProfileName ?? ROLE_LABELS.member}
                   </span>
                 </div>
                 {company.id === currentCompany.id && (
                   <Check className="h-4 w-4 shrink-0 text-primary" />
                 )}
               </DropdownMenuItem>
-            ))}
+            ),
+            )}
             {isGroupOwner && (
               <>
                 <DropdownMenuSeparator />

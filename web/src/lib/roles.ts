@@ -1,22 +1,25 @@
-export type UserCompanyRole = 'operador' | 'gestor' | 'owner'
+export type UserCompanyRole = "owner" | "member";
 
 export const ROLE_LABELS: Record<UserCompanyRole, string> = {
-  operador: 'Operador',
-  gestor: 'Gestor',
-  owner: 'Proprietário',
+  owner: "Proprietário",
+  member: "Colaborador",
+};
+
+export function isOwnerRole(role: UserCompanyRole | null | undefined): boolean {
+  return role === "owner";
 }
 
-/** Operador: captura NFs, despesas, recebimento - fluxo operacional */
-export function canOperadorAccess(role: UserCompanyRole): boolean {
-  return ['operador', 'gestor', 'owner'].includes(role)
+/** Proprietário: configurações, gestão de acessos e tudo mais. */
+export function canOwnerAccess(role: UserCompanyRole | null | undefined): boolean {
+  return isOwnerRole(role);
 }
 
-/** Gestor: aprova despesas, alertas, DRE, relatórios */
-export function canGestorAccess(role: UserCompanyRole): boolean {
-  return ['gestor', 'owner'].includes(role)
+/** @deprecated Use `hasPermission` com chaves de `permissions.ts`. */
+export function canGestorAccess(role: UserCompanyRole | null | undefined): boolean {
+  return role === "owner" || role === "member";
 }
 
-/** Owner: configurações da empresa, adicionar usuários */
-export function canOwnerAccess(role: UserCompanyRole): boolean {
-  return role === 'owner'
+/** @deprecated Operador não acessa a plataforma (WhatsApp via company_members). */
+export function canOperadorAccess(role: UserCompanyRole | null | undefined): boolean {
+  return role === "member" || role === "owner";
 }

@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import {
   applyWhatsappPhoneMaskChange,
@@ -79,21 +78,21 @@ type ExpenseRecebimentoCandidate = {
 
 function mapCompanyMemberError(message: string): string {
   if (message.includes("Limite de 3")) {
-    return "Limite de 3 membros ativos por empresa.";
+    return "Limite de 3 operadores ativos por empresa.";
   }
   if (message.includes("proprietário")) {
     return "Este número já é o do proprietário ou conflita com ele.";
   }
   if (message.includes("23505")) {
-    return "Já existe um membro ativo com este telefone.";
+    return "Já existe um operador ativo com este telefone.";
   }
   return message;
 }
 
 export function Recebimento() {
-  const { currentCompany, currentRole } = useCompany();
-  const canAssignShare = currentRole === "owner" || currentRole === "gestor";
-  const canCreateMember = currentRole ? canOwnerAccess(currentRole) : false;
+  const { currentCompany, isCompanyOwner } = useCompany();
+  const canAssignShare = isCompanyOwner;
+  const canCreateMember = isCompanyOwner;
   const [recebimentos, setRecebimentos] = useState<Recebimento[]>([]);
   const [recebimentosCount, setRecebimentosCount] = useState(0);
   const [recebimentosPage, setRecebimentosPage] = useState(1);
@@ -386,7 +385,7 @@ export function Recebimento() {
       .order("name");
     setLoadingMembers(false);
     if (error) {
-      toast.error("Não foi possível carregar os membros.");
+      toast.error("Não foi possível carregar os operadores.");
       setCompanyMembers([]);
       return [];
     }
@@ -414,12 +413,12 @@ export function Recebimento() {
   const handleCreateMemberInShareDialog = async () => {
     if (!currentCompany?.id || !canCreateMember) return;
     if (companyMembers.length >= 3) {
-      toast.error("Limite de 3 membros ativos por empresa.");
+      toast.error("Limite de 3 operadores ativos por empresa.");
       return;
     }
     const name = newMemberName.trim();
     if (!name) {
-      toast.error("Informe o nome do membro.");
+      toast.error("Informe o nome do operador.");
       return;
     }
     const phoneValidation = validateAndNormalizePhone(newMemberPhoneDigits);
@@ -445,11 +444,11 @@ export function Recebimento() {
     setCreatingMember(false);
 
     if (error || !created) {
-      toast.error(mapCompanyMemberError(error?.message ?? "Erro ao cadastrar membro."));
+      toast.error(mapCompanyMemberError(error?.message ?? "Erro ao cadastrar operador."));
       return;
     }
 
-    toast.success("Membro cadastrado.");
+    toast.success("Operador cadastrado.");
     setAddMemberSheetOpen(false);
     setNewMemberName("");
     setNewMemberPhoneDigits("");
@@ -462,7 +461,7 @@ export function Recebimento() {
     if (!shareTarget || !currentCompany?.id) return;
     const memberId = memberIdOverride ?? shareMemberId;
     if (!memberId) {
-      toast.error("Selecione o membro de referência para este recebimento.");
+      toast.error("Selecione o operador de referência para este recebimento.");
       return;
     }
     setSavingShare(true);
@@ -482,7 +481,7 @@ export function Recebimento() {
     if (!out?.success) {
       toast.error(
         out?.error === "Sem permissão"
-          ? "Apenas proprietário ou gestor podem vincular o membro."
+          ? "Apenas o proprietário pode vincular o operador."
           : (out?.error ?? "Não foi possível salvar o vínculo."),
       );
       return;
@@ -503,7 +502,7 @@ export function Recebimento() {
     setCopiedId(shareTarget.id);
     setTimeout(() => setCopiedId(null), 2000);
     toast.success(
-      "Link copiado. Qualquer pessoa com o link pode confirmar; o membro é só referência.",
+      "Link copiado. Qualquer pessoa com o link pode confirmar; o operador é só referência.",
     );
     setShareDialogOpen(false);
     setShareTarget(null);
@@ -530,7 +529,7 @@ export function Recebimento() {
       <PageHeader
         icon={PackageCheck}
         title="Recebimento de mercadorias"
-        description="Você pode associar um membro da empresa ao recebimento da mercadoria. Qualquer pessoa com o link pode confirmar."
+        description="Você pode associar um operador da empresa ao recebimento da mercadoria. Qualquer pessoa com o link pode confirmar."
         action={
           <Button
             type="button"
@@ -777,7 +776,7 @@ export function Recebimento() {
                             disabled={!canAssignShare}
                             title={
                               !canAssignShare
-                                ? "Apenas proprietário ou gestor podem vincular um membro ao link"
+                                ? "Apenas o proprietário pode vincular um operador ao link"
                                 : undefined
                             }
                             onClick={() => openShareDialog(r)}
@@ -1130,14 +1129,14 @@ export function Recebimento() {
           <DialogHeader>
             <DialogTitle>Compartilhar link de recebimento</DialogTitle>
             <DialogDescription>
-              Associe um membro cadastrado na empresa a este recebimento (só
+              Associe um operador cadastrado na empresa a este recebimento (só
               referência para relatórios). Qualquer pessoa com o link pode
               confirmar o recebimento.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="share-member">Membro de referência</Label>
+              <Label htmlFor="share-member">Operador de referência</Label>
               <Select
                 value={shareMemberId || undefined}
                 onValueChange={handleShareMemberSelect}
@@ -1147,8 +1146,8 @@ export function Recebimento() {
                   <SelectValue
                     placeholder={
                       loadingMembers
-                        ? "Carregando membros…"
-                        : "Selecione um membro"
+                        ? "Carregando operadores…"
+                        : "Selecione um operador"
                     }
                   />
                 </SelectTrigger>
@@ -1162,7 +1161,7 @@ export function Recebimento() {
                     <SelectItem value={ADD_MEMBER_SELECT_VALUE}>
                       <span className="flex items-center gap-2">
                         <Plus className="h-4 w-4" />
-                        Adicionar membro
+                        Adicionar operador
                       </span>
                     </SelectItem>
                   )}
@@ -1170,13 +1169,13 @@ export function Recebimento() {
               </Select>
               {!loadingMembers && companyMembers.length === 0 && !canCreateMember && (
                 <p className="text-sm text-amber-600 dark:text-amber-500">
-                  Não há membros cadastrados. Peça ao proprietário para
-                  cadastrar em Configurações → Usuários e membros.
+                  Não há operadores cadastrados. Peça ao proprietário para
+                  cadastrar em Configurações → Usuários e acessos.
                 </p>
               )}
               {canCreateMember && companyMembers.length >= 3 && (
                 <p className="text-xs text-muted-foreground">
-                  Limite de 3 membros ativos atingido. Desative um membro em
+                  Limite de 3 operadores ativos atingido. Desative um operador em
                   Configurações para cadastrar outro.
                 </p>
               )}
@@ -1221,10 +1220,10 @@ export function Recebimento() {
           className="z-[70] flex flex-col gap-0 sm:max-w-md"
         >
           <SheetHeader>
-            <SheetTitle>Novo membro</SheetTitle>
+            <SheetTitle>Novo operador</SheetTitle>
             <SheetDescription>
               Cadastre o <strong>nome</strong> e o <strong>WhatsApp</strong> do
-              operador. Este membro não terá login no Faro — o número serve para
+              operador. Este operador não terá login no Faro — o número serve para
               referência e autorização no webhook.
             </SheetDescription>
           </SheetHeader>

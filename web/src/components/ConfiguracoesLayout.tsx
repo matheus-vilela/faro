@@ -15,9 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
-import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -35,8 +34,8 @@ import { toast } from "sonner";
 
 const SUB_LINKS = [
   {
-    to: "/app/configuracoes/usuarios-membros",
-    label: "Usuários e membros",
+    to: "/app/configuracoes/usuarios",
+    label: "Usuários e acessos",
     icon: Users,
   },
   {
@@ -67,13 +66,13 @@ const SUB_LINKS = [
 ] as const;
 
 export function ConfiguracoesLayout() {
-  const { currentRole, currentCompany, refetchCompanies } = useCompany();
+  const { currentCompany, refetchCompanies, isCompanyOwner } = useCompany();
+  const canConfig = useHasPermission("configuracoes");
   const { openModal } = useUnitSetupModal();
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
 
-  if (!isOwner) {
+  if (!canConfig && !isCompanyOwner) {
     return (
       <div className="mx-auto max-w-lg">
         <Card>
@@ -83,7 +82,7 @@ export function ConfiguracoesLayout() {
               Configurações
             </CardTitle>
             <CardDescription>
-              Apenas o proprietário da empresa pode acessar as configurações.
+              Você não tem permissão para acessar as configurações desta unidade.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -91,19 +90,23 @@ export function ConfiguracoesLayout() {
     );
   }
 
+  const visibleLinks = SUB_LINKS.filter(
+    (link) => !("ownerOnly" in link && link.ownerOnly) || isCompanyOwner,
+  );
+
   return (
-    <PageShell narrow className="space-y-8">
+    <PageShell className="space-y-8">
       <PageHeader
         icon={Settings2}
         title="Configurações"
-        description="Centralize ajustes da empresa, integrações e permissões."
+        description="Centralize ajustes da empresa, usuários, operadores e integrações."
       />
 
       <nav
         className="flex flex-wrap gap-2 border-b border-border pb-px"
         aria-label="Seções de configurações"
       >
-        {SUB_LINKS.map(({ to, label, icon: Icon }) => (
+        {visibleLinks.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

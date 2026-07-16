@@ -1,7 +1,7 @@
 import { DashboardImportReviewEpocRecipesNoIngredientsCard } from "./DashboardImportReviewEpocRecipesNoIngredientsCard";
 import { DashboardImportReviewPendingRevenueLinkCard } from "./DashboardImportReviewPendingRevenueLinkCard";
 
-/** Revisão pós-importação: fichas EPOC sem insumos e ligação de vendas à ficha. */
+/** Revisão pós-importação: fichas pendentes (só saída) e ligação de vendas à ficha. */
 export function DashboardImportReviewHub({
   companyId,
   refreshSignal,

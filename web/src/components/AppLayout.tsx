@@ -28,7 +28,11 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ROLE_LABELS, type UserCompanyRole } from "@/lib/roles";
+import {
+  hasPermission,
+  type PermissionKey,
+} from "@/lib/permissions";
+import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
@@ -56,7 +60,7 @@ type NavItem = {
   title: string;
   url: string;
   icon: LucideIcon;
-  roles: UserCompanyRole[];
+  permission: PermissionKey;
   /** Só marca ativo na URL exata (evita sub-rotas, ex. /desenvolvimento vs /desenvolvimento/fornecedores). */
   exact?: boolean;
 };
@@ -69,7 +73,7 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Dashboard",
         url: "/app",
         icon: LayoutDashboard,
-        roles: ["operador", "gestor", "owner"],
+        permission: "dashboard",
       },
     ],
   },
@@ -80,32 +84,32 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Notas Fiscais",
         url: "/app/despesas",
         icon: FileText,
-        roles: ["operador", "gestor", "owner"],
+        permission: "despesas",
       },
 
       {
         title: "Recebimento de mercadorias",
         url: "/app/recebimento",
         icon: PackageCheck,
-        roles: ["operador", "gestor", "owner"],
+        permission: "recebimento",
       },
       {
         title: "Checklists",
         url: "/app/checklists",
         icon: ListChecks,
-        roles: ["operador", "gestor", "owner"],
+        permission: "checklists",
       },
       {
         title: "Fornecedores",
         url: "/app/fornecedores",
         icon: Truck,
-        roles: ["operador", "gestor", "owner"],
+        permission: "fornecedores",
       },
       {
         title: "Produtos e estoque",
         url: "/app/produtos",
         icon: Package,
-        roles: ["operador", "gestor", "owner"],
+        permission: "produtos",
       },
     ],
   },
@@ -116,19 +120,19 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Contas a pagar",
         url: "/app/contas-a-pagar",
         icon: TrendingDown,
-        roles: ["operador", "gestor", "owner"],
+        permission: "contas_a_pagar",
       },
       {
         title: "Vendas realizadas",
         url: "/app/vendas-realizadas",
         icon: TrendingUp,
-        roles: ["operador", "gestor", "owner"],
+        permission: "vendas_realizadas",
       },
       {
         title: "DRE",
         url: "/app/dre",
         icon: BarChart3,
-        roles: ["gestor", "owner"],
+        permission: "dre",
       },
     ],
   },
@@ -139,13 +143,13 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Alertas",
         url: "/app/alertas",
         icon: Bell,
-        roles: ["gestor", "owner"],
+        permission: "alertas",
       },
       {
         title: "Integrações",
         url: "/app/integracoes",
         icon: Plug,
-        roles: ["gestor", "owner"],
+        permission: "integracoes",
       },
     ],
   },
@@ -157,14 +161,14 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Ferramentas",
         url: "/app/desenvolvimento",
         icon: FlaskConical,
-        roles: ["operador", "gestor", "owner"],
+        permission: "dashboard",
         exact: true,
       },
       {
         title: "Fornecedores globais",
         url: "/app/desenvolvimento/fornecedores",
         icon: Truck,
-        roles: ["operador", "gestor", "owner"],
+        permission: "dashboard",
       },
     ],
   },
@@ -175,7 +179,7 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Configurações",
         url: "/app/configuracoes",
         icon: Settings2,
-        roles: ["owner"],
+        permission: "configuracoes",
       },
     ],
   },
@@ -219,22 +223,21 @@ export function AppLayout() {
 function AppLayoutContent() {
   const { user, signOut, isAdmin } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany, currentRole, currentPermissions, isCompanyOwner, currentProfileName } =
+    useCompany();
   const location = useLocation();
   const { isMobile } = useSidebar();
 
-  const navSections = currentRole
-    ? NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin)
-        .map((section) => ({
-          label: section.label,
-          items: section.items.filter((item) =>
-            item.roles.includes(currentRole),
-          ),
-        }))
-        .filter((section) => section.items.length > 0)
-    : NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin).map(
-        (s) => ({ ...s, items: [...s.items] }),
-      );
+  const navSections = NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin)
+    .map((section) => ({
+      label: section.label,
+      items: section.items.filter((item) => {
+        if (section.adminOnly && isAdmin) return true;
+        if (isCompanyOwner) return true;
+        return hasPermission(currentPermissions, item.permission);
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
   const initials = user?.email?.split("@")[0].slice(0, 2).toUpperCase() ?? "U";
 
   return (
@@ -326,7 +329,9 @@ function AppLayoutContent() {
                       </p>
                       {currentRole && (
                         <p className="text-xs text-muted-foreground/80">
-                          {ROLE_LABELS[currentRole]}
+                          {isCompanyOwner
+                            ? ROLE_LABELS.owner
+                            : (currentProfileName ?? ROLE_LABELS.member)}
                         </p>
                       )}
                     </div>

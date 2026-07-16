@@ -33,12 +33,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { findExpenseDuplicateId } from "@/lib/expenseDedup";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
-import { canGestorAccess, canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -249,11 +248,11 @@ export function ExpenseDetailSheet({
   onRefresh,
   elevated = false,
 }: ExpenseDetailSheetProps) {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany, isCompanyOwner } = useCompany();
   const navigate = useNavigate();
   const companyId = currentCompany?.id;
-  const isGestor = currentRole && canGestorAccess(currentRole);
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
+  const canEditDespesas = useHasPermission("despesas");
+  const isOwner = isCompanyOwner;
 
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
@@ -1024,7 +1023,7 @@ export function ExpenseDetailSheet({
                       </p>
                     </div>
                   )}
-                  {isGestor &&
+                  {canEditDespesas &&
                     detailExpense.expense_source === "whatsapp" &&
                     detailExpense.status === "pending" &&
                     !isOwner && (
@@ -1052,7 +1051,7 @@ export function ExpenseDetailSheet({
                         </p>
                       </div>
                     )}
-                  {isGestor &&
+                  {canEditDespesas &&
                     !(
                       detailExpense.expense_source === "whatsapp" &&
                       detailExpense.status === "pending"

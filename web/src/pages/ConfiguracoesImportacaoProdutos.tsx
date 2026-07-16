@@ -292,14 +292,14 @@ export function ConfiguracoesImportacaoProdutos() {
 
   if (!companyId) {
     return (
-      <PageShell narrow>
+      <PageShell>
         <p className="text-sm text-muted-foreground">Selecione uma empresa.</p>
       </PageShell>
     );
   }
 
   return (
-    <PageShell narrow className="space-y-8">
+    <PageShell className="space-y-8">
       <PageHeader
         icon={PackageSearch}
         title="Importação de produtos (nota / WhatsApp)"

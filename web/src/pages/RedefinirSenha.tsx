@@ -12,6 +12,7 @@ import {
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/contexts/ThemeContext";
+import { humanizeAuthError } from "@/lib/authErrorMessage";
 import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -96,7 +97,7 @@ export function RedefinirSenha() {
       toast.success("Senha alterada. Faça login com a nova senha.");
       navigate("/login?senha=redefinida", { replace: true });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Não foi possível salvar.");
+      setError(humanizeAuthError(err, "reset_password"));
     } finally {
       setLoading(false);
     }

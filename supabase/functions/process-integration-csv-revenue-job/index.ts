@@ -13,8 +13,8 @@
  * reconsulta ao banco antes do INSERT, coordenador anti-paralelo, cache entre chunks.
  * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `products.unit_conversions`.
  * `product_operational_config` (AUTO/CONFIGURADO) e `product_category_assignments`.
- * Rótulos novos passam por heurística + OpenAI (`OPENAI_API_KEY`, `OPENAI_EPOC_PRODUCT_KIND_MODEL`)
- * para decidir produto vs ficha técnica; fichas criam receita PREP sem insumos (revisão no dashboard).
+ * Produtos novos são cadastrados como venda direta; candidatos a ficha técnica aparecem
+ * no dashboard quando só têm saída de estoque (sem entrada).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
  * Corpo inicial: `{ "job_id" }` ou `{ "record": { "id" } }`.
@@ -30,13 +30,6 @@ import {
   readCsvRevenueImportContinueMessages,
 } from "../_shared/csvRevenueImportQueue.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import {
-  batchClassifyEpocProductKindWithOpenAi,
-  classifyEpocProductKindHeuristic,
-  needsEpocProductKindOpenAi,
-  type EpocProductKind,
-  type StoredEpocProductKind,
-} from "../_shared/epocCsvProductKindClassification.ts";
 import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
 import {
   batchClassifyRevenueLeavesWithOpenAi,
@@ -913,25 +906,9 @@ async function runCsvRevenueImportForJob(
         : {};
     const catByKey: Record<string, StoredRevenueCat> = { ...priorCatByProduct };
 
-    const priorKindByProduct =
-      priorMeta.epoc_product_kind_by_name &&
-      typeof priorMeta.epoc_product_kind_by_name === "object" &&
-      !Array.isArray(priorMeta.epoc_product_kind_by_name)
-        ? (priorMeta.epoc_product_kind_by_name as Record<
-            string,
-            StoredEpocProductKind
-          >)
-        : {};
-    const kindByKey: Record<string, StoredEpocProductKind> = {
-      ...priorKindByProduct,
-    };
-
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
     const openaiClassifyModel =
       Deno.env.get("OPENAI_REVENUE_CLASSIFY_MODEL")?.trim() || "gpt-4o-mini";
-    const openaiProductKindModel =
-      Deno.env.get("OPENAI_EPOC_PRODUCT_KIND_MODEL")?.trim() ||
-      openaiClassifyModel;
     const openaiProductMatchModel =
       Deno.env.get("OPENAI_EPOC_PRODUCT_MATCH_MODEL")?.trim() ||
       openaiClassifyModel;
@@ -1064,93 +1041,6 @@ async function runCsvRevenueImportForJob(
       }
     }
 
-    const pendingProductKind = new Map<
-      string,
-      { raw: string; pick: ReturnType<typeof classifyEpocProductKindHeuristic> }
-    >();
-    const uncertainKindKeysOrder: string[] = [];
-    const uncertainKindLabels: string[] = [];
-
-    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
-      const row = rows[pi]!;
-      const totalCell = sanitizeCell(row[totalCol] ?? "");
-      if (parseBrMoney(totalCell) == null) continue;
-      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
-      if (!parseFlexibleDate(rawDate)) continue;
-      const rawP =
-        produtoCol >= 0
-          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
-          : "";
-      if (!rawP) continue;
-      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
-
-      const k = epocProductLineKey(rawP);
-      if (!k || kindByKey[k]) continue;
-      const exactKeyKind = epocExactNameKey(rawP);
-      if (manualReviewExactNames.has(exactKeyKind)) continue;
-      const kindResolve = resolveEpocProductId(
-        rawP,
-        productCatalog,
-        productIdCache,
-        canonicalProductIndex,
-        recipeCatalog,
-      );
-      if (kindResolve.productId || kindResolve.ambiguous) continue;
-      if (pendingProductKind.has(k)) continue;
-
-      const hk = classifyEpocProductKindHeuristic(rawP);
-      if (!needsEpocProductKindOpenAi(hk)) {
-        kindByKey[k] = {
-          kind: hk.kind,
-          confidence: hk.confidence,
-          reason: hk.reason,
-          src: "heuristic",
-        };
-      } else {
-        pendingProductKind.set(k, { raw: rawP, pick: hk });
-        uncertainKindKeysOrder.push(k);
-        uncertainKindLabels.push(rawP);
-      }
-    }
-
-    if (uncertainKindLabels.length && openaiApiKey) {
-      const aiKindMap = await batchClassifyEpocProductKindWithOpenAi({
-        apiKey: openaiApiKey,
-        model: openaiProductKindModel,
-        labels: uncertainKindLabels,
-      });
-      for (let i = 0; i < uncertainKindKeysOrder.length; i++) {
-        const k = uncertainKindKeysOrder[i]!;
-        const aiKind = aiKindMap.get(i);
-        if (aiKind) {
-          kindByKey[k] = {
-            kind: aiKind,
-            confidence: 0.88,
-            reason: "openai_batch",
-            src: "openai",
-          };
-        } else {
-          const ph = pendingProductKind.get(k)!;
-          kindByKey[k] = {
-            kind: ph.pick.kind,
-            confidence: ph.pick.confidence,
-            reason: ph.pick.reason,
-            src: "default",
-          };
-        }
-      }
-    } else {
-      for (const k of uncertainKindKeysOrder) {
-        const ph = pendingProductKind.get(k)!;
-        kindByKey[k] = {
-          kind: ph.pick.kind,
-          confidence: ph.pick.confidence,
-          reason: ph.pick.reason,
-          src: "heuristic",
-        };
-      }
-    }
-
     const pushDiagnostic = (d: IgnoredRowDiagnostic) => {
       if (diagnostics.length >= maxDiagnostics) {
         diagnosticsTruncated = true;
@@ -1166,7 +1056,6 @@ async function runCsvRevenueImportForJob(
       if (Date.now() - t0 >= TIME_BUDGET_MS) break;
 
       let createdNewProductThisIteration = false;
-      let createdNewRecipeThisIteration = false;
 
       const row = rows[idx]!;
       const totalCell = sanitizeCell(row[totalCol] ?? "");
@@ -1422,28 +1311,20 @@ async function runCsvRevenueImportForJob(
       if (createdNewProductThisIteration && productId) {
         const leafForAutoCreate =
           leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const kindPickPost =
-          kindByKey[lineKey]?.kind ??
-          (createdNewRecipeThisIteration ? "RECIPE" : "PRODUCT");
-        const autoOpType =
-          kindPickPost === "RECIPE"
-            ? "RECEITA_FICHA"
-            : deriveOperationalTypeForAutoProduct(
-                leafForAutoCreate.name,
-                rawProdutoForMatch,
-              );
+        const autoOpType = deriveOperationalTypeForAutoProduct(
+          leafForAutoCreate.name,
+          rawProdutoForMatch,
+        );
         const { error: pocErr } = await admin
           .from("product_operational_config")
           .insert({
             company_id: job.company_id,
             product_id: productId,
             suggested_operational_type: autoOpType,
-            suggested_score: createdNewRecipeThisIteration ? 0.9 : 0.82,
+            suggested_score: 0.82,
             suggestion_reasons: {
               epoc_csv_revenue_import: true,
               revenue_category: scRowForLine?.reason ?? null,
-              epoc_product_kind: kindByKey[lineKey] ?? null,
-              auto_recipe: createdNewRecipeThisIteration,
             },
             final_operational_type: autoOpType,
             final_decision_source: "AUTO",
@@ -1495,7 +1376,6 @@ async function runCsvRevenueImportForJob(
     const newMeta: Record<string, unknown> = {
       ...priorMeta,
       epoc_revenue_category_by_product: catByKey,
-      epoc_product_kind_by_name: kindByKey,
       epoc_product_id_by_line_key: productIdCacheToMetadata(productIdCache),
       epoc_product_id_by_exact_name: productIdCacheExactNameToMetadata(
         productIdCache,

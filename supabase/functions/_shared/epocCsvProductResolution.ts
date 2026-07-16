@@ -473,7 +473,10 @@ export async function runEpocProductMatchPipeline(input: {
       await applyEpocOpenAiCreatePlan({
         exactKey,
         raw,
-        plan: prior,
+        plan: {
+          ...prior,
+          action: "CREATE_PRODUCT",
+        },
         ...input,
         openAiPlanByExactName,
       });
@@ -539,14 +542,14 @@ export async function runEpocProductMatchPipeline(input: {
         }
         continue;
       }
-      if (
-        plan.action === "CREATE_PRODUCT" ||
-        plan.action === "CREATE_RECIPE"
-      ) {
+      if (plan.action === "CREATE_PRODUCT" || plan.action === "CREATE_RECIPE") {
         await applyEpocOpenAiCreatePlan({
           exactKey,
           raw,
-          plan,
+          plan: {
+            ...plan,
+            action: "CREATE_PRODUCT",
+          },
           ...input,
           openAiPlanByExactName,
         });
@@ -582,7 +585,7 @@ function assignmentToStoredPlan(a: EpocOpenAiMatchAssignment): StoredEpocOpenAiP
   }
   if (a.action === "CREATE_PRODUCT" || a.action === "CREATE_RECIPE") {
     return {
-      action: a.action,
+      action: "CREATE_PRODUCT",
       create: a.create ?? null,
     };
   }
@@ -632,19 +635,16 @@ async function applyEpocOpenAiCreatePlan(ctx: {
 }): Promise<void> {
   const create = ctx.plan.create;
   if (!create?.catalog_name) return;
-  const asRecipe = ctx.plan.action === "CREATE_RECIPE" || create.kind === "RECIPE";
   const catalogName = epocCatalogDisplayName(create.catalog_name);
   const unit = (create.unit || "un").trim().toLowerCase() || "un";
-  const autoOp = asRecipe
-    ? "RECEITA_FICHA"
-    : ctx.deriveOperationalType(ctx.defaultCategoryName, ctx.raw);
+  const autoOp = ctx.deriveOperationalType(ctx.defaultCategoryName, ctx.raw);
   const ensured = await ctx.productEnsure.ensure({
     rawName: ctx.raw,
     catalogName,
     lineKey: epocProductLineKey(ctx.raw),
     canonicalName: canonicalProductName(catalogName) || ctx.exactKey,
     inferredUnit: unit,
-    autoStock: asRecipe ? "RECIPE_CONTROLLED" : ctx.mapStockControl(autoOp),
+    autoStock: ctx.mapStockControl(autoOp),
   });
   if (!ensured.productId) return;
   await ensureProductSaleUnitUnConversion(
@@ -653,16 +653,6 @@ async function applyEpocOpenAiCreatePlan(ctx: {
     unit,
     create.un_per_stock_unit ?? null,
   );
-  if (asRecipe && ensured.created) {
-    await ctx.admin.from("recipes").insert({
-      company_id: ctx.companyId,
-      name: catalogName.slice(0, 500),
-      output_product_id: ensured.productId,
-      batch_yield: 1,
-      active: true,
-      recipe_type: "PREP",
-    });
-  }
 }
 
 /** Garante conversão da unidade de estoque para UN (vendas EPOC em un). */

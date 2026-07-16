@@ -36,7 +36,6 @@ import {
 import { buildDreTreeForBucket } from "@/lib/dre/dreTree";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { cn } from "@/lib/utils";
-import { canGestorAccess } from "@/lib/roles";
 import {
   AlertTriangle,
   BarChart3,
@@ -47,13 +46,12 @@ import {
   Scale,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
 
 type DreMainView = "resumo" | "sem-categoria";
 
 export function Dre() {
   const { user } = useAuth();
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const now = new Date();
   const [period, setPeriod] = useState<MonthYear>({
     month: now.getMonth() + 1,
@@ -100,10 +98,6 @@ export function Dre() {
       imp: buildDreTreeForBucket(categories, m, "IMPOSTOS"),
     };
   }, [categories, categoryTotals.byCategoryId, computed]);
-
-  if (!currentRole || !canGestorAccess(currentRole)) {
-    return <Navigate to="/app" replace />;
-  }
 
   return (
     <PageShell>

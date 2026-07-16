@@ -52,7 +52,7 @@ const featureCards = [
   {
     icon: BarChart3,
     title: "Painel operacional",
-    text: "Dashboard com o essencial para gestores e proprietários.",
+    text: "Dashboard com o essencial para quem gerencia a operação.",
   },
   {
     icon: Shield,
@@ -160,7 +160,7 @@ export function Landing() {
               <strong className="font-semibold text-foreground">
                 WhatsApp
               </strong>{" "}
-              no fluxo: membros e mensagens ligados à sua empresa. Pensado para
+              no fluxo: operadores e mensagens ligados à sua empresa. Pensado para
               bares e restaurantes.
             </p>
             <div
@@ -316,7 +316,7 @@ export function Landing() {
             </h2>
             <p className="relative mx-auto mt-3 max-w-lg text-muted-foreground">
               Crie sua conta em minutos, defina o WhatsApp do proprietário e
-              convide a equipe com papéis de operador, gestor ou proprietário.
+              convide a equipe por e-mail com perfis de permissão personalizados.
             </p>
             <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link to="/register">

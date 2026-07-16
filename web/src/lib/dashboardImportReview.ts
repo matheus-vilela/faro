@@ -10,7 +10,7 @@ export type DashboardImportReviewRow = {
 };
 
 export type DashboardEpocRecipeNoIngredientsRow = {
-  recipe_id: string;
+  recipe_id: string | null;
   product_id: string;
   name: string;
   unit: string;
@@ -71,9 +71,13 @@ function parseEpocRecipeRows(
   return raw
     .map((r): DashboardEpocRecipeNoIngredientsRow | null => {
       const o = r as Record<string, unknown>;
-      const recipeId = String(o.recipe_id ?? "").trim();
+      const recipeIdRaw = o.recipe_id;
+      const recipeId =
+        recipeIdRaw == null || recipeIdRaw === ""
+          ? null
+          : String(recipeIdRaw).trim() || null;
       const productId = String(o.product_id ?? "").trim();
-      if (!recipeId || !productId) return null;
+      if (!productId) return null;
       return {
         recipe_id: recipeId,
         product_id: productId,

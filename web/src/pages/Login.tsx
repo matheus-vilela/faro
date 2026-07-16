@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { useTheme } from "@/contexts/ThemeContext";
+import { humanizeAuthError } from "@/lib/authErrorMessage";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -59,7 +60,7 @@ export function Login() {
           : "/empresas";
       navigate(safe, { replace: true });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Erro ao fazer login");
+      setError(humanizeAuthError(err, "login"));
     } finally {
       setLoading(false);
     }
@@ -88,9 +89,7 @@ export function Login() {
       setForgotOpen(false);
       setForgotEmail("");
     } catch (err: unknown) {
-      setForgotError(
-        err instanceof Error ? err.message : "Não foi possível enviar o email.",
-      );
+      setForgotError(humanizeAuthError(err, "forgot_password"));
     } finally {
       setForgotLoading(false);
     }
@@ -136,9 +135,7 @@ export function Login() {
             )}
             {error && (
               <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                {error === "Failed to fetch"
-                  ? "Verifique sua conexão com a internet."
-                  : error}
+                {error}
               </p>
             )}
             <div className="space-y-2">
