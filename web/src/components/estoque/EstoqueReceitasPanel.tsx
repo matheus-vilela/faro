@@ -623,13 +623,16 @@ export const EstoqueReceitasPanel = forwardRef<
   >(null);
   const prefillHandledRef = useRef(false);
 
+  const technicalSheetPid = technicalSheetOutputProductId?.trim() ?? "";
+
   const isIngredientsDirty = useMemo(() => {
-    if (!ingredientsOnly || !editingRecipeId) return false;
+    if (!ingredientsOnly) return false;
+    if (!editingRecipeId && !technicalSheetPid) return false;
     return !ingsSnapshotsEqual(
       normalizeIngsForCompare(ings),
       savedIngsSnapshot,
     );
-  }, [ingredientsOnly, editingRecipeId, ings, savedIngsSnapshot]);
+  }, [ingredientsOnly, editingRecipeId, technicalSheetPid, ings, savedIngsSnapshot]);
 
   useEffect(() => {
     prefillHandledRef.current = false;
@@ -639,8 +642,6 @@ export const EstoqueReceitasPanel = forwardRef<
     initialOpenRecipeId,
     technicalSheetOutputProductId,
   ]);
-
-  const technicalSheetPid = technicalSheetOutputProductId?.trim() ?? "";
 
   const ingredientExcludeProductId = useMemo(() => {
     for (const candidate of [
@@ -1271,7 +1272,7 @@ export const EstoqueReceitasPanel = forwardRef<
         setEditingRecipeId(null);
         onSheetOpenChange?.(false);
       };
-      if (ingredientsOnly && editingRecipeId && isIngredientsDirty) {
+      if (ingredientsOnly && (editingRecipeId || technicalSheetPid) && isIngredientsDirty) {
         promptUnsavedLeave(close);
         return;
       }

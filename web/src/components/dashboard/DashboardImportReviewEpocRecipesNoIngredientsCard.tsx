@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/card";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
-  dashboardImportReviewConfirmOutboundAsRecipe,
   dashboardImportReviewEpocRecipeRevertToProduct,
   dashboardImportReviewSetResolution,
   fetchDashboardImportReviewEpocRecipesNoIngredients,
@@ -103,7 +102,6 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   const [rows, setRows] = useState<DashboardEpocRecipeNoIngredientsRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
-  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const recipePanelRef = useRef<EstoqueReceitasPanelHandle>(null);
   /** Evita spinner no card quando o próprio save/revert disparou refreshSignal. */
   const skipFullLoadRef = useRef(false);
@@ -164,7 +162,6 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   useEffect(() => {
     if (selectedRowKey && !rows.some((r) => rowKey(r) === selectedRowKey)) {
       setSelectedRowKey(null);
-      setSelectedRecipeId(null);
     }
   }, [rows, selectedRowKey]);
 
@@ -198,7 +195,6 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
     toast.success("Item mantido como produto de venda.");
     if (selectedRowKey === rowKey(row)) {
       setSelectedRowKey(null);
-      setSelectedRecipeId(null);
     }
     refreshAfterLocalChange();
   };
@@ -210,55 +206,34 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
   const selectRow = async (row: DashboardEpocRecipeNoIngredientsRow) => {
     const key = rowKey(row);
     if (key === selectedRowKey) return;
-    if (selectedRecipeId) {
+    if (selectedRowKey) {
       const leave =
         (await recipePanelRef.current?.confirmLeaveIfDirty()) ?? "proceed";
       if (leave === "cancel") return;
     }
-
-    let recipeId = row.recipe_id;
-    if (!recipeId) {
-      setBusyId(row.product_id);
-      const res = await dashboardImportReviewConfirmOutboundAsRecipe(
-        supabase,
-        companyId,
-        row.product_id,
-      );
-      setBusyId(null);
-      if (!res.ok) {
-        toast.error(
-          res.error ?? "Não foi possível preparar a ficha técnica deste item.",
-        );
-        return;
-      }
-      recipeId = res.recipe_id ?? null;
-      if (!recipeId) {
-        toast.error(
-          "Ficha técnica criada, mas não foi possível abrir o editor.",
-        );
-        void reloadQuiet();
-        return;
-      }
-      await reloadQuiet();
-    }
-
     setSelectedRowKey(key);
-    setSelectedRecipeId(recipeId);
   };
 
   const selectedRow = rows.find((r) => rowKey(r) === selectedRowKey) ?? null;
 
-  const recipeEditor = selectedRecipeId ? (
+  const recipeEditor = selectedRow ? (
     <EstoqueReceitasPanel
+      key={`${selectedRow.product_id}:${selectedRow.recipe_id ?? "draft"}`}
       ref={recipePanelRef}
       companyId={companyId}
       sheetOnly
       embedInline={!isMobile}
       ingredientsOnly
-      initialOpenRecipeId={selectedRecipeId}
-      contextOutputProductId={selectedRow?.product_id ?? null}
+      initialOpenRecipeId={selectedRow.recipe_id}
+      technicalSheetOutputProductId={
+        selectedRow.recipe_id ? null : selectedRow.product_id
+      }
+      contextOutputProductId={selectedRow.product_id}
+      onTechnicalSheetSaved={() => {
+        refreshAfterLocalChange();
+      }}
       onSheetOpenChange={(open) => {
-        if (!open) setSelectedRecipeId(null);
+        if (!open) setSelectedRowKey(null);
       }}
       onStockChanged={refreshAfterLocalChange}
     />
@@ -366,7 +341,7 @@ export function DashboardImportReviewEpocRecipesNoIngredientsCard({
                 <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Produtos da ficha
                 </p>
-                {selectedRecipeId ? (
+                {selectedRow ? (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     {recipeEditor}
                   </div>
