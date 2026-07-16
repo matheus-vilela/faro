@@ -7,6 +7,9 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
+import { PayableByCategoryView } from "@/components/fluxo/PayableByCategoryView";
+import { PayableByDueDateView } from "@/components/fluxo/PayableByDueDateView";
+import { PayableListViewToggle } from "@/components/fluxo/PayableListViewToggle";
 import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
@@ -65,6 +68,7 @@ import {
   filterBoletosBySearch,
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
+import type { PayableListView } from "@/lib/payableListViews";
 import {
   computePayableTotals,
   EMPTY_PAYABLE_TOTALS,
@@ -158,6 +162,9 @@ export function FluxoBoletosPage({
   const isReceivableFlow = flowType === "receivable";
 
   const [boletosList, setBoletosList] = useState<FluxoBoletoRow[]>([]);
+  const [boletosMonthFiltered, setBoletosMonthFiltered] = useState<
+    FluxoBoletoRow[]
+  >([]);
   const [boletosListCount, setBoletosListCount] = useState(0);
   const [seriesMasters, setSeriesMasters] = useState<ExpenseSeriesMaster[]>([]);
   const [seriesEditOpen, setSeriesEditOpen] = useState(false);
@@ -167,6 +174,7 @@ export function FluxoBoletosPage({
   const [boletosSearch, setBoletosSearch] = useState("");
   const debouncedSearch = useDebounce(boletosSearch, 300);
   const [loadingList, setLoadingList] = useState(true);
+  const [listView, setListView] = useState<PayableListView>("category");
 
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
   const [createBoletoDefaultDueDate, setCreateBoletoDefaultDueDate] = useState<
@@ -308,10 +316,12 @@ export function FluxoBoletosPage({
           (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
         );
         const filtered = filterBoletosBySearch(visible, debouncedSearch);
+        setBoletosMonthFiltered(filtered);
         setBoletosListCount(filtered.length);
         const pageStart = (boletosPage - 1) * PAGE_SIZE;
         setBoletosList(filtered.slice(pageStart, pageStart + PAGE_SIZE));
       } else {
+        setBoletosMonthFiltered([]);
         let query = supabase
           .from("boletos")
           .select("*", { count: "exact" })
@@ -336,6 +346,7 @@ export function FluxoBoletosPage({
       console.error(e);
       toast.error("Não foi possível carregar a lista.");
       setBoletosList([]);
+      setBoletosMonthFiltered([]);
       setBoletosListCount(0);
     }
     setLoadingList(false);
@@ -410,13 +421,27 @@ export function FluxoBoletosPage({
       );
       return;
     }
-    void fetchPayableReceiptContext(calendarBoletos)
+    const byKey = new Map<string, FluxoBoletoRow>();
+    for (const b of [...calendarBoletos, ...boletosMonthFiltered]) {
+      const key =
+        b.id ||
+        `${b.series_master_expense_id ?? b.expense_id ?? "x"}-${b.due_date}-${b.amount}`;
+      byKey.set(key, b);
+    }
+    void fetchPayableReceiptContext([...byKey.values()])
       .then(setPayableReceiptContext)
       .catch((error) => {
         console.error(error);
         setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
       });
-  }, [companyId, flowType, calendarBoletos]);
+  }, [companyId, flowType, calendarBoletos, boletosMonthFiltered]);
+
+  const scheduledMonthBoletos = useMemo(
+    () => boletosMonthFiltered.filter((b) => isScheduledPayableBoleto(b)),
+    [boletosMonthFiltered],
+  );
+
+  const todayYmd = localDateYmd();
 
   const boletoReadyToPay = useCallback(
     (b: FluxoBoletoRow) => isBoletoReadyToPay(b, payableReceiptContext),
@@ -984,16 +1009,10 @@ export function FluxoBoletosPage({
         />
       )}
 
-      <Card>
-        <CardHeader className="flex flex-col gap-5 space-y-0">
-          <div>
-            <CardTitle>{listTitle}</CardTitle>
-            <CardDescription>{listDescription}</CardDescription>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
+      {!isReceivableFlow ? (
+        <div className="space-y-4">
+          <PayableListViewToggle value={listView} onChange={setListView} />
+          <div className="flex flex-wrap gap-3 items-center">
             <Input
               placeholder={searchPlaceholder}
               value={boletosSearch}
@@ -1001,62 +1020,134 @@ export function FluxoBoletosPage({
               className="max-w-sm"
             />
           </div>
-          {loadingList ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : boletosList.length === 0 ? (
-            <p className="text-muted-foreground">{emptyListMessage}</p>
-          ) : (
-            <div className="space-y-6">
-              {flowType === "payable" && listReadyToPay.length > 0 && (
-                <div className="space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">Valores a pagar</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Contas agendadas liberadas para pagamento.
-                    </p>
-                  </div>
-                  {listReadyToPay.map((b) => renderListCard(b))}
-                </div>
-              )}
-              {flowType === "payable" && listPendingReceipt.length > 0 && (
-                <div className="space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                      Valores a confirmar
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      NF ou romaneio aguardando recebimento da mercadoria.
-                    </p>
-                  </div>
-                  {listPendingReceipt.map((b) => renderListCard(b))}
-                </div>
-              )}
-              {(flowType !== "payable" || listOther.length > 0) && (
-                <div className="space-y-2">
-                  {flowType === "payable" && listOther.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold">Quitadas</h3>
-                      <p className="text-xs text-muted-foreground">
-                        Contas já pagas neste mês.
-                      </p>
-                    </div>
-                  )}
-                  {(flowType === "payable" ? listOther : boletosList).map((b) =>
-                    renderListCard(b),
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {!loadingList && (
-            <Pagination
-              page={boletosPage}
-              totalCount={boletosListCount}
-              onPageChange={setBoletosPage}
+          {listView === "category" && (
+            <PayableByCategoryView
+              boletos={scheduledMonthBoletos}
+              categoriesById={categoriesById}
+              expenseById={payableReceiptContext.expenseById}
+              todayYmd={todayYmd}
+              loading={loadingList}
+              emptyMessage={emptyListMessage}
+              formatCurrency={formatCurrency}
+              onSelect={setBoletoResumo}
             />
           )}
-        </CardContent>
-      </Card>
+          {listView === "due" && (
+            <PayableByDueDateView
+              boletos={scheduledMonthBoletos}
+              categoriesById={categoriesById}
+              expenseById={payableReceiptContext.expenseById}
+              todayYmd={todayYmd}
+              loading={loadingList}
+              emptyMessage={emptyListMessage}
+              formatCurrency={formatCurrency}
+              onSelect={setBoletoResumo}
+            />
+          )}
+          {listView === "status" && (
+            <Card>
+              <CardHeader className="flex flex-col gap-5 space-y-0">
+                <div>
+                  <CardTitle>{listTitle}</CardTitle>
+                  <CardDescription>{listDescription}</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingList ? (
+                  <p className="text-muted-foreground">Carregando...</p>
+                ) : boletosList.length === 0 ? (
+                  <p className="text-muted-foreground">{emptyListMessage}</p>
+                ) : (
+                  <div className="space-y-6">
+                    {listReadyToPay.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold">
+                            Valores a pagar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            Contas agendadas liberadas para pagamento.
+                          </p>
+                        </div>
+                        {listReadyToPay.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                    {listPendingReceipt.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                            Valores a confirmar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            NF ou romaneio aguardando recebimento da mercadoria.
+                          </p>
+                        </div>
+                        {listPendingReceipt.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                    {listOther.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold">Quitadas</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Contas já pagas neste mês.
+                          </p>
+                        </div>
+                        {listOther.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!loadingList && (
+                  <Pagination
+                    page={boletosPage}
+                    totalCount={boletosListCount}
+                    onPageChange={setBoletosPage}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : (
+        <Card>
+          <CardHeader className="flex flex-col gap-5 space-y-0">
+            <div>
+              <CardTitle>{listTitle}</CardTitle>
+              <CardDescription>{listDescription}</CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="mb-4 flex flex-wrap gap-3 items-center">
+              <Input
+                placeholder={searchPlaceholder}
+                value={boletosSearch}
+                onChange={(e) => setBoletosSearch(e.target.value)}
+                className="max-w-sm"
+              />
+            </div>
+            {loadingList ? (
+              <p className="text-muted-foreground">Carregando...</p>
+            ) : boletosList.length === 0 ? (
+              <p className="text-muted-foreground">{emptyListMessage}</p>
+            ) : (
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  {boletosList.map((b) => renderListCard(b))}
+                </div>
+              </div>
+            )}
+            {!loadingList && (
+              <Pagination
+                page={boletosPage}
+                totalCount={boletosListCount}
+                onPageChange={setBoletosPage}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {!isReceivableFlow && (
         <Sheet

@@ -16,7 +16,10 @@ export async function fetchPayableReceiptContext(
   if (expenseIds.length === 0) return EMPTY_PAYABLE_RECEIPT_CONTEXT;
 
   const [expRes, recRes] = await Promise.all([
-    supabase.from("expenses").select("id, type").in("id", expenseIds),
+    supabase
+      .from("expenses")
+      .select("id, type, expense_source")
+      .in("id", expenseIds),
     supabase
       .from("recebimentos")
       .select("expense_id, status")
@@ -31,6 +34,8 @@ export async function fetchPayableReceiptContext(
     expenseById.set(row.id, {
       id: row.id,
       type: row.type as PayableReceiptExpense["type"],
+      expense_source:
+        (row.expense_source as PayableReceiptExpense["expense_source"]) ?? null,
     });
   }
 
