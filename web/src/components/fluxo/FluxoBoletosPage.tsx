@@ -7,6 +7,7 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
+import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -40,7 +41,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { formatCompetenceLabel } from "@/lib/boletoPayment";
+import { formatCompetenceLabel, localDateYmd } from "@/lib/boletoPayment";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
@@ -64,6 +65,13 @@ import {
   filterBoletosBySearch,
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
+import {
+  computePayableTotals,
+  EMPTY_PAYABLE_TOTALS,
+  formatPayableMonthName,
+  getPayableTotalsFetchRange,
+  type PayableTotals,
+} from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -183,6 +191,9 @@ export function FluxoBoletosPage({
   const [bankAccountsById, setBankAccountsById] = useState<
     Map<string, CompanyBankAccount>
   >(new Map());
+  const [payableTotals, setPayableTotals] =
+    useState<PayableTotals>(EMPTY_PAYABLE_TOTALS);
+  const [totalsLoading, setTotalsLoading] = useState(false);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -337,6 +348,32 @@ export function FluxoBoletosPage({
     flowType,
   ]);
 
+  const fetchPayableTotals = useCallback(async () => {
+    if (!companyId || isReceivableFlow) {
+      setPayableTotals(EMPTY_PAYABLE_TOTALS);
+      setTotalsLoading(false);
+      return;
+    }
+    setTotalsLoading(true);
+    const todayYmd = localDateYmd();
+    const { startYmd, endYmd } = getPayableTotalsFetchRange(period, todayYmd);
+    try {
+      const merged = await fetchMergedPayableBoletosInRange(
+        companyId,
+        startYmd,
+        endYmd,
+      );
+      const visible = merged.filter(
+        (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
+      );
+      setPayableTotals(computePayableTotals(visible, period, todayYmd));
+    } catch (e) {
+      console.error(e);
+      setPayableTotals(EMPTY_PAYABLE_TOTALS);
+    }
+    setTotalsLoading(false);
+  }, [companyId, period.month, period.year, isReceivableFlow]);
+
   useEffect(() => {
     if (!companyId || flowType !== "payable") {
       queueMicrotask(() => setSeriesMasters([]));
@@ -361,6 +398,10 @@ export function FluxoBoletosPage({
   useEffect(() => {
     queueMicrotask(() => void fetchBoletosList());
   }, [fetchBoletosList]);
+
+  useEffect(() => {
+    queueMicrotask(() => void fetchPayableTotals());
+  }, [fetchPayableTotals]);
 
   useEffect(() => {
     if (!companyId || flowType !== "payable") {
@@ -418,10 +459,12 @@ export function FluxoBoletosPage({
     if (isReceivableFlow) void fetchCalendarRevenueEntries();
     else void fetchCalendarBoletos();
     void fetchBoletosList();
+    void fetchPayableTotals();
   }, [
     fetchCalendarBoletos,
     fetchCalendarRevenueEntries,
     fetchBoletosList,
+    fetchPayableTotals,
     isReceivableFlow,
   ]);
 
@@ -885,6 +928,15 @@ export function FluxoBoletosPage({
         onChange={setPeriod}
         description={periodDescription}
       />
+
+      {!isReceivableFlow && (
+        <PayableTotalsCards
+          totals={payableTotals}
+          loading={totalsLoading}
+          monthName={formatPayableMonthName(period.month, period.year)}
+          formatCurrency={formatCurrency}
+        />
+      )}
 
       {currentCompany?.id && (
         <CreateBoletoSheet
