@@ -1,4 +1,5 @@
 import { EpocIntegrationCard } from "@/components/integrations/EpocIntegrationCard";
+import { FiscalIntegrationCard } from "@/components/integrations/FiscalIntegrationCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import {
@@ -45,6 +46,7 @@ export function Integracoes() {
 
       {companyId ? (
         <div className="space-y-6">
+          <FiscalIntegrationCard companyId={companyId} />
           <EpocIntegrationCard companyId={companyId} />
         </div>
       ) : null}

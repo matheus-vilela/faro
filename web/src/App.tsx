@@ -13,7 +13,6 @@ import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
 import { UnitSetupLegacyOpen } from "@/pages/UnitSetupLegacyOpen";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
-import { ConfiguracoesFiscal } from "@/pages/ConfiguracoesFiscal";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesContasBancarias } from "@/pages/ConfiguracoesContasBancarias";
@@ -161,7 +160,6 @@ function AuthenticatedLayout() {
               path="impostos-receita"
               element={<ConfiguracoesImpostosReceita />}
             />
-            <Route path="fiscal" element={<ConfiguracoesFiscal />} />
             <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
           </Route>
         </Route>

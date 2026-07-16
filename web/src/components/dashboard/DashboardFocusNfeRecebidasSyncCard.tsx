@@ -320,8 +320,8 @@ export function DashboardFocusNfeRecebidasSyncCard({
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
-              <Link to="/app/configuracoes/fiscal">
-                Configurações fiscais
+              <Link to="/app/integracoes">
+                Integração Fiscal
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>
             </Button>
