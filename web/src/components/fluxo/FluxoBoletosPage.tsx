@@ -91,7 +91,7 @@ import type {
 import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
@@ -128,8 +128,11 @@ export type FluxoBoletosPageConfig = {
 
 export function FluxoBoletosPage({
   config,
+  afterHeader,
 }: {
   config: FluxoBoletosPageConfig;
+  /** Conteúdo renderizado logo abaixo do PageHeader (ex.: abas). */
+  afterHeader?: ReactNode;
 }) {
   const {
     flowType,
@@ -955,6 +958,8 @@ export function FluxoBoletosPage({
           </Button>
         }
       />
+
+      {afterHeader}
 
       <ReferencePeriodCard
         value={period}
