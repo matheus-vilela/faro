@@ -56,17 +56,20 @@ export async function buildNfeXmlExpenseItemInserts(
     items: ExtractedExpenseItem[];
     motorVersion: string;
     xmlLineIdentities: string[];
+    supplierId?: string | null;
   },
 ): Promise<{
   matchResult: Awaited<ReturnType<typeof matchNfeExpenseCatalogLines>>;
   lines: BuiltXmlCatalogExpenseLine[];
 }> {
-  const { companyId, items, motorVersion, xmlLineIdentities } = params;
+  const { companyId, items, motorVersion, xmlLineIdentities, supplierId } =
+    params;
   const matchResult = await matchNfeExpenseCatalogLines(
     supabase,
     companyId,
     items,
     "XML_BATCH_OR_LAB",
+    { supplierId: supplierId ?? null },
   );
 
   const catalogNameById = new Map<string, string>();

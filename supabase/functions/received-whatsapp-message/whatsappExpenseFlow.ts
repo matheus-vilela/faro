@@ -1208,10 +1208,16 @@ export async function tryHandleIncomingExpenseDocument(
       return true;
     }
 
+    const { supplierId: waSupplierId } = await ensureSupplierFromExtracted(
+      supabase,
+      auth.companyId,
+      data,
+    );
     const matchOpts = await getDefaultCatalogMatchingOpts(
       supabase,
       auth.companyId,
       "WHATSAPP_INTERACTIVE",
+      { supplierId: waSupplierId },
     );
     const matchResult = await resolveProductMatches(
       supabase,

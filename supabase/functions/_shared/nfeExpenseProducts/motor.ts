@@ -17,6 +17,7 @@ import {
 } from "../productImport/consolidateItems.ts";
 import { loadNfeMotorExtractContext } from "./extractFromStoredContext.ts";
 import { catalogRegistrationNameFromNfeLine } from "./newProductCatalogFromNfe.ts";
+import { upsertProductSupplierCode } from "../productImport/productSupplierCodes.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import { reconcileNfeFinancials } from "./financialReconciliation.ts";
 import type {
@@ -164,7 +165,7 @@ export async function runNfeExpenseProductMotor(
 
   const { data: expRow, error: expErr } = await supabase
     .from("expenses")
-    .select("id, document_total")
+    .select("id, document_total, supplier_id")
     .eq("company_id", companyId)
     .eq("id", expenseId)
     .maybeSingle();
@@ -382,12 +383,19 @@ export async function runNfeExpenseProductMotor(
     };
   }
 
-  /** Mesmas opções que `PREVIEW_FULL` no laboratório (importBatch + LLM + embeddings). */
+  const expenseSupplierId =
+    (expRow as { supplier_id?: string | null }).supplier_id != null
+      ? String((expRow as { supplier_id?: string | null }).supplier_id).trim() ||
+        null
+      : null;
+
+  /** Match determinístico (EAN / cProd+fornecedor) — sem IA. */
   const matchResult = await matchNfeExpenseCatalogLines(
     supabase,
     companyId,
     ctx.items,
     "XML_BATCH_OR_LAB",
+    { supplierId: expenseSupplierId },
   );
 
   const linesOut: NfeExpenseProductsResultLine[] = [];
@@ -564,6 +572,16 @@ export async function runNfeExpenseProductMotor(
             pm: pmForLineNeeds,
           });
         }
+      }
+
+      if (productId) {
+        await upsertProductSupplierCode(
+          supabase,
+          companyId,
+          expenseSupplierId,
+          ctx.items[i]?.productCode,
+          productId,
+        );
       }
 
       /** Focus interpret (onboarding fiscal): com produto resolvido, liberta stock automático. */

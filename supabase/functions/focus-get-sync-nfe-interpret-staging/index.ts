@@ -18,8 +18,8 @@
  * `FOCUS_NFE_RECEBIDAS_CRON_SECRET`.
  * Opcional: `FOCUS_GET_SYNC_INTERPRET_MAX_JOBS` (default 2), `FOCUS_GET_SYNC_INTERPRET_STAGING_CHUNK` (default 5),
  * `FOCUS_GET_SYNC_INTERPRET_QUEUE_VT` (visibility timeout em segundos, default 300).
- * Opcional (LLM): `OPENAI_API_KEY`, `OPENAI_PRODUCT_MATCH_MODEL`.
  * Catálogo global `unified_supplier_*` é atualizado aqui (parse XML por nota), não em `focus-get-sync-nfe`.
+ * Produtos: match determinístico (EAN / cProd+fornecedor) — sem vínculo por IA.
  * Onboarding: `companies.onboarding_fiscal.nfes_sync` = `staging_process_offset` (teto `max_nfes_sync`), não +chunk.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
@@ -411,8 +411,9 @@ async function runInterpretStagingChunk(
           })
         : Promise.resolve(null);
 
+    // Fornecedor antes dos produtos: match por cProd+fornecedor depende do supplier_id.
+    await ensureSupplierForInterpretLog(admin, row.company_id, payload);
     await Promise.all([
-      ensureSupplierForInterpretLog(admin, row.company_id, payload),
       resolveProductsForInterpretLog(
         admin,
         row.company_id,

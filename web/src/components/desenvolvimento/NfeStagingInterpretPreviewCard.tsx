@@ -68,14 +68,8 @@ export type StagingInterpretPreviewResult = {
 
 const ACTION_LABELS: Record<string, string> = {
   link_ean: "Vincular (EAN)",
-  link_name_key: "Vincular (nome)",
-  link_ncm_and_name: "Vincular (NCM+nome)",
-  link_sem_ncm_name: "Vincular (sem NCM, nome)",
-  link_llm: "Vincular (LLM)",
-  link_normalized_name_after_llm: "Vincular (nome normalizado LLM)",
+  link_cprod_supplier: "Vincular (cProd + fornecedor)",
   reuse_chunk_dedupe: "Reutilizar (dedupe chunk)",
-  reuse_catalog_name: "Reutilizar (nome catálogo)",
-  reuse_canonical_name: "Reutilizar (canonical_name)",
   create_product: "Criar produto",
   skip_fiscal_incomplete: "Ignorar (fiscal incompleto)",
 };
@@ -143,7 +137,7 @@ export function NfeStagingInterpretPreviewCard({
             focus-get-sync-nfe-interpret-staging
           </code>
           . Catálogo: {meta.catalog_size} produtos
-          {meta.openai_configured ? " · OpenAI ativa" : " · OpenAI inativa"}
+          {" · match: EAN / cProd+fornecedor"}
           {meta.catalog_fetch_error
             ? ` · Erro catálogo: ${meta.catalog_fetch_error}`
             : null}

@@ -5,8 +5,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
-import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
+import { ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
 import { getDefaultCatalogMatchingOpts } from "../_shared/nfeExpenseProducts/catalogMatchingPolicy.ts";
+import { resolveProductMatches } from "../received-whatsapp-message/productMatch.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -32,6 +33,7 @@ function itemsToMatchInput(items: unknown[]): ExtractedExpenseItem[] {
       quantity: Number(r.quantity ?? 0),
       unitValue: Number(r.unitValue ?? 0),
       lineTotal: Number(r.lineTotal ?? 0),
+      productCode: (r.productCode as string | null | undefined) ?? null,
       unitCommercial: (r.unitCommercial as string | null | undefined) ?? null,
       unitTax: (r.unitTax as string | null | undefined) ?? null,
       ncm: (r.ncm as string | null | undefined) ?? null,
@@ -92,10 +94,27 @@ Deno.serve(async (req) => {
   }
 
   const baseItems = itemsToMatchInput(itemsRaw);
+  const { supplierId } = await ensureSupplierFromExtracted(
+    supabase,
+    draft.company_id as string,
+    {
+      validDocument: true,
+      documentKind: null,
+      supplierName: (ex.supplierName as string | null) ?? null,
+      supplierDocument: (ex.supplierDocument as string | null) ?? null,
+      invoiceNumber: null,
+      invoiceSeries: null,
+      totalAmount: null,
+      items: [],
+      notes: null,
+    },
+    "Cadastrado automaticamente — refresh draft WhatsApp",
+  );
   const matchOpts = await getDefaultCatalogMatchingOpts(
     supabase,
     draft.company_id as string,
     "WHATSAPP_INTERACTIVE",
+    { supplierId },
   );
   const matchResult = await resolveProductMatches(
     supabase,

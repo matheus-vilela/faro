@@ -1,12 +1,5 @@
 import type { ExtractedExpenseItem } from "../_shared/openaiExpense.ts";
 import {
-  applySecondarySignals,
-  digitsOnly,
-  isFlavorOnlyCatalogInsideCompositeInvoice,
-  scoreNameMatchIncludingMergedAliases,
-} from "../_shared/productImport/matchingScore.ts";
-import { beverageSkuVolumeConflict } from "../_shared/productImport/beverageSkuIdentity.ts";
-import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
   sanitizeCatalogProductName,
@@ -36,22 +29,18 @@ import {
   type NormalizedUnitCode,
 } from "../_shared/productImport/unitNormalize.ts";
 import {
-  assistBorderlineProductMatch,
-  assistImportColdNewProduct,
-  assistNfeRagArbiterMatch,
-} from "../_shared/productImport/productMatchLlmAssist.ts";
-import {
-  augmentScoredListWithVectorNeighbors,
-  ensureCompanyProductNameEmbeddings,
-  embeddingModelFromEnv,
-} from "../_shared/productEmbedding.ts";
-import {
   eanLookupKeys,
+  findDirectMatchByEan,
 } from "../_shared/productImport/llmCatalogCandidates.ts";
 import {
-  matchImportBatchLineWithCatalogLlm,
-  type ImportBatchCatalogLlmMatchResult,
-} from "../_shared/productImport/importBatchCatalogLlmMatch.ts";
+  matchImportBatchLineWithCatalog,
+  type ImportBatchCatalogMatchResult,
+} from "../_shared/productImport/importBatchCatalogMatch.ts";
+import {
+  findProductIdBySupplierCProd,
+  normalizeCProd,
+  upsertProductSupplierCode,
+} from "../_shared/productImport/productSupplierCodes.ts";
 
 /** @deprecated usar limiares em matchConfig (escala 0–100). */
 export const AUTO_LINK_MIN_SIMILARITY = 0.92;
@@ -61,6 +50,7 @@ export type ProductRow = {
   name: string;
   unit: string | null;
   barcode?: string | null;
+  ean?: string | null;
   ncm?: string | null;
   merged_catalog_names?: string[] | null;
 };
@@ -87,7 +77,7 @@ export type ItemWithProductMatch = ExtractedExpenseItem & {
     decisionPath?: string;
     borderlineLlmRationale?: string;
     borderlineLlmSuggestedName?: string;
-    /** Pós-match: `assistInvoiceLineUnits` (produção + preview). */
+    /** @deprecated unidades por IA removidas do fluxo. */
     invoice_line_units_llm?: Record<string, unknown>;
   };
 };
@@ -99,7 +89,7 @@ export type ResolveProductMatchesResult = {
   deferProductCreationToReconciliation: boolean;
   /** Chamadas LLM na faixa borderline nesta execução (métricas). */
   borderlineLlmCalls: number;
-  /** Chamadas a `assistInvoiceLineUnits` (NF-e XML / preview full). */
+  /** Sempre 0 — assist de unidades por IA removido. */
   lineUnitsLlmCalls?: number;
 };
 
@@ -133,97 +123,6 @@ function finalizeSuggestedCatalogName(raw: string | null | undefined): string | 
   if (!t) return undefined;
   const n = sanitizeCatalogProductName(t).slice(0, 512);
   return n.length ? n : undefined;
-}
-
-function envProductMatchLlmMaxCalls(): number {
-  try {
-    const raw =
-      typeof Deno !== "undefined"
-        ? Deno.env.get("PRODUCT_MATCH_LLM_MAX_PER_INVOCATION")
-        : "";
-    const n = Number.parseInt(String(raw ?? "30"), 10);
-    return Number.isFinite(n) && n > 0 ? Math.min(n, 200) : 30;
-  } catch {
-    return 30;
-  }
-}
-
-/** Modo do árbitro RAG+LLM na importação NF-e em lote (`IMPORT_NFE_RAG_ARBITER`). */
-function importNfeRagArbiterMode(): "off" | "smart" | "always" {
-  try {
-    const v = String(
-      typeof Deno !== "undefined" ? Deno.env.get("IMPORT_NFE_RAG_ARBITER") ?? "" : "",
-    )
-      .trim()
-      .toLowerCase();
-    if (v === "off" || v === "false" || v === "0") return "off";
-    if (v === "always" || v === "true" || v === "1") return "always";
-    return "smart";
-  } catch {
-    return "smart";
-  }
-}
-
-function importNfeRagArbiterGapThreshold(): number {
-  try {
-    const n = Number.parseInt(
-      String(
-        typeof Deno !== "undefined"
-          ? Deno.env.get("IMPORT_NFE_ARBITER_GAP_THRESHOLD") ?? "14"
-          : "14",
-      ),
-      10,
-    );
-    return Number.isFinite(n) && n >= 4 && n <= 40 ? n : 14;
-  } catch {
-    return 14;
-  }
-}
-
-function importNfeRagMatchCount(): number {
-  try {
-    const n = Number.parseInt(
-      String(
-        typeof Deno !== "undefined"
-          ? Deno.env.get("IMPORT_NFE_RAG_MATCH_COUNT") ?? "42"
-          : "42",
-      ),
-      10,
-    );
-    return Number.isFinite(n) && n >= 8 && n <= 80 ? Math.floor(n) : 42;
-  } catch {
-    return 42;
-  }
-}
-
-function importNfeArbiterMaxCandidates(): number {
-  try {
-    const n = Number.parseInt(
-      String(
-        typeof Deno !== "undefined"
-          ? Deno.env.get("IMPORT_NFE_ARBITER_MAX_CANDIDATES") ?? "18"
-          : "18",
-      ),
-      10,
-    );
-    return Number.isFinite(n) && n >= 6 && n <= 30 ? Math.floor(n) : 18;
-  } catch {
-    return 18;
-  }
-}
-
-function promoteScoredCandidateToTop(
-  list: Array<{ product: ProductRow; score: number; detail: string }>,
-  productId: string,
-): boolean {
-  const i = list.findIndex((s) => s.product.id === productId);
-  if (i < 0) return false;
-  const [row] = list.splice(i, 1);
-  const prevTop = list[0]?.score ?? 0;
-  row.score = Math.max(row.score, prevTop + 0.5, 86);
-  row.detail = `${row.detail} · árbitro RAG+LLM`;
-  list.unshift(row);
-  return true;
 }
 
 async function loadImportSettings(
@@ -361,7 +260,7 @@ function buildImportBatchMatchOutput(params: {
   it: ExtractedExpenseItem;
   name: string;
   invoiceU: NormalizedUnitCode;
-  batchResult: ImportBatchCatalogLlmMatchResult;
+  batchResult: ImportBatchCatalogMatchResult;
   products: ProductRow[];
   thresholds: ImportMatchThresholds;
   autoApplyGlobalMassVolume: boolean;
@@ -372,7 +271,6 @@ function buildImportBatchMatchOutput(params: {
     it,
     invoiceU,
     batchResult,
-    thresholds,
     autoApplyGlobalMassVolume,
     rulesByProduct,
     rawUnit,
@@ -380,8 +278,7 @@ function buildImportBatchMatchOutput(params: {
 
   const linkProduct =
     batchResult.kind === "DIRECT_EAN" ||
-    batchResult.kind === "DIRECT_NCM_NAME" ||
-    batchResult.kind === "LLM_LINK"
+    batchResult.kind === "DIRECT_CPROD_SUPPLIER"
       ? batchResult.product
       : null;
 
@@ -390,15 +287,11 @@ function buildImportBatchMatchOutput(params: {
     const matchReason =
       batchResult.kind === "DIRECT_EAN"
         ? "EAN igual ao cadastro"
-        : batchResult.kind === "DIRECT_NCM_NAME"
-          ? "NCM e nome idênticos ao cadastro"
-          : `IA: ${batchResult.rationale}`;
+        : "cProd + fornecedor iguais ao cadastro";
     const decisionPath =
       batchResult.kind === "DIRECT_EAN"
         ? "import_batch_direct_ean"
-        : batchResult.kind === "DIRECT_NCM_NAME"
-          ? "import_batch_direct_ncm_name"
-          : "import_batch_llm_link";
+        : "import_batch_direct_cprod_supplier";
     const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
       resolvedProductId: linkProduct.id,
       suggestedProductId: linkProduct.id,
@@ -411,8 +304,6 @@ function buildImportBatchMatchOutput(params: {
       catalogUnitNormalized: normalizeUnitLabel(linkProduct.unit),
       unitConvertible: false,
       decisionPath,
-      borderlineLlmRationale:
-        batchResult.kind === "LLM_LINK" ? batchResult.rationale : undefined,
     };
     const m = enrichProductMatch(
       it,
@@ -426,25 +317,13 @@ function buildImportBatchMatchOutput(params: {
     return { ...it, productId: m.resolvedProductId, productMatch: m };
   }
 
-  const suggestedRaw =
-    batchResult.kind === "LLM_NEW_PRODUCT"
-      ? batchResult.suggestedCatalogName
-      : batchResult.kind === "LLM_SKIP" || batchResult.kind === "NO_OPENAI" ||
-          batchResult.kind === "EMPTY_CATALOG"
-        ? batchResult.fallbackSuggestedName
-        : finalizeSuggestedCatalogName(params.name.trim()) ?? params.name.trim();
-
+  const suggestedRaw = batchResult.kind === "NEW_PRODUCT"
+    ? batchResult.fallbackSuggestedName
+    : finalizeSuggestedCatalogName(params.name.trim()) ?? params.name.trim();
   const suggestedName = finalizeSuggestedCatalogName(suggestedRaw) ?? suggestedRaw;
-  const rationale =
-    batchResult.kind === "LLM_NEW_PRODUCT"
-      ? batchResult.rationale
-      : batchResult.kind === "LLM_SKIP"
-        ? batchResult.rationale
-        : batchResult.kind === "NO_OPENAI"
-          ? "Sem OpenAI — cadastro automático com nome da nota."
-          : batchResult.kind === "EMPTY_CATALOG"
-            ? "Catálogo vazio — cadastro automático."
-            : "—";
+  const rationale = batchResult.kind === "NEW_PRODUCT"
+    ? batchResult.rationale
+    : "Sem identificador determinístico — cadastro automático.";
 
   const stubProduct: ProductRow = {
     id: "",
@@ -458,16 +337,12 @@ function buildImportBatchMatchOutput(params: {
     suggestedScore: 0,
     needsConfirmation: false,
     resolutionStatus: "NEW_PRODUCT_STAGED",
-    matchReason: `IA: ${rationale}`,
+    matchReason: rationale,
     invoiceUnitNormalized: invoiceU,
     catalogUnitNormalized: normalizeUnitLabel(stubProduct.unit),
     unitConvertible: false,
-    decisionPath:
-      batchResult.kind === "LLM_NEW_PRODUCT"
-        ? "import_batch_llm_new_product"
-        : "import_batch_llm_fallback_new",
+    decisionPath: "import_batch_deterministic_new",
     borderlineLlmSuggestedName: suggestedName,
-    borderlineLlmRationale: rationale,
   };
   const m = enrichProductMatch(
     it,
@@ -570,18 +445,19 @@ function decideWithUnits(params: {
 export type ResolveProductMatchesOptions = {
   /**
    * Import XML/ZIP em lote: não adia criação de produto à reconciliação;
-   * usa IA também fora da faixa borderline (scores baixos) com mais candidatos.
+   * sem match por IA — EAN / cProd+fornecedor ou produto novo.
    */
   importBatch?: boolean;
   /**
-   * Evita backfill de embeddings durante processamento de lote.
-   * Útil para reduzir latência em workers de importação.
+   * @deprecated Sempre ignorado — embeddings de match removidos.
    */
   skipEmbeddingBackfill?: boolean;
   /**
-   * Desliga assistências com OpenAI (vector + borderline LLM) para priorizar robustez.
+   * @deprecated Sempre ignorado — vínculo por IA removido.
    */
   skipLlmAssist?: boolean;
+  /** Fornecedor da NF (para match/upsert de cProd). */
+  supplierId?: string | null;
 };
 
 export async function resolveProductMatches(
@@ -593,29 +469,14 @@ export async function resolveProductMatches(
   let {
     thresholds,
     autoApplyGlobalMassVolume,
-    llmBorderlineMatchEnabled,
     deferProductCreationToReconciliation,
   } = await loadImportSettings(supabase, companyId);
   if (opts?.importBatch) {
     deferProductCreationToReconciliation = false;
   }
 
-  let borderlineLlmRemaining = envProductMatchLlmMaxCalls();
-  let borderlineLlmCalls = 0;
-
-  let openaiKey = "";
-  let openaiModel = "gpt-4o-mini";
-  try {
-    if (typeof Deno !== "undefined") {
-      openaiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
-      openaiModel =
-        Deno.env.get("OPENAI_PRODUCT_MATCH_MODEL") ?? "gpt-4o-mini";
-    }
-  } catch {
-    openaiKey = "";
-  }
-
-  const embeddingModel = embeddingModelFromEnv();
+  const supplierId =
+    opts?.supplierId != null ? String(opts.supplierId).trim() || null : null;
 
   const itemsSanitized = (items ?? []).filter(
     (x): x is ExtractedExpenseItem =>
@@ -689,7 +550,7 @@ export async function resolveProductMatches(
 
   const { data: prodRows, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, unit, barcode, ncm, merged_catalog_names")
+    .select("id, name, unit, barcode, ean, ncm, merged_catalog_names")
     .eq("company_id", companyId)
     .eq("is_active", true);
 
@@ -699,30 +560,6 @@ export async function resolveProductMatches(
 
   const products = (prodRows ?? []) as ProductRow[];
   const productById = new Map(products.map((p) => [p.id, p]));
-
-  if (
-    opts?.importBatch &&
-    !opts?.skipEmbeddingBackfill &&
-    openaiKey &&
-    products.length > 0
-  ) {
-    try {
-      const { updated, errors } = await ensureCompanyProductNameEmbeddings(
-        supabase,
-        companyId,
-        openaiKey,
-        embeddingModel,
-      );
-      if (updated > 0 || errors > 0) {
-        console.log(
-          "[productMatch] name_embedding backfill",
-          JSON.stringify({ company_id: companyId, updated, errors }),
-        );
-      }
-    } catch (e) {
-      console.error("[productMatch] name_embedding backfill:", e);
-    }
-  }
 
   const out: ItemWithProductMatch[] = [];
   let requiresProductConfirmation = false;
@@ -734,8 +571,8 @@ export async function resolveProductMatches(
     const rawUnit = pickInvoiceUnitRaw(it as ExtractedItemWithInvoiceMeta);
     const invoiceU = rawUnit ? normalizeUnitLabel(rawUnit) : "UNKN";
 
-    const itemNcm = (it as ExtractedExpenseItem & { ncm?: string | null }).ncm;
     const itemEan = (it as ExtractedExpenseItem & { ean?: string | null }).ean;
+    const cProd = normalizeCProd(it.productCode);
 
     const equiv = equivList.find(
       (e) =>
@@ -805,6 +642,15 @@ export async function resolveProductMatches(
           productId: mOk.resolvedProductId,
           productMatch: mOk,
         });
+        if (mOk.resolvedProductId) {
+          await upsertProductSupplierCode(
+            supabase,
+            companyId,
+            supplierId,
+            cProd,
+            mOk.resolvedProductId,
+          );
+        }
         continue;
       }
     }
@@ -842,6 +688,15 @@ export async function resolveProductMatches(
             productId: mAlias.resolvedProductId,
             productMatch: mAlias,
           });
+          if (mAlias.resolvedProductId) {
+            await upsertProductSupplierCode(
+              supabase,
+              companyId,
+              supplierId,
+              cProd,
+              mAlias.resolvedProductId,
+            );
+          }
           continue;
         }
         const decision = decideWithUnits({
@@ -883,22 +738,16 @@ export async function resolveProductMatches(
     }
 
     if (opts?.importBatch === true) {
-      if (!opts.skipLlmAssist && openaiKey && borderlineLlmRemaining > 0) {
-        borderlineLlmRemaining -= 1;
-        borderlineLlmCalls += 1;
-      }
-      const batchResult = await matchImportBatchLineWithCatalogLlm({
+      const batchResult = await matchImportBatchLineWithCatalog({
         item: it,
         productName: name,
         invoiceUnitNormalized: invoiceU,
         products,
-        itemNcm,
         itemEan,
-        openaiKey: openaiKey ?? "",
-        openaiModel,
-        thresholds,
         eanLookupKeys,
-        skipLlm: opts.skipLlmAssist || !openaiKey,
+        companyId,
+        supplierId,
+        supabase,
       });
 
       const batchOut = buildImportBatchMatchOutput({
@@ -915,463 +764,126 @@ export async function resolveProductMatches(
       if (batchOut.productMatch?.needsConfirmation) {
         requiresProductConfirmation = true;
       }
+      if (batchOut.productId) {
+        await upsertProductSupplierCode(
+          supabase,
+          companyId,
+          supplierId,
+          cProd,
+          batchOut.productId,
+        );
+      }
       out.push(batchOut);
       continue;
     }
 
-    const normInvoice = normalizeInvoiceProductLabel(name);
-    const exactNameHits = products.filter(
-      (p) =>
-        normalizeInvoiceProductLabel(p.name) === normInvoice &&
-        !beverageSkuVolumeConflict(name, p.name),
-    );
-    if (exactNameHits.length > 0) {
-      let pPick: ProductRow;
-      if (exactNameHits.length === 1) {
-        pPick = exactNameHits[0]!;
-      } else {
-        const unitOk = exactNameHits.find((p) =>
-          unitsAreEqual(invoiceU, normalizeUnitLabel(p.unit)),
-        );
-        pPick = unitOk ?? exactNameHits[0]!;
-      }
-      const catUe = normalizeUnitLabel(pPick.unit);
-      const prulesE = rulesByProduct.get(pPick.id) ?? [];
-      const mExact = enrichProductMatch(
+    // WhatsApp / interativo: só EAN ou cProd+fornecedor; senão produto novo (confirmação).
+    const byEan = findDirectMatchByEan(products, itemEan, eanLookupKeys);
+    if (byEan) {
+      const catU = normalizeUnitLabel(byEan.unit);
+      const prules = rulesByProduct.get(byEan.id) ?? [];
+      const mEan = enrichProductMatch(
         it,
         {
-          resolvedProductId: pPick.id,
-          suggestedProductId: pPick.id,
-          suggestedProductName: pPick.name,
+          resolvedProductId: byEan.id,
+          suggestedProductId: byEan.id,
+          suggestedProductName: byEan.name,
           suggestedScore: 100,
           needsConfirmation: false,
           resolutionStatus: "AUTO_MATCH",
-          matchReason: "Nome normalizado idêntico ao cadastro",
+          matchReason: "EAN igual ao cadastro",
           invoiceUnitNormalized: invoiceU,
-          catalogUnitNormalized: catUe,
+          catalogUnitNormalized: catU,
           unitConvertible: false,
-          decisionPath: "exact_normalized_name",
+          decisionPath: "direct_ean",
         },
-        pPick,
+        byEan,
         invoiceU,
         autoApplyGlobalMassVolume,
-        prulesE,
+        prules,
         null,
       );
-      if (mExact.needsConfirmation) requiresProductConfirmation = true;
+      if (mEan.needsConfirmation) requiresProductConfirmation = true;
       out.push({
         ...it,
-        productId: mExact.resolvedProductId,
-        productMatch: mExact,
+        productId: mEan.resolvedProductId,
+        productMatch: mEan,
       });
-      continue;
-    }
-
-    type Scored = { product: ProductRow; score: number; detail: string };
-    const scoredList: Scored[] = [];
-
-    for (const p of products) {
-      let sc = scoreNameMatchIncludingMergedAliases(
-        name,
-        p.name,
-        p.merged_catalog_names,
-      );
-      const sec = applySecondarySignals({
-        baseScore: sc,
-        invoiceNcm: itemNcm,
-        invoiceEan: itemEan,
-        productNcm: p.ncm,
-        productBarcode: p.barcode,
-      });
-      sc = sec.score;
-      const reasons = Array.isArray(sec.reasons) ? sec.reasons : [];
-      const extra = reasons.length ? `; ${reasons.join("; ")}` : "";
-      scoredList.push({
-        product: p,
-        score: sc,
-        detail: `pontuação ${sc.toFixed(1)}${extra}`,
-      });
-    }
-
-    scoredList.sort((a, b) => b.score - a.score);
-
-    if (
-      opts?.importBatch &&
-      !opts?.skipLlmAssist &&
-      openaiKey &&
-      products.length > 0 &&
-      name.trim()
-    ) {
-      try {
-        await augmentScoredListWithVectorNeighbors({
+      if (mEan.resolvedProductId) {
+        await upsertProductSupplierCode(
           supabase,
           companyId,
-          invoiceLineName: name,
-          scoredList,
-          productById,
-          openaiKey,
-          model: embeddingModel,
-          matchCount: opts?.importBatch ? importNfeRagMatchCount() : 24,
-        });
-      } catch (e) {
-        console.error("[productMatch] vector RAG:", e);
+          supplierId,
+          cProd,
+          mEan.resolvedProductId,
+        );
       }
-    }
-
-    if (!scoredList.length) {
-      const autoNewEmpty = opts?.importBatch === true;
-      if (!autoNewEmpty) requiresProductConfirmation = true;
-      out.push({
-        ...it,
-        productId: null,
-        productMatch: {
-          resolvedProductId: null,
-          suggestedProductId: null,
-          suggestedProductName: null,
-          suggestedScore: 0,
-          needsConfirmation: !autoNewEmpty,
-          resolutionStatus: "NEW_PRODUCT_STAGED",
-          matchReason: autoNewEmpty
-            ? "Catálogo vazio — cadastro automático com nome da nota."
-            : "Catálogo vazio ou sem candidato",
-          invoiceUnitNormalized: invoiceU,
-          catalogUnitNormalized: "UNKN",
-          unitConvertible: false,
-          decisionPath: "catalog_empty_or_no_candidates",
-          borderlineLlmSuggestedName: autoNewEmpty
-            ? finalizeSuggestedCatalogName(name.trim())
-            : undefined,
-        },
-      });
       continue;
     }
 
-    let borderlineLlmSuggestedName: string | undefined;
-    let nfeArbiterRationale: string | undefined;
-    let nfeArbiterDecisionPath: string | undefined;
-    let nfeArbiterForcedNewSuggestedName: string | undefined;
-
-    const arbMode = importNfeRagArbiterMode();
-    const gapTh = importNfeRagArbiterGapThreshold();
-    const maxCand = importNfeArbiterMaxCandidates();
-    if (
-      opts?.importBatch &&
-      arbMode !== "off" &&
-      !opts?.skipLlmAssist &&
-      openaiKey &&
-      borderlineLlmRemaining > 0 &&
-      name.trim()
-    ) {
-      const top = scoredList[0]!;
-      const second = scoredList[1];
-      const gap = second ? top.score - second.score : 100;
-      const ambiguous = second != null && gap < gapTh;
-      const belowAuto = top.score < thresholds.autoMatchMinScore;
-      const softTop = top.score < 86;
-      const runArb =
-        arbMode === "always" ||
-        (arbMode === "smart" && (ambiguous || belowAuto || softTop));
-      if (runArb) {
-        borderlineLlmRemaining -= 1;
-        borderlineLlmCalls += 1;
-        const sliceN = Math.min(maxCand, scoredList.length);
-        const arbInputCands = scoredList.slice(0, sliceN).map((s, idx) => ({
-          rank: idx + 1,
-          product_id: s.product.id,
-          name: s.product.name,
-          catalog_unit: s.product.unit,
-          ncm: s.product.ncm ?? null,
-          barcode_digits: (() => {
-            const d = digitsOnly(s.product.barcode);
-            return d.length >= 4 ? d : null;
-          })(),
-          similarity_0_100: Math.round(s.score * 10) / 10,
-          match_detail: s.detail,
-        }));
-        const arb = await assistNfeRagArbiterMatch(openaiKey, openaiModel, {
-          invoice_description: name,
-          invoice_unit_raw: rawUnit ?? null,
-          invoice_ean: itemEan ? String(itemEan) : null,
-          invoice_ncm: itemNcm ? String(itemNcm) : null,
-          candidates: arbInputCands,
-        });
-        if (arb.kind === "LINK") {
-          promoteScoredCandidateToTop(scoredList, arb.product_id);
-          nfeArbiterRationale = arb.rationale;
-          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_link";
-        } else if (arb.kind === "NEW_PRODUCT") {
-          nfeArbiterForcedNewSuggestedName = arb.suggested_catalog_name;
-          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
-            arb.suggested_catalog_name,
-          );
-          nfeArbiterRationale = arb.rationale;
-          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_new_product";
-        } else if (arb.kind === "ERROR") {
-          nfeArbiterRationale = arb.message;
-          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_error";
-        } else {
-          nfeArbiterRationale = arb.rationale;
-          nfeArbiterDecisionPath = "nfe_rag_llm_arbiter_skip";
-        }
-      }
-    }
-
-    const nfeArbiterForcedNew = nfeArbiterForcedNewSuggestedName != null;
-    let bestScore = nfeArbiterForcedNew
-      ? Math.min(45, Math.max(0, thresholds.confirmMinScore - 1))
-      : scoredList[0].score;
-    let bestProduct = scoredList[0].product;
-    if (nfeArbiterForcedNew && borderlineLlmSuggestedName) {
-      bestProduct = {
-        ...bestProduct,
-        name: borderlineLlmSuggestedName,
-        unit: rawUnit ?? bestProduct.unit,
-      };
-    }
-    let matchReason = `Melhor candidato: ${scoredList[0].detail}`;
-
-    const autoTh = thresholds.autoMatchMinScore;
-    const confMin = thresholds.confirmMinScore;
-
-    const topK = opts?.importBatch ? 12 : 5;
-    const LLM_LINK_MIN_SCORE = 52;
-    const LLM_LINK_MIN_NAME_SCORE = 42;
-    const safeForLink = (s: Scored) => {
-      const nameOnly = scoreNameMatchIncludingMergedAliases(
-        name,
-        s.product.name,
-        s.product.merged_catalog_names,
+    if (supplierId && cProd) {
+      const byCProd = await findProductIdBySupplierCProd(
+        supabase,
+        companyId,
+        supplierId,
+        cProd,
       );
-      return (
-        s.score >= LLM_LINK_MIN_SCORE &&
-        nameOnly >= LLM_LINK_MIN_NAME_SCORE &&
-        !isFlavorOnlyCatalogInsideCompositeInvoice(name, s.product.name)
-      );
-    };
-    const linkCandidates = scoredList.filter(safeForLink).slice(0, topK);
-
-    const importBatchNoSafeLink =
-      opts?.importBatch === true &&
-      bestScore < autoTh &&
-      linkCandidates.length === 0;
-
-    let catU = normalizeUnitLabel(bestProduct.unit);
-    let decision = decideWithUnits({
-      thresholds,
-      bestScore,
-      invoiceU,
-      catalogU: catU,
-      hasCandidate: true,
-    });
-
-    let decisionPath = nfeArbiterDecisionPath ?? "scored_catalog";
-    let borderlineLlmRationale: string | undefined = nfeArbiterRationale;
-
-    const inBorderlineScoreBand = bestScore >= confMin && bestScore < autoTh;
-    const importBatchLlmEligible =
-      opts?.importBatch === true &&
-      bestScore < autoTh &&
-      !!openaiKey &&
-      borderlineLlmRemaining > 0;
-
-    const runBorderlineLlm =
-      inBorderlineScoreBand &&
-      llmBorderlineMatchEnabled &&
-      !!openaiKey &&
-      borderlineLlmRemaining > 0;
-
-    const useColdNewOnly =
-      importBatchLlmEligible &&
-      linkCandidates.length === 0 &&
-      String(borderlineLlmSuggestedName ?? "").trim() === "";
-
-    const useBorderlineAssist =
-      linkCandidates.length > 0 &&
-      (importBatchLlmEligible || runBorderlineLlm) &&
-      String(borderlineLlmSuggestedName ?? "").trim() === "";
-
-    const canInvokeLlm =
-      !opts?.skipLlmAssist &&
-      !!openaiKey &&
-      borderlineLlmRemaining > 0 &&
-      (useColdNewOnly || useBorderlineAssist);
-
-    if (canInvokeLlm) {
-      let assist: Awaited<ReturnType<typeof assistBorderlineProductMatch>>;
-      if (useColdNewOnly) {
-        borderlineLlmRemaining -= 1;
-        borderlineLlmCalls += 1;
-        assist = await assistImportColdNewProduct(openaiKey, openaiModel, {
-          invoice_description: name,
-          invoice_unit_raw: rawUnit ?? null,
-          invoice_ean: itemEan ? String(itemEan) : null,
-        });
-      } else if (useBorderlineAssist) {
-        borderlineLlmRemaining -= 1;
-        borderlineLlmCalls += 1;
-        const candidates = linkCandidates.map((s) => ({
-          product_id: s.product.id,
-          product_name: s.product.name,
-          catalog_unit: s.product.unit ?? null,
-          similarity_score_0_100: Math.round(s.score * 10) / 10,
-        }));
-        assist = await assistBorderlineProductMatch(openaiKey, openaiModel, {
-          invoice_description: name,
-          invoice_unit_raw: rawUnit ?? null,
-          invoice_ean: itemEan ? String(itemEan) : null,
-          candidates,
-          mode: opts?.importBatch ? "import_xml_batch" : "borderline",
-        });
-      } else {
-        assist = { kind: "SKIP", rationale: "Sem candidatos seguros para IA." };
-      }
-
-      if (assist.kind === "LINK") {
-        const picked = productById.get(assist.product_id);
-        if (picked) {
-          const pickedEntry = scoredList.find((s) => s.product.id === picked.id);
-          bestProduct = picked;
-          if (pickedEntry) {
-            bestScore = pickedEntry.score;
-            matchReason = `Melhor candidato: ${pickedEntry.detail}`;
-          }
-          catU = normalizeUnitLabel(bestProduct.unit);
-          decision = decideWithUnits({
-            thresholds,
-            bestScore,
-            invoiceU,
-            catalogU: catU,
-            hasCandidate: true,
-          });
-          decisionPath = "borderline_llm_link";
-          borderlineLlmRationale = assist.rationale;
-        }
-      } else if (assist.kind === "NEW_PRODUCT") {
-        decisionPath = useColdNewOnly
-          ? "import_llm_cold_new"
-          : "borderline_llm_new_hint";
-        borderlineLlmRationale = assist.rationale;
-        borderlineLlmSuggestedName = finalizeSuggestedCatalogName(
-          assist.suggested_catalog_name,
+      const p = byCProd ? productById.get(byCProd) : undefined;
+      if (p) {
+        const catU = normalizeUnitLabel(p.unit);
+        const prules = rulesByProduct.get(p.id) ?? [];
+        const mC = enrichProductMatch(
+          it,
+          {
+            resolvedProductId: p.id,
+            suggestedProductId: p.id,
+            suggestedProductName: p.name,
+            suggestedScore: 100,
+            needsConfirmation: false,
+            resolutionStatus: "AUTO_MATCH",
+            matchReason: "cProd + fornecedor iguais ao cadastro",
+            invoiceUnitNormalized: invoiceU,
+            catalogUnitNormalized: catU,
+            unitConvertible: false,
+            decisionPath: "direct_cprod_supplier",
+          },
+          p,
+          invoiceU,
+          autoApplyGlobalMassVolume,
+          prules,
+          null,
         );
-      } else if (assist.kind === "SKIP") {
-        decisionPath = "borderline_llm_skip";
-        borderlineLlmRationale = assist.rationale;
-        if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-          decisionPath = "import_llm_cold_fallback";
-          borderlineLlmRationale = `${assist.rationale} · fallback: nome da nota.`;
-        } else if (
-          opts?.importBatch &&
-          bestScore < autoTh &&
-          useBorderlineAssist
-        ) {
-          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-          decisionPath = "import_batch_borderline_llm_skip_auto_new";
-          borderlineLlmRationale = `${assist.rationale} · cadastro automático (batch) com nome da nota.`;
-        }
-      } else if (assist.kind === "ERROR") {
-        decisionPath = "borderline_llm_error";
-        borderlineLlmRationale = assist.message;
-        if (useColdNewOnly && opts?.importBatch) {
-          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-          decisionPath = "import_llm_cold_fallback_error";
-          borderlineLlmRationale = `${assist.message} · fallback: nome da nota.`;
-        } else if (opts?.importBatch && bestScore < autoTh && useBorderlineAssist) {
-          borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-          decisionPath = "import_batch_borderline_llm_error_auto_new";
-          borderlineLlmRationale = `${assist.message} · cadastro automático (batch) com nome da nota.`;
-        }
-      }
-    } else if (importBatchNoSafeLink) {
-      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-      decisionPath = "import_batch_deterministic_new";
-      borderlineLlmRationale =
-        "Sem candidatos com similaridade mínima no catálogo; cadastro automático com o nome da nota.";
-    } else if (inBorderlineScoreBand && !canInvokeLlm) {
-      decisionPath = "scored_borderline_no_llm";
-    } else if (
-      opts?.importBatch &&
-      bestScore < autoTh &&
-      linkCandidates.length > 0 &&
-      !openaiKey
-    ) {
-      decisionPath = "import_batch_no_openai_key";
-      borderlineLlmSuggestedName = finalizeSuggestedCatalogName(name.trim());
-      borderlineLlmRationale =
-        "Sem OpenAI no servidor; cadastro automático (batch) com nome da nota.";
-    }
-
-    let resolvedId: string | null = null;
-    if (
-      decision.resolutionStatus === "AUTO_MATCH" &&
-      !decision.needsConfirmation
-    ) {
-      resolvedId = bestProduct.id;
-    }
-
-    let needsConfirmation = decision.needsConfirmation || resolvedId == null;
-
-    if (
-      opts?.importBatch === true &&
-      String(borderlineLlmSuggestedName ?? "").trim() !== ""
-    ) {
-      const blockOnlyUnitOrAmbiguousMatch =
-        decision.resolutionStatus === "UNIT_CONFLICT_PENDING" ||
-        decision.resolutionStatus === "UNIT_VALIDATION_REQUIRED" ||
-        decision.resolutionStatus === "PENDING_USER_CONFIRM";
-      if (!blockOnlyUnitOrAmbiguousMatch) {
-        needsConfirmation = false;
+        if (mC.needsConfirmation) requiresProductConfirmation = true;
+        out.push({
+          ...it,
+          productId: mC.resolvedProductId,
+          productMatch: mC,
+        });
+        continue;
       }
     }
 
-    if (needsConfirmation) {
-      requiresProductConfirmation = true;
-    }
-
-    const suggestedIdOut =
-      bestScore >= confMin ? bestProduct.id : null;
-    const suggestedNameOut =
-      bestScore >= confMin ? bestProduct.name : null;
-
-    let matchReasonFinal =
-      decision.matchReason + (matchReason ? ` (${matchReason})` : "");
-    if (borderlineLlmRationale) {
-      matchReasonFinal += ` · IA: ${borderlineLlmRationale}`;
-    }
-    if (borderlineLlmSuggestedName) {
-      matchReasonFinal += ` · Sugestão de nome (IA): ${borderlineLlmSuggestedName}`;
-    }
-
-    const prulesB = rulesByProduct.get(bestProduct.id) ?? [];
-    const mBest = enrichProductMatch(
-      it,
-      {
-        resolvedProductId: resolvedId,
-        suggestedProductId: suggestedIdOut,
-        suggestedProductName: suggestedNameOut,
-        suggestedScore: Math.round(bestScore * 10) / 10,
-        needsConfirmation,
-        resolutionStatus: decision.resolutionStatus,
-        matchReason: matchReasonFinal,
-        invoiceUnitNormalized: invoiceU,
-        catalogUnitNormalized: catU,
-        unitConvertible: decision.unitConvertible,
-        decisionPath,
-        borderlineLlmRationale,
-        borderlineLlmSuggestedName,
-      },
-      bestProduct,
-      invoiceU,
-      autoApplyGlobalMassVolume,
-      prulesB,
-      null,
-    );
-    if (mBest.needsConfirmation) requiresProductConfirmation = true;
+    requiresProductConfirmation = true;
+    const suggestedName =
+      finalizeSuggestedCatalogName(name.trim()) ?? name.trim();
     out.push({
       ...it,
-      productId: mBest.resolvedProductId,
-      productMatch: mBest,
+      productId: null,
+      productMatch: {
+        resolvedProductId: null,
+        suggestedProductId: null,
+        suggestedProductName: null,
+        suggestedScore: 0,
+        needsConfirmation: true,
+        resolutionStatus: "NEW_PRODUCT_STAGED",
+        matchReason:
+          "Sem produto por EAN ou cProd+fornecedor — cadastro novo pendente de confirmação",
+        invoiceUnitNormalized: invoiceU,
+        catalogUnitNormalized: "UNKN",
+        unitConvertible: false,
+        decisionPath: "deterministic_new_product",
+        borderlineLlmSuggestedName: suggestedName,
+      },
     });
   }
 
@@ -1379,7 +891,7 @@ export async function resolveProductMatches(
     items: out,
     requiresProductConfirmation,
     deferProductCreationToReconciliation,
-    borderlineLlmCalls,
+    borderlineLlmCalls: 0,
     lineUnitsLlmCalls: 0,
   };
 }
