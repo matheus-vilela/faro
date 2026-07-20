@@ -7,6 +7,7 @@ import {
 import { defaultOnboardingFiscalRecord } from "@/lib/onboardingFiscalDefaults";
 import { defaultOnboardingPdvRecord } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
+import type { CompanyNotificationEntry } from "@/types/companyNotification";
 import type {
   CompanySetupMap,
   EmpresaMap,
@@ -17,7 +18,7 @@ import type {
 
 export const EMPTY_SETUP_BASE: CompanySetupMap = {
   status: "not_started",
-  setup_schema_version: 5,
+  setup_schema_version: 6,
   current_step: 1,
   completed_steps: [],
   skipped_steps: [],
@@ -110,6 +111,25 @@ function migrateWizardFourToThreeStepsOnly(
     skipped_steps: skipped,
     current_step: Math.max(1, Math.min(cur, 3)),
     setup_schema_version: 5,
+  });
+}
+
+/**
+ * v6: quarto passo WhatsApp no wizard.
+ * Setups já concluídos antes desta versão têm o passo 4 marcado como skipped.
+ */
+function migrateWizardThreeToFourWithWhatsapp(
+  setup: CompanySetupMap,
+): CompanySetupMap {
+  if ((setup.setup_schema_version ?? 0) >= 6) return setup;
+  const skipped = [...new Set(setup.skipped_steps ?? [])];
+  if (setup.status === "completed" && !skipped.includes(4)) {
+    skipped.push(4);
+    skipped.sort((a, b) => a - b);
+  }
+  return mergeSetupPatch(setup, {
+    skipped_steps: skipped,
+    setup_schema_version: 6,
   });
 }
 
@@ -302,6 +322,7 @@ export async function patchCompanyMaps(
     phone?: string | null;
     onboarding_pdv?: Record<string, unknown>;
     onboarding_fiscal?: Record<string, unknown>;
+    notification?: CompanyNotificationEntry[];
   },
 ): Promise<{ error?: string }> {
   const row: Record<string, unknown> = {};
@@ -331,6 +352,9 @@ export async function patchCompanyMaps(
   }
   if (patch.onboarding_pdv !== undefined) {
     row.onboarding_pdv = patch.onboarding_pdv;
+  }
+  if (patch.notification !== undefined) {
+    row.notification = patch.notification;
   }
 
   const { error } = await supabase
@@ -406,6 +430,9 @@ export function normalizeSetupMap(raw: unknown): CompanySetupMap {
   }
   if ((migrated.setup_schema_version ?? 0) < 5) {
     migrated = migrateWizardFourToThreeStepsOnly(migrated);
+  }
+  if ((migrated.setup_schema_version ?? 0) < 6) {
+    migrated = migrateWizardThreeToFourWithWhatsapp(migrated);
   }
   migrated.progress_percent = calculateSetupProgress(migrated);
   return migrated;
