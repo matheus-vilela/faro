@@ -30,6 +30,7 @@ import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
+import { CmvMargens } from "@/pages/CmvMargens";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
 import { Landing } from "@/pages/Landing";
@@ -37,6 +38,7 @@ import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
+import { CertificadoOnboardingPublic } from "@/pages/CertificadoOnboardingPublic";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
 import { RedirectInventorySlug } from "@/pages/RedirectInventorySlug";
@@ -109,6 +111,7 @@ function AuthenticatedLayout() {
           />
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
+          <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
           <Route path="fluxo-de-caixa" element={<PermissionRouteGuard permission="contas_a_pagar"><FluxoDeCaixa /></PermissionRouteGuard>} />
           <Route
             path="boletos"
@@ -200,6 +203,10 @@ function AppRoutes() {
       <Route path="/k/:slug" element={<RedirectChecklistSlug />} />
       <Route path="/i/:slug" element={<RedirectInventorySlug />} />
       <Route path="/contagem-estoque/:token" element={<ContagemEstoquePublic />} />
+      <Route
+        path="/certificado-onboarding/:token"
+        element={<CertificadoOnboardingPublic />}
+      />
       <Route path="/checklist/:token" element={<ExecutarChecklist />} />
       <Route
         path="/*"

@@ -7,8 +7,8 @@ export type CompanySetupStatus =
   | "paused"
   | "completed";
 
-/** Passos 1–3: empresa, certificado fiscal, PDV/EPOC (endereço vem da consulta CNPJ). */
-export type SetupStepNumber = 1 | 2 | 3;
+/** Passos 1–4: empresa, certificado fiscal, PDV/EPOC, WhatsApp (endereço vem da consulta CNPJ). */
+export type SetupStepNumber = 1 | 2 | 3 | 4;
 
 export type EmpresaMap = {
   nome_razao_social?: string;
@@ -79,10 +79,19 @@ export type CertificateUploadStatus =
   | "uploaded"
   | "validating"
   | "valid"
-  | "invalid";
+  | "invalid"
+  | "delegated_pending";
+
+export type CertificateFiscalMode =
+  | "undecided"
+  | "upload_now"
+  | "skip"
+  | "delegate_link";
 
 export type SetupCertificateState = {
   status: CertificateUploadStatus;
+  mode?: CertificateFiscalMode;
+  delegation_link_id?: string;
   storage_path?: string;
   file_name?: string;
   error_message?: string;
@@ -125,8 +134,16 @@ export type SetupXmlZipImportState = {
 
 export type EpocWizardMode = "undecided" | "no" | "credentials";
 
+export type PdvSalesOption =
+  | "undecided"
+  | "epoc"
+  | "other_system"
+  | "no_system";
+
 export type SetupEpocState = {
   mode: EpocWizardMode;
+  pdv_option?: PdvSalesOption;
+  other_system_name?: string;
   /** Rascunho local antes de gravar em company_integrations */
   enabled?: boolean;
   username?: string;
@@ -150,7 +167,7 @@ export type ItemClassificationOnboardingSnapshot = {
 export type CompanySetupMap = {
   status: CompanySetupStatus;
   /**
-   * Legado: 2 = fluxo antigo; 4 = wizard com quarto passo XML; 5 = três passos (empresa, fiscal, PDV).
+   * Legado: 2 = fluxo antigo; 4 = wizard com quarto passo XML; 5 = três passos; 6 = quatro passos (+ WhatsApp).
    */
   setup_schema_version?: number;
   /** Preenchido ao visitar o passo de classificação de itens (evita concluir o passo com pendências). */

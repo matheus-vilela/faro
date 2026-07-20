@@ -57,6 +57,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/vendas", label: "Vendas" },
     { prefix: "/app/contas-a-pagar", label: "Contas a pagar" },
     { prefix: "/app/vendas-realizadas", label: "Vendas realizadas" },
+    { prefix: "/app/cmv-margens", label: "CMV & Margens" },
     { prefix: "/app/fluxo-de-caixa", label: "Fluxo de caixa" },
     { prefix: "/app/fornecedores", label: "Fornecedores" },
     { prefix: "/app/produtos", label: "Produtos e estoque" },

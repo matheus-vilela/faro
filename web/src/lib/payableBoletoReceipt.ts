@@ -1,10 +1,11 @@
 import { isProjectedBoleto } from "@/lib/expenseSeriesProjection";
-import type { ExpenseType } from "@/types/expense";
+import type { ExpenseSource, ExpenseType } from "@/types/expense";
 import type { FluxoBoletoRow } from "@/types/expenseSeries";
 
 export type PayableReceiptExpense = {
   id: string;
   type: ExpenseType;
+  expense_source?: ExpenseSource | null;
 };
 
 export type PayableReceiptContext = {

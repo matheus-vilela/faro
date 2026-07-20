@@ -46,6 +46,7 @@ import {
   Moon,
   Package,
   PackageCheck,
+  Percent,
   Plug,
   Settings2,
   Sun,
@@ -126,6 +127,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Vendas realizadas",
         url: "/app/vendas-realizadas",
         icon: TrendingUp,
+        permission: "vendas_realizadas",
+      },
+      {
+        title: "CMV & Margens",
+        url: "/app/cmv-margens",
+        icon: Percent,
         permission: "vendas_realizadas",
       },
       {

@@ -72,7 +72,8 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   if (
     path.startsWith("/app/vendas-realizadas") ||
     path.startsWith("/app/vendas") ||
-    path.startsWith("/app/receitas")
+    path.startsWith("/app/receitas") ||
+    path.startsWith("/app/cmv-margens")
   ) {
     return "vendas_realizadas";
   }

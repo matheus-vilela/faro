@@ -7,6 +7,10 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
+import { PayableByCategoryView } from "@/components/fluxo/PayableByCategoryView";
+import { PayableByDueDateView } from "@/components/fluxo/PayableByDueDateView";
+import { PayableListViewToggle } from "@/components/fluxo/PayableListViewToggle";
+import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -40,7 +44,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { formatCompetenceLabel } from "@/lib/boletoPayment";
+import { formatCompetenceLabel, localDateYmd } from "@/lib/boletoPayment";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
@@ -64,6 +68,15 @@ import {
   filterBoletosBySearch,
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
+import type { PayableListView } from "@/lib/payableListViews";
+import { sortPayablesPaidLast } from "@/lib/payableListViews";
+import {
+  computePayableTotals,
+  EMPTY_PAYABLE_TOTALS,
+  formatPayableMonthName,
+  getPayableTotalsFetchRange,
+  type PayableTotals,
+} from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -78,7 +91,7 @@ import type {
 import type { RevenueEntry } from "@/types/revenue";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
@@ -115,8 +128,11 @@ export type FluxoBoletosPageConfig = {
 
 export function FluxoBoletosPage({
   config,
+  afterHeader,
 }: {
   config: FluxoBoletosPageConfig;
+  /** Conteúdo renderizado logo abaixo do PageHeader (ex.: abas). */
+  afterHeader?: ReactNode;
 }) {
   const {
     flowType,
@@ -150,6 +166,9 @@ export function FluxoBoletosPage({
   const isReceivableFlow = flowType === "receivable";
 
   const [boletosList, setBoletosList] = useState<FluxoBoletoRow[]>([]);
+  const [boletosMonthFiltered, setBoletosMonthFiltered] = useState<
+    FluxoBoletoRow[]
+  >([]);
   const [boletosListCount, setBoletosListCount] = useState(0);
   const [seriesMasters, setSeriesMasters] = useState<ExpenseSeriesMaster[]>([]);
   const [seriesEditOpen, setSeriesEditOpen] = useState(false);
@@ -159,6 +178,9 @@ export function FluxoBoletosPage({
   const [boletosSearch, setBoletosSearch] = useState("");
   const debouncedSearch = useDebounce(boletosSearch, 300);
   const [loadingList, setLoadingList] = useState(true);
+  const [listView, setListView] = useState<PayableListView>("category");
+  const [calendarDayListView, setCalendarDayListView] =
+    useState<PayableListView>("category");
 
   const [boletoSheetOpen, setBoletoSheetOpen] = useState(false);
   const [createBoletoDefaultDueDate, setCreateBoletoDefaultDueDate] = useState<
@@ -183,6 +205,9 @@ export function FluxoBoletosPage({
   const [bankAccountsById, setBankAccountsById] = useState<
     Map<string, CompanyBankAccount>
   >(new Map());
+  const [payableTotals, setPayableTotals] =
+    useState<PayableTotals>(EMPTY_PAYABLE_TOTALS);
+  const [totalsLoading, setTotalsLoading] = useState(false);
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -297,10 +322,12 @@ export function FluxoBoletosPage({
           (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
         );
         const filtered = filterBoletosBySearch(visible, debouncedSearch);
+        setBoletosMonthFiltered(filtered);
         setBoletosListCount(filtered.length);
         const pageStart = (boletosPage - 1) * PAGE_SIZE;
         setBoletosList(filtered.slice(pageStart, pageStart + PAGE_SIZE));
       } else {
+        setBoletosMonthFiltered([]);
         let query = supabase
           .from("boletos")
           .select("*", { count: "exact" })
@@ -325,6 +352,7 @@ export function FluxoBoletosPage({
       console.error(e);
       toast.error("Não foi possível carregar a lista.");
       setBoletosList([]);
+      setBoletosMonthFiltered([]);
       setBoletosListCount(0);
     }
     setLoadingList(false);
@@ -336,6 +364,32 @@ export function FluxoBoletosPage({
     boletosPage,
     flowType,
   ]);
+
+  const fetchPayableTotals = useCallback(async () => {
+    if (!companyId || isReceivableFlow) {
+      setPayableTotals(EMPTY_PAYABLE_TOTALS);
+      setTotalsLoading(false);
+      return;
+    }
+    setTotalsLoading(true);
+    const todayYmd = localDateYmd();
+    const { startYmd, endYmd } = getPayableTotalsFetchRange(period, todayYmd);
+    try {
+      const merged = await fetchMergedPayableBoletosInRange(
+        companyId,
+        startYmd,
+        endYmd,
+      );
+      const visible = merged.filter(
+        (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
+      );
+      setPayableTotals(computePayableTotals(visible, period, todayYmd));
+    } catch (e) {
+      console.error(e);
+      setPayableTotals(EMPTY_PAYABLE_TOTALS);
+    }
+    setTotalsLoading(false);
+  }, [companyId, period.month, period.year, isReceivableFlow]);
 
   useEffect(() => {
     if (!companyId || flowType !== "payable") {
@@ -363,19 +417,37 @@ export function FluxoBoletosPage({
   }, [fetchBoletosList]);
 
   useEffect(() => {
+    queueMicrotask(() => void fetchPayableTotals());
+  }, [fetchPayableTotals]);
+
+  useEffect(() => {
     if (!companyId || flowType !== "payable") {
       queueMicrotask(() =>
         setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT),
       );
       return;
     }
-    void fetchPayableReceiptContext(calendarBoletos)
+    const byKey = new Map<string, FluxoBoletoRow>();
+    for (const b of [...calendarBoletos, ...boletosMonthFiltered]) {
+      const key =
+        b.id ||
+        `${b.series_master_expense_id ?? b.expense_id ?? "x"}-${b.due_date}-${b.amount}`;
+      byKey.set(key, b);
+    }
+    void fetchPayableReceiptContext([...byKey.values()])
       .then(setPayableReceiptContext)
       .catch((error) => {
         console.error(error);
         setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
       });
-  }, [companyId, flowType, calendarBoletos]);
+  }, [companyId, flowType, calendarBoletos, boletosMonthFiltered]);
+
+  const scheduledMonthBoletos = useMemo(
+    () => boletosMonthFiltered.filter((b) => isScheduledPayableBoleto(b)),
+    [boletosMonthFiltered],
+  );
+
+  const todayYmd = localDateYmd();
 
   const boletoReadyToPay = useCallback(
     (b: FluxoBoletoRow) => isBoletoReadyToPay(b, payableReceiptContext),
@@ -418,10 +490,12 @@ export function FluxoBoletosPage({
     if (isReceivableFlow) void fetchCalendarRevenueEntries();
     else void fetchCalendarBoletos();
     void fetchBoletosList();
+    void fetchPayableTotals();
   }, [
     fetchCalendarBoletos,
     fetchCalendarRevenueEntries,
     fetchBoletosList,
+    fetchPayableTotals,
     isReceivableFlow,
   ]);
 
@@ -809,6 +883,11 @@ export function FluxoBoletosPage({
 
   const calendarDayItems = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
 
+  const calendarDayItemsSorted = useMemo(
+    () => sortPayablesPaidLast(calendarDayItems),
+    [calendarDayItems],
+  );
+
   const calendarDayBuckets = useMemo(() => {
     const items = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
     if (flowType !== "payable") {
@@ -880,11 +959,22 @@ export function FluxoBoletosPage({
         }
       />
 
+      {afterHeader}
+
       <ReferencePeriodCard
         value={period}
         onChange={setPeriod}
         description={periodDescription}
       />
+
+      {!isReceivableFlow && (
+        <PayableTotalsCards
+          totals={payableTotals}
+          loading={totalsLoading}
+          monthName={formatPayableMonthName(period.month, period.year)}
+          formatCurrency={formatCurrency}
+        />
+      )}
 
       {currentCompany?.id && (
         <CreateBoletoSheet
@@ -932,16 +1022,10 @@ export function FluxoBoletosPage({
         />
       )}
 
-      <Card>
-        <CardHeader className="flex flex-col gap-5 space-y-0">
-          <div>
-            <CardTitle>{listTitle}</CardTitle>
-            <CardDescription>{listDescription}</CardDescription>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
+      {!isReceivableFlow ? (
+        <div className="space-y-4">
+          <PayableListViewToggle value={listView} onChange={setListView} />
+          <div className="flex flex-wrap gap-3 items-center">
             <Input
               placeholder={searchPlaceholder}
               value={boletosSearch}
@@ -949,69 +1033,146 @@ export function FluxoBoletosPage({
               className="max-w-sm"
             />
           </div>
-          {loadingList ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : boletosList.length === 0 ? (
-            <p className="text-muted-foreground">{emptyListMessage}</p>
-          ) : (
-            <div className="space-y-6">
-              {flowType === "payable" && listReadyToPay.length > 0 && (
-                <div className="space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">Valores a pagar</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Contas agendadas liberadas para pagamento.
-                    </p>
-                  </div>
-                  {listReadyToPay.map((b) => renderListCard(b))}
-                </div>
-              )}
-              {flowType === "payable" && listPendingReceipt.length > 0 && (
-                <div className="space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                      Valores a confirmar
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      NF ou romaneio aguardando recebimento da mercadoria.
-                    </p>
-                  </div>
-                  {listPendingReceipt.map((b) => renderListCard(b))}
-                </div>
-              )}
-              {(flowType !== "payable" || listOther.length > 0) && (
-                <div className="space-y-2">
-                  {flowType === "payable" && listOther.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold">Quitadas</h3>
-                      <p className="text-xs text-muted-foreground">
-                        Contas já pagas neste mês.
-                      </p>
-                    </div>
-                  )}
-                  {(flowType === "payable" ? listOther : boletosList).map((b) =>
-                    renderListCard(b),
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {!loadingList && (
-            <Pagination
-              page={boletosPage}
-              totalCount={boletosListCount}
-              onPageChange={setBoletosPage}
+          {listView === "category" && (
+            <PayableByCategoryView
+              boletos={scheduledMonthBoletos}
+              categoriesById={categoriesById}
+              expenseById={payableReceiptContext.expenseById}
+              todayYmd={todayYmd}
+              loading={loadingList}
+              emptyMessage={emptyListMessage}
+              formatCurrency={formatCurrency}
+              onSelect={setBoletoResumo}
             />
           )}
-        </CardContent>
-      </Card>
+          {listView === "due" && (
+            <PayableByDueDateView
+              boletos={scheduledMonthBoletos}
+              categoriesById={categoriesById}
+              expenseById={payableReceiptContext.expenseById}
+              todayYmd={todayYmd}
+              loading={loadingList}
+              emptyMessage={emptyListMessage}
+              formatCurrency={formatCurrency}
+              onSelect={setBoletoResumo}
+            />
+          )}
+          {listView === "status" && (
+            <Card>
+              <CardHeader className="flex flex-col gap-5 space-y-0">
+                <div>
+                  <CardTitle>{listTitle}</CardTitle>
+                  <CardDescription>{listDescription}</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingList ? (
+                  <p className="text-muted-foreground">Carregando...</p>
+                ) : boletosList.length === 0 ? (
+                  <p className="text-muted-foreground">{emptyListMessage}</p>
+                ) : (
+                  <div className="space-y-6">
+                    {listReadyToPay.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold">
+                            Valores a pagar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            Contas agendadas liberadas para pagamento.
+                          </p>
+                        </div>
+                        {listReadyToPay.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                    {listPendingReceipt.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                            Valores a confirmar
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            NF ou romaneio aguardando recebimento da mercadoria.
+                          </p>
+                        </div>
+                        {listPendingReceipt.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                    {listOther.length > 0 && (
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="text-sm font-semibold">Quitadas</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Contas já pagas neste mês.
+                          </p>
+                        </div>
+                        {listOther.map((b) => renderListCard(b))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!loadingList && (
+                  <Pagination
+                    page={boletosPage}
+                    totalCount={boletosListCount}
+                    onPageChange={setBoletosPage}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : (
+        <Card>
+          <CardHeader className="flex flex-col gap-5 space-y-0">
+            <div>
+              <CardTitle>{listTitle}</CardTitle>
+              <CardDescription>{listDescription}</CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="mb-4 flex flex-wrap gap-3 items-center">
+              <Input
+                placeholder={searchPlaceholder}
+                value={boletosSearch}
+                onChange={(e) => setBoletosSearch(e.target.value)}
+                className="max-w-sm"
+              />
+            </div>
+            {loadingList ? (
+              <p className="text-muted-foreground">Carregando...</p>
+            ) : boletosList.length === 0 ? (
+              <p className="text-muted-foreground">{emptyListMessage}</p>
+            ) : (
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  {boletosList.map((b) => renderListCard(b))}
+                </div>
+              </div>
+            )}
+            {!loadingList && (
+              <Pagination
+                page={boletosPage}
+                totalCount={boletosListCount}
+                onPageChange={setBoletosPage}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {!isReceivableFlow && (
         <Sheet
           open={!!calendarDayList}
-          onOpenChange={(o) => !o && setCalendarDayList(null)}
+          onOpenChange={(o) => {
+            if (!o) {
+              setCalendarDayList(null);
+              setCalendarDayListView("category");
+            }
+          }}
         >
-          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
             <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
               <SheetTitle className="capitalize">
                 Lançamentos neste dia
@@ -1047,55 +1208,87 @@ export function FluxoBoletosPage({
                 </div>
               )}
               {calendarDayItems.length > 0 && (
-                <div className="space-y-5">
-                  {flowType === "payable" &&
-                    calendarDayBuckets.ready.length > 0 && (
-                      <div className="space-y-2">
-                        <div>
-                          <h3 className="text-sm font-semibold">
-                            Valores a pagar
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            Liberadas para pagamento neste dia.
-                          </p>
+                <div className="space-y-4">
+                  <PayableListViewToggle
+                    value={calendarDayListView}
+                    onChange={setCalendarDayListView}
+                  />
+                  {calendarDayListView === "category" && (
+                    <PayableByCategoryView
+                      boletos={calendarDayItemsSorted}
+                      categoriesById={categoriesById}
+                      expenseById={payableReceiptContext.expenseById}
+                      todayYmd={todayYmd}
+                      loading={false}
+                      emptyMessage="Nenhum lançamento com vencimento neste dia."
+                      formatCurrency={formatCurrency}
+                      onSelect={(b) => {
+                        setCalendarDayList(null);
+                        setBoletoResumo(b);
+                      }}
+                    />
+                  )}
+                  {calendarDayListView === "due" && (
+                    <PayableByDueDateView
+                      boletos={calendarDayItemsSorted}
+                      categoriesById={categoriesById}
+                      expenseById={payableReceiptContext.expenseById}
+                      todayYmd={todayYmd}
+                      loading={false}
+                      emptyMessage="Nenhum lançamento com vencimento neste dia."
+                      formatCurrency={formatCurrency}
+                      onSelect={(b) => {
+                        setCalendarDayList(null);
+                        setBoletoResumo(b);
+                      }}
+                    />
+                  )}
+                  {calendarDayListView === "status" && (
+                    <div className="space-y-5">
+                      {calendarDayBuckets.ready.length > 0 && (
+                        <div className="space-y-2">
+                          <div>
+                            <h3 className="text-sm font-semibold">
+                              Valores a pagar
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              Liberadas para pagamento neste dia.
+                            </p>
+                          </div>
+                          {calendarDayBuckets.ready.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
                         </div>
-                        {calendarDayBuckets.ready.map((b) =>
-                          renderCalendarDayCompactCard(b),
-                        )}
-                      </div>
-                    )}
-                  {flowType === "payable" &&
-                    calendarDayBuckets.pending.length > 0 && (
-                      <div className="space-y-2">
-                        <div>
-                          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                            Valores a confirmar
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            NF ou romaneio aguardando recebimento da mercadoria.
-                          </p>
+                      )}
+                      {calendarDayBuckets.pending.length > 0 && (
+                        <div className="space-y-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                              Valores a confirmar
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              NF ou romaneio aguardando recebimento da
+                              mercadoria.
+                            </p>
+                          </div>
+                          {calendarDayBuckets.pending.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
                         </div>
-                        {calendarDayBuckets.pending.map((b) =>
-                          renderCalendarDayCompactCard(b),
-                        )}
-                      </div>
-                    )}
-                  {(flowType !== "payable" ||
-                    calendarDayBuckets.other.length > 0) && (
-                    <div className="space-y-2">
-                      {flowType === "payable" &&
-                        calendarDayBuckets.other.length > 0 && (
+                      )}
+                      {calendarDayBuckets.other.length > 0 && (
+                        <div className="space-y-2">
                           <div>
                             <h3 className="text-sm font-semibold">Quitadas</h3>
                             <p className="text-xs text-muted-foreground">
                               Contas já pagas com vencimento neste dia.
                             </p>
                           </div>
-                        )}
-                      {(flowType === "payable"
-                        ? calendarDayBuckets.other
-                        : calendarDayItems
-                      ).map((b) => renderCalendarDayCompactCard(b))}
+                          {calendarDayBuckets.other.map((b) =>
+                            renderCalendarDayCompactCard(b),
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1108,6 +1301,7 @@ export function FluxoBoletosPage({
                   if (!calendarDayList) return;
                   const dk = calendarDayList.dateKey;
                   setCalendarDayList(null);
+                  setCalendarDayListView("category");
                   setCreateBoletoDefaultDueDate(dk);
                   setBoletoSheetOpen(true);
                 }}

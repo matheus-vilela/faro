@@ -47,6 +47,9 @@ verify_jwt = false
 [functions.focus-cria-empresa]
 verify_jwt = false
 
+[functions.focus-submit-delegated-certificado]
+verify_jwt = false
+
 [functions.focus-delete-empresa]
 verify_jwt = false
 
