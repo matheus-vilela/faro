@@ -1,4 +1,5 @@
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
+import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
@@ -150,6 +151,7 @@ export function BankReconciliationPanel({
   const [createFromLine, setCreateFromLine] = useState<BankStatementLine | null>(
     null,
   );
+  const [listPage, setListPage] = useState(1);
 
   const loadAccounts = useCallback(async () => {
     if (!companyId) return;
@@ -307,6 +309,21 @@ export function BankReconciliationPanel({
     (r): r is Extract<UiRow, { kind: "forte" }> => r.kind === "forte",
   );
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safeListPage = Math.min(listPage, totalPages);
+  const pageRows = rows.slice(
+    (safeListPage - 1) * PAGE_SIZE,
+    safeListPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setListPage(1);
+  }, [accountId, fileLabel]);
+
+  useEffect(() => {
+    if (listPage > totalPages) setListPage(totalPages);
+  }, [listPage, totalPages]);
+
   const diffAmount = useMemo(() => {
     let diff = 0;
     for (const r of pendingRows) {
@@ -335,6 +352,7 @@ export function BankReconciliationPanel({
         userId: user?.id ?? null,
       });
       setDoneKeys({});
+      setListPage(1);
       toast.success("Extrato importado.");
       await reloadMatchData();
     } catch (e) {
@@ -629,7 +647,7 @@ export function BankReconciliationPanel({
         </Card>
       ) : (
         <div className="space-y-2">
-          {rows.map((row) => (
+          {pageRows.map((row) => (
             <ReconRow
               key={row.key}
               row={row}
@@ -666,6 +684,11 @@ export function BankReconciliationPanel({
               confirming={confirming}
             />
           ))}
+          <Pagination
+            page={safeListPage}
+            totalCount={rows.length}
+            onPageChange={setListPage}
+          />
         </div>
       )}
 
@@ -821,6 +844,7 @@ function ReconRow({
   confirming: boolean;
 }) {
   const done = row.done;
+  const isForte = row.kind === "forte";
   let linkIcon = "=";
   let linkClass = "bg-emerald-500/15 text-emerald-600";
   let left: ReactNode = null;
@@ -828,10 +852,9 @@ function ReconRow({
   let actions: ReactNode = null;
 
   if (row.kind === "forte" || row.kind === "provavel") {
-    const isForte = row.kind === "forte";
     linkIcon = done ? "✓" : isForte ? "=" : "≈";
     linkClass = isForte
-      ? "bg-emerald-500/15 text-emerald-600"
+      ? "bg-emerald-500/20 text-emerald-600 ring-2 ring-emerald-500/30"
       : "bg-amber-500/15 text-amber-600";
     left = (
       <SideCard
@@ -845,7 +868,11 @@ function ReconRow({
         )}
         amount={Number(row.boleto.amount)}
         borderClass={
-          isForte ? undefined : "border-amber-500/40"
+          isForte && !done
+            ? "border-emerald-500/35"
+            : isForte
+              ? undefined
+              : "border-amber-500/40"
         }
       />
     );
@@ -857,21 +884,21 @@ function ReconRow({
         }`}
         amount={Number(row.line.amount)}
         borderClass={
-          isForte ? undefined : "border-amber-500/40"
+          isForte && !done
+            ? "border-emerald-500/35"
+            : isForte
+              ? undefined
+              : "border-amber-500/40"
         }
       />
     );
     actions = done ? (
-      <Badge variant="secondary">{done ? "Conciliado" : ""}</Badge>
+      <Badge variant="secondary">Conciliado</Badge>
     ) : (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         {isForte ? (
           <>
-            <Button
-              size="sm"
-              disabled={confirming}
-              onClick={onConfirm}
-            >
+            <Button size="sm" disabled={confirming} onClick={onConfirm}>
               Confirmar
             </Button>
             <Button
@@ -899,7 +926,7 @@ function ReconRow({
     linkIcon = "?";
     linkClass = "bg-destructive/10 text-destructive";
     left = (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-4 text-xs text-muted-foreground">
+      <div className="flex h-full min-w-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-2.5 text-xs text-muted-foreground">
         sem lançamento no Faro
       </div>
     );
@@ -924,16 +951,13 @@ function ReconRow({
     left = (
       <SideCard
         title={boletoReconTitle(row.boleto)}
-        sub={boletoSideSub(
-          row.boleto,
-          boletoReferenceDate(row.boleto),
-        )}
+        sub={boletoSideSub(row.boleto, boletoReferenceDate(row.boleto))}
         amount={Number(row.boleto.amount)}
         borderClass="border-muted-foreground/30"
       />
     );
     right = (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-4 text-xs text-muted-foreground">
+      <div className="flex h-full min-w-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-2.5 text-xs text-muted-foreground">
         não encontrado no banco
       </div>
     );
@@ -950,14 +974,15 @@ function ReconRow({
   return (
     <div
       className={cn(
-        "grid items-center gap-2 rounded-xl border bg-card p-3 sm:grid-cols-[1fr_auto_1fr_auto]",
+        "grid items-stretch gap-2 rounded-xl border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]",
+        isForte && !done && "border-emerald-500/40 bg-emerald-500/5",
         done && "opacity-70",
       )}
     >
       {left}
       <div
         className={cn(
-          "mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold",
+          "mx-auto flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-full text-sm font-bold",
           linkClass,
         )}
         aria-hidden
@@ -971,7 +996,9 @@ function ReconRow({
         )}
       </div>
       {right}
-      <div className="flex justify-end sm:min-w-[140px]">{actions}</div>
+      <div className="flex self-center justify-end sm:min-w-[140px]">
+        {actions}
+      </div>
     </div>
   );
 }
@@ -990,17 +1017,24 @@ function SideCard({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border bg-background px-3 py-2.5",
+        "flex h-full min-w-0 items-center gap-3 rounded-lg border bg-background px-3 py-2.5",
         borderClass,
       )}
     >
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold leading-tight">{title}</p>
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <p className="truncate text-sm font-semibold leading-tight" title={title}>
+          {title}
+        </p>
         {sub ? (
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">{sub}</p>
+          <p
+            className="mt-0.5 truncate text-xs text-muted-foreground"
+            title={sub}
+          >
+            {sub}
+          </p>
         ) : null}
       </div>
-      <p className="shrink-0 text-sm font-semibold tabular-nums tracking-tight">
+      <p className="min-w-[4.5rem] shrink-0 text-right text-sm font-semibold tabular-nums tracking-tight">
         {formatCurrency(amount)}
       </p>
     </div>
