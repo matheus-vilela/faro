@@ -165,6 +165,10 @@ interface CreateBoletoSheetProps {
   expenseId?: string | null;
   /** YYYY-MM-DD — preenche vencimento ao abrir (ex.: dia clicado no calendário) */
   defaultDueDate?: string | null;
+  /** Valor inicial ao abrir (ex.: conciliação a partir do extrato). */
+  defaultAmount?: number | null;
+  /** Descrição inicial ao abrir. */
+  defaultDescription?: string | null;
   /** Tipo de lançamento ao abrir sem despesa vinculada (quando não há `fixedAccountFlow`). */
   defaultAccountFlow?: BoletoFlowType;
   /** Fixa o fluxo e oculta o seletor conta a pagar / a receber (ex.: página de Contas a pagar). */
@@ -178,6 +182,8 @@ export function CreateBoletoSheet({
   companyId,
   expenseId,
   defaultDueDate,
+  defaultAmount,
+  defaultDescription,
   defaultAccountFlow = "payable",
   fixedAccountFlow,
   onSuccess,
@@ -231,7 +237,21 @@ export function CreateBoletoSheet({
     } else {
       setDueDate("");
     }
-  }, [open, defaultDueDate, defaultAccountFlow, fixedAccountFlow, expenseId]);
+    if (defaultAmount != null && Number.isFinite(defaultAmount)) {
+      setAmount(String(defaultAmount));
+    }
+    if (defaultDescription?.trim()) {
+      setDescription(defaultDescription.trim());
+    }
+  }, [
+    open,
+    defaultDueDate,
+    defaultAmount,
+    defaultDescription,
+    defaultAccountFlow,
+    fixedAccountFlow,
+    expenseId,
+  ]);
 
   const effectiveFlow: BoletoFlowType = expenseId
     ? "payable"

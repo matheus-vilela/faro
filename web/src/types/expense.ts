@@ -116,6 +116,8 @@ export interface Boleto {
   exclude_from_fluxo?: boolean
   revenue_entry_id?: string | null
   supplier_id?: string | null
+  /** Embed opcional (ex.: conciliação / fluxo). */
+  supplier?: { id?: string; name?: string | null } | null
   /** Data em que o pagamento foi realizado (contas quitadas). */
   paid_at?: string | null
   /** Competência do pagamento (primeiro dia do mês, YYYY-MM-01). */

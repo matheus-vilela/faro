@@ -35,3 +35,48 @@ export function formatBoletoFluxoDescription(
 
   return stripLegacyFluxoPrefixes(raw);
 }
+
+/** Fornecedor / beneficiário para título de lista e conciliação. */
+export function boletoCounterpartyLabel(
+  b: Pick<Boleto, "provider"> & {
+    supplier?: { name?: string | null } | null;
+  },
+): string | null {
+  const fromSupplier = b.supplier?.name?.trim();
+  if (fromSupplier) return fromSupplier;
+  const fromProvider = b.provider?.trim();
+  if (fromProvider) return fromProvider;
+  return null;
+}
+
+/**
+ * Título amigável: prioriza fornecedor; senão a descrição (ex. NF).
+ */
+export function boletoReconTitle(
+  b: Pick<Boleto, "description" | "provider"> & {
+    supplier?: { name?: string | null } | null;
+  },
+): string {
+  return (
+    boletoCounterpartyLabel(b) ||
+    formatBoletoFluxoDescription(b) ||
+    "Conta a pagar"
+  );
+}
+
+/**
+ * Detalhe sob o título: NF/descrição quando o título é o fornecedor.
+ * Retorna null se não houver nada além do que já está no título.
+ */
+export function boletoReconSecondaryLabel(
+  b: Pick<Boleto, "description" | "provider"> & {
+    supplier?: { name?: string | null } | null;
+  },
+): string | null {
+  const desc = formatBoletoFluxoDescription(b);
+  if (!desc) return null;
+  const counterparty = boletoCounterpartyLabel(b);
+  if (!counterparty) return null;
+  if (desc.toLowerCase() === counterparty.toLowerCase()) return null;
+  return desc;
+}
