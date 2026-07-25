@@ -99,9 +99,7 @@ export function NfeStagingInterpretPreviewCard({
         <CardHeader>
           <CardTitle className="text-base">Interpretação staging</CardTitle>
           <CardDescription>
-            Não foi possível simular{" "}
-            <code className="text-xs">focus-get-sync-nfe-interpret-staging</code>
-            : {error}
+            Não foi possível simular a interpretação staging: {error}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -132,12 +130,9 @@ export function NfeStagingInterpretPreviewCard({
           Interpretação staging (dry-run)
         </CardTitle>
         <CardDescription>
-          Mesma lógica de{" "}
-          <code className="rounded bg-muted px-1 text-xs">
-            focus-get-sync-nfe-interpret-staging
-          </code>
-          . Catálogo: {meta.catalog_size} produtos
-          {" · match: EAN / cProd+fornecedor"}
+          Dry-run de fornecedor, produtos e despesa a partir do XML. Catálogo:{" "}
+          {meta.catalog_size} produtos
+          {" · match: EAN / cProd+fornecedor / nome / NCM"}
           {meta.catalog_fetch_error
             ? ` · Erro catálogo: ${meta.catalog_fetch_error}`
             : null}

@@ -69,8 +69,14 @@ export function parseOnboardingPdv(raw: unknown): ParsedOnboardingPdv {
   };
 }
 
-/** Tempo mínimo antes de mostrar «Retomar importação» (import preso sem %). */
+/** Tempo mínimo antes de mostrar «Retomar» quando o import ainda não mostrou %. */
 export const ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS = 15 * 60 * 1000;
+
+/**
+ * Import travado a meio (ex.: 20/1431): a continuação por fila falhou e o progresso
+ * parou. Mostrar «Retomar» após este intervalo (mais curto que o caso sem %).
+ */
+export const ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS = 90 * 1000;
 
 export function parseOnboardingPdvImportStartedAtMs(raw: unknown): number | null {
   const o = onboardingPdvObject(raw);
@@ -88,22 +94,41 @@ export function isOnboardingPdvImportAwaitingSalesTotal(raw: unknown): boolean {
   return isOnboardingPdvImportActive(raw);
 }
 
-/** Mostrar «Retomar importação» após 15 min na fila sem progresso de linhas. */
+/** Progresso parcial parado (`sales_sync` < `sales_total`). */
+export function isOnboardingPdvImportStalledMidProgress(raw: unknown): boolean {
+  const o = parseOnboardingPdv(raw);
+  if (o.completed || isOnboardingPdvConfirmPhase(raw)) return false;
+  if (o.import_status === "failed") return false;
+  if (o.sales_total <= 0) return false;
+  return o.sales_sync < o.sales_total;
+}
+
+/** Mostrar «Retomar importação» se o job ficou órfão na fila. */
 export function shouldShowOnboardingPdvResumeImportButton(
   raw: unknown,
   nowMs: number = Date.now(),
 ): boolean {
   if (!isOnboardingPdvProcessingSales(raw)) return false;
   if (isOnboardingPdvConfirmPhase(raw)) return false;
-  if (!isOnboardingPdvImportAwaitingSalesTotal(raw)) return false;
 
-  let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
-  if (startedMs == null && isOnboardingPdvImportActive(raw)) {
-    // Registos antigos sem `import_started_at`: permite retomar de imediato.
-    startedMs = 0;
+  // Caso A: sem % ainda (fila/portal) — espera 15 min.
+  if (isOnboardingPdvImportAwaitingSalesTotal(raw)) {
+    let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
+    if (startedMs == null && isOnboardingPdvImportActive(raw)) {
+      startedMs = 0;
+    }
+    if (startedMs == null) return false;
+    return nowMs - startedMs >= ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS;
   }
-  if (startedMs == null) return false;
-  return nowMs - startedMs >= ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS;
+
+  // Caso B: parou no meio (ex. 20/1431) — a continuação do chunk falhou.
+  if (isOnboardingPdvImportStalledMidProgress(raw)) {
+    let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
+    if (startedMs == null) startedMs = 0;
+    return nowMs - startedMs >= ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS;
+  }
+
+  return false;
 }
 
 /**

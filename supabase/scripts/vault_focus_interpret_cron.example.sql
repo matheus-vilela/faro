@@ -1,5 +1,4 @@
 -- Secrets para crons NF-e (pg_cron → net.http_post).
--- Continuações entre chunks de interpret usam pgmq; os crons são rede de segurança.
 -- Executar no SQL Editor (produção) ou após `supabase db reset` em dev, com valores reais.
 --
 -- Nomes **exatos** (coluna `name` em vault.secrets / visão decrypted_secrets):
@@ -8,19 +7,12 @@
 --   focus_interpret_cron_bearer_secret   (= FOCUS_NFE_RECEBIDAS_CRON_SECRET nas Edge Functions)
 --
 -- Jobs pg_cron (após migrations):
---   focus_get_sync_nfe_recebidas          — a cada 10 min → listagem Focus (rodízio 12 h/unidade)
---   focus_get_sync_nfe_interpret_dispatch — a cada 5 min → interpretação XML em staging
---   focus_get_sync_nfe_onboarding_retry   — a cada 30 min → retry SEFAZ no onboarding
+--   focus_get_sync_nfe_recebidas          — listagem Focus (rodízio)
+--   focus_get_sync_nfe_onboarding_retry   — retry SEFAZ no onboarding
+--
+-- A fila focus_get_sync_nfe_interpret_jobs / cron interpret_dispatch foi removida.
 
 -- Exemplo (API Dashboard Vault ou extensão vault — sintaxe pode variar):
 -- select vault.create_secret('https://SEU_REF.supabase.co', 'focus_interpret_cron_supabase_url');
 -- select vault.create_secret('SUA_ANON_KEY', 'focus_interpret_cron_anon_key');
 -- select vault.create_secret('MESMO_SECRET_DO_CRON_FOCUS', 'focus_interpret_cron_bearer_secret');
-
--- Reagendar interpret (opcional; migration 20260715220000 já define */5):
--- select cron.unschedule((select jobid from cron.job where jobname = 'focus_get_sync_nfe_interpret_dispatch'));
--- select cron.schedule(
---   'focus_get_sync_nfe_interpret_dispatch',
---   '*/5 * * * *',
---   $cron$select public.cron_invoke_focus_get_sync_nfe_interpret();$cron$
--- );

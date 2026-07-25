@@ -28,16 +28,16 @@ import {
   unitsAreEqual,
   type NormalizedUnitCode,
 } from "../_shared/productImport/unitNormalize.ts";
-import {
-  eanLookupKeys,
-  findDirectMatchByEan,
-} from "../_shared/productImport/llmCatalogCandidates.ts";
+import { eanLookupKeys } from "../_shared/productImport/llmCatalogCandidates.ts";
 import {
   matchImportBatchLineWithCatalog,
   type ImportBatchCatalogMatchResult,
 } from "../_shared/productImport/importBatchCatalogMatch.ts";
 import {
-  findProductIdBySupplierCProd,
+  loadSupplierProductMatchHints,
+  matchExistingProductFromNfeXmlLine,
+} from "../_shared/productImport/matchExistingProductFromNfeXml.ts";
+import {
   normalizeCProd,
   upsertProductSupplierCode,
 } from "../_shared/productImport/productSupplierCodes.ts";
@@ -52,7 +52,10 @@ export type ProductRow = {
   barcode?: string | null;
   ean?: string | null;
   ncm?: string | null;
+  sku?: string | null;
+  canonical_name?: string | null;
   merged_catalog_names?: string[] | null;
+  is_active?: boolean | null;
 };
 
 export type ItemWithProductMatch = ExtractedExpenseItem & {
@@ -278,20 +281,27 @@ function buildImportBatchMatchOutput(params: {
 
   const linkProduct =
     batchResult.kind === "DIRECT_EAN" ||
-    batchResult.kind === "DIRECT_CPROD_SUPPLIER"
+    batchResult.kind === "DIRECT_CPROD_SUPPLIER" ||
+    batchResult.kind === "DIRECT_XML_IDENTITY"
       ? batchResult.product
       : null;
 
   if (linkProduct) {
     const prules = rulesByProduct.get(linkProduct.id) ?? [];
+    const criterio =
+      batchResult.kind === "NEW_PRODUCT" ? null : batchResult.criterio;
     const matchReason =
       batchResult.kind === "DIRECT_EAN"
         ? "EAN igual ao cadastro"
-        : "cProd + fornecedor iguais ao cadastro";
+        : batchResult.kind === "DIRECT_CPROD_SUPPLIER"
+          ? "cProd + fornecedor iguais ao cadastro"
+          : `Identificadores do XML (${criterio ?? "xml"}) iguais ao cadastro`;
     const decisionPath =
       batchResult.kind === "DIRECT_EAN"
         ? "import_batch_direct_ean"
-        : "import_batch_direct_cprod_supplier";
+        : batchResult.kind === "DIRECT_CPROD_SUPPLIER"
+          ? "import_batch_direct_cprod_supplier"
+          : "import_batch_direct_xml_identity";
     const partial: NonNullable<ItemWithProductMatch["productMatch"]> = {
       resolvedProductId: linkProduct.id,
       suggestedProductId: linkProduct.id,
@@ -550,7 +560,9 @@ export async function resolveProductMatches(
 
   const { data: prodRows, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, unit, barcode, ean, ncm, merged_catalog_names")
+    .select(
+      "id, name, unit, barcode, ean, ncm, sku, canonical_name, merged_catalog_names",
+    )
     .eq("company_id", companyId)
     .eq("is_active", true);
 
@@ -560,6 +572,11 @@ export async function resolveProductMatches(
 
   const products = (prodRows ?? []) as ProductRow[];
   const productById = new Map(products.map((p) => [p.id, p]));
+  const supplierHints = await loadSupplierProductMatchHints(
+    supabase,
+    companyId,
+    supplierId,
+  );
 
   const out: ItemWithProductMatch[] = [];
   let requiresProductConfirmation = false;
@@ -744,10 +761,12 @@ export async function resolveProductMatches(
         invoiceUnitNormalized: invoiceU,
         products,
         itemEan,
+        itemNcm: it.ncm,
         eanLookupKeys,
         companyId,
         supplierId,
         supabase,
+        supplierHints,
       });
 
       const batchOut = buildImportBatchMatchOutput({
@@ -777,62 +796,31 @@ export async function resolveProductMatches(
       continue;
     }
 
-    // WhatsApp / interativo: só EAN ou cProd+fornecedor; senão produto novo (confirmação).
-    const byEan = findDirectMatchByEan(products, itemEan, eanLookupKeys);
-    if (byEan) {
-      const catU = normalizeUnitLabel(byEan.unit);
-      const prules = rulesByProduct.get(byEan.id) ?? [];
-      const mEan = enrichProductMatch(
-        it,
-        {
-          resolvedProductId: byEan.id,
-          suggestedProductId: byEan.id,
-          suggestedProductName: byEan.name,
-          suggestedScore: 100,
-          needsConfirmation: false,
-          resolutionStatus: "AUTO_MATCH",
-          matchReason: "EAN igual ao cadastro",
-          invoiceUnitNormalized: invoiceU,
-          catalogUnitNormalized: catU,
-          unitConvertible: false,
-          decisionPath: "direct_ean",
-        },
-        byEan,
-        invoiceU,
-        autoApplyGlobalMassVolume,
-        prules,
-        null,
-      );
-      if (mEan.needsConfirmation) requiresProductConfirmation = true;
-      out.push({
-        ...it,
-        productId: mEan.resolvedProductId,
-        productMatch: mEan,
-      });
-      if (mEan.resolvedProductId) {
-        await upsertProductSupplierCode(
-          supabase,
-          companyId,
-          supplierId,
-          cProd,
-          mEan.resolvedProductId,
-        );
-      }
-      continue;
-    }
-
-    if (supplierId && cProd) {
-      const byCProd = await findProductIdBySupplierCProd(
-        supabase,
-        companyId,
-        supplierId,
-        cProd,
-      );
-      const p = byCProd ? productById.get(byCProd) : undefined;
+    // WhatsApp / interativo: identificadores do XML; senão produto novo (confirmação).
+    const xmlMatch = await matchExistingProductFromNfeXmlLine({
+      supabase,
+      companyId,
+      supplierId,
+      supplierHints,
+      catalog: products,
+      line: {
+        nome: name,
+        codigo: cProd,
+        ean: itemEan,
+        ncm: it.ncm ?? null,
+        unidade_comercial: it.unitCommercial ?? null,
+        unidade_tributavel: it.unitTax ?? null,
+        quantidade_comercial: it.quantityCommercial ?? it.quantity,
+        quantidade_tributavel: it.quantityTax ?? null,
+        quantidade: it.quantity,
+      },
+    });
+    if (xmlMatch) {
+      const p = productById.get(xmlMatch.productId);
       if (p) {
         const catU = normalizeUnitLabel(p.unit);
         const prules = rulesByProduct.get(p.id) ?? [];
-        const mC = enrichProductMatch(
+        const mXml = enrichProductMatch(
           it,
           {
             resolvedProductId: p.id,
@@ -841,11 +829,11 @@ export async function resolveProductMatches(
             suggestedScore: 100,
             needsConfirmation: false,
             resolutionStatus: "AUTO_MATCH",
-            matchReason: "cProd + fornecedor iguais ao cadastro",
+            matchReason: `Identificadores do XML (${xmlMatch.criterio}) iguais ao cadastro`,
             invoiceUnitNormalized: invoiceU,
             catalogUnitNormalized: catU,
             unitConvertible: false,
-            decisionPath: "direct_cprod_supplier",
+            decisionPath: `direct_xml_${xmlMatch.criterio}`,
           },
           p,
           invoiceU,
@@ -853,12 +841,21 @@ export async function resolveProductMatches(
           prules,
           null,
         );
-        if (mC.needsConfirmation) requiresProductConfirmation = true;
+        if (mXml.needsConfirmation) requiresProductConfirmation = true;
         out.push({
           ...it,
-          productId: mC.resolvedProductId,
-          productMatch: mC,
+          productId: mXml.resolvedProductId,
+          productMatch: mXml,
         });
+        if (mXml.resolvedProductId) {
+          await upsertProductSupplierCode(
+            supabase,
+            companyId,
+            supplierId,
+            cProd,
+            mXml.resolvedProductId,
+          );
+        }
         continue;
       }
     }
@@ -877,7 +874,7 @@ export async function resolveProductMatches(
         needsConfirmation: true,
         resolutionStatus: "NEW_PRODUCT_STAGED",
         matchReason:
-          "Sem produto por EAN ou cProd+fornecedor — cadastro novo pendente de confirmação",
+          "Sem produto pelos identificadores do XML — cadastro novo pendente de confirmação",
         invoiceUnitNormalized: invoiceU,
         catalogUnitNormalized: "UNKN",
         unitConvertible: false,

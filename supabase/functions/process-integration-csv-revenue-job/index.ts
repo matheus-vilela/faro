@@ -537,6 +537,8 @@ async function runCsvRevenueImportForJob(
   }
 
   const isResume = body.resume === true || body.phase === "resume";
+  /** Quando true, não enfileira continuação — o caller encadeia chunks na mesma invocação. */
+  const deferContinueEnqueue = body.defer_continue_enqueue === true;
 
   let jobRow: Record<string, unknown> | null = null;
 
@@ -1417,7 +1419,9 @@ async function runCsvRevenueImportForJob(
         })
         .eq("id", jobId);
 
-      await enqueueCsvRevenueContinue(admin, jobId, supabaseUrl, serviceKey);
+      if (!deferContinueEnqueue) {
+        await enqueueCsvRevenueContinue(admin, jobId, supabaseUrl, serviceKey);
+      }
 
       return json({
         ok: true,
@@ -1431,6 +1435,7 @@ async function runCsvRevenueImportForJob(
         recipes_auto_created_this_chunk: recipesAutoCreatedChunk,
         revenue_entries_created_total: prevCreated + createdChunk,
         continuing: true,
+        continue_enqueued: !deferContinueEnqueue,
       });
     }
 
@@ -1553,6 +1558,8 @@ async function consumeCsvRevenueImportQueue(
   anonKey: string,
 ): Promise<Response> {
   const maxMessages = intFromEnv("CSV_REVENUE_IMPORT_QUEUE_MAX", 1, 1, 5);
+  /** Chunks encadeados na mesma invocação (evita depender só de waitUntil). */
+  const maxChain = intFromEnv("CSV_REVENUE_IMPORT_INLINE_CHAIN", 8, 1, 40);
   const queueVtSeconds = intFromEnv(
     "CSV_REVENUE_IMPORT_QUEUE_VT",
     300,
@@ -1573,30 +1580,61 @@ async function consumeCsvRevenueImportQueue(
       continue;
     }
 
-    const res = await runCsvRevenueImportForJob(
-      admin,
-      supabaseUrl,
-      serviceKey,
-      anonKey,
-      { job_id: jobId, resume: true },
-    );
+    let lastStatus = 0;
     let data: Record<string, unknown> = {};
-    try {
-      data = (await res.json()) as Record<string, unknown>;
-    } catch {
-      /* ignore */
+    let leaseBusy = false;
+    let chainCount = 0;
+
+    while (chainCount < maxChain) {
+      chainCount += 1;
+      const deferContinue = chainCount < maxChain;
+      const res = await runCsvRevenueImportForJob(
+        admin,
+        supabaseUrl,
+        serviceKey,
+        anonKey,
+        {
+          job_id: jobId,
+          resume: true,
+          defer_continue_enqueue: deferContinue,
+        },
+      );
+      lastStatus = res.status;
+      try {
+        data = (await res.json()) as Record<string, unknown>;
+      } catch {
+        data = {};
+      }
+
+      leaseBusy =
+        data.skipped === true && data.reason === "chunk_lease_busy";
+      if (!res.ok || leaseBusy) break;
+      if (data.continuing !== true) break;
+      // Continua o próximo chunk na mesma invocação.
     }
 
-    const leaseBusy =
-      data.skipped === true && data.reason === "chunk_lease_busy";
-    if (res.ok && !leaseBusy) {
+    // Se ainda há trabalho e o último passo usou defer, enfileira 1 continuação.
+    if (
+      !leaseBusy &&
+      lastStatus >= 200 &&
+      lastStatus < 300 &&
+      data.continuing === true &&
+      data.continue_enqueued !== true
+    ) {
+      await enqueueCsvRevenueContinue(admin, jobId, supabaseUrl, serviceKey);
+      data = { ...data, continue_enqueued: true, chained_chunks: chainCount };
+    } else {
+      data = { ...data, chained_chunks: chainCount };
+    }
+
+    if (lastStatus >= 200 && lastStatus < 300 && !leaseBusy) {
       await deleteCsvRevenueImportContinueMessage(admin, msg.msg_id);
     }
 
     outcomes.push({
       msg_id: msg.msg_id,
       job_id: jobId,
-      status: res.status,
+      status: lastStatus,
       body: data,
     });
   }
@@ -1605,6 +1643,7 @@ async function consumeCsvRevenueImportQueue(
     ok: true,
     consumed: outcomes.length,
     queue_vt_seconds: queueVtSeconds,
+    inline_chain_max: maxChain,
     outcomes,
   });
 }

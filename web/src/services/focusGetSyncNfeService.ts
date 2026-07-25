@@ -67,11 +67,8 @@ export type FocusNfeConsultaHistoryRow = {
   exec_id: string;
   consulta_at: string;
   nfes_encontradas: number;
-  interpret_status: string | null;
-  interpret_error: string | null;
   onboarding: boolean;
   staging_xml_total: number | null;
-  finished_at: string | null;
 };
 
 export async function listFocusNfeConsultaHistory(
@@ -92,14 +89,9 @@ export async function listFocusNfeConsultaHistory(
     exec_id: String(r.exec_id),
     consulta_at: String(r.consulta_at ?? ""),
     nfes_encontradas: Number(r.nfes_encontradas ?? 0),
-    interpret_status:
-      r.interpret_status != null ? String(r.interpret_status) : null,
-    interpret_error:
-      r.interpret_error != null ? String(r.interpret_error) : null,
     onboarding: r.onboarding === true,
     staging_xml_total:
       r.staging_xml_total != null ? Number(r.staging_xml_total) : null,
-    finished_at: r.finished_at != null ? String(r.finished_at) : null,
   }));
   return { ok: true, rows };
 }

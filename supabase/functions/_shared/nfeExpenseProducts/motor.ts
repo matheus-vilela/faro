@@ -389,7 +389,7 @@ export async function runNfeExpenseProductMotor(
         null
       : null;
 
-  /** Match determinístico (EAN / cProd+fornecedor) — sem IA. */
+  /** Match determinístico pelos identificadores do XML — sem IA. */
   const matchResult = await matchNfeExpenseCatalogLines(
     supabase,
     companyId,
@@ -479,6 +479,7 @@ export async function runNfeExpenseProductMotor(
       }
     }
     let createdNew = false;
+    let stockAppliedOnCreate = false;
     const alreadyLinkedPid = existingProductIds[i] ?? null;
 
     if (mode === "apply") {
@@ -492,10 +493,12 @@ export async function runNfeExpenseProductMotor(
           companyId,
           ctx.items[i]!,
           pm,
+          expenseSupplierId,
         );
         if (!productId && ensured.productId) {
           productId = ensured.productId;
           createdNew = ensured.created;
+          stockAppliedOnCreate = ensured.stockApplied === true;
         }
       }
 
@@ -544,11 +547,13 @@ export async function runNfeExpenseProductMotor(
           companyId,
           ctx.items[i]!,
           pm,
+          expenseSupplierId,
         );
         if (fb.productId) {
           productId = fb.productId;
           if (fb.created) {
             createdNew = true;
+            stockAppliedOnCreate = fb.stockApplied === true;
             resolutionLabel = "NEW_PRODUCT_CREATED";
           } else {
             resolutionLabel = "AUTO_MATCH";
@@ -619,6 +624,15 @@ export async function runNfeExpenseProductMotor(
 
       if (productId) updateRow.product_id = productId;
       if (pm?.stockQuantity != null) updateRow.stock_quantity = pm.stockQuantity;
+      if (stockAppliedOnCreate) {
+        updateRow.stock_added = true;
+        if (updateRow.stock_quantity == null) {
+          updateRow.stock_quantity = Math.max(
+            0,
+            Number(ctx.items[i]?.quantity) || 0,
+          );
+        }
+      }
       if (pm?.conversionFactorApplied != null) {
         updateRow.conversion_factor_applied = pm.conversionFactorApplied;
       }

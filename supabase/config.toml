@@ -83,6 +83,3 @@ verify_jwt = false
 
 [functions.kick-csv-revenue-import-job]
 verify_jwt = true
-
-[functions.focus-get-sync-nfe-interpret-staging]
-verify_jwt = false

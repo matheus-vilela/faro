@@ -66,26 +66,15 @@ export function DashboardIntegrationCsvRevenueCard({
   );
 
   useEffect(() => {
-    if (
-      !processingSales ||
-      confirmPhase ||
-      ob.sales_total > 0 ||
-      !isOnboardingPdvProcessingSales(onboardingPdv)
-    ) {
+    if (!processingSales || confirmPhase || showResumeImportButton) {
       return;
     }
-    if (showResumeImportButton) return;
+    // Relógio para liberar «Retomar» (fila sem % ou progresso parcial travado).
     const timer = window.setInterval(() => {
       setResumeImportClockMs(Date.now());
-    }, 30_000);
+    }, 15_000);
     return () => window.clearInterval(timer);
-  }, [
-    processingSales,
-    confirmPhase,
-    ob.sales_total,
-    onboardingPdv,
-    showResumeImportButton,
-  ]);
+  }, [processingSales, confirmPhase, showResumeImportButton]);
 
   const { title, subtitle, showSpinner, icon } = useMemo(() => {
     if (confirmPhase) {

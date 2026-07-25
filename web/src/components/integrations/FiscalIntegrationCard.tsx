@@ -50,15 +50,6 @@ function asObj(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function interpretStatusLabel(status: string | null): string {
-  if (!status) return "Consulta registrada";
-  if (status === "pending") return "Interpretação na fila";
-  if (status === "processing") return "A interpretar XMLs";
-  if (status === "done") return "Interpretação concluída";
-  if (status === "failed") return "Falha na interpretação";
-  return status;
-}
-
 function formatDateTimeBr(iso: string): string {
   if (!iso.trim()) return "—";
   const d = new Date(iso);
@@ -383,7 +374,7 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                               <Clock3 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              {interpretStatusLabel(item.interpret_status)}
+                              Consulta registrada
                             </span>
                             <span className="font-mono text-xs text-muted-foreground">
                               {idShort}…
@@ -399,20 +390,9 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                               : `${item.nfes_encontradas} NF-e(s) encontrada(s).`}
                             {item.staging_xml_total != null &&
                             item.staging_xml_total > 0
-                              ? ` · ${item.staging_xml_total} XML(s) a interpretar.`
+                              ? ` · ${item.staging_xml_total} XML(s) em staging.`
                               : ""}
                           </p>
-                          {item.interpret_error ? (
-                            <p className="mt-2 text-xs text-destructive">
-                              {item.interpret_error}
-                            </p>
-                          ) : null}
-                          {item.finished_at ? (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Interpretação concluída:{" "}
-                              {formatDateTimeBr(item.finished_at)}
-                            </p>
-                          ) : null}
                         </div>
                       );
                     })}

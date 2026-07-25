@@ -1,5 +1,5 @@
 /**
- * Pré-visualização dry-run da lógica de `focus-get-sync-nfe-interpret-staging`
+ * Pré-visualização dry-run da lógica de interpretação de XML em staging
  * (fornecedor, produtos, conversões, despesa, boletos) sem gravar no banco.
  */
 import type { StagingNfeInterpretLog } from "./stagingNfeInterpretLog.ts";

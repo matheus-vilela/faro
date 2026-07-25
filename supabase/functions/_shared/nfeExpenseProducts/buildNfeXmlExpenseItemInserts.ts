@@ -134,11 +134,19 @@ export async function buildNfeXmlExpenseItemInserts(
       }
     }
     let createdNew = false;
+    let stockAppliedOnCreate = false;
     if (pm) {
-      const ensured = await ensureProductForLine(supabase, companyId, items[i]!, pm);
+      const ensured = await ensureProductForLine(
+        supabase,
+        companyId,
+        items[i]!,
+        pm,
+        supplierId,
+      );
       if (!productId && ensured.productId) {
         productId = ensured.productId;
         createdNew = ensured.created;
+        stockAppliedOnCreate = ensured.stockApplied === true;
       }
     }
 
@@ -184,11 +192,13 @@ export async function buildNfeXmlExpenseItemInserts(
         companyId,
         items[i]!,
         pm,
+        supplierId,
       );
       if (fb.productId) {
         productId = fb.productId;
         if (fb.created) {
           createdNew = true;
+          stockAppliedOnCreate = fb.stockApplied === true;
           resolutionLabel = "NEW_PRODUCT_CREATED";
         } else {
           resolutionLabel = "AUTO_MATCH";
@@ -272,7 +282,7 @@ export async function buildNfeXmlExpenseItemInserts(
       unit_value: uv,
       invoice_unit: invUnit,
       stock_quantity: Number.isFinite(stockQty) ? stockQty : q,
-      stock_added: false,
+      stock_added: stockAppliedOnCreate,
       import_nature: "ESTOQUE_DIRETO",
       import_engine_suggestion: "XML_CATALOG_MOTOR_APPLIED",
       import_confidence_0_1: pm?.suggestedScore != null
