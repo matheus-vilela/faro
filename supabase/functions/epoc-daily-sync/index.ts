@@ -1,4 +1,8 @@
 /**
+ * LEGADO — substituído pelo pipeline `epoc-dispatcher` + `epoc-worker`
+ * (migration 20260726160000_epoc_pipeline_phase1). O cron `epoc_daily_sync`
+ * é desagendado; esta edge permanece para ops manuais / rollback.
+ *
  * Rotina EPOC do dia anterior (America/Sao_Paulo), uma unidade por invocação.
  *
  * Cron (pg_cron a cada 10 min): processa no máximo um estabelecimento com integração

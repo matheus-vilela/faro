@@ -6,11 +6,21 @@
 --   focus_interpret_cron_anon_key
 --   focus_interpret_cron_bearer_secret   (= FOCUS_NFE_RECEBIDAS_CRON_SECRET nas Edge Functions)
 --
--- Jobs pg_cron (após migrations):
---   focus_get_sync_nfe_recebidas          — listagem Focus (rodízio)
---   focus_get_sync_nfe_onboarding_retry   — retry SEFAZ no onboarding
+-- Jobs pg_cron (após migration 20260725190000_nfe_pipeline_phase1):
+--   nfe_pipeline_dispatcher   — a cada 1 min → Edge nfe-dispatcher
+--   nfe_pipeline_worker       — a cada 1 min → Edge nfe-worker
 --
--- A fila focus_get_sync_nfe_interpret_jobs / cron interpret_dispatch foi removida.
+-- Jobs pg_cron Epoc (após migration 20260726160000_epoc_pipeline_phase1):
+--   epoc_pipeline_dispatcher  — a cada 1 min → Edge epoc-dispatcher
+--   epoc_pipeline_worker      — a cada 1 min → Edge epoc-worker
+--   Vault bearer: epoc_daily_cron_bearer_secret (= EPOC_DAILY_CRON_SECRET)
+--   Cron legado epoc_daily_sync é desagendado pela migration.
+--
+-- Import CSV Epoc (após migration 20260726190000_epoc_csv_import_worker_heartbeat):
+--   epoc_csv_import_watchdog  — a cada 1 min → Edge epoc-csv-import-worker { mode: watchdog }
+--   Retoma jobs PROCESSING com heartbeat_at > 2 min (self-call é o caminho quente).
+--
+-- Crons legados focus_get_sync_nfe_recebidas / onboarding_retry são desagendados pela migration.
 
 -- Exemplo (API Dashboard Vault ou extensão vault — sintaxe pode variar):
 -- select vault.create_secret('https://SEU_REF.supabase.co', 'focus_interpret_cron_supabase_url');

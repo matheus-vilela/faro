@@ -76,7 +76,7 @@ export const ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS = 15 * 60 * 1000;
  * Import travado a meio (ex.: 20/1431): a continuação por fila falhou e o progresso
  * parou. Mostrar «Retomar» após este intervalo (mais curto que o caso sem %).
  */
-export const ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS = 90 * 1000;
+export const ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS = 15 * 1000;
 
 export function parseOnboardingPdvImportStartedAtMs(raw: unknown): number | null {
   const o = onboardingPdvObject(raw);

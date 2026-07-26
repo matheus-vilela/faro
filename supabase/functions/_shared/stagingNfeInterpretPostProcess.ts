@@ -22,6 +22,10 @@ import {
   previewActionForMatchCriterio,
 } from "./productImport/matchExistingProductFromNfeXml.ts";
 import {
+  matchProductBySupplierCertainty,
+  toLegacyMatchResult,
+} from "./productImport/matchProductBySupplierCertainty.ts";
+import {
   normalizeCProd,
   upsertProductSupplierCode as upsertProductSupplierCodeShared,
 } from "./productImport/productSupplierCodes.ts";
@@ -365,7 +369,7 @@ async function insertProductFromStagingInterpret(
 
 const CRITERIO_PRODUTO_CRIADO: Record<string, string> = {
   sem_identificador_existente:
-    "Nenhum produto encontrado pelos identificadores do XML (EAN, cProd+fornecedor, SKU, nome, NCM, histórico); cadastro criado a partir da linha da NF-e",
+    "Nenhum produto do fornecedor com certeza (cProd/EAN/SKU); cadastro criado a partir da linha da NF-e",
 };
 
 function criterioProdutoCriadoLabel(contexto: string): string {
@@ -696,11 +700,17 @@ export async function fetchProductCatalogForStagingInterpret(
   return { catalog, error: null };
 }
 
+export type ResolveProductsMatchMode = "legacy" | "supplier_certainty";
+
 /**
  * 2) Produtos (determinístico): identificadores do XML → criar só se nenhum bater.
  * Produto novo só é criado com movimentação de entrada na mesma TX.
  * `stockAppliedByLineIndex` marca linhas cuja entrada já foi feita no create
  * (para `expense_items.stock_added = true` e não duplicar no finalize).
+ *
+ * `matchMode`:
+ * - `legacy` — EAN/SKU/nome/NCM/histórico (preview e caminhos antigos)
+ * - `supplier_certainty` — só cProd/EAN/SKU no escopo do fornecedor (pipeline NF-e)
  */
 export async function resolveProductsForInterpretLog(
   admin: SupabaseAdmin,
@@ -711,6 +721,7 @@ export async function resolveProductsForInterpretLog(
   chunkProductDedupeByKey: Map<string, string>,
   previewSink?: StagingInterpretPreviewSink,
   stockAppliedByLineIndex?: Set<number>,
+  matchMode: ResolveProductsMatchMode = "legacy",
 ): Promise<void> {
   if (!interpret.parse_ok) return;
 
@@ -771,24 +782,41 @@ export async function resolveProductsForInterpretLog(
       continue;
     }
 
-    const matched = await matchExistingProductFromNfeXmlLine({
-      supabase: admin,
-      companyId,
-      supplierId,
-      supplierHints,
-      catalog: productCatalog,
-      line: {
-        nome: line.nome,
-        codigo: line.codigo,
-        ean: line.ean,
-        ncm: line.ncm,
-        unidade_comercial: line.unidade_comercial,
-        unidade_tributavel: line.unidade_tributavel,
-        quantidade_comercial: line.quantidade_comercial,
-        quantidade_tributavel: line.quantidade_tributavel,
-        quantidade: line.quantidade,
-      },
-    });
+    const lineIdentity = {
+      nome: line.nome,
+      codigo: line.codigo,
+      ean: line.ean,
+      ncm: line.ncm,
+      unidade_comercial: line.unidade_comercial,
+      unidade_tributavel: line.unidade_tributavel,
+      quantidade_comercial: line.quantidade_comercial,
+      quantidade_tributavel: line.quantidade_tributavel,
+      quantidade: line.quantidade,
+    };
+
+    let matched: Awaited<
+      ReturnType<typeof matchExistingProductFromNfeXmlLine>
+    > = null;
+    if (matchMode === "supplier_certainty") {
+      const hit = await matchProductBySupplierCertainty({
+        supabase: admin,
+        companyId,
+        supplierId,
+        supplierHints,
+        catalog: productCatalog,
+        line: lineIdentity,
+      });
+      matched = hit ? toLegacyMatchResult(hit) : null;
+    } else {
+      matched = await matchExistingProductFromNfeXmlLine({
+        supabase: admin,
+        companyId,
+        supplierId,
+        supplierHints,
+        catalog: productCatalog,
+        line: lineIdentity,
+      });
+    }
 
     if (matched) {
       productIdByLineIndex.set(lineIndex, matched.productId);

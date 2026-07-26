@@ -193,8 +193,19 @@ function buildFocusEmpresaBody(raw: Record<string, unknown>):
   const complemento = optString(raw.complemento) ?? "";
   const enviarEmailDestinatario = false;
 
-  /** Sempre pela data atual do pedido (criação na Focus): 1º dia de dois meses atrás em SP. */
-  const dataInicioRecebimentoNfe = firstDayOfTwoMonthsAgoFocusBr(new Date());
+  /** Default: 1º dia de dois meses atrás em SP. Override opcional via body. */
+  const overrideInicio = optString(raw.data_inicio_recebimento_nfe);
+  let dataInicioRecebimentoNfe = firstDayOfTwoMonthsAgoFocusBr(new Date());
+  if (overrideInicio) {
+    // Aceita dd/MM/yyyy (Focus) ou yyyy-MM-dd.
+    const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(overrideInicio);
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(overrideInicio);
+    if (br) {
+      dataInicioRecebimentoNfe = overrideInicio;
+    } else if (iso) {
+      dataInicioRecebimentoNfe = `${iso[3]}/${iso[2]}/${iso[1]}`;
+    }
+  }
 
   const knownKeys = new Set([
     "dry_run",

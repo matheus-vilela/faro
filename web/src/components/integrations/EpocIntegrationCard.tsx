@@ -31,8 +31,9 @@ import { cn } from "@/lib/utils";
 import {
   invokeEpocCsvSync,
   releaseStalePdvSyncLockIfIdle,
-  triggerEpocCsvSyncInBackground,
 } from "@/services/epocSyncCsvService";
+import { triggerEpocPipelineInBackground } from "@/services/epocPipelineService";
+import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -743,10 +744,15 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     setSheetOpen(false);
 
     if (enabled && baseUrl.trim()) {
-      triggerEpocCsvSyncInBackground(companyId);
+      const pdvBusy = isOnboardingPdvSyncInProgress(
+        companyMeta?.onboarding_pdv,
+      );
+      triggerEpocPipelineInBackground(companyId, {
+        mode: pdvBusy ? "onboarding" : undefined,
+      });
       void refetchCompanies();
       toast.message(
-        "Sincronização EPOC em segundo plano: login e exportação do CSV.",
+        "Sincronização EPOC enfileirada: o pipeline consulta o portal e importa vendas.",
         { duration: 6000 },
       );
     }

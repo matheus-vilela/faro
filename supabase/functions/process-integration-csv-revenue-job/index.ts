@@ -829,27 +829,83 @@ async function runCsvRevenueImportForJob(
       });
     }
 
-    const onboardingCsvJob = patchOnboardingEnabled;
-    if (onboardingCsvJob) {
-      await patchOnboardingPdv(
-        admin,
-        job.company_id,
-        {
-          sales_total: rows.length,
-          sales_sync: startOffset,
-          import_status: "processing",
-          ...onboardingPdvJobFields,
-        },
-        "[process-integration-csv-revenue-job]",
-      );
-    }
-
     const priorMeta =
       job.metadata &&
       typeof job.metadata === "object" &&
       !Array.isArray(job.metadata)
         ? { ...(job.metadata as Record<string, unknown>) }
         : {};
+
+    /**
+     * Total estável para o card do onboarding:
+     * - preferir `metadata.linhas_dados` (contagem do epoc-sync-csv na exportação);
+     * - senão `csv_total_data_rows` já gravado em chunks anteriores;
+     * - senão `rows.length` do CSV atual.
+     * Em chunks de continuação NÃO rebaixar o total (evita salto se outro sync
+     * sobrescrever o ficheiro/job a meio do import).
+     */
+    const metaLinhas = Number(priorMeta.linhas_dados ?? 0) || 0;
+    const metaCsvTotal = Number(priorMeta.csv_total_data_rows ?? 0) || 0;
+    const stableSalesTotal = Math.max(
+      metaLinhas,
+      metaCsvTotal,
+      rows.length,
+    );
+
+    const onboardingCsvJob = patchOnboardingEnabled;
+    if (onboardingCsvJob) {
+      const obNow = await admin
+        .from("companies")
+        .select("onboarding_pdv")
+        .eq("id", job.company_id)
+        .maybeSingle();
+      const prevOb =
+        obNow.data?.onboarding_pdv &&
+          typeof obNow.data.onboarding_pdv === "object" &&
+          !Array.isArray(obNow.data.onboarding_pdv)
+          ? (obNow.data.onboarding_pdv as Record<string, unknown>)
+          : {};
+      const trackedJobId =
+        typeof prevOb.csv_import_job_id === "string"
+          ? prevOb.csv_import_job_id.trim()
+          : "";
+      // Job antigo/paralelo não pode mexer no card (evita 80→20 e fecho com total errado).
+      const isTrackedJob = !trackedJobId || trackedJobId === jobId;
+      if (!isTrackedJob) {
+        console.warn(
+          "[process-integration-csv-revenue-job] onboarding_patch_ignorado_job_nao_rastreado",
+          { job_id: jobId, tracked: trackedJobId, start_offset: startOffset },
+        );
+      } else {
+        const prevTotal = Math.max(0, Math.floor(Number(prevOb.sales_total) || 0));
+        const prevSync = Math.max(0, Math.floor(Number(prevOb.sales_sync) || 0));
+        // Monotónico: nunca diminuir sales_sync (worker atrasado não regride o UI).
+        const nextSync = Math.max(prevSync, startOffset);
+        const progressPatch: {
+          sales_sync: number;
+          import_status: "processing";
+          sales_total?: number;
+          csv_import_job_id: string;
+          csv_storage_path: string;
+        } = {
+          sales_sync: nextSync,
+          import_status: "processing",
+          ...onboardingPdvJobFields,
+        };
+        if (startOffset === 0 || prevTotal <= 0) {
+          progressPatch.sales_total = Math.max(prevTotal, stableSalesTotal);
+        } else if (stableSalesTotal > prevTotal) {
+          progressPatch.sales_total = stableSalesTotal;
+        }
+
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          progressPatch,
+          "[process-integration-csv-revenue-job]",
+        );
+      }
+    }
 
     const batchByDate = new Map<string, string>();
     const bbd = priorMeta.batch_by_reference_date;
@@ -1386,7 +1442,11 @@ async function runCsvRevenueImportForJob(
         openAiPlanByExactName,
       ),
       batch_by_reference_date: batchMapObj,
-      csv_total_data_rows: rows.length,
+      csv_total_data_rows: Math.max(
+        Number(priorMeta.csv_total_data_rows ?? 0) || 0,
+        Number(priorMeta.linhas_dados ?? 0) || 0,
+        rows.length,
+      ),
       revenue_entries_created_total: prevCreated + createdChunk,
       rows_skipped_total: prevSkipped + skippedChunk,
       rows_skipped_no_product: prevSkipNoProduct + skipNoProductChunk,
@@ -1402,12 +1462,37 @@ async function runCsvRevenueImportForJob(
 
     if (!done) {
       if (onboardingCsvJob) {
-        await patchOnboardingPdv(
-          admin,
-          job.company_id,
-          { sales_sync: nextOffset, import_status: "processing", ...onboardingPdvJobFields },
-          "[process-integration-csv-revenue-job]",
-        );
+        const { data: obMid } = await admin
+          .from("companies")
+          .select("onboarding_pdv")
+          .eq("id", job.company_id)
+          .maybeSingle();
+        const midOb =
+          obMid?.onboarding_pdv &&
+            typeof obMid.onboarding_pdv === "object" &&
+            !Array.isArray(obMid.onboarding_pdv)
+            ? (obMid.onboarding_pdv as Record<string, unknown>)
+            : {};
+        const trackedMid =
+          typeof midOb.csv_import_job_id === "string"
+            ? midOb.csv_import_job_id.trim()
+            : "";
+        if (!trackedMid || trackedMid === jobId) {
+          const prevSyncMid = Math.max(
+            0,
+            Math.floor(Number(midOb.sales_sync) || 0),
+          );
+          await patchOnboardingPdv(
+            admin,
+            job.company_id,
+            {
+              sales_sync: Math.max(prevSyncMid, nextOffset),
+              import_status: "processing",
+              ...onboardingPdvJobFields,
+            },
+            "[process-integration-csv-revenue-job]",
+          );
+        }
       }
       await admin
         .from("integration_csv_revenue_import_jobs")
@@ -1467,18 +1552,50 @@ async function runCsvRevenueImportForJob(
     }
 
     if (onboardingCsvJob) {
-      await patchOnboardingPdv(
-        admin,
-        job.company_id,
-        {
-          sales_total: rows.length,
-          sales_sync: rows.length,
-          import_status: "completed",
-          sync: false,
-          ...onboardingPdvJobFields,
-        },
-        "[process-integration-csv-revenue-job]",
-      );
+      const { data: obEnd } = await admin
+        .from("companies")
+        .select("onboarding_pdv")
+        .eq("id", job.company_id)
+        .maybeSingle();
+      const endOb =
+        obEnd?.onboarding_pdv &&
+          typeof obEnd.onboarding_pdv === "object" &&
+          !Array.isArray(obEnd.onboarding_pdv)
+          ? (obEnd.onboarding_pdv as Record<string, unknown>)
+          : {};
+      const trackedEnd =
+        typeof endOb.csv_import_job_id === "string"
+          ? endOb.csv_import_job_id.trim()
+          : "";
+      if (!trackedEnd || trackedEnd === jobId) {
+        const prevTotalEnd = Math.max(
+          0,
+          Math.floor(Number(endOb.sales_total) || 0),
+        );
+        const finalTotal = Math.max(
+          prevTotalEnd,
+          Number(newMeta.csv_total_data_rows ?? 0) || 0,
+          Number(priorMeta.linhas_dados ?? 0) || 0,
+          rows.length,
+        );
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          {
+            sales_total: finalTotal,
+            sales_sync: finalTotal,
+            import_status: "completed",
+            sync: false,
+            ...onboardingPdvJobFields,
+          },
+          "[process-integration-csv-revenue-job]",
+        );
+      } else {
+        console.warn(
+          "[process-integration-csv-revenue-job] complete_onboarding_ignorado_job_nao_rastreado",
+          { job_id: jobId, tracked: trackedEnd },
+        );
+      }
     }
 
     const flowDiagnostic = buildEpocImportJobFlowDiagnostic({
@@ -1689,11 +1806,97 @@ Deno.serve(async (req) => {
     );
   }
 
-  return runCsvRevenueImportForJob(
+  const orchestrated = body.orchestrated === true;
+
+  // Processa vários chunks na mesma invocação (não depende só do fire-and-forget
+  // da fila — evita ficar preso em 20/N após o 1.º chunk).
+  const maxInline = intFromEnv("CSV_REVENUE_IMPORT_INLINE_CHAIN", 8, 1, 40);
+  const first = await runCsvRevenueImportForJob(
     admin,
     supabaseUrl,
     serviceKey,
     anonKey,
-    body,
+    { ...body, defer_continue_enqueue: true },
   );
+  let firstBody: Record<string, unknown> = {};
+  try {
+    firstBody = (await first.clone().json()) as Record<string, unknown>;
+  } catch {
+    firstBody = {};
+  }
+
+  if (first.status < 200 || first.status >= 300 || firstBody.ok === false) {
+    return first;
+  }
+  if (firstBody.continuing !== true || firstBody.skipped === true) {
+    return first;
+  }
+
+  const jobIdForChain = extractJobId(body) ||
+    (typeof firstBody.job_id === "string" ? firstBody.job_id : "");
+  if (!jobIdForChain) {
+    await enqueueCsvRevenueContinue(
+      admin,
+      String(firstBody.job_id ?? ""),
+      supabaseUrl,
+      serviceKey,
+    ).catch(() => undefined);
+    return first;
+  }
+
+  let chainCount = 1;
+  let lastBody = firstBody;
+  let lastStatus = first.status;
+
+  while (
+    lastStatus >= 200 &&
+    lastStatus < 300 &&
+    lastBody.continuing === true &&
+    lastBody.skipped !== true &&
+    chainCount < maxInline
+  ) {
+    chainCount += 1;
+    const defer = chainCount < maxInline;
+    const next = await runCsvRevenueImportForJob(
+      admin,
+      supabaseUrl,
+      serviceKey,
+      anonKey,
+      {
+        job_id: jobIdForChain,
+        resume: true,
+        defer_continue_enqueue: defer,
+      },
+    );
+    lastStatus = next.status;
+    try {
+      lastBody = (await next.json()) as Record<string, unknown>;
+    } catch {
+      lastBody = {};
+    }
+    if (lastBody.skipped === true && lastBody.reason === "chunk_lease_busy") {
+      break;
+    }
+  }
+
+  // Com orchestrated=true o epoc-csv-import-worker faz self-call; não usar pgmq.
+  if (
+    !orchestrated &&
+    lastBody.continuing === true &&
+    lastBody.continue_enqueued !== true &&
+    lastBody.skipped !== true
+  ) {
+    await enqueueCsvRevenueContinue(admin, jobIdForChain, supabaseUrl, serviceKey);
+    lastBody = { ...lastBody, continue_enqueued: true };
+  }
+
+  return json({
+    ...lastBody,
+    ok: lastStatus >= 200 && lastStatus < 300,
+    chained_chunks: chainCount,
+    orchestrated,
+    continue_enqueued: orchestrated ? false : lastBody.continue_enqueued === true,
+    phase: lastBody.phase ??
+      (lastBody.continuing === true ? "chunk" : "completed"),
+  }, lastStatus >= 200 && lastStatus < 300 ? 200 : lastStatus);
 });

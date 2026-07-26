@@ -19,10 +19,10 @@ import {
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import {
-  invokeFocusGetSyncNfe,
   listFocusNfeConsultaHistory,
   type FocusNfeConsultaHistoryRow,
 } from "@/services/focusGetSyncNfeService";
+import { invokeNfePipelineForCompany } from "@/services/nfePipelineService";
 import type { CompanySetupMap } from "@/types/companySetup";
 import {
   AlertTriangle,
@@ -112,18 +112,13 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
     }
     setSyncing(true);
     try {
-      const res = await invokeFocusGetSyncNfe({ companyId });
+      const res = await invokeNfePipelineForCompany({ companyId });
       await refetchCompanies();
       if (activeTab === "history") await loadHistory();
       if (res.ok) {
-        const d0 = Array.isArray(res.data.detail)
-          ? res.data.detail[0]
-          : undefined;
-        if (d0?.skipped) {
-          toast.message(String(d0.skipped));
-        } else {
-          toast.success("Consulta NF-e recebidas concluída.");
-        }
+        toast.success(
+          "Consulta NF-e enfileirada. O processamento continua em segundo plano.",
+        );
       } else {
         toast.error(res.error);
       }

@@ -5,6 +5,8 @@ export const DEFAULT_ONBOARDING_FISCAL = {
   nfes_sync: 0,
   nfes_ignored: 0,
   completed: false,
+  /** Fase 1 pipeline: XMLs da janela baixados. `completed` só na Fase 2 (motor). */
+  capture_completed: false,
   sefaz_unavailable: false,
 } as const;
 

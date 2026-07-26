@@ -21,6 +21,13 @@ export function isOnboardingFiscalJsonCompleted(raw: unknown): boolean {
   return o.completed === true;
 }
 
+/** Fase 1: XMLs da janela capturados (`capture_completed`). */
+export function isOnboardingFiscalCaptureCompleted(raw: unknown): boolean {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return false;
+  return o.capture_completed === true;
+}
+
 /** Etapa fiscal concluída (`onboarding_fiscal.completed`). */
 export function isOnboardingFiscalFlowCompleted(raw: unknown): boolean {
   return isOnboardingFiscalJsonCompleted(raw);
@@ -40,20 +47,19 @@ export function isOnboardingFiscalNfeRecebidasDashboardEnabled(raw: unknown): bo
 }
 
 /**
- * Fase pós-interpretação: `sync` false (interpretação terminou) e `completed` ainda não true.
+ * Fase legada de confirmação manual — desativada no pipeline novo
+ * (`capture_completed` / `completed` são automáticos).
  */
 export function isOnboardingFiscalInterpretConfirmPhase(raw: unknown): boolean {
-  const o = onboardingFiscalObject(raw);
-  if (!o) return false;
-  if (!syncFlagIsExplicitOff(o.sync)) return false;
-  if (isOnboardingFiscalJsonCompleted(raw)) return false;
-  return true;
+  void raw;
+  return false;
 }
 
-/** Sincronização fiscal em curso (`sync` ativo e etapa ainda não concluída). */
+/** Sincronização fiscal em curso (`sync` ativo e captura/conclusão ainda pendentes). */
 export function isFiscalOnboardingSyncInProgress(raw: unknown): boolean {
   return (
     isOnboardingFiscalNfeRecebidasDashboardEnabled(raw) &&
+    !isOnboardingFiscalCaptureCompleted(raw) &&
     !isOnboardingFiscalJsonCompleted(raw)
   );
 }
