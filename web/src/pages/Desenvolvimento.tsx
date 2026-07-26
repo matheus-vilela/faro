@@ -10,6 +10,8 @@ import {
   NfeUnitPriceBreakdownCard,
   type NfeUnitPricePreviewResult,
 } from "@/components/desenvolvimento/NfeUnitPriceBreakdownCard";
+import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFaturamentoExportCard";
+import { EpocFaturamentoInterpretCard } from "@/components/desenvolvimento/EpocFaturamentoInterpretCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -312,6 +314,10 @@ export function Desenvolvimento() {
       <UnitSetupResetCard />
 
       <OnboardingResetCard />
+
+      <EpocFaturamentoExportCard />
+
+      <EpocFaturamentoInterpretCard />
 
       <div className="flex flex-wrap gap-2 border-b border-border pb-px">
         <button
