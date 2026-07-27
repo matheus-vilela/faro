@@ -1,5 +1,6 @@
 import type { MonthYear } from "@/components/MonthSelector";
 import { computeBudgetComparison } from "@/lib/budget/computeBudgetComparison";
+import { fetchActualAvg3Months } from "@/lib/budget/fetchActualAvg3Months";
 import { fetchActualByCategory } from "@/lib/budget/fetchActualByCategory";
 import { fetchCategoryBudgets } from "@/lib/budget/fetchCategoryBudgets";
 import {
@@ -74,6 +75,9 @@ export function useBudgetComparison(
   const [actualByCategoryId, setActualByCategoryId] = useState<
     Map<string, number>
   >(new Map());
+  const [avg3mByCategoryId, setAvg3mByCategoryId] = useState<
+    Map<string, number>
+  >(new Map());
   const [basis, setBasisState] = useState<BudgetBasis>(
     DEFAULT_BUDGET_PREFS.basis,
   );
@@ -99,6 +103,7 @@ export function useBudgetComparison(
       setCategories([]);
       setBudgets([]);
       setActualByCategoryId(new Map());
+      setAvg3mByCategoryId(new Map());
       setLoading(false);
       setError(null);
       return;
@@ -120,19 +125,22 @@ export function useBudgetComparison(
       const cats = (catRes.data ?? []) as CompanyCategory[];
       const categoriesById = new Map(cats.map((c) => [c.id, c]));
 
-      const [budgetRows, actualMap] = await Promise.all([
+      const [budgetRows, actualMap, avgMap] = await Promise.all([
         fetchCategoryBudgets(companyId, period.year, period.month),
         fetchActualByCategory(companyId, period, basis, categoriesById),
+        fetchActualAvg3Months(companyId, period, basis),
       ]);
 
       setCategories(cats);
       setBudgets(budgetRows);
       setActualByCategoryId(actualMap);
+      setAvg3mByCategoryId(avgMap);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar orçamento.");
       setCategories([]);
       setBudgets([]);
       setActualByCategoryId(new Map());
+      setAvg3mByCategoryId(new Map());
     } finally {
       setLoading(false);
     }
@@ -226,6 +234,7 @@ export function useBudgetComparison(
     periodLabel,
     savingCategoryId,
     bulkActionLoading,
+    avg3mByCategoryId,
     saveBudget,
     copyFromPreviousMonth,
     clearMonthBudgets,

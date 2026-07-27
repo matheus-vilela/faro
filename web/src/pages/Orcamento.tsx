@@ -40,6 +40,7 @@ export function Orcamento() {
     periodLabel,
     savingCategoryId,
     bulkActionLoading,
+    avg3mByCategoryId,
     saveBudget,
     copyFromPreviousMonth,
     clearMonthBudgets,
@@ -92,7 +93,7 @@ export function Orcamento() {
     <PageShell>
       <PageHeader
         title="Orçamento vs Realizado"
-        description="Defina metas de custo por categoria e acompanhe desvios no período."
+        description="Metas de custo/despesa por categoria — o realizado usa contas a pagar (não o lucro do DRE)."
         icon={Target}
       />
 
@@ -156,6 +157,7 @@ export function Orcamento() {
               onSaveBudget={handleSaveBudget}
               savingCategoryId={savingCategoryId}
               disabled={bulkActionLoading}
+              avg3mByCategoryId={avg3mByCategoryId}
             />
           )}
 

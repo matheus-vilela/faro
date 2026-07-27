@@ -10,14 +10,14 @@ const BASIS_OPTIONS: {
   {
     value: "competencia",
     label: "Competência",
-    description:
-      "Realizado pelos vencimentos no mês (mesma base do DRE). Inclui contas pendentes e pagas.",
+      description:
+      "Realizado pelos vencimentos no mês nas contas a pagar (despesas). Não inclui receitas nem o lucro do DRE.",
   },
   {
     value: "caixa",
     label: "Caixa",
     description:
-      "Realizado pelos pagamentos confirmados no mês (data de pagamento).",
+      "Realizado pelos pagamentos confirmados no mês (data de pagamento das contas a pagar).",
   },
 ];
 

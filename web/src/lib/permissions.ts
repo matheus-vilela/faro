@@ -25,7 +25,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   produtos: "Produtos e estoque",
   contas_a_pagar: "Contas a pagar",
   vendas_realizadas: "Vendas realizadas",
-  dre: "DRE",
+  dre: "DRE / Resultado",
   alertas: "Alertas",
   integracoes: "Integrações",
   configuracoes: "Configurações",

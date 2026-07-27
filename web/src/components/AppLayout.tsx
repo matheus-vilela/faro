@@ -175,7 +175,7 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         permission: "dre",
       },
       {
-        title: "DRE",
+        title: "DRE / Resultado",
         url: "/app/dre",
         icon: BarChart3,
         permission: "dre",
