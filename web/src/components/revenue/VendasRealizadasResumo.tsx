@@ -46,6 +46,29 @@ const PERIOD_OPTIONS: { value: ResumoPeriodFilter; label: string }[] = [
   { value: "month", label: "Este mês" },
 ];
 
+function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
+  return rows.map((raw) => {
+    const row = raw as {
+      faturamento_date: string;
+      amount: number | null;
+      payment_method_id: string;
+      payment_methods:
+        | { sku: string; name: string }
+        | { sku: string; name: string }[]
+        | null;
+    };
+    const pm = Array.isArray(row.payment_methods)
+      ? (row.payment_methods[0] ?? null)
+      : (row.payment_methods ?? null);
+    return {
+      faturamento_date: row.faturamento_date,
+      amount: row.amount,
+      payment_method_id: row.payment_method_id,
+      payment_methods: pm,
+    };
+  });
+}
+
 const RANKING_OPTIONS: { value: ResumoRankingMode; label: string }[] = [
   { value: "product", label: "Por produto" },
   { value: "payment", label: "Por tipo de transação" },
@@ -364,7 +387,7 @@ export function VendasRealizadasResumo() {
             .gte("faturamento_date", fetchStart)
             .lte("faturamento_date", fetchEnd)
             .order("faturamento_date", { ascending: true }),
-        ).then((rows) => rows as EpocPaymentLineInput[]),
+        ).then((rows) => normalizeEpocPaymentRows(rows)),
         fetchAllInRange(
           supabase
             .from("epoc_faturamento_daily")
@@ -375,7 +398,7 @@ export function VendasRealizadasResumo() {
             .gte("faturamento_date", fetchStart)
             .lte("faturamento_date", fetchEnd)
             .order("faturamento_date", { ascending: true }),
-        ).then((rows) => rows as EpocFaturamentoDayInput[]),
+        ).then((rows) => rows as unknown as EpocFaturamentoDayInput[]),
         supabase
           .from("company_categories")
           .select("*")

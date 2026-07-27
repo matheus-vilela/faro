@@ -244,7 +244,7 @@ export function FaturamentoEpoc() {
       <Pagination
         page={page}
         pageSize={PAGE_SIZE}
-        total={count}
+        totalCount={count}
         onPageChange={setPage}
       />
 
