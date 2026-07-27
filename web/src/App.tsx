@@ -116,7 +116,16 @@ function AuthenticatedLayout() {
           <Route path="faturamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FaturamentoEpoc /></PermissionRouteGuard>} />
           <Route path="formas-de-pagamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FormasPagamento /></PermissionRouteGuard>} />
           <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
-          <Route path="fluxo-de-caixa" element={<PermissionRouteGuard permission="contas_a_pagar"><FluxoDeCaixa /></PermissionRouteGuard>} />
+          <Route
+            path="fluxo-de-caixa"
+            element={
+              <PermissionRouteGuard
+                permissions={["contas_a_pagar", "vendas_realizadas"]}
+              >
+                <FluxoDeCaixa />
+              </PermissionRouteGuard>
+            }
+          />
           <Route
             path="boletos"
             element={<Navigate to="/app/contas-a-pagar" replace />}

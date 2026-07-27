@@ -1,5 +1,6 @@
 import { useCompany } from "@/contexts/CompanyContext";
 import {
+  hasAnyPermission,
   hasPermission,
   permissionKeyForPath,
   type PermissionKey,
@@ -9,10 +10,13 @@ import { Navigate, useLocation } from "react-router-dom";
 
 export function PermissionRouteGuard({
   permission,
+  permissions,
   children,
   ownerOnly = false,
 }: {
   permission?: PermissionKey;
+  /** Quando informado, exige ao menos uma das permissões listadas. */
+  permissions?: PermissionKey[];
   ownerOnly?: boolean;
   children: React.ReactNode;
 }) {
@@ -29,6 +33,13 @@ export function PermissionRouteGuard({
   }
 
   if (isOwnerRole(currentRole)) {
+    return <>{children}</>;
+  }
+
+  if (permissions?.length) {
+    if (!hasAnyPermission(currentPermissions, permissions)) {
+      return <Navigate to="/app" replace />;
+    }
     return <>{children}</>;
   }
 
