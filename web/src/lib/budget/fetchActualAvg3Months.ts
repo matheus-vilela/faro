@@ -1,5 +1,6 @@
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
+import type { MonthYear } from "@/components/MonthSelector";
 import { shiftMonth } from "@/lib/dre/dreInsight";
+import { getMonthYmdRange } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import type { BudgetBasis } from "./types";
 
@@ -19,24 +20,22 @@ export async function fetchActualAvg3Months(
 
   const first = months[2];
   const last = months[0];
-  const { start } = getMonthRange(first.month, first.year);
-  const { end } = getMonthRange(last.month, last.year);
-  const startDate = start.slice(0, 10);
-  const endDate = end.slice(0, 10);
+  const { startYmd } = getMonthYmdRange(first.month, first.year);
+  const { endYmd } = getMonthYmdRange(last.month, last.year);
 
   let query = supabase
     .from("boletos")
-    .select("amount, paid_amount, company_category_id, due_date, paid_at, status")
+    .select("amount, paid_amount, company_category_id, due_date, paid_at, status, flow_type")
     .eq("company_id", companyId)
-    .eq("flow_type", "payable");
+    .or("flow_type.eq.payable,flow_type.is.null");
 
   if (basis === "competencia") {
-    query = query.gte("due_date", startDate).lte("due_date", endDate);
+    query = query.gte("due_date", startYmd).lte("due_date", endYmd);
   } else {
     query = query
       .eq("status", "paid")
-      .gte("paid_at", `${startDate}T00:00:00`)
-      .lte("paid_at", `${endDate}T23:59:59.999`);
+      .gte("paid_at", `${startYmd}T00:00:00`)
+      .lte("paid_at", `${endYmd}T23:59:59.999`);
   }
 
   const { data, error } = await query;
@@ -44,12 +43,11 @@ export async function fetchActualAvg3Months(
 
   const sums = new Map<string, number>();
   const monthKeys = new Set(
-    months.map(
-      (m) => `${m.year}-${String(m.month).padStart(2, "0")}`,
-    ),
+    months.map((m) => `${m.year}-${String(m.month).padStart(2, "0")}`),
   );
 
   for (const row of data ?? []) {
+    if (row.flow_type === "receivable") continue;
     const catId = row.company_category_id as string | null;
     if (!catId) continue;
 

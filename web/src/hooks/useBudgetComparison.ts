@@ -78,6 +78,9 @@ export function useBudgetComparison(
   const [avg3mByCategoryId, setAvg3mByCategoryId] = useState<
     Map<string, number>
   >(new Map());
+  const [salesCmv, setSalesCmv] = useState(0);
+  const [semCategoriaCount, setSemCategoriaCount] = useState(0);
+  const [semCategoriaTotal, setSemCategoriaTotal] = useState(0);
   const [basis, setBasisState] = useState<BudgetBasis>(
     DEFAULT_BUDGET_PREFS.basis,
   );
@@ -104,6 +107,9 @@ export function useBudgetComparison(
       setBudgets([]);
       setActualByCategoryId(new Map());
       setAvg3mByCategoryId(new Map());
+      setSalesCmv(0);
+      setSemCategoriaCount(0);
+      setSemCategoriaTotal(0);
       setLoading(false);
       setError(null);
       return;
@@ -125,7 +131,7 @@ export function useBudgetComparison(
       const cats = (catRes.data ?? []) as CompanyCategory[];
       const categoriesById = new Map(cats.map((c) => [c.id, c]));
 
-      const [budgetRows, actualMap, avgMap] = await Promise.all([
+      const [budgetRows, actualRes, avgMap] = await Promise.all([
         fetchCategoryBudgets(companyId, period.year, period.month),
         fetchActualByCategory(companyId, period, basis, categoriesById),
         fetchActualAvg3Months(companyId, period, basis),
@@ -133,14 +139,20 @@ export function useBudgetComparison(
 
       setCategories(cats);
       setBudgets(budgetRows);
-      setActualByCategoryId(actualMap);
+      setActualByCategoryId(actualRes.byCategoryId);
       setAvg3mByCategoryId(avgMap);
+      setSalesCmv(actualRes.salesCmv);
+      setSemCategoriaCount(actualRes.semCategoriaCount);
+      setSemCategoriaTotal(actualRes.semCategoriaTotal);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar orçamento.");
       setCategories([]);
       setBudgets([]);
       setActualByCategoryId(new Map());
       setAvg3mByCategoryId(new Map());
+      setSalesCmv(0);
+      setSemCategoriaCount(0);
+      setSemCategoriaTotal(0);
     } finally {
       setLoading(false);
     }
@@ -151,15 +163,21 @@ export function useBudgetComparison(
   }, [load]);
 
   const comparison: BudgetComparisonResult | null = useMemo(() => {
-    if (!categories.length && !budgets.length && actualByCategoryId.size === 0) {
+    if (
+      !categories.length &&
+      !budgets.length &&
+      actualByCategoryId.size === 0 &&
+      salesCmv <= 0
+    ) {
       return null;
     }
     return computeBudgetComparison({
       categories,
       budgets,
       actualByCategoryId,
+      salesCmv,
     });
-  }, [categories, budgets, actualByCategoryId]);
+  }, [categories, budgets, actualByCategoryId, salesCmv]);
 
   const expenseCategoryCount = useMemo(
     () => categories.filter((c) => c.natureza === "DESPESA" && c.ativo !== false).length,
@@ -208,6 +226,30 @@ export function useBudgetComparison(
     }
   }, [companyId, period.month, period.year, load]);
 
+  const applyAvg3mAsBudget = useCallback(async () => {
+    if (!companyId || avg3mByCategoryId.size === 0) return 0;
+    setBulkActionLoading(true);
+    try {
+      let count = 0;
+      for (const [categoryId, amount] of avg3mByCategoryId) {
+        const rounded = Math.round(amount * 100) / 100;
+        if (rounded <= 0) continue;
+        await upsertCategoryBudget({
+          companyId,
+          categoryId,
+          year: period.year,
+          month: period.month,
+          amount: rounded,
+        });
+        count += 1;
+      }
+      await load();
+      return count;
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }, [companyId, avg3mByCategoryId, period.month, period.year, load]);
+
   const clearMonthBudgets = useCallback(async () => {
     if (!companyId) return;
     setBulkActionLoading(true);
@@ -235,8 +277,12 @@ export function useBudgetComparison(
     savingCategoryId,
     bulkActionLoading,
     avg3mByCategoryId,
+    semCategoriaCount,
+    semCategoriaTotal,
+    salesCmv,
     saveBudget,
     copyFromPreviousMonth,
+    applyAvg3mAsBudget,
     clearMonthBudgets,
     reload: load,
   };

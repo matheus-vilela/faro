@@ -11,7 +11,7 @@ const BASIS_OPTIONS: {
     value: "competencia",
     label: "Competência",
       description:
-      "Realizado pelos vencimentos no mês nas contas a pagar (despesas). Não inclui receitas nem o lucro do DRE.",
+      "Realizado pelos vencimentos no mês nas contas a pagar + CMV de vendas. Não é o lucro do DRE.",
   },
   {
     value: "caixa",

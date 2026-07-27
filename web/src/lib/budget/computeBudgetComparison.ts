@@ -207,6 +207,8 @@ export function computeBudgetComparison(input: {
   categories: CompanyCategory[];
   budgets: CategoryBudgetRow[];
   actualByCategoryId: Map<string, number>;
+  /** CMV de vendas (fichas) — soma no bucket CMV. */
+  salesCmv?: number;
 }): BudgetComparisonResult {
   const expenseCats = expenseCategories(input.categories);
   const byId = new Map(expenseCats.map((c) => [c.id, c]));
@@ -224,6 +226,8 @@ export function computeBudgetComparison(input: {
   for (const [id, amount] of input.actualByCategoryId) {
     if (byId.has(id)) actualByCategoryId.set(id, amount);
   }
+
+  const salesCmv = Math.max(0, input.salesCmv ?? 0);
 
   const sections: BudgetComparisonNode[] = [];
 
@@ -270,6 +274,22 @@ export function computeBudgetComparison(input: {
         ),
       )
       .filter((n): n is BudgetComparisonNode => n != null);
+
+    // CMV de vendas: nó sintético quando não há boleto CMV correspondente
+    if (bucket === "CMV" && salesCmv > 0) {
+      children.push({
+        id: "__sales_cmv__",
+        name: "CMV de vendas (fichas)",
+        isLeaf: false,
+        budgeted: 0,
+        actual: salesCmv,
+        variance: salesCmv,
+        percentConsumed: null,
+        status: "no_budget",
+        children: [],
+        dreBucket: "CMV",
+      });
+    }
 
     if (children.length === 0) continue;
 
