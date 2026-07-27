@@ -4,8 +4,8 @@ import { isProjectedBoleto } from "@/lib/expenseSeriesProjection";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import type { Boleto } from "@/types/expense";
-import { toCashFlowItem } from "./computeCashFlowProjection";
-import type { CashFlowItem, HorizonWeeks, ScenarioKey } from "./types";
+import { toRawCashFlowItem } from "./computeCashFlowProjection";
+import type { HorizonWeeks, RawCashFlowItem } from "./types";
 import { getCashFlowFetchRange } from "./computeCashFlowProjection";
 
 type ReceivableBoletoRow = Pick<
@@ -24,10 +24,9 @@ export async function fetchKnownCashFlowItems(input: {
   companyId: string;
   todayYmd: string;
   horizonWeeks: HorizonWeeks;
-  scenario: ScenarioKey;
   includePayables: boolean;
   includeReceivables: boolean;
-}): Promise<CashFlowItem[]> {
+}): Promise<RawCashFlowItem[]> {
   const { startYmd, endYmd } = getCashFlowFetchRange(
     input.todayYmd,
     input.horizonWeeks,
@@ -53,19 +52,18 @@ export async function fetchKnownCashFlowItems(input: {
       : Promise.resolve([]),
   ]);
 
-  const items: CashFlowItem[] = [];
+  const items: RawCashFlowItem[] = [];
 
   for (const b of payables) {
     if (!isPendingCashFlowBoleto(b)) continue;
     if (!isProjectedBoleto(b) && !boletoVisibleInFluxo(b)) continue;
 
     items.push(
-      toCashFlowItem({
+      toRawCashFlowItem({
         id: String(b.id),
         direction: "outflow",
         amount: Number(b.amount) || 0,
         dueDateYmd: String(b.due_date).slice(0, 10),
-        scenario: input.scenario,
         description: b.description ?? undefined,
         isProjected: isProjectedBoleto(b),
       }),
@@ -76,12 +74,11 @@ export async function fetchKnownCashFlowItems(input: {
     if (!boletoVisibleInFluxo(b)) continue;
 
     items.push(
-      toCashFlowItem({
+      toRawCashFlowItem({
         id: String(b.id),
         direction: "inflow",
         amount: Number(b.amount) || 0,
         dueDateYmd: String(b.due_date).slice(0, 10),
-        scenario: input.scenario,
         description: b.description ?? undefined,
       }),
     );

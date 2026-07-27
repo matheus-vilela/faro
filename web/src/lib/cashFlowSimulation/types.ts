@@ -1,13 +1,22 @@
 export type CashFlowDirection = "inflow" | "outflow";
 
-export type CashFlowItem = {
+/** Item bruto vindo do banco (sem offset de cenário). */
+export type RawCashFlowItem = {
   id: string;
   direction: CashFlowDirection;
   amount: number;
   dueDateYmd: string;
-  simulatedDateYmd: string;
   description?: string;
   isProjected?: boolean;
+};
+
+export type CashFlowItem = RawCashFlowItem & {
+  simulatedDateYmd: string;
+};
+
+export type CashFlowBucketItem = CashFlowItem & {
+  isOverdue: boolean;
+  clampedToHorizon: boolean;
 };
 
 export type ScenarioKey = "base" | "optimistic" | "pessimistic";
@@ -29,6 +38,7 @@ export type PeriodBucket = {
   outflows: number;
   netFlow: number;
   runningBalance: number;
+  items: CashFlowBucketItem[];
 };
 
 export type CashFlowProjectionKpis = {
@@ -39,9 +49,31 @@ export type CashFlowProjectionKpis = {
   endingBalance: number;
 };
 
+export type CashFlowProjectionMeta = {
+  /** Itens alocados na última semana por extrapolação do cenário. */
+  clampedToLastBucketCount: number;
+};
+
 export type CashFlowProjection = {
   buckets: PeriodBucket[];
   kpis: CashFlowProjectionKpis;
+  meta: CashFlowProjectionMeta;
+};
+
+export type CashFlowDiagnostics = {
+  pendingInHorizon: number;
+  pendingOutsideHorizon: number;
+  overduePendingCount: number;
+  overduePendingPayablesAmount: number;
+  overduePendingReceivablesAmount: number;
+};
+
+export type OpeningBalanceHint = {
+  paidInflows30: number;
+  paidOutflows30: number;
+  netPaid30: number;
+  overduePendingPayablesAmount: number;
+  overduePendingReceivablesAmount: number;
 };
 
 export const DEFAULT_CASH_FLOW_PREFS: CashFlowSimulationPrefs = {

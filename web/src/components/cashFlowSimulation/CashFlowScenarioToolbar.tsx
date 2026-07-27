@@ -22,7 +22,10 @@ export function CashFlowScenarioToolbar({
   onHorizonChange: (value: HorizonWeeks) => void;
   disabled?: boolean;
 }) {
+  const activeScenario = SCENARIO_OPTIONS.find((o) => o.value === scenario);
+
   return (
+    <div className="space-y-2">
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <div
         className="inline-flex w-fit max-w-full flex-wrap rounded-full bg-muted p-1"
@@ -80,6 +83,10 @@ export function CashFlowScenarioToolbar({
           );
         })}
       </div>
+    </div>
+    {activeScenario ? (
+      <p className="text-xs text-muted-foreground">{activeScenario.description}</p>
+    ) : null}
     </div>
   );
 }

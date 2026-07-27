@@ -1,3 +1,4 @@
+import { CashFlowEmptyState } from "@/components/cashFlowSimulation/CashFlowEmptyState";
 import { CashFlowKpiCards } from "@/components/cashFlowSimulation/CashFlowKpiCards";
 import { CashFlowOpeningBalanceInput } from "@/components/cashFlowSimulation/CashFlowOpeningBalanceInput";
 import { CashFlowPeriodTable } from "@/components/cashFlowSimulation/CashFlowPeriodTable";
@@ -25,8 +26,12 @@ export function FluxoDeCaixa() {
     loading,
     error,
     projection,
-    itemCount,
+    diagnostics,
+    openingBalanceHint,
+    hasVisibleMovements,
     partialAccess,
+    includePayables,
+    includeReceivables,
     setScenario,
     setHorizonWeeks,
     setOpeningBalance,
@@ -36,6 +41,8 @@ export function FluxoDeCaixa() {
     currentPermissions,
     isCompanyOwner,
   );
+
+  const showEmptyState = !loading && !error && !hasVisibleMovements;
 
   return (
     <PageShell>
@@ -56,6 +63,8 @@ export function FluxoDeCaixa() {
       <CashFlowOpeningBalanceInput
         value={prefs.openingBalance}
         onChange={setOpeningBalance}
+        hint={openingBalanceHint}
+        loadingHint={loading}
         disabled={loading}
       />
 
@@ -97,18 +106,28 @@ export function FluxoDeCaixa() {
         formatCurrency={formatBrl}
       />
 
-      {!loading && !error && itemCount === 0 ? (
-        <Card className="border-border/80 shadow-sm">
-          <CardContent className="flex flex-col items-center gap-2 px-4 py-10 text-center sm:px-6">
-            <p className="text-sm font-medium text-foreground">
-              Nenhuma entrada ou saída pendente no horizonte
-            </p>
-            <p className="max-w-md text-sm text-muted-foreground">
-              Cadastre contas a pagar ou a receber para visualizar a projeção de
-              caixa nas próximas semanas.
-            </p>
+      {projection.meta.clampedToLastBucketCount > 0 && hasVisibleMovements ? (
+        <Card className="border-amber-500/30 bg-amber-500/5 shadow-sm">
+          <CardContent className="px-4 py-3 text-sm text-muted-foreground sm:px-5">
+            {projection.meta.clampedToLastBucketCount}{" "}
+            {projection.meta.clampedToLastBucketCount === 1
+              ? "conta foi alocada"
+              : "contas foram alocadas"}{" "}
+            na última semana porque o cenário empurrou o vencimento além do
+            horizonte selecionado.
           </CardContent>
         </Card>
+      ) : null}
+
+      {showEmptyState ? (
+        <CashFlowEmptyState
+          diagnostics={diagnostics}
+          partialAccess={partialAccess}
+          includePayables={includePayables}
+          includeReceivables={includeReceivables}
+          horizonWeeks={prefs.horizonWeeks}
+          clampedToLastBucketCount={projection.meta.clampedToLastBucketCount}
+        />
       ) : null}
 
       <CashFlowProjectionChart buckets={projection.buckets} loading={loading} />

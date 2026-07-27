@@ -1,10 +1,12 @@
 import { addDaysYmd } from "@/lib/payableTotals";
 import { applyScenarioOffset } from "./scenarioPresets";
 import type {
+  CashFlowBucketItem,
   CashFlowDirection,
   CashFlowItem,
   CashFlowProjection,
   HorizonWeeks,
+  RawCashFlowItem,
   ScenarioKey,
 } from "./types";
 
@@ -56,7 +58,7 @@ export function buildWeeklyBuckets(
   return buckets;
 }
 
-function findBucketIndex(
+function findBucketIndexInRange(
   dateYmd: string,
   buckets: { startYmd: string; endYmd: string }[],
 ): number | null {
@@ -78,6 +80,64 @@ export function resolveBucketAssignmentYmd(
   return simulatedDateYmd;
 }
 
+function resolveBucketIndex(
+  assignYmd: string,
+  weekDefs: { startYmd: string; endYmd: string }[],
+): { index: number; clampedToHorizon: boolean } {
+  const inRange = findBucketIndexInRange(assignYmd, weekDefs);
+  if (inRange != null) {
+    return { index: inRange, clampedToHorizon: false };
+  }
+
+  const lastIdx = weekDefs.length - 1;
+  if (lastIdx < 0) return { index: 0, clampedToHorizon: false };
+
+  if (assignYmd > weekDefs[lastIdx].endYmd) {
+    return { index: lastIdx, clampedToHorizon: true };
+  }
+
+  return { index: 0, clampedToHorizon: false };
+}
+
+export function toRawCashFlowItem(input: {
+  id: string;
+  direction: CashFlowDirection;
+  amount: number;
+  dueDateYmd: string;
+  description?: string;
+  isProjected?: boolean;
+}): RawCashFlowItem {
+  return {
+    id: input.id,
+    direction: input.direction,
+    amount: input.amount,
+    dueDateYmd: input.dueDateYmd.slice(0, 10),
+    description: input.description,
+    isProjected: input.isProjected,
+  };
+}
+
+export function applyScenarioToRawItems(
+  items: RawCashFlowItem[],
+  scenario: ScenarioKey,
+  todayYmd: string,
+): CashFlowItem[] {
+  return items.map((item) => {
+    const due = item.dueDateYmd.slice(0, 10);
+    // Vencidas pendentes: simular a partir de hoje para cenários alterarem a semana.
+    const anchorYmd = due < todayYmd ? todayYmd : due;
+    return {
+      ...item,
+      simulatedDateYmd: applyScenarioOffset(
+        anchorYmd,
+        item.direction,
+        scenario,
+      ),
+    };
+  });
+}
+
+/** @deprecated Use applyScenarioToRawItems + computeCashFlowProjection com rawItems. */
 export function toCashFlowItem(input: {
   id: string;
   direction: CashFlowDirection;
@@ -87,21 +147,9 @@ export function toCashFlowItem(input: {
   description?: string;
   isProjected?: boolean;
 }): CashFlowItem {
-  const dueDateYmd = input.dueDateYmd.slice(0, 10);
-  const simulatedDateYmd = applyScenarioOffset(
-    dueDateYmd,
-    input.direction,
-    input.scenario,
-  );
-  return {
-    id: input.id,
-    direction: input.direction,
-    amount: input.amount,
-    dueDateYmd,
-    simulatedDateYmd,
-    description: input.description,
-    isProjected: input.isProjected,
-  };
+  const raw = toRawCashFlowItem(input);
+  const todayYmd = input.dueDateYmd.slice(0, 10);
+  return applyScenarioToRawItems([raw], input.scenario, todayYmd)[0];
 }
 
 export function parseOpeningBalance(raw: unknown): number {
@@ -114,7 +162,8 @@ export function parseOpeningBalance(raw: unknown): number {
 }
 
 export function computeCashFlowProjection(input: {
-  items: CashFlowItem[];
+  rawItems: RawCashFlowItem[];
+  scenario: ScenarioKey;
   openingBalance: number;
   todayYmd: string;
   horizonWeeks: HorizonWeeks;
@@ -122,27 +171,54 @@ export function computeCashFlowProjection(input: {
   const openingBalance = parseOpeningBalance(input.openingBalance);
   const weekDefs = buildWeeklyBuckets(input.todayYmd, input.horizonWeeks);
   const firstBucketStart = weekDefs[0]?.startYmd ?? input.todayYmd;
+  const scenarioItems = applyScenarioToRawItems(
+    input.rawItems,
+    input.scenario,
+    input.todayYmd,
+  );
 
   const inflowsByBucket = new Array(weekDefs.length).fill(0);
   const outflowsByBucket = new Array(weekDefs.length).fill(0);
+  const itemsByBucket: CashFlowBucketItem[][] = weekDefs.map(() => []);
+  let clampedToLastBucketCount = 0;
 
-  for (const item of input.items) {
+  for (const item of scenarioItems) {
     const amount = Number(item.amount) || 0;
     if (amount <= 0) continue;
 
+    const isOverdue = item.dueDateYmd < input.todayYmd;
     const assignYmd = resolveBucketAssignmentYmd(
       item.simulatedDateYmd,
       input.todayYmd,
       firstBucketStart,
     );
-    const bucketIdx = findBucketIndex(assignYmd, weekDefs);
-    if (bucketIdx == null) continue;
+    const { index: bucketIdx, clampedToHorizon } = resolveBucketIndex(
+      assignYmd,
+      weekDefs,
+    );
+
+    if (clampedToHorizon) clampedToLastBucketCount += 1;
+
+    const bucketItem: CashFlowBucketItem = {
+      ...item,
+      isOverdue,
+      clampedToHorizon,
+    };
+    itemsByBucket[bucketIdx].push(bucketItem);
 
     if (item.direction === "inflow") {
       inflowsByBucket[bucketIdx] += amount;
     } else {
       outflowsByBucket[bucketIdx] += amount;
     }
+  }
+
+  for (const bucketItems of itemsByBucket) {
+    bucketItems.sort((a, b) => {
+      const dateCmp = a.simulatedDateYmd.localeCompare(b.simulatedDateYmd);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.description ?? "").localeCompare(b.description ?? "");
+    });
   }
 
   let runningBalance = openingBalance;
@@ -168,6 +244,7 @@ export function computeCashFlowProjection(input: {
       outflows,
       netFlow,
       runningBalance,
+      items: itemsByBucket[index],
     };
   });
 
@@ -179,6 +256,9 @@ export function computeCashFlowProjection(input: {
       totalOutflows,
       minBalance,
       endingBalance: runningBalance,
+    },
+    meta: {
+      clampedToLastBucketCount,
     },
   };
 }

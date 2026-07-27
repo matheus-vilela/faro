@@ -8,7 +8,7 @@ export type ScenarioOffsets = {
 
 const SCENARIO_OFFSETS: Record<ScenarioKey, ScenarioOffsets> = {
   base: { receivableDays: 0, payableDays: 0 },
-  optimistic: { receivableDays: -3, payableDays: 5 },
+  optimistic: { receivableDays: -3, payableDays: 7 },
   pessimistic: { receivableDays: 7, payableDays: 0 },
 };
 

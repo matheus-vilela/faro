@@ -1,12 +1,17 @@
 import { localDateYmd } from "@/lib/boletoPayment";
 import { computeCashFlowProjection } from "@/lib/cashFlowSimulation/computeCashFlowProjection";
+import { fetchCashFlowDiagnostics } from "@/lib/cashFlowSimulation/fetchCashFlowDiagnostics";
 import { fetchKnownCashFlowItems } from "@/lib/cashFlowSimulation/fetchKnownCashFlowItems";
+import { fetchOpeningBalanceHint } from "@/lib/cashFlowSimulation/fetchOpeningBalanceHint";
 import {
   CASH_FLOW_PREFS_STORAGE_PREFIX,
   DEFAULT_CASH_FLOW_PREFS,
+  type CashFlowDiagnostics,
   type CashFlowProjection,
   type CashFlowSimulationPrefs,
   type HorizonWeeks,
+  type OpeningBalanceHint,
+  type RawCashFlowItem,
   type ScenarioKey,
 } from "@/lib/cashFlowSimulation/types";
 import { hasPermission } from "@/lib/permissions";
@@ -67,6 +72,23 @@ const EMPTY_PROJECTION: CashFlowProjection = {
     minBalance: 0,
     endingBalance: 0,
   },
+  meta: { clampedToLastBucketCount: 0 },
+};
+
+const EMPTY_DIAGNOSTICS: CashFlowDiagnostics = {
+  pendingInHorizon: 0,
+  pendingOutsideHorizon: 0,
+  overduePendingCount: 0,
+  overduePendingPayablesAmount: 0,
+  overduePendingReceivablesAmount: 0,
+};
+
+const EMPTY_HINT: OpeningBalanceHint = {
+  paidInflows30: 0,
+  paidOutflows30: 0,
+  netPaid30: 0,
+  overduePendingPayablesAmount: 0,
+  overduePendingReceivablesAmount: 0,
 };
 
 export function useCashFlowSimulation(
@@ -79,10 +101,12 @@ export function useCashFlowSimulation(
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [projection, setProjection] = useState<CashFlowProjection>(
-    EMPTY_PROJECTION,
-  );
-  const [itemCount, setItemCount] = useState(0);
+  const [rawItems, setRawItems] = useState<RawCashFlowItem[]>([]);
+  const [todayYmd, setTodayYmd] = useState(() => localDateYmd());
+  const [diagnostics, setDiagnostics] =
+    useState<CashFlowDiagnostics>(EMPTY_DIAGNOSTICS);
+  const [openingBalanceHint, setOpeningBalanceHint] =
+    useState<OpeningBalanceHint>(EMPTY_HINT);
 
   const includePayables =
     isCompanyOwner || hasPermission(permissions, "contas_a_pagar");
@@ -121,57 +145,86 @@ export function useCashFlowSimulation(
     [setPrefs],
   );
 
-  const fetchProjection = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!companyId) {
-      setProjection(EMPTY_PROJECTION);
-      setItemCount(0);
+      setRawItems([]);
+      setDiagnostics(EMPTY_DIAGNOSTICS);
+      setOpeningBalanceHint(EMPTY_HINT);
       setLoading(false);
       return;
     }
 
     setLoading(true);
     setError(null);
-    const todayYmd = localDateYmd();
+    const fetchedTodayYmd = localDateYmd();
+    setTodayYmd(fetchedTodayYmd);
 
     try {
-      const items = await fetchKnownCashFlowItems({
+      const [items, hint] = await Promise.all([
+        fetchKnownCashFlowItems({
+          companyId,
+          todayYmd: fetchedTodayYmd,
+          horizonWeeks: prefs.horizonWeeks,
+          includePayables,
+          includeReceivables,
+        }),
+        fetchOpeningBalanceHint({
+          companyId,
+          todayYmd: fetchedTodayYmd,
+          includePayables,
+          includeReceivables,
+        }),
+      ]);
+
+      const diag = await fetchCashFlowDiagnostics({
         companyId,
-        todayYmd,
+        todayYmd: fetchedTodayYmd,
         horizonWeeks: prefs.horizonWeeks,
-        scenario: prefs.scenario,
+        pendingInHorizon: items.length,
         includePayables,
         includeReceivables,
       });
 
-      const result = computeCashFlowProjection({
-        items,
-        openingBalance: prefs.openingBalance,
-        todayYmd,
-        horizonWeeks: prefs.horizonWeeks,
-      });
-
-      setProjection(result);
-      setItemCount(items.length);
+      setRawItems(items);
+      setDiagnostics(diag);
+      setOpeningBalanceHint(hint);
     } catch (e) {
       console.error(e);
       setError("Não foi possível carregar a simulação de fluxo de caixa.");
-      setProjection(EMPTY_PROJECTION);
-      setItemCount(0);
+      setRawItems([]);
+      setDiagnostics(EMPTY_DIAGNOSTICS);
+      setOpeningBalanceHint(EMPTY_HINT);
     } finally {
       setLoading(false);
     }
   }, [
     companyId,
     prefs.horizonWeeks,
-    prefs.scenario,
-    prefs.openingBalance,
     includePayables,
     includeReceivables,
   ]);
 
   useEffect(() => {
-    void fetchProjection();
-  }, [fetchProjection]);
+    void fetchData();
+  }, [fetchData]);
+
+  const projection = useMemo(
+    () =>
+      computeCashFlowProjection({
+        rawItems,
+        scenario: prefs.scenario,
+        openingBalance: prefs.openingBalance,
+        todayYmd,
+        horizonWeeks: prefs.horizonWeeks,
+      }),
+    [
+      rawItems,
+      prefs.scenario,
+      prefs.openingBalance,
+      prefs.horizonWeeks,
+      todayYmd,
+    ],
+  );
 
   const partialAccess = useMemo(
     () =>
@@ -181,18 +234,25 @@ export function useCashFlowSimulation(
     [includePayables, includeReceivables, isCompanyOwner],
   );
 
+  const hasVisibleMovements = projection.kpis.totalInflows > 0 ||
+    projection.kpis.totalOutflows > 0;
+
   return {
     prefs,
     loading,
     error,
     projection,
-    itemCount,
+    rawItems,
+    diagnostics,
+    openingBalanceHint,
+    itemCount: rawItems.length,
+    hasVisibleMovements,
     includePayables,
     includeReceivables,
     partialAccess,
     setScenario,
     setHorizonWeeks,
     setOpeningBalance,
-    retry: fetchProjection,
+    retry: fetchData,
   };
 }
