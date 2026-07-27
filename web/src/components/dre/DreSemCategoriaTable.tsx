@@ -139,7 +139,7 @@ export function DreSemCategoriaTable({
       </div>
 
       <div className="w-full overflow-x-auto rounded-xl border border-border">
-        <table className="w-full min-w-[920px] border-collapse text-sm">
+        <table className="w-full min-w-[980px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/40 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="w-10 px-3 py-3">
@@ -156,7 +156,7 @@ export function DreSemCategoriaTable({
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Valor</th>
               <th className="px-4 py-3">Legado</th>
-              <th className="px-4 py-3 w-[8.5rem]" />
+              <th className="px-4 py-3 w-[9.5rem] whitespace-nowrap" />
             </tr>
           </thead>
           <tbody>
@@ -216,12 +216,17 @@ export function DreSemCategoriaTable({
                   <td className="px-4 py-3 align-middle text-xs text-muted-foreground">
                     {legacyLabel}
                   </td>
-                  <td className="px-4 py-3 align-middle">
+                  <td className="px-4 py-3 align-middle whitespace-nowrap">
                     {link ? (
-                      <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 gap-1.5 whitespace-nowrap px-2"
+                        asChild
+                      >
                         <Link to={link.to}>
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          <span className="sr-only sm:not-sr-only">{link.label}</span>
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          <span>{link.label}</span>
                         </Link>
                       </Button>
                     ) : null}
