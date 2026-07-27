@@ -4,8 +4,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { VendasRealizadasResumo } from "@/components/revenue/VendasRealizadasResumo";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { CalendarDays, LayoutDashboard, TrendingUp } from "lucide-react";
+import { CalendarDays, CreditCard, LayoutDashboard, Receipt, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 
 type VendasTab = "resumo" | "calendario";
@@ -74,13 +76,44 @@ export function VendasRealizadasFluxo() {
   }
 
   return (
-    <PageShell>
+    <PageShell className="space-y-6">
       <PageHeader
         title="Vendas realizadas"
-        description="Panorama das vendas e calendário de recebimentos"
+        description="Panorama das vendas e calendário de recebimentos. O faturamento diário do PDV (EPOC) fica numa vista separada."
         icon={TrendingUp}
       />
       {tabToggle}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4">
+            <Receipt className="text-muted-foreground mt-0.5 size-5 shrink-0" />
+            <div className="min-w-0 space-y-2">
+              <p className="text-sm font-medium">Faturamento EPOC</p>
+              <p className="text-muted-foreground text-xs">
+                Consulte o Total Geral, produtos/serviços, fiscal e formas de
+                pagamento por dia, gravados na sincronização.
+              </p>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link to="/app/faturamento">Ver faturamento</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4">
+            <CreditCard className="text-muted-foreground mt-0.5 size-5 shrink-0" />
+            <div className="min-w-0 space-y-2">
+              <p className="text-sm font-medium">Formas de pagamento</p>
+              <p className="text-muted-foreground text-xs">
+                Visualize e ajuste os nomes das formas usadas no faturamento.
+              </p>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link to="/app/formas-de-pagamento">Configurar</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
       <VendasRealizadasResumo />
     </PageShell>
   );

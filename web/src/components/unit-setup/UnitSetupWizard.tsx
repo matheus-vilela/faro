@@ -43,7 +43,8 @@ import { formatNormalizedForDisplay } from "@/lib/whatsappPhone";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { invokeValidateEpocLogin } from "@/services/epocValidateLoginService";
-import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
+import { triggerEpocPipelineInBackground } from "@/services/epocPipelineService";
+import { patchCompanyOnboardingPdv } from "@/lib/onboardingPdvPatch";
 import {
   focusAtualizarCertificado,
   hasFocusNfeEmpresaId,
@@ -64,6 +65,7 @@ import {
   createSetupCertificateDelegationLink,
   getActiveSetupCertificateDelegationLink,
 } from "@/services/setupCertificateDelegationService";
+import { invokeNfePipelineForCompany } from "@/services/nfePipelineService";
 import {
   buildCompletedSetup,
   buildPausedSetup,
@@ -594,6 +596,13 @@ export function UnitSetupWizard({
       });
     }
     toast.success("Unidade criada na Faro.");
+    if (focusnfeForDb.id_empresa != null) {
+      void invokeNfePipelineForCompany({ companyId: created.companyId }).then(
+        (r) => {
+          if (!r.ok) console.warn("[UnitSetup] nfe-dispatcher", r.error);
+        },
+      );
+    }
     return true;
   };
 
@@ -1170,10 +1179,23 @@ export function UnitSetupWizard({
             return;
           }
           if (enabled && (epOut.base_url ?? "").trim()) {
-            triggerEpocCsvSyncInBackground(companyId, {
-              sync_mode: "onboarding_initial",
-              lockOnboardingPdv: true,
+            void patchCompanyOnboardingPdv(companyId, {
+              sync: true,
+              completed: false,
+              sales_total: 0,
+              sales_sync: 0,
+              portal_busy: true,
+              portal_outcome: null,
+              portal_message: null,
+              import_status: null,
+              import_error: null,
+              csv_import_job_id: null,
+              csv_storage_path: null,
+              import_started_at: null,
+            }).then((r) => {
+              if (r.error) console.warn("[UnitSetup] onboarding_pdv", r.error);
             });
+            triggerEpocPipelineInBackground(companyId, { mode: "onboarding" });
             void refetchCompanies();
             toast.message(
               "Sincronização EPOC em segundo plano: período desde o início do mês anterior até ontem.",

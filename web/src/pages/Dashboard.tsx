@@ -1,6 +1,7 @@
 import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
 import { DashboardPurchasesSection } from "@/components/dashboard/DashboardPurchasesSection";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
+import { DashboardEpocPartialSyncCard } from "@/components/dashboard/DashboardEpocPartialSyncCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
 import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
@@ -67,6 +68,9 @@ export function Dashboard() {
       ) : null}
       {companyId ? (
         <DashboardEpocDailySyncAlertCard companyId={companyId} />
+      ) : null}
+      {companyId ? (
+        <DashboardEpocPartialSyncCard companyId={companyId} />
       ) : null}
       {/* {currentCompany ? <SetupProgressCard /> : null} */}
 

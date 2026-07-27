@@ -1,13 +1,17 @@
 import type { ItemWithProductMatch } from "../../received-whatsapp-message/productMatch.ts";
+import { createProductWithStockIn } from "../createProductWithStockIn.ts";
 import { canonicalProductName } from "../productImport/canonicalName.ts";
+import {
+  loadSupplierProductMatchHints,
+  matchExistingProductFromNfeXmlLine,
+} from "../productImport/matchExistingProductFromNfeXml.ts";
 import { invoiceLabelMatchesMergedCatalog } from "../productImport/mergedCatalogMatch.ts";
+import { normalizeCProd } from "../productImport/productSupplierCodes.ts";
 import type { ImportItemResolutionStatus } from "../productImport/resolutionStatus.ts";
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
-import { appendProductUnitConversionOnProduct } from "../productUnitConversionsOnProduct.ts";
 import {
   autoCatalogStockUnitWithOptionalUnPack,
   catalogRegistrationNameFromNfeLine,
-  insertProductUnitConversions,
 } from "./newProductCatalogFromNfe.ts";
 import type { NfeCatalogLineResolution } from "./types.ts";
 
@@ -72,18 +76,165 @@ export function mapResolution(
   return "PENDING_REVIEW";
 }
 
+function stockQtyAndUnitValueForMotorLine(
+  item: ExtractedExpenseItem,
+  pm: NonNullable<ItemWithProductMatch["productMatch"]>,
+): { quantity: number; unitValue: number } {
+  const qty =
+    pm.stockQuantity != null && Number(pm.stockQuantity) > 0
+      ? Number(pm.stockQuantity)
+      : Math.max(0, Number(item.quantity) || 0);
+  const unitValue = Math.round((Number(item.unitValue) || 0) * 100) / 100;
+  return { quantity: qty, unitValue };
+}
+
+async function insertMotorProductWithStock(
+  supabase: SupabaseClient,
+  companyId: string,
+  item: ExtractedExpenseItem,
+  pm: NonNullable<ItemWithProductMatch["productMatch"]>,
+  logTag: string,
+  supplierId?: string | null,
+): Promise<{ productId: string | null; created: boolean; stockApplied: boolean }> {
+  const name = catalogRegistrationNameFromNfeLine(item, pm);
+  if (!name) return { productId: null, created: false, stockApplied: false };
+
+  const { data: catalogRows } = await supabase
+    .from("products")
+    .select(
+      "id, name, unit, barcode, ean, ncm, sku, canonical_name, merged_catalog_names, is_active",
+    )
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .limit(8000);
+  const catalog = Array.isArray(catalogRows) ? catalogRows : [];
+  const supplierHints = await loadSupplierProductMatchHints(
+    supabase,
+    companyId,
+    supplierId,
+  );
+  const xmlMatch = await matchExistingProductFromNfeXmlLine({
+    supabase,
+    companyId,
+    supplierId,
+    supplierHints,
+    catalog,
+    line: {
+      nome: String(item.productName ?? name),
+      codigo: normalizeCProd(item.productCode),
+      ean: item.ean ?? null,
+      ncm: item.ncm ?? null,
+      unidade_comercial: item.unitCommercial ?? null,
+      unidade_tributavel: item.unitTax ?? null,
+      quantidade_comercial: item.quantityCommercial ?? item.quantity,
+      quantidade_tributavel: item.quantityTax ?? null,
+      quantidade: item.quantity,
+    },
+  });
+  if (xmlMatch?.productId) {
+    return {
+      productId: xmlMatch.productId,
+      created: false,
+      stockApplied: false,
+    };
+  }
+
+  const existingId = await findExistingProductIdForCatalogName(
+    supabase,
+    companyId,
+    name,
+  );
+  if (existingId) {
+    return { productId: existingId, created: false, stockApplied: false };
+  }
+
+  const { quantity, unitValue } = stockQtyAndUnitValueForMotorLine(item, pm);
+  if (quantity <= 0) {
+    console.error(logTag, "produto_skip_sem_movimentacao", {
+      nome: name,
+      quantity: item.quantity,
+    });
+    return { productId: null, created: false, stockApplied: false };
+  }
+
+  const cn = canonicalProductName(name);
+  const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
+    item,
+    pm,
+  );
+  const insertRow: Record<string, unknown> = {
+    name,
+    unit: stockUnit,
+    ncm: item.ncm ? String(item.ncm).trim() || null : null,
+    ean: item.ean ? String(item.ean).replace(/\D/g, "") || null : null,
+    canonical_name: cn || null,
+    min_quantity: 0,
+    is_active: true,
+    stock_control_type: "DIRECT",
+  };
+  if (pack) {
+    insertRow.import_unit_needs_review = false;
+    insertRow.import_unit_raw = null;
+  }
+
+  const unitConversions =
+    conversions.length > 0
+      ? conversions
+      : pack
+        ? [
+            {
+              primary_qty: 1,
+              primary_unit_code: stockUnit,
+              secondary_qty: pack.secondary_qty,
+              secondary_unit_code: pack.secondary_unit_code,
+            },
+          ]
+        : [];
+
+  const created = await createProductWithStockIn(supabase, {
+    companyId,
+    product: insertRow,
+    quantity,
+    unitValue,
+    referenceType: "nfe_motor_create",
+    unitConversions,
+  });
+  if (created.error || !created.productId) {
+    console.error(logTag, "create product+stock:", created.error ?? "unknown");
+    return { productId: null, created: false, stockApplied: false };
+  }
+  if (pack) {
+    await supabase
+      .from("products")
+      .update({
+        import_unit_needs_review: false,
+        import_unit_raw: null,
+      })
+      .eq("id", created.productId)
+      .eq("company_id", companyId);
+  }
+  return {
+    productId: created.productId,
+    created: true,
+    stockApplied: true,
+  };
+}
+
 export async function ensureProductForLine(
   supabase: SupabaseClient,
   companyId: string,
   item: ExtractedExpenseItem,
   pm: NonNullable<ItemWithProductMatch["productMatch"]>,
-): Promise<{ productId: string | null; created: boolean }> {
+  supplierId?: string | null,
+): Promise<{ productId: string | null; created: boolean; stockApplied: boolean }> {
   const existing = String(pm.resolvedProductId ?? "").trim();
-  if (existing) return { productId: existing, created: false };
+  if (existing) {
+    return { productId: existing, created: false, stockApplied: false };
+  }
 
   const suggestedId = String(pm.suggestedProductId ?? "").trim();
   if (suggestedId && pm.resolutionStatus === "NEW_PRODUCT_STAGED") {
-    return { productId: null, created: false };
+    return { productId: null, created: false, stockApplied: false };
   }
 
   const blockStatuses: ImportItemResolutionStatus[] = [
@@ -92,66 +243,17 @@ export async function ensureProductForLine(
     "PENDING_USER_CONFIRM",
   ];
   if (blockStatuses.includes(pm.resolutionStatus as ImportItemResolutionStatus)) {
-    return { productId: null, created: false };
+    return { productId: null, created: false, stockApplied: false };
   }
 
-  const name = catalogRegistrationNameFromNfeLine(item, pm);
-  if (!name) return { productId: null, created: false };
-
-  const existingId = await findExistingProductIdForCatalogName(
+  return insertMotorProductWithStock(
     supabase,
     companyId,
-    name,
-  );
-  if (existingId) return { productId: existingId, created: false };
-
-  const cn = canonicalProductName(name);
-  const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
     item,
     pm,
+    "[nfeExpenseMotor]",
+    supplierId,
   );
-  const insertRow: Record<string, unknown> = {
-    company_id: companyId,
-    name,
-    unit: stockUnit,
-    ncm: item.ncm ? String(item.ncm).trim() || null : null,
-    canonical_name: cn || null,
-    min_quantity: 0,
-    current_quantity: 0,
-    is_active: true,
-    stock_control_type: "DIRECT",
-  };
-  if (pack) {
-    insertRow.import_unit_needs_review = false;
-    insertRow.import_unit_raw = null;
-  }
-  const { data: ins, error } = await supabase
-    .from("products")
-    .insert(insertRow)
-    .select("id")
-    .single();
-  if (error || !ins?.id) {
-    console.error("[nfeExpenseMotor] create product:", error?.message ?? "unknown");
-    return { productId: null, created: false };
-  }
-  const pid = String(ins.id);
-  if (conversions.length > 0) {
-    await insertProductUnitConversions(
-      supabase,
-      companyId,
-      pid,
-      conversions,
-      "[nfeExpenseMotor]",
-    );
-  } else if (pack) {
-    await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
-      primary_qty: 1,
-      primary_unit_code: stockUnit,
-      secondary_qty: pack.secondary_qty,
-      secondary_unit_code: pack.secondary_unit_code,
-    });
-  }
-  return { productId: pid, created: true };
 }
 
 export async function createProductAutoWhenNoReviewQueue(
@@ -159,65 +261,14 @@ export async function createProductAutoWhenNoReviewQueue(
   companyId: string,
   item: ExtractedExpenseItem,
   pm: NonNullable<ItemWithProductMatch["productMatch"]>,
-): Promise<{ productId: string | null; created: boolean }> {
-  const name = catalogRegistrationNameFromNfeLine(item, pm);
-  if (!name) return { productId: null, created: false };
-
-  const existingId = await findExistingProductIdForCatalogName(
+  supplierId?: string | null,
+): Promise<{ productId: string | null; created: boolean; stockApplied: boolean }> {
+  return insertMotorProductWithStock(
     supabase,
     companyId,
-    name,
-  );
-  if (existingId) return { productId: existingId, created: false };
-
-  const cn = canonicalProductName(name);
-  const { stockUnit, pack, conversions } = autoCatalogStockUnitWithOptionalUnPack(
     item,
     pm,
+    "[nfeExpenseMotor] createProductAutoWhenNoReviewQueue",
+    supplierId,
   );
-  const insertRow: Record<string, unknown> = {
-    company_id: companyId,
-    name,
-    unit: stockUnit,
-    ncm: item.ncm ? String(item.ncm).trim() || null : null,
-    canonical_name: cn || null,
-    min_quantity: 0,
-    current_quantity: 0,
-    is_active: true,
-    stock_control_type: "DIRECT",
-  };
-  if (pack) {
-    insertRow.import_unit_needs_review = false;
-    insertRow.import_unit_raw = null;
-  }
-  const { data: ins, error } = await supabase
-    .from("products")
-    .insert(insertRow)
-    .select("id")
-    .single();
-  if (error || !ins?.id) {
-    console.error(
-      "[nfeExpenseMotor] createProductAutoWhenNoReviewQueue:",
-      error?.message ?? "unknown",
-    );
-    return { productId: null, created: false };
-  }
-  const pid = String(ins.id);
-  if (conversions.length > 0) {
-    await insertProductUnitConversions(
-      supabase,
-      companyId,
-      pid,
-      conversions,
-      "[nfeExpenseMotor]",
-    );
-  } else if (pack) {
-    await appendProductUnitConversionOnProduct(supabase, pid, stockUnit, {
-      primary_qty: 1,
-      primary_unit_code: stockUnit,
-      secondary_qty: pack.secondary_qty,
-      secondary_unit_code: pack.secondary_unit_code,
-    });
-  }
-  return { productId: pid, created: true };
 }

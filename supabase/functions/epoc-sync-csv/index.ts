@@ -22,10 +22,17 @@ import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
 import { enqueueAndTriggerEpocCsvImport } from "../_shared/enqueueEpocCsvRevenueImportJob.ts";
 import {
+  buildPartialSyncSummary,
+  listEpocSyncGaps,
+  upsertEpocSyncDayStatus,
+} from "../_shared/epocPersistDailyExtras.ts";
+import { brDateToIso } from "../_shared/epocPtBrNumber.ts";
+import {
   isOnboardingPdvSyncInProgress,
   patchOnboardingPdv,
   type OnboardingPdvPatch,
 } from "../_shared/onboardingPdvPatch.ts";
+import { triggerEpocDailyExtrasInBackground } from "../_shared/triggerEpocDailyExtras.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -1316,6 +1323,7 @@ Deno.serve(async (req) => {
   );
 
   // --- Fase 2: janela de dias (consulta diária no EPOC) ----------------------
+  // Serviços/faturamento correm depois, em `epoc-retry-daily-extras` (evita idle timeout 150s).
   let diasConsulta: string[];
   let diasConsultaLabel: string;
   if (manualConsultaDias?.length) {
@@ -1441,6 +1449,21 @@ Deno.serve(async (req) => {
     );
 
     for (const result of batchResults) {
+      const saleDateIso = brDateToIso(result.dia);
+      if (saleDateIso) {
+        // Produtos neste request; serviços/faturamento ficam pendentes p/ worker async.
+        await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+          products_ok: result.ok,
+          products_error: result.ok
+            ? null
+            : (result.message ?? "produtos sem dados"),
+          services_ok: false,
+          faturamento_ok: false,
+          services_error: "pendente (sync async)",
+          faturamento_error: "pendente (sync async)",
+        });
+      }
+
       if (!result.ok) {
         const portalFb =
           "portal_feedback" in result && result.portal_feedback
@@ -1494,6 +1517,33 @@ Deno.serve(async (req) => {
       );
     }
   }
+
+  // Dispara serviços/faturamento em background (chunks) — não bloqueia a resposta.
+  triggerEpocDailyExtrasInBackground({
+    supabaseUrl,
+    serviceKey,
+    companyId,
+    continueChain: true,
+    maxDays: 3,
+    logTag: LOG,
+  });
+  recordStepWithoutUpload(
+    "extras_async_queued",
+    "Fila serviços/faturamento (async)",
+    {
+      status: "ok",
+      message:
+        "Busca de serviços e faturamento enfileirada em segundo plano (chunks).",
+      detalhes: { dias: diasConsulta.length },
+    },
+  );
+
+  const syncGaps = await listEpocSyncGaps(admin, companyId);
+  const partialSummary =
+    buildPartialSyncSummary(syncGaps) ??
+    (diasConsulta.length > 0
+      ? `Sync parcial: produtos processados; serviços/faturamento a concluir em segundo plano (${diasConsulta.length} dia(s)).`
+      : null);
 
   if (headerBase.length === 0) {
     const diasComFeedbackPortal = diasConsulta
@@ -1575,6 +1625,10 @@ Deno.serve(async (req) => {
         epoc_daily_sync_last_attempt_outcome: "no_tbl_export",
         epoc_daily_sync_last_attempt_error: null,
         epoc_daily_sync_last_consulted_day_br: diasConsulta[0] ?? null,
+        epoc_partial_sync_summary: partialSummary,
+        epoc_partial_sync_missing_services_days: syncGaps.services,
+        epoc_partial_sync_missing_faturamento_days: syncGaps.faturamento,
+        epoc_partial_sync_at: nowIso,
       };
       const { error: upDailyErr } = await admin
         .from("company_integrations")
@@ -1602,7 +1656,26 @@ Deno.serve(async (req) => {
         steps_prefix: stepsPrefix,
         steps,
         signed_url_expires_in: signedTtl,
+        partial_sync_summary: partialSummary,
       });
+    }
+
+    {
+      const nowIso = new Date().toISOString();
+      await admin
+        .from("company_integrations")
+        .update({
+          settings: {
+            ...raw,
+            epoc_partial_sync_summary: partialSummary,
+            epoc_partial_sync_missing_services_days: syncGaps.services,
+            epoc_partial_sync_missing_faturamento_days: syncGaps.faturamento,
+            epoc_partial_sync_at: nowIso,
+          },
+          updated_at: nowIso,
+        })
+        .eq("company_id", companyId)
+        .eq("provider", "epoc");
     }
 
     return await failJson(
@@ -1613,6 +1686,7 @@ Deno.serve(async (req) => {
         dias_consultados: diasConsulta.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
         outcome: "no_tbl_export",
+        partial_sync_summary: partialSummary,
       },
       {
         skipPortalPatch: true,
@@ -1711,6 +1785,11 @@ Deno.serve(async (req) => {
     nextSettings.epoc_daily_sync_last_attempt_error = null;
     nextSettings.epoc_daily_sync_last_consulted_day_br = null;
   }
+  nextSettings.epoc_partial_sync_summary = partialSummary;
+  nextSettings.epoc_partial_sync_missing_services_days = syncGaps.services;
+  nextSettings.epoc_partial_sync_missing_faturamento_days =
+    syncGaps.faturamento;
+  nextSettings.epoc_partial_sync_at = nowIso;
 
   const { error: upIntegErr } = await admin
     .from("company_integrations")

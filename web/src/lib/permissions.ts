@@ -65,7 +65,9 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   if (path.startsWith("/app/recebimento")) return "recebimento";
   if (path.startsWith("/app/checklists")) return "checklists";
   if (path.startsWith("/app/fornecedores")) return "fornecedores";
-  if (path.startsWith("/app/produtos")) return "produtos";
+  if (path.startsWith("/app/produtos") || path.startsWith("/app/servicos")) {
+    return "produtos";
+  }
   if (path.startsWith("/app/contas-a-pagar") || path.startsWith("/app/boletos")) {
     return "contas_a_pagar";
   }
@@ -73,7 +75,9 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
     path.startsWith("/app/vendas-realizadas") ||
     path.startsWith("/app/vendas") ||
     path.startsWith("/app/receitas") ||
-    path.startsWith("/app/cmv-margens")
+    path.startsWith("/app/cmv-margens") ||
+    path.startsWith("/app/faturamento") ||
+    path.startsWith("/app/formas-de-pagamento")
   ) {
     return "vendas_realizadas";
   }

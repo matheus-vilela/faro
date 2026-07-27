@@ -1,22 +1,28 @@
--- Secrets para `cron_invoke_focus_get_sync_nfe_interpret()` (pg_cron → net.http_post).
--- Continuações entre chunks usam pgmq (`focus_interpret_staging_continue`); o cron continua
--- como consumer periódico e rede de segurança para jobs órfãos.
+-- Secrets para crons NF-e (pg_cron → net.http_post).
 -- Executar no SQL Editor (produção) ou após `supabase db reset` em dev, com valores reais.
 --
 -- Nomes **exatos** (coluna `name` em vault.secrets / visão decrypted_secrets):
 --   focus_interpret_cron_supabase_url
 --   focus_interpret_cron_anon_key
 --   focus_interpret_cron_bearer_secret   (= FOCUS_NFE_RECEBIDAS_CRON_SECRET nas Edge Functions)
+--
+-- Jobs pg_cron (após migration 20260725190000_nfe_pipeline_phase1):
+--   nfe_pipeline_dispatcher   — a cada 1 min → Edge nfe-dispatcher
+--   nfe_pipeline_worker       — a cada 1 min → Edge nfe-worker
+--
+-- Jobs pg_cron Epoc (após migration 20260726160000_epoc_pipeline_phase1):
+--   epoc_pipeline_dispatcher  — a cada 1 min → Edge epoc-dispatcher
+--   epoc_pipeline_worker      — a cada 1 min → Edge epoc-worker
+--   Vault bearer: epoc_daily_cron_bearer_secret (= EPOC_DAILY_CRON_SECRET)
+--   Cron legado epoc_daily_sync é desagendado pela migration.
+--
+-- Import CSV Epoc (após migration 20260726190000_epoc_csv_import_worker_heartbeat):
+--   epoc_csv_import_watchdog  — a cada 1 min → Edge epoc-csv-import-worker { mode: watchdog }
+--   Retoma jobs PROCESSING com heartbeat_at > 2 min (self-call é o caminho quente).
+--
+-- Crons legados focus_get_sync_nfe_recebidas / onboarding_retry são desagendados pela migration.
 
 -- Exemplo (API Dashboard Vault ou extensão vault — sintaxe pode variar):
 -- select vault.create_secret('https://SEU_REF.supabase.co', 'focus_interpret_cron_supabase_url');
 -- select vault.create_secret('SUA_ANON_KEY', 'focus_interpret_cron_anon_key');
 -- select vault.create_secret('MESMO_SECRET_DO_CRON_FOCUS', 'focus_interpret_cron_bearer_secret');
-
--- Passar o cron de 1 minuto (teste) para 5 minutos:
--- select cron.unschedule((select jobid from cron.job where jobname = 'focus_get_sync_nfe_interpret_dispatch'));
--- select cron.schedule(
---   'focus_get_sync_nfe_interpret_dispatch',
---   '*/5 * * * *',
---   $cron$select public.cron_invoke_focus_get_sync_nfe_interpret();$cron$
--- );

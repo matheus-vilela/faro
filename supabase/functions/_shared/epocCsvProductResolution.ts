@@ -13,6 +13,7 @@ import {
   canonicalProductName,
   sanitizeCatalogProductName,
 } from "./productImport/canonicalName.ts";
+import { catalogMatchNameKey } from "./productImport/llmCatalogCandidates.ts";
 import { invoiceLabelMatchesMergedCatalog } from "./productImport/mergedCatalogMatch.ts";
 
 /** Score mínimo (0–100) para match fuzzy legado (não usado no fluxo EPOC). */

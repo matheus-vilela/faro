@@ -38,6 +38,8 @@ import {
   BarChart3,
   Bell,
   Building2,
+  ConciergeBell,
+  CreditCard,
   FileText,
   FlaskConical,
   LayoutDashboard,
@@ -48,6 +50,7 @@ import {
   PackageCheck,
   Percent,
   Plug,
+  Receipt,
   Settings2,
   Sun,
   TrendingDown,
@@ -112,6 +115,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         icon: Package,
         permission: "produtos",
       },
+      {
+        title: "Serviços",
+        url: "/app/servicos",
+        icon: ConciergeBell,
+        permission: "produtos",
+      },
     ],
   },
   {
@@ -127,6 +136,18 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         title: "Vendas realizadas",
         url: "/app/vendas-realizadas",
         icon: TrendingUp,
+        permission: "vendas_realizadas",
+      },
+      {
+        title: "Faturamento",
+        url: "/app/faturamento",
+        icon: Receipt,
+        permission: "vendas_realizadas",
+      },
+      {
+        title: "Formas de pagamento",
+        url: "/app/formas-de-pagamento",
+        icon: CreditCard,
         permission: "vendas_realizadas",
       },
       {

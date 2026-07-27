@@ -1,6 +1,6 @@
 /**
  * Pré-visualização de NF-e: parse do XML, valor unitário efetivo e dry-run da
- * interpretação staging (`focus-get-sync-nfe-interpret-staging`).
+ * interpretação staging (dry-run).
  */
 import { buildNfeUnitPricePreviewFromXml } from "./nfeUnitPricePreview.ts";
 import type { NfeUnitPricePreviewResult } from "./nfeUnitPricePreview.ts";

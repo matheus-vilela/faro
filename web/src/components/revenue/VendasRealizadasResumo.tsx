@@ -15,6 +15,8 @@ import {
   buildVendasRealizadasResumo,
   formatCompactBrl,
   getResumoRanges,
+  type EpocFaturamentoDayInput,
+  type EpocPaymentLineInput,
   type ResumoKpiDelta,
   type ResumoPaymentRow,
   type ResumoPeriodFilter,
@@ -43,6 +45,29 @@ const PERIOD_OPTIONS: { value: ResumoPeriodFilter; label: string }[] = [
   { value: "last7", label: "Últimos 7 dias" },
   { value: "month", label: "Este mês" },
 ];
+
+function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
+  return rows.map((raw) => {
+    const row = raw as {
+      faturamento_date: string;
+      amount: number | null;
+      payment_method_id: string;
+      payment_methods:
+        | { sku: string; name: string }
+        | { sku: string; name: string }[]
+        | null;
+    };
+    const pm = Array.isArray(row.payment_methods)
+      ? (row.payment_methods[0] ?? null)
+      : (row.payment_methods ?? null);
+    return {
+      faturamento_date: row.faturamento_date,
+      amount: row.amount,
+      payment_method_id: row.payment_method_id,
+      payment_methods: pm,
+    };
+  });
+}
 
 const RANKING_OPTIONS: { value: ResumoRankingMode; label: string }[] = [
   { value: "product", label: "Por produto" },
@@ -225,9 +250,10 @@ function PaymentMethodsPanel({
     return (
       <Card className="shadow-sm">
         <CardContent className="space-y-1 py-12 text-center text-sm text-muted-foreground">
-          <p>Nenhuma forma de pagamento identificada neste período.</p>
+          <p>Nenhuma forma de pagamento neste período.</p>
           <p className="text-xs">
-            As vendas ainda não registram cartão, Pix, dinheiro etc. no Faro.
+            Os dados vêm do faturamento EPOC. Sincronize o PDV ou confira a tela
+            de Faturamento.
           </p>
         </CardContent>
       </Card>
@@ -243,17 +269,11 @@ function PaymentMethodsPanel({
           </CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto pt-0">
-          <table className="w-full min-w-[36rem] border-collapse text-sm">
+          <table className="w-full min-w-[28rem] border-collapse text-sm">
             <thead>
               <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <th className="pb-2 pr-3 font-semibold">Forma de pagamento</th>
-                <th className="pb-2 pr-3 text-right font-semibold">
-                  Transações
-                </th>
                 <th className="pb-2 pr-3 text-right font-semibold">Valor</th>
-                <th className="pb-2 pr-3 text-right font-semibold">
-                  Tíquete médio
-                </th>
                 <th className="pb-2 font-semibold">% do total</th>
               </tr>
             </thead>
@@ -271,21 +291,20 @@ function PaymentMethodsPanel({
                     <td className="py-3 pr-3 font-medium text-foreground">
                       {row.label}
                     </td>
-                    <td className="py-3 pr-3 text-right tabular-nums">
-                      {row.count.toLocaleString("pt-BR")}
-                    </td>
                     <td className="py-3 pr-3 text-right tabular-nums font-medium">
                       {formatBrl(row.amount)}
                     </td>
-                    <td className="py-3 pr-3 text-right tabular-nums">
-                      {formatBrl(row.ticket)}
-                    </td>
                     <td className="py-3 min-w-[8rem]">
-                      <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${barPct}%` }}
-                        />
+                      <div className="flex items-center gap-2">
+                        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                        <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          {formatSharePct(row.share)}
+                        </span>
                       </div>
                     </td>
                   </tr>
@@ -314,6 +333,10 @@ export function VendasRealizadasResumo() {
   const [period, setPeriod] = useState<ResumoPeriodFilter>("last7");
   const [rankingMode, setRankingMode] = useState<ResumoRankingMode>("product");
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
+  const [epocPayments, setEpocPayments] = useState<EpocPaymentLineInput[]>([]);
+  const [epocFaturamentoDays, setEpocFaturamentoDays] = useState<
+    EpocFaturamentoDayInput[]
+  >([]);
   const [categories, setCategories] = useState<CompanyCategory[]>([]);
   const [productNameById, setProductNameById] = useState<Map<string, string>>(
     () => new Map(),
@@ -332,6 +355,8 @@ export function VendasRealizadasResumo() {
   const fetchData = useCallback(async () => {
     if (!companyId) {
       setEntries([]);
+      setEpocPayments([]);
+      setEpocFaturamentoDays([]);
       setCategories([]);
       setLoading(false);
       return;
@@ -341,7 +366,8 @@ export function VendasRealizadasResumo() {
     try {
       const { fetchStart, fetchEnd } = getResumoRanges(period, localDateYmd());
 
-      const [revenueRows, catRows] = await Promise.all([
+      const [revenueRows, epocPaymentRows, epocFatRows, catRows] =
+        await Promise.all([
         fetchAllInRange<RevenueEntry>(
           supabase
             .from("revenue_entries")
@@ -351,6 +377,28 @@ export function VendasRealizadasResumo() {
             .lte("entry_date", fetchEnd)
             .order("entry_date", { ascending: true }),
         ),
+        fetchAllInRange(
+          supabase
+            .from("epoc_faturamento_daily_payment_methods")
+            .select(
+              "faturamento_date, amount, payment_method_id, payment_methods ( sku, name )",
+            )
+            .eq("company_id", companyId)
+            .gte("faturamento_date", fetchStart)
+            .lte("faturamento_date", fetchEnd)
+            .order("faturamento_date", { ascending: true }),
+        ).then((rows) => normalizeEpocPaymentRows(rows)),
+        fetchAllInRange(
+          supabase
+            .from("epoc_faturamento_daily")
+            .select(
+              "faturamento_date, quantity, produtos, servicos, taxas, total, ticket_medio",
+            )
+            .eq("company_id", companyId)
+            .gte("faturamento_date", fetchStart)
+            .lte("faturamento_date", fetchEnd)
+            .order("faturamento_date", { ascending: true }),
+        ).then((rows) => rows as unknown as EpocFaturamentoDayInput[]),
         supabase
           .from("company_categories")
           .select("*")
@@ -389,6 +437,8 @@ export function VendasRealizadasResumo() {
       if (recipesRes.error) throw recipesRes.error;
 
       setEntries(revenueRows);
+      setEpocPayments(epocPaymentRows);
+      setEpocFaturamentoDays(epocFatRows);
       setCategories(catRows);
       setProductNameById(
         new Map(
@@ -407,6 +457,8 @@ export function VendasRealizadasResumo() {
     } catch (err) {
       console.error(err);
       setEntries([]);
+      setEpocPayments([]);
+      setEpocFaturamentoDays([]);
     } finally {
       setLoading(false);
     }
@@ -431,6 +483,8 @@ export function VendasRealizadasResumo() {
         categoriesById,
         productNameById,
         recipeNameById,
+        epocPayments,
+        epocFaturamentoDays,
       }),
     [
       entries,
@@ -440,6 +494,8 @@ export function VendasRealizadasResumo() {
       categoriesById,
       productNameById,
       recipeNameById,
+      epocPayments,
+      epocFaturamentoDays,
     ],
   );
 
@@ -452,7 +508,12 @@ export function VendasRealizadasResumo() {
     [dashboard.daily],
   );
 
-  const hasSales = dashboard.kpis.count.current > 0;
+  const hasSales = entries.some(
+    (e) =>
+      e.revenue_type === "operational" &&
+      e.entry_date.slice(0, 10) >= ranges.currentStart &&
+      e.entry_date.slice(0, 10) <= ranges.currentEnd,
+  );
   const maxChampionShare = dashboard.champions.reduce(
     (m, r) => Math.max(m, r.revenueShare),
     0,
@@ -550,18 +611,18 @@ export function VendasRealizadasResumo() {
             })}
           </div>
 
-          {!hasSales ? (
-            <Card className="shadow-sm">
-              <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                Nenhuma venda operacional neste período.
-              </CardContent>
-            </Card>
-          ) : rankingMode === "payment" ? (
+          {rankingMode === "payment" ? (
             <PaymentMethodsPanel
               rows={dashboard.payments}
               championsTitle={dashboard.ranges.championsTitle}
               periodShortLabel={dashboard.ranges.periodShortLabel}
             />
+          ) : !hasSales ? (
+            <Card className="shadow-sm">
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                Nenhuma venda operacional neste período.
+              </CardContent>
+            </Card>
           ) : (
             <div className="grid gap-4 lg:grid-cols-5">
               <Card className="shadow-sm lg:col-span-3">

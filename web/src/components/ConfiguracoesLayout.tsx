@@ -20,7 +20,6 @@ import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
-  FileKey,
   FolderTree,
   Landmark,
   MessageCircle,
@@ -57,11 +56,6 @@ const SUB_LINKS = [
     to: "/app/configuracoes/impostos-receita",
     label: "Impostos na receita",
     icon: Percent,
-  },
-  {
-    to: "/app/configuracoes/fiscal",
-    label: "Fiscal",
-    icon: FileKey,
   },
 ] as const;
 

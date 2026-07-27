@@ -10,19 +10,15 @@
  *
  * **Manual:** `{ "manual": true, "company_id": "<uuid>" }` + `Authorization: Bearer <JWT>`.
  * Opcional: `versao` (número inicial do cursor; senão usa `focusnfe.nfes_recebidas_ultima_versao` ou 0).
- * Opcional: `onboarding: true` — fluxo de onboarding fiscal: `max_nfes_sync` = XMLs a interpretar;
- * `sync` só passa a `false` se a listagem Focus terminar sem XML em staging, ou quando o job de interpretação
- * (`focus-get-sync-nfe-interpret-staging`) marcar `status=done` após processar todos os XMLs.
- * `nfes_sync` na interpretação segue o offset do job (teto = `max_nfes_sync`), não soma +5 por chunk.
+ * Opcional: `onboarding: true` — fluxo de onboarding fiscal: `max_nfes_sync` = XMLs em staging;
+ * ao concluir a listagem Focus, `sync` passa a `false` (não há mais fila de interpretação).
  * Em falha transitória (rede/5xx), grava `sefaz_unavailable` + `sefaz_retry_at` (retry pg_cron 30 min).
  * Opcional: `onboarding_retry: true` — retry automático (não repõe métricas; limpa `sefaz_unavailable` ao iniciar).
  * Com `onboarding` / `onboarding_retry`, ignora unidades com `onboarding_fiscal.completed` ou fora da fase de listagem (`sync: false`).
  * Sem onboarding explícito no body, unidades em onboarding pendente (fase de listagem) com
  * **primeira** sync (`nfes_recebidas_ultima_sync_at` ausente) entram com prioridade (tier 0);
  * onboarding pendente que já sincronizou ao menos uma vez entra no rodízio (tier 2), como as demais.
- * Cron automático (secret, sem `manual: true`): processa **no máximo 1 empresa por execução** e **não
- * inicia** se existir **qualquer** job em `focus_get_sync_nfe_interpret_jobs` com `pending` ou
- * `processing` (aguarda a fila de interpretação terminar).
+ * Cron automático (secret, sem `manual: true`): processa **no máximo 1 empresa por execução**.
  * Rodízio cron (fora onboarding/retry/manual): só empresas sem `nfes_recebidas_ultima_sync_at` ou com
  * última sync há ≥ 12 h. Ao reservar a unidade no run, grava `nfes_recebidas_ultima_sync_at` de imediato
  * (antes do GET na Focus) para o próximo disparo não repetir a mesma empresa.
@@ -32,12 +28,6 @@
  * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
  * Para cada nota gravada, faz download do XML em **blocos paralelos de 10** (`GET .../{chave}.xml`);
  * entre blocos aplica `FOCUS_NFE_XML_THROTTLE_MS` (default 450 ms).
- * Com pelo menos uma linha em `focus_get_sync_nfe_staging` com XML, enfileira `focus_get_sync_nfe_interpret_jobs`
- * (`staging_xml_total` = total de XMLs; `staging_process_offset` = progresso).
- * Catálogo global de fornecedores (`unified_supplier_*`) roda em `focus-get-sync-nfe-interpret-staging`, não aqui
- * (evita CPU Time exceeded ao parsear cada XML nesta função).
- * (com `onboarding` quando o body pediu `onboarding: true`).
- * (processamento assíncrono via pg_cron → `focus-get-sync-nfe-interpret-staging`).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -790,15 +780,7 @@ async function patchOnboardingFiscalAfterListagem(
   return {};
 }
 
-type ActiveInterpretJob = {
-  id: string;
-  exec_id: string;
-  status: string;
-  onboarding: boolean | null;
-  company_id: string;
-};
-
-async function countStagingXmlsForInterpretJob(
+async function countStagingXmlsForExec(
   admin: ReturnType<typeof createClient>,
   execId: string,
   companyId: string,
@@ -812,44 +794,6 @@ async function countStagingXmlsForInterpretJob(
     .neq("xml_content", "");
   if (error) return { count: 0, error: error.message };
   return { count: count ?? 0 };
-}
-
-/** Qualquer unidade com interpretação NF-e ainda na fila (pending/processing). */
-async function findIfThereIsAnyActiveInterpretJob(
-  admin: ReturnType<typeof createClient>,
-): Promise<ActiveInterpretJob | null> {
-  const { data, error } = await admin
-    .from("focus_get_sync_nfe_interpret_jobs")
-    .select("id, exec_id, status, onboarding, company_id")
-    .in("status", ["pending", "processing"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.warn(LOG, "interpret_job_global_active_select", error.message);
-    return null;
-  }
-  if (!data?.id) return null;
-  return data as ActiveInterpretJob;
-}
-async function findActiveInterpretJob(
-  admin: ReturnType<typeof createClient>,
-  companyId: string,
-): Promise<ActiveInterpretJob | null> {
-  const { data, error } = await admin
-    .from("focus_get_sync_nfe_interpret_jobs")
-    .select("id, exec_id, status, onboarding")
-    .eq("company_id", companyId)
-    .in("status", ["pending", "processing"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.warn(LOG, "interpret_job_active_select", companyId, error.message);
-    return null;
-  }
-  if (!data?.id) return null;
-  return data as ActiveInterpretJob;
 }
 
 Deno.serve(async (req) => {
@@ -920,35 +864,6 @@ Deno.serve(async (req) => {
     });
 
     const execId = crypto.randomUUID();
-
-    if (isCron) {
-      const interpretJobBloqueando =
-        await findIfThereIsAnyActiveInterpretJob(admin);
-      if (interpretJobBloqueando?.id) {
-        logPhase("sync_adiada_interpret_job_global", {
-          exec_id: execId,
-          motivo:
-            "existe job pending/processing; aguardar focus-get-sync-nfe-interpret-staging",
-          interpret_job_id: interpretJobBloqueando.id,
-          interpret_job_status: interpretJobBloqueando.status,
-          interpret_job_company_id: interpretJobBloqueando.company_id,
-          interpret_job_exec_id: interpretJobBloqueando.exec_id,
-        });
-        return json({
-          ok: true,
-          skipped: true,
-          exec_id: execId,
-          reason: "interpret_job_ativo",
-          interpret_job: {
-            id: interpretJobBloqueando.id,
-            status: interpretJobBloqueando.status,
-            company_id: interpretJobBloqueando.company_id,
-            exec_id: interpretJobBloqueando.exec_id,
-          },
-          detail: [],
-        });
-      }
-    }
 
     let companiesToProcess: CoRow[] = [];
     let isManualSingle = false;
@@ -1229,8 +1144,7 @@ Deno.serve(async (req) => {
         isOnboardingFiscalPending(obFresh) &&
         isOnboardingFiscalListSyncPhase(obFresh);
 
-      const activeInterpretJob = await findActiveInterpretJob(admin, companyId);
-      const stagingExecId = activeInterpretJob?.exec_id ?? execId;
+      const stagingExecId = execId;
 
       const storedRaw = Number(
         (coFreshRow?.focusnfe as Record<string, unknown> | undefined)
@@ -1272,13 +1186,6 @@ Deno.serve(async (req) => {
             : null,
         onboarding_fiscal: summarizeOnboardingFiscal(obFresh),
         onboarding_flow: companyOnboardingFlow,
-        interpret_job_ativo: activeInterpretJob
-          ? {
-              id: activeInterpretJob.id,
-              exec_id: activeInterpretJob.exec_id,
-              status: activeInterpretJob.status,
-            }
-          : null,
         onboarding_retry: item.clear_sefaz_retry,
         rodizio_tier: item.tier,
         ultima_sync_ms: item.last_sync_ms,
@@ -1688,93 +1595,15 @@ Deno.serve(async (req) => {
       };
 
       const { count: stagingXmlTotal, error: xmlCountErr } =
-        await countStagingXmlsForInterpretJob(admin, stagingExecId, companyId);
+        await countStagingXmlsForExec(admin, stagingExecId, companyId);
       if (xmlCountErr) {
-        console.warn(
-          LOG,
-          "interpret_staging_xml_count",
-          companyId,
-          xmlCountErr,
-        );
-      }
-
-      if (stagingXmlTotal > 0) {
-        if (activeInterpretJob?.id) {
-          const jobPatch: Record<string, unknown> = {
-            staging_xml_total: stagingXmlTotal,
-          };
-          if (activeInterpretJob.onboarding !== companyOnboardingFlow) {
-            jobPatch.onboarding = companyOnboardingFlow;
-          }
-          const { error: updJobErr } = await admin
-            .from("focus_get_sync_nfe_interpret_jobs")
-            .update(jobPatch)
-            .eq("id", activeInterpretJob.id);
-          if (updJobErr) {
-            console.warn(
-              LOG,
-              "interpret_job_update",
-              companyId,
-              updJobErr.message,
-            );
-          }
-          logPhase("interpret_job_ja_ativo", {
-            exec_id: execId,
-            staging_exec_id: stagingExecId,
-            company_id: companyId,
-            job_id: activeInterpretJob.id,
-            job_status: activeInterpretJob.status,
-            notas_staging_novas: notasEncontradas,
-            staging_xml_total: stagingXmlTotal,
-          });
-        } else {
-          const { data: existingJob, error: selJobErr } = await admin
-            .from("focus_get_sync_nfe_interpret_jobs")
-            .select("id,status")
-            .eq("exec_id", stagingExecId)
-            .eq("company_id", companyId)
-            .maybeSingle();
-          if (selJobErr) {
-            console.warn(
-              LOG,
-              "interpret_job_select",
-              companyId,
-              selJobErr.message,
-            );
-          } else if (!existingJob?.id) {
-            const { error: insJobErr } = await admin
-              .from("focus_get_sync_nfe_interpret_jobs")
-              .insert({
-                exec_id: stagingExecId,
-                company_id: companyId,
-                status: "pending",
-                onboarding: companyOnboardingFlow,
-                staging_process_offset: 0,
-                staging_xml_total: stagingXmlTotal,
-              });
-            if (insJobErr) {
-              console.warn(
-                LOG,
-                "interpret_job_insert",
-                companyId,
-                insJobErr.message,
-              );
-            } else {
-              logPhase("interpret_job_enfileirado", {
-                exec_id: stagingExecId,
-                company_id: companyId,
-                onboarding: companyOnboardingFlow,
-                notas_staging: notasEncontradas,
-                staging_xml_total: stagingXmlTotal,
-              });
-            }
-          }
-        }
-      } else if (notasEncontradas > 0) {
-        logPhase("interpret_job_omitido_sem_xml", {
+        console.warn(LOG, "staging_xml_count", companyId, xmlCountErr);
+      } else if (stagingXmlTotal > 0) {
+        logPhase("staging_xmls_gravados", {
           exec_id: stagingExecId,
           company_id: companyId,
-          notas_staging_sem_xml: notasEncontradas,
+          staging_xml_total: stagingXmlTotal,
+          notas_staging: notasEncontradas,
         });
       }
 
@@ -1784,12 +1613,11 @@ Deno.serve(async (req) => {
         listagemConcluida
       ) {
         const xmlTotal = Math.max(0, stagingXmlTotal ?? 0);
-        const endListagemSync = xmlTotal === 0;
         const { error: obErr } = await patchOnboardingFiscalAfterListagem(
           admin,
           companyId,
           xmlTotal,
-          { endListagemSync },
+          { endListagemSync: true },
         );
         if (obErr) {
           console.warn(LOG, "onboarding_fiscal_listagem_fim", companyId, obErr);
@@ -1798,8 +1626,7 @@ Deno.serve(async (req) => {
             exec_id: execId,
             company_id: companyId,
             max_nfes_sync: xmlTotal,
-            sync: endListagemSync ? false : true,
-            aguarda_interpret_job: !endListagemSync,
+            sync: false,
           });
         }
       }

@@ -28,6 +28,14 @@ export type EpocIntegrationSettings = {
   epoc_daily_sync_last_consulted_day_br?: string | null;
   epoc_daily_sync_last_attempt_error?: string | null;
   /**
+   * Sync parcial: produtos OK, mas serviços e/ou faturamento em falta em alguns dias.
+   * Preenchido por `epoc-sync-csv` / `epoc-retry-daily-extras`.
+   */
+  epoc_partial_sync_summary?: string | null;
+  epoc_partial_sync_missing_services_days?: string[];
+  epoc_partial_sync_missing_faturamento_days?: string[];
+  epoc_partial_sync_at?: string | null;
+  /**
    * Legado: ignorado pelo import; a edge escolhe automaticamente a primeira folha de
    * receita operacional (excl. dedução DRE).
    */
@@ -93,6 +101,32 @@ export function parseEpocSettings(
         ? null
         : typeof raw.epoc_daily_sync_last_attempt_error === "string"
           ? raw.epoc_daily_sync_last_attempt_error
+          : undefined,
+    epoc_partial_sync_summary:
+      raw.epoc_partial_sync_summary === null
+        ? null
+        : typeof raw.epoc_partial_sync_summary === "string"
+          ? raw.epoc_partial_sync_summary
+          : undefined,
+    epoc_partial_sync_missing_services_days: Array.isArray(
+      raw.epoc_partial_sync_missing_services_days,
+    )
+      ? raw.epoc_partial_sync_missing_services_days.filter(
+          (d): d is string => typeof d === "string",
+        )
+      : undefined,
+    epoc_partial_sync_missing_faturamento_days: Array.isArray(
+      raw.epoc_partial_sync_missing_faturamento_days,
+    )
+      ? raw.epoc_partial_sync_missing_faturamento_days.filter(
+          (d): d is string => typeof d === "string",
+        )
+      : undefined,
+    epoc_partial_sync_at:
+      raw.epoc_partial_sync_at === null
+        ? null
+        : typeof raw.epoc_partial_sync_at === "string"
+          ? raw.epoc_partial_sync_at
           : undefined,
     epoc_csv_revenue_subcategory_id:
       typeof raw.epoc_csv_revenue_subcategory_id === "string"

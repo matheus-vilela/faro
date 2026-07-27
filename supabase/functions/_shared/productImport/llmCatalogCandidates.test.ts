@@ -12,7 +12,7 @@ Deno.test("catalogMatchNameKey: acento e caixa equivalentes", () => {
   assertEquals(catalogMatchNameKey("ÁGUA COM GÁS"), catalogMatchNameKey("AGUA COM GAS"));
 });
 
-Deno.test("findCatalogProductByNormalizedName: vincula nome IA ao cadastro existente", () => {
+Deno.test("findCatalogProductByNormalizedName: vincula nome normalizado ao cadastro", () => {
   const catalog = [
     { id: "p1", name: "AGUA COM GAS" },
     { id: "p2", name: "CERVEJA HEINEKEN" },

@@ -68,14 +68,8 @@ export type StagingInterpretPreviewResult = {
 
 const ACTION_LABELS: Record<string, string> = {
   link_ean: "Vincular (EAN)",
-  link_name_key: "Vincular (nome)",
-  link_ncm_and_name: "Vincular (NCM+nome)",
-  link_sem_ncm_name: "Vincular (sem NCM, nome)",
-  link_llm: "Vincular (LLM)",
-  link_normalized_name_after_llm: "Vincular (nome normalizado LLM)",
+  link_cprod_supplier: "Vincular (cProd + fornecedor)",
   reuse_chunk_dedupe: "Reutilizar (dedupe chunk)",
-  reuse_catalog_name: "Reutilizar (nome catálogo)",
-  reuse_canonical_name: "Reutilizar (canonical_name)",
   create_product: "Criar produto",
   skip_fiscal_incomplete: "Ignorar (fiscal incompleto)",
 };
@@ -105,9 +99,7 @@ export function NfeStagingInterpretPreviewCard({
         <CardHeader>
           <CardTitle className="text-base">Interpretação staging</CardTitle>
           <CardDescription>
-            Não foi possível simular{" "}
-            <code className="text-xs">focus-get-sync-nfe-interpret-staging</code>
-            : {error}
+            Não foi possível simular a interpretação staging: {error}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -138,12 +130,9 @@ export function NfeStagingInterpretPreviewCard({
           Interpretação staging (dry-run)
         </CardTitle>
         <CardDescription>
-          Mesma lógica de{" "}
-          <code className="rounded bg-muted px-1 text-xs">
-            focus-get-sync-nfe-interpret-staging
-          </code>
-          . Catálogo: {meta.catalog_size} produtos
-          {meta.openai_configured ? " · OpenAI ativa" : " · OpenAI inativa"}
+          Dry-run de fornecedor, produtos e despesa a partir do XML. Catálogo:{" "}
+          {meta.catalog_size} produtos
+          {" · match: EAN / cProd+fornecedor / nome / NCM"}
           {meta.catalog_fetch_error
             ? ` · Erro catálogo: ${meta.catalog_fetch_error}`
             : null}

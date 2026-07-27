@@ -58,7 +58,18 @@ async function enrichForCompany(
     return { data, resolvedSupplierId: sr.supplierId };
   }
   const ctx = catalogContext ?? "WHATSAPP_INTERACTIVE";
-  const matchOpts = await getDefaultCatalogMatchingOpts(supabase, companyId, ctx);
+  const sr = await ensureSupplierFromExtracted(
+    supabase,
+    companyId,
+    ex0,
+    "Cadastrado automaticamente — leitura de comprovante no Faro",
+  );
+  const matchOpts = await getDefaultCatalogMatchingOpts(
+    supabase,
+    companyId,
+    ctx,
+    { supplierId: sr.supplierId },
+  );
   const matchResult = await resolveProductMatches(
     supabase,
     companyId,
@@ -72,12 +83,6 @@ async function enrichForCompany(
     items: matchResult.items,
     _requiresProductConfirmation: matchResult.requiresProductConfirmation,
   };
-  const sr = await ensureSupplierFromExtracted(
-    supabase,
-    companyId,
-    data,
-    "Cadastrado automaticamente — leitura de comprovante no Faro",
-  );
   return { data, resolvedSupplierId: sr.supplierId };
 }
 

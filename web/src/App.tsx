@@ -13,7 +13,6 @@ import { AtualizarPagamento } from "@/pages/AtualizarPagamento";
 import { Companies } from "@/pages/Companies";
 import { UnitSetupLegacyOpen } from "@/pages/UnitSetupLegacyOpen";
 import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
-import { ConfiguracoesFiscal } from "@/pages/ConfiguracoesFiscal";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesContasBancarias } from "@/pages/ConfiguracoesContasBancarias";
@@ -31,6 +30,8 @@ import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
 import { CmvMargens } from "@/pages/CmvMargens";
+import { FaturamentoEpoc } from "@/pages/FaturamentoEpoc";
+import { FormasPagamento } from "@/pages/FormasPagamento";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
 import { Landing } from "@/pages/Landing";
@@ -38,6 +39,7 @@ import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
 import { Recebimento } from "@/pages/Recebimento";
+import { Servicos } from "@/pages/Servicos";
 import { CertificadoOnboardingPublic } from "@/pages/CertificadoOnboardingPublic";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
@@ -111,6 +113,8 @@ function AuthenticatedLayout() {
           />
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
+          <Route path="faturamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FaturamentoEpoc /></PermissionRouteGuard>} />
+          <Route path="formas-de-pagamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FormasPagamento /></PermissionRouteGuard>} />
           <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
           <Route path="fluxo-de-caixa" element={<PermissionRouteGuard permission="contas_a_pagar"><FluxoDeCaixa /></PermissionRouteGuard>} />
           <Route
@@ -119,6 +123,7 @@ function AuthenticatedLayout() {
           />
           <Route path="fornecedores" element={<PermissionRouteGuard permission="fornecedores"><Fornecedores /></PermissionRouteGuard>} />
           <Route path="produtos" element={<PermissionRouteGuard permission="produtos"><Produtos /></PermissionRouteGuard>} />
+          <Route path="servicos" element={<PermissionRouteGuard permission="produtos"><Servicos /></PermissionRouteGuard>} />
           <Route path="recebimento" element={<PermissionRouteGuard permission="recebimento"><Recebimento /></PermissionRouteGuard>} />
           <Route
             path="importacoes"
@@ -164,7 +169,6 @@ function AuthenticatedLayout() {
               path="impostos-receita"
               element={<ConfiguracoesImpostosReceita />}
             />
-            <Route path="fiscal" element={<ConfiguracoesFiscal />} />
             <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
           </Route>
         </Route>

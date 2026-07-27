@@ -93,21 +93,54 @@ export function triggerCsvRevenueImportWorker(
   serviceKey: string,
   logTag = "[csvRevenueImportQueue]",
 ): void {
+  void triggerCsvRevenueImportWorkerAwait(supabaseUrl, serviceKey, logTag);
+}
+
+/**
+ * Aguarda o consumer arrancar (até timeout). Usa waitUntil como rede de segurança
+ * se o isolate morrer a seguir — evita ficar preso em 20/N quando o fire-and-forget falha.
+ */
+export async function triggerCsvRevenueImportWorkerAwait(
+  supabaseUrl: string,
+  serviceKey: string,
+  logTag = "[csvRevenueImportQueue]",
+  timeoutMs = 45_000,
+): Promise<{ ok: boolean; error?: string }> {
   const base = supabaseUrl.replace(/\/$/, "");
   const url = `${base}/functions/v1/process-integration-csv-revenue-job`;
-  const p = fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      apikey: serviceKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ consume_queue: true }),
-  }).catch((e) => {
-    console.error(logTag, "worker_trigger_erro", String(e));
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  const p = (async () => {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+          apikey: serviceKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ consume_queue: true }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        console.error(logTag, "worker_trigger_http", res.status, raw.slice(0, 300));
+        return { ok: false as const, error: `HTTP ${res.status}` };
+      }
+      return { ok: true as const };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(logTag, "worker_trigger_erro", msg);
+      return { ok: false as const, error: msg };
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+
+  // Rede de segurança se o caller não puder await até ao fim.
   scheduleWaitUntil(p);
+  return await p;
 }
 
 export async function enqueueCsvRevenueImportContinue(
@@ -118,6 +151,11 @@ export async function enqueueCsvRevenueImportContinue(
     supabaseUrl?: string;
     serviceKey?: string;
     logTag?: string;
+    /**
+     * Se true, espera o consumer HTTP. Default false (fire-and-forget + waitUntil)
+     * para não aninhar invocações longas; o cron/`close_cycle` fazem pump.
+     */
+    awaitWorker?: boolean;
   },
 ): Promise<EnqueueCsvRevenueImportContinueResult> {
   const send = await sendCsvRevenueImportContinueMessage(admin, jobId);
@@ -126,11 +164,26 @@ export async function enqueueCsvRevenueImportContinue(
   }
 
   if (opts?.triggerWorker && opts.supabaseUrl && opts.serviceKey) {
-    triggerCsvRevenueImportWorker(
-      opts.supabaseUrl,
-      opts.serviceKey,
-      opts.logTag,
-    );
+    if (opts.awaitWorker === true) {
+      const trig = await triggerCsvRevenueImportWorkerAwait(
+        opts.supabaseUrl,
+        opts.serviceKey,
+        opts.logTag,
+      );
+      if (!trig.ok) {
+        console.warn(
+          opts.logTag ?? "[csvRevenueImportQueue]",
+          "worker_trigger_falhou_mas_msg_na_fila",
+          { job_id: jobId, error: trig.error },
+        );
+      }
+    } else {
+      triggerCsvRevenueImportWorker(
+        opts.supabaseUrl,
+        opts.serviceKey,
+        opts.logTag,
+      );
+    }
   }
 
   return send;

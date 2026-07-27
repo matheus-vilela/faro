@@ -14,6 +14,7 @@ import {
   type RevenuePeriodSummary,
 } from "@/components/revenue/RevenueSalesList";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -69,7 +70,13 @@ import {
   type RevenueTaxType,
 } from "@/types/revenue";
 import type { CompanyRevenueCategoryTaxSetting } from "@/types/revenueCategoryTax";
-import { ChevronsUpDown, CircleDollarSign, Plus, Search } from "lucide-react";
+import {
+  ChevronsUpDown,
+  CircleDollarSign,
+  Plus,
+  Receipt,
+  Search,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -1010,6 +1017,30 @@ export function Receitas() {
           </Button>
         }
       />
+
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <Receipt className="text-muted-foreground mt-0.5 size-5 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Faturamento do PDV (EPOC)</p>
+              <p className="text-muted-foreground text-xs">
+                O relatório diário de faturamento (produtos, serviços, fiscal e
+                formas de pagamento) é gravado na sincronização. Use a tela de
+                faturamento para consultar os dias já salvos.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link to="/app/faturamento">Ver faturamento</Link>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" asChild>
+              <Link to="/app/formas-de-pagamento">Formas de pagamento</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <ReferencePeriodCard
         value={period}

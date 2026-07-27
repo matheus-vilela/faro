@@ -9,12 +9,10 @@ import {
   readOnboardingPdvCsvStoragePath,
 } from "./onboardingPdvPatch.ts";
 import {
-  resumeCsvRevenueImportViaQueue,
-} from "./csvRevenueImportQueue.ts";
-import {
   triggerCsvRevenueImportJob,
   type TriggerCsvRevenueImportResult,
 } from "./triggerCsvRevenueImportJob.ts";
+import { triggerEpocCsvImportWorker } from "./epocCsvImportOrchestrator.ts";
 
 const DEFAULT_BUCKET = "company-setup";
 
@@ -63,7 +61,7 @@ export type EnqueueAndTriggerEpocCsvImportResult = {
   error?: string;
 };
 
-/** Insere job, confirma persistência e dispara `process-integration-csv-revenue-job`. */
+/** Insere job, confirma persistência e dispara `epoc-csv-import-worker`. */
 export async function enqueueAndTriggerEpocCsvImport(
   admin: Admin,
   input: {
@@ -307,27 +305,10 @@ export async function recoverEpocCsvRevenueImport(
 
   if (activeJob?.id) {
     const jobId = String(activeJob.id);
-    if (activeJob.status === "PROCESSING") {
-      const enqueue = await resumeCsvRevenueImportViaQueue(admin, jobId, {
-        supabaseUrl: input.supabaseUrl,
-        serviceKey: input.serviceKey,
-        logTag,
-      });
-      if (!enqueue.ok) {
-        return {
-          ok: false,
-          action: "triggered",
-          job_id: jobId,
-          error: enqueue.error ?? "Falha ao enfileirar retomada.",
-        };
-      }
-      return { ok: true, action: "triggered", job_id: jobId };
-    }
-
-    const trigger = await triggerCsvRevenueImportJob(
+    // PENDING ou PROCESSING → orquestrador (alive < 2 min faz skip; órfão reclama).
+    const trigger = await triggerEpocCsvImportWorker(
       input.supabaseUrl,
       input.serviceKey,
-      input.anonKey,
       jobId,
       { logTag },
     );

@@ -60,12 +60,42 @@ verify_jwt = false
 [functions.epoc-daily-sync]
 verify_jwt = false
 
+# Pipeline Epoc Fase 1 (dispatcher + worker). Bearer = EPOC_DAILY_CRON_SECRET.
+[functions.epoc-dispatcher]
+verify_jwt = false
+
+[functions.epoc-worker]
+verify_jwt = false
+
+# Orquestrador import CSV Epoc (heartbeat + self-call + watchdog).
+[functions.epoc-csv-import-worker]
+verify_jwt = false
+
 # JWT validado no código (sessão + user_companies), como epoc-sync-csv para utilizadores.
 [functions.epoc-validate-login]
 verify_jwt = false
 
+# Export CSV faturamento EPOC (dev tools). JWT validado no handler.
+[functions.epoc-export-faturamento]
+verify_jwt = false
+
+# Export CSV venda de serviços EPOC (dev tools). JWT validado no handler.
+[functions.epoc-export-venda-servicos]
+verify_jwt = false
+
+# Retry serviços/faturamento em dias com sync parcial. JWT no handler.
+[functions.epoc-retry-daily-extras]
+verify_jwt = false
+
 # Secret no header Authorization (cron) ou JWT no handler — igual epoc-daily-sync.
 [functions.focus-get-sync-nfe]
+verify_jwt = false
+
+# Pipeline NF-e Fase 1 (dispatcher + worker). Mesmo secret FOCUS_NFE_RECEBIDAS_CRON_SECRET.
+[functions.nfe-dispatcher]
+verify_jwt = false
+
+[functions.nfe-worker]
 verify_jwt = false
 
 # JWT validado no handler (sessão + user_companies).
@@ -83,6 +113,3 @@ verify_jwt = false
 
 [functions.kick-csv-revenue-import-job]
 verify_jwt = true
-
-[functions.focus-get-sync-nfe-interpret-staging]
-verify_jwt = false
