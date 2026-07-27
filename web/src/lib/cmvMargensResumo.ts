@@ -20,6 +20,10 @@ export const CMV_MARGIN_TARGET_PCT = 55;
 export type CmvProductRow = {
   key: string;
   label: string;
+  /** Rótulo curto para bolhas BCG (até ~14 chars). */
+  shortLabel: string;
+  productId: string | null;
+  recipeId: string | null;
   /** Quantidade vendida no período. */
   quantity: number;
   /** Receita líquida no período. */
@@ -163,10 +167,33 @@ function hasValidCmv(
 type ProductAcc = {
   key: string;
   label: string;
+  productId: string | null;
+  recipeId: string | null;
   quantity: number;
   revenue: number;
   cmv: number;
 };
+
+function shortLabelFrom(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "—";
+  const first = trimmed.split(/\s+/)[0] ?? trimmed;
+  if (first.length <= 14) return first;
+  return `${first.slice(0, 13)}…`;
+}
+
+function idsFromKey(key: string): {
+  productId: string | null;
+  recipeId: string | null;
+} {
+  if (key.startsWith("product:")) {
+    return { productId: key.slice("product:".length), recipeId: null };
+  }
+  if (key.startsWith("recipe:")) {
+    return { productId: null, recipeId: key.slice("recipe:".length) };
+  }
+  return { productId: null, recipeId: null };
+}
 
 function accumulateProducts(
   entries: RevenueEntry[],
@@ -178,6 +205,7 @@ function accumulateProducts(
     if (!isSaleEntry(e)) continue;
     const key = productKey(e);
     const label = productLabel(e, productNameById, recipeNameById);
+    const ids = idsFromKey(key);
     const prev = map.get(key);
     const qty = entryQuantity(e);
     const revenue = Number(e.net_amount) || 0;
@@ -187,7 +215,15 @@ function accumulateProducts(
       prev.revenue += revenue;
       prev.cmv += cmv;
     } else {
-      map.set(key, { key, label, quantity: qty, revenue, cmv });
+      map.set(key, {
+        key,
+        label,
+        productId: ids.productId ?? e.product_id,
+        recipeId: ids.recipeId ?? e.recipe_id,
+        quantity: qty,
+        revenue,
+        cmv,
+      });
     }
   }
   return map;
@@ -233,6 +269,32 @@ export const BCG_QUADRANT_LABELS: Record<BcgQuadrant, string> = {
   aposta: "Aposta",
   abacaxi: "Abacaxi",
 };
+
+/** Preço de venda necessário para atingir margem alvo dado o custo unitário. */
+export function priceToReachMargin(
+  costPrice: number,
+  targetMarginPct: number = CMV_MARGIN_TARGET_PCT,
+): number | null {
+  if (!(costPrice > 0)) return null;
+  const t = targetMarginPct / 100;
+  if (t >= 1 || t < 0) return null;
+  return costPrice / (1 - t);
+}
+
+export function countByQuadrant(
+  products: CmvProductRow[],
+): Record<BcgQuadrant, number> {
+  const counts: Record<BcgQuadrant, number> = {
+    estrela: 0,
+    vaca: 0,
+    aposta: 0,
+    abacaxi: 0,
+  };
+  for (const p of products) {
+    counts[p.quadrant] += 1;
+  }
+  return counts;
+}
 
 function sortProducts(
   rows: CmvProductRow[],
@@ -325,19 +387,62 @@ function buildInsight(
   if (kpis.pendingGapCount > 0) {
     return `${kpis.pendingGapCount} item(ns) ainda sem CMV confiável — ${kpis.reconciledPct.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% do faturamento elegível está conciliado.`;
   }
-  const worst = [...products]
-    .filter((p) => p.marginPct != null)
-    .sort((a, b) => (a.marginPct ?? 0) - (b.marginPct ?? 0))[0];
-  const best = [...products]
-    .filter((p) => p.marginPct != null)
+
+  const withMargin = products.filter((p) => p.marginPct != null);
+  const worst = [...withMargin].sort(
+    (a, b) => (a.marginPct ?? 0) - (b.marginPct ?? 0),
+  )[0];
+  const best = [...withMargin].sort(
+    (a, b) => (b.marginPct ?? 0) - (a.marginPct ?? 0),
+  )[0];
+
+  // Vaca perto da meta: sugestão de preço para virar Estrela
+  const nearStar = products
+    .filter(
+      (p) =>
+        p.quadrant === "vaca" &&
+        p.marginPct != null &&
+        p.marginPct >= CMV_MARGIN_TARGET_PCT - 5 &&
+        p.marginPct < CMV_MARGIN_TARGET_PCT &&
+        p.costPrice > 0,
+    )
     .sort((a, b) => (b.marginPct ?? 0) - (a.marginPct ?? 0))[0];
+
+  if (nearStar) {
+    const target = priceToReachMargin(nearStar.costPrice);
+    if (target != null && target > nearStar.sellPrice) {
+      const bump = target - nearStar.sellPrice;
+      return `${nearStar.label} está em Vaca leiteira com ${Math.round(nearStar.marginPct!)}% de margem (vende bem, mas abaixo da meta). Subir cerca de ${bump.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} no preço unitário já a leva para Estrela.`;
+    }
+  }
+
   if (!worst || !best) {
     return "Margens disponíveis para os produtos vendidos no período.";
   }
+
+  const markups = products
+    .map((p) => p.markup)
+    .filter((m): m is number => m != null && m > 0);
+  const medMarkup = markups.length > 0 ? median(markups) : null;
+
   if (worst.key === best.key) {
     return `${best.label} está com margem de ${Math.round(best.marginPct!)}%.`;
   }
-  return `${best.label} lidera com ${Math.round(best.marginPct!)}% de margem. ${worst.label} é a pior (${Math.round(worst.marginPct!)}%)${worst.markup != null ? ` — markup ${worst.markup.toFixed(2).replace(".", ",")}x` : ""}.`;
+
+  let line = `${best.label} lidera com ${Math.round(best.marginPct!)}% de margem. Sua pior margem agora é ${worst.label} com ${Math.round(worst.marginPct!)}%`;
+  if (worst.markup != null) {
+    line += ` — markup ${worst.markup.toFixed(2).replace(".", ",")}x`;
+    if (medMarkup != null && worst.markup < medMarkup) {
+      line += ` (abaixo da mediana ${medMarkup.toFixed(2).replace(".", ",")}x do cardápio)`;
+    }
+  }
+  line += ".";
+
+  if (worst.quadrant === "vaca" || worst.quadrant === "abacaxi") {
+    line += ` Na matriz BCG ela aparece como ${BCG_QUADRANT_LABELS[worst.quadrant].toLowerCase()}.`;
+  }
+
+  return line;
 }
 
 /**
@@ -420,6 +525,9 @@ export function buildCmvMargensDashboard(input: {
     return {
       key: acc.key,
       label: acc.label,
+      shortLabel: shortLabelFrom(acc.label),
+      productId: acc.productId,
+      recipeId: acc.recipeId,
       quantity: acc.quantity,
       revenue: acc.revenue,
       cmv: acc.cmv,
