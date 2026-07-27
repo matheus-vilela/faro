@@ -12,6 +12,7 @@ import {
 } from "@/components/desenvolvimento/NfeUnitPriceBreakdownCard";
 import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFaturamentoExportCard";
 import { EpocFaturamentoInterpretCard } from "@/components/desenvolvimento/EpocFaturamentoInterpretCard";
+import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -87,7 +88,9 @@ export function Desenvolvimento() {
     .slice(0, 14);
   const hasFocus = hasFocusNfeEmpresaId(currentCompany?.focusnfe ?? null);
 
-  const [mainTab, setMainTab] = useState<"syncNfs" | "preview">("syncNfs");
+  const [mainTab, setMainTab] = useState<
+    "geral" | "epoc" | "syncNfs" | "preview"
+  >("geral");
 
   const [getSyncVersao, setGetSyncVersao] = useState("");
   const [getSyncOnboarding, setGetSyncOnboarding] = useState(true);
@@ -311,15 +314,31 @@ export function Desenvolvimento() {
         icon={FlaskConical}
       />
 
-      <UnitSetupResetCard />
-
-      <OnboardingResetCard />
-
-      <EpocFaturamentoExportCard />
-
-      <EpocFaturamentoInterpretCard />
-
       <div className="flex flex-wrap gap-2 border-b border-border pb-px">
+        <button
+          type="button"
+          onClick={() => setMainTab("geral")}
+          className={cn(
+            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            mainTab === "geral"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Geral
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab("epoc")}
+          className={cn(
+            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            mainTab === "epoc"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          EPOC
+        </button>
         <button
           type="button"
           onClick={() => setMainTab("syncNfs")}
@@ -345,6 +364,21 @@ export function Desenvolvimento() {
           Pré-visualizar XML (NF-e)
         </button>
       </div>
+
+      {mainTab === "geral" ? (
+        <div className="space-y-6">
+          <UnitSetupResetCard />
+          <OnboardingResetCard />
+        </div>
+      ) : null}
+
+      {mainTab === "epoc" ? (
+        <div className="space-y-6">
+          <EpocFaturamentoExportCard />
+          <EpocVendaServicosExportCard />
+          <EpocFaturamentoInterpretCard />
+        </div>
+      ) : null}
 
       {mainTab === "syncNfs" ? (
         <div className="space-y-6">
@@ -515,7 +549,9 @@ export function Desenvolvimento() {
             </CardContent>
           </Card>
         </div>
-      ) : (
+      ) : null}
+
+      {mainTab === "preview" ? (
         <Card className="w-full min-w-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -597,7 +633,7 @@ export function Desenvolvimento() {
             ) : null}
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </PageShell>
   );
 }

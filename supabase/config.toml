@@ -79,6 +79,14 @@ verify_jwt = false
 [functions.epoc-export-faturamento]
 verify_jwt = false
 
+# Export CSV venda de serviços EPOC (dev tools). JWT validado no handler.
+[functions.epoc-export-venda-servicos]
+verify_jwt = false
+
+# Retry serviços/faturamento em dias com sync parcial. JWT no handler.
+[functions.epoc-retry-daily-extras]
+verify_jwt = false
+
 # Secret no header Authorization (cron) ou JWT no handler — igual epoc-daily-sync.
 [functions.focus-get-sync-nfe]
 verify_jwt = false

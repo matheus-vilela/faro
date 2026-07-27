@@ -62,10 +62,28 @@ export type ResumoPaymentRow = {
   key: string;
   label: string;
   shortLabel: string;
-  count: number;
+  /** Valor total no período (fonte: faturamento EPOC). */
   amount: number;
-  ticket: number;
   share: number;
+};
+
+/** Linha diária de forma de pagamento vinda do faturamento EPOC. */
+export type EpocPaymentLineInput = {
+  faturamento_date: string;
+  amount: number | null;
+  payment_method_id: string;
+  payment_methods: { sku: string; name: string } | null;
+};
+
+/** Dia de faturamento EPOC (Total Geral da tabela_3). */
+export type EpocFaturamentoDayInput = {
+  faturamento_date: string;
+  quantity: number | null;
+  produtos: number | null;
+  servicos: number | null;
+  taxas: number | null;
+  total: number | null;
+  ticket_medio: number | null;
 };
 
 export type ResumoDashboard = {
@@ -276,6 +294,32 @@ function sumMetrics(entries: RevenueEntry[]): ResumoKpiMetrics {
   };
 }
 
+/**
+ * KPIs a partir do faturamento diário EPOC:
+ * - brutas = `total`
+ * - líquidas = produtos + serviços (sem taxas)
+ * - transações = `quantity`
+ * - tíquete = total / quantity (ponderado no período)
+ */
+export function sumFaturamentoMetrics(
+  days: EpocFaturamentoDayInput[],
+): ResumoKpiMetrics {
+  let gross = 0;
+  let net = 0;
+  let count = 0;
+  for (const d of days) {
+    gross += Number(d.total) || 0;
+    net += (Number(d.produtos) || 0) + (Number(d.servicos) || 0);
+    count += Number(d.quantity) || 0;
+  }
+  return {
+    gross,
+    net,
+    count,
+    ticket: count > 0 ? gross / count : 0,
+  };
+}
+
 function pctChange(current: number, previous: number): number | null {
   if (previous === 0) {
     if (current === 0) return 0;
@@ -366,10 +410,28 @@ function buildChampions(
     }));
 }
 
+function finalizePaymentRows(
+  map: Map<
+    string,
+    { key: string; label: string; shortLabel: string; amount: number }
+  >,
+): ResumoPaymentRow[] {
+  const total = [...map.values()].reduce((s, r) => s + r.amount, 0);
+  return [...map.values()]
+    .sort((a, b) => b.amount - a.amount)
+    .map((row) => ({
+      key: row.key,
+      label: row.label,
+      shortLabel: row.shortLabel,
+      amount: row.amount,
+      share: total > 0 ? row.amount / total : 0,
+    }));
+}
+
 function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
   const map = new Map<
     string,
-    { key: string; label: string; shortLabel: string; count: number; amount: number }
+    { key: string; label: string; shortLabel: string; amount: number }
   >();
 
   for (const e of entries) {
@@ -379,25 +441,54 @@ function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
     const prev = map.get(key);
     const amount = Number(e.net_amount) || 0;
     if (prev) {
-      prev.count += 1;
       prev.amount += amount;
     } else {
-      map.set(key, { key, label, shortLabel, count: 1, amount });
+      map.set(key, { key, label, shortLabel, amount });
     }
   }
 
-  const total = [...map.values()].reduce((s, r) => s + r.amount, 0);
-  return [...map.values()]
-    .sort((a, b) => b.amount - a.amount)
-    .map((row) => ({
-      key: row.key,
-      label: row.label,
-      shortLabel: row.shortLabel,
-      count: row.count,
-      amount: row.amount,
-      ticket: row.count > 0 ? row.amount / row.count : 0,
-      share: total > 0 ? row.amount / total : 0,
-    }));
+  return finalizePaymentRows(map);
+}
+
+function shortPaymentLabel(name: string, sku: string): string {
+  const base = name.trim() || sku.trim() || "Outros";
+  if (base.length <= 18) return base;
+  return `${base.slice(0, 16)}…`;
+}
+
+/**
+ * Agrega formas de pagamento do faturamento EPOC (fonte principal da aba
+ * “Por tipo de transação”). Só forma + valor — o relatório não traz nº de
+ * transações confiável para tíquete médio.
+ */
+export function buildPaymentsFromEpoc(
+  lines: EpocPaymentLineInput[],
+): ResumoPaymentRow[] {
+  const map = new Map<
+    string,
+    { key: string; label: string; shortLabel: string; amount: number }
+  >();
+
+  for (const line of lines) {
+    const sku = line.payment_methods?.sku?.trim() ?? "";
+    const name = line.payment_methods?.name?.trim() ?? "";
+    const key = line.payment_method_id || (sku ? `sku:${sku}` : "unknown");
+    const label = name || sku || "Forma sem nome";
+    const shortLabel = shortPaymentLabel(label, sku);
+    const amount = Number(line.amount) || 0;
+    const prev = map.get(key);
+    if (prev) {
+      prev.amount += amount;
+      if (name && prev.label === (sku || "Forma sem nome")) {
+        prev.label = name;
+        prev.shortLabel = shortPaymentLabel(name, sku);
+      }
+    } else {
+      map.set(key, { key, label, shortLabel, amount });
+    }
+  }
+
+  return finalizePaymentRows(map);
 }
 
 function buildDailySeries(
@@ -469,6 +560,10 @@ export function buildVendasRealizadasResumo(input: {
   categoriesById: Map<string, CompanyCategory>;
   productNameById: Map<string, string>;
   recipeNameById: Map<string, string>;
+  /** Formas de pagamento do faturamento EPOC (período já filtrado ou completo). */
+  epocPayments?: EpocPaymentLineInput[];
+  /** Dias de faturamento EPOC para os KPIs (fonte preferencial). */
+  epocFaturamentoDays?: EpocFaturamentoDayInput[];
 }): ResumoDashboard {
   const ranges = getResumoRanges(input.period, input.todayYmd);
   const operational = input.entries.filter(
@@ -485,8 +580,41 @@ export function buildVendasRealizadasResumo(input: {
     ),
   );
 
-  const curM = sumMetrics(current);
-  const prevM = sumMetrics(previous);
+  const fatDays = input.epocFaturamentoDays ?? [];
+  const fatCurrent = fatDays.filter((d) =>
+    inRange(
+      d.faturamento_date.slice(0, 10),
+      ranges.currentStart,
+      ranges.currentEnd,
+    ),
+  );
+  const fatPrevious = fatDays.filter((d) =>
+    inRange(
+      d.faturamento_date.slice(0, 10),
+      ranges.previousStart,
+      ranges.previousEnd,
+    ),
+  );
+
+  const hasFaturamentoKpis =
+    fatCurrent.length > 0 || fatPrevious.length > 0;
+  const curM = hasFaturamentoKpis
+    ? sumFaturamentoMetrics(fatCurrent)
+    : sumMetrics(current);
+  const prevM = hasFaturamentoKpis
+    ? sumFaturamentoMetrics(fatPrevious)
+    : sumMetrics(previous);
+
+  const epocCurrent = (input.epocPayments ?? []).filter((line) =>
+    inRange(
+      line.faturamento_date.slice(0, 10),
+      ranges.currentStart,
+      ranges.currentEnd,
+    ),
+  );
+  const paymentsFromEpoc = buildPaymentsFromEpoc(epocCurrent);
+  const payments =
+    paymentsFromEpoc.length > 0 ? paymentsFromEpoc : buildPayments(current);
 
   return {
     ranges,
@@ -502,7 +630,7 @@ export function buildVendasRealizadasResumo(input: {
       input.productNameById,
       input.recipeNameById,
     ),
-    payments: buildPayments(current),
+    payments,
     daily: buildDailySeries(current, ranges, input.period),
     categories: buildCategories(current, input.categoriesById),
   };
