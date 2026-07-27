@@ -55,6 +55,7 @@ import {
   Receipt,
   Settings2,
   Sun,
+  Target,
   TrendingDown,
   TrendingUp,
   Truck,
@@ -166,6 +167,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         url: "/app/cmv-margens",
         icon: Percent,
         permission: "vendas_realizadas",
+      },
+      {
+        title: "Orçamento",
+        url: "/app/orcamento",
+        icon: Target,
+        permission: "dre",
       },
       {
         title: "DRE",

@@ -25,6 +25,7 @@ import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
 import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoFornecedoresGlobais";
 import { Dre } from "@/pages/Dre";
+import { Orcamento } from "@/pages/Orcamento";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
@@ -157,6 +158,7 @@ function AuthenticatedLayout() {
               </AdminRoute>
             }
           />
+          <Route path="orcamento" element={<PermissionRouteGuard permission="dre"><Orcamento /></PermissionRouteGuard>} />
           <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
           <Route path="configuracoes" element={<PermissionRouteGuard permission="configuracoes"><ConfiguracoesLayout /></PermissionRouteGuard>}>
             <Route index element={<Navigate to="usuarios" replace />} />
