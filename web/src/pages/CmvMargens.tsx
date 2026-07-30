@@ -1,3 +1,4 @@
+import { CmvProductDetailSheet } from "@/components/cmv/CmvProductDetailSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -14,9 +15,11 @@ import {
   BCG_QUADRANT_LABELS,
   buildCmvMargensDashboard,
   CMV_MARGIN_TARGET_PCT,
+  countByQuadrant,
   type BcgQuadrant,
   type CmvGapKind,
   type CmvPeriodFilter,
+  type CmvProductRow,
   type CmvSortMode,
   type CmvViewMode,
   type ProductCmvMeta,
@@ -40,6 +43,7 @@ import { Link } from "react-router-dom";
 import {
   CartesianGrid,
   Cell,
+  LabelList,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -120,15 +124,18 @@ type BcgTooltipPayload = {
   quadrant?: BcgQuadrant;
   quantity?: number;
   marginPct?: number | null;
+  marginDeltaPp?: number | null;
   revenue?: number;
 };
 
 function BcgScatterTooltip({
   active,
   payload,
+  compare,
 }: {
   active?: boolean;
   payload?: Array<{ payload?: BcgTooltipPayload }>;
+  compare?: boolean;
 }) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload;
@@ -151,11 +158,23 @@ function BcgScatterTooltip({
           })}
         </p>
         <p>Margem: {formatPct(row.marginPct ?? null, 1)}</p>
+        {compare ? <p>Δ vs ant.: {formatDeltaPp(row.marginDeltaPp ?? null)}</p> : null}
         <p>Receita: {formatBrl(row.revenue ?? 0)}</p>
       </div>
     </div>
   );
 }
+
+const QUADRANT_FILTER_OPTIONS: Array<{
+  value: BcgQuadrant | "all";
+  label: string;
+}> = [
+  { value: "all", label: "Todos" },
+  { value: "estrela", label: "Estrela" },
+  { value: "vaca", label: "Vaca" },
+  { value: "aposta", label: "Aposta" },
+  { value: "abacaxi", label: "Abacaxi" },
+];
 
 function KpiCard({
   label,
@@ -465,21 +484,53 @@ function MargemPanel({
   setSort: (s: CmvSortMode) => void;
   compare: boolean;
   setCompare: (v: boolean) => void;
-  bcgData: Array<{
-    key: string;
-    label: string;
-    x: number;
-    y: number;
-    z: number;
-    fill: string;
-    quantity: number;
-    marginPct: number | null;
-    revenue: number;
-    quadrant: BcgQuadrant;
-  }>;
+  bcgData: Array<
+    CmvProductRow & {
+      x: number;
+      y: number;
+      z: number;
+      fill: string;
+    }
+  >;
 }) {
   const { kpis, products, insight, volumeThreshold, marginThreshold, ranges } =
     dashboard;
+  const [quadrantFilter, setQuadrantFilter] = useState<BcgQuadrant | "all">(
+    "all",
+  );
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const quadrantCounts = useMemo(() => countByQuadrant(products), [products]);
+
+  const filteredProducts = useMemo(
+    () =>
+      quadrantFilter === "all"
+        ? products
+        : products.filter((p) => p.quadrant === quadrantFilter),
+    [products, quadrantFilter],
+  );
+
+  const filteredBcgData = useMemo(
+    () =>
+      quadrantFilter === "all"
+        ? bcgData
+        : bcgData.filter((p) => p.quadrant === quadrantFilter),
+    [bcgData, quadrantFilter],
+  );
+
+  const labelKeys = useMemo(() => {
+    const top = [...filteredBcgData]
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 8)
+      .map((p) => p.key);
+    return new Set(top);
+  }, [filteredBcgData]);
+
+  const selectedProduct =
+    filteredProducts.find((p) => p.key === selectedKey) ??
+    products.find((p) => p.key === selectedKey) ??
+    null;
+
   const hasProducts = products.length > 0;
 
   return (
@@ -595,6 +646,48 @@ function MargemPanel({
         </label>
       </div>
 
+      {hasProducts ? (
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label="Filtrar por quadrante BCG"
+        >
+          {QUADRANT_FILTER_OPTIONS.map((opt) => {
+            const active = quadrantFilter === opt.value;
+            const count =
+              opt.value === "all"
+                ? products.length
+                : quadrantCounts[opt.value];
+            const color =
+              opt.value === "all" ? undefined : QUADRANT_COLORS[opt.value];
+            return (
+              <Button
+                key={opt.value}
+                type="button"
+                variant={active ? "default" : "outline"}
+                size="sm"
+                onClick={() => setQuadrantFilter(opt.value)}
+                className={cn(
+                  "h-8 rounded-full px-3 text-xs font-medium",
+                  active
+                    ? "bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+                    : "bg-background",
+                )}
+              >
+                {color ? (
+                  <span
+                    className="mr-1.5 h-2 w-2 rounded-full"
+                    style={{ backgroundColor: color }}
+                    aria-hidden
+                  />
+                ) : null}
+                {opt.label} ({count})
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
+
       {!hasProducts ? (
         <Card className="shadow-sm">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
@@ -627,61 +720,119 @@ function MargemPanel({
                 </span>
               ))}
             </div>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 12, right: 16, bottom: 12, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis
-                    type="number"
-                    dataKey="x"
-                    name="Volume"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    label={{
-                      value: "Volume de vendas →",
-                      position: "insideBottom",
-                      offset: -4,
-                      fontSize: 11,
-                    }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="y"
-                    name="Margem"
-                    unit="%"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    domain={[0, "auto"]}
-                    label={{
-                      value: "Margem % →",
-                      angle: -90,
-                      position: "insideLeft",
-                      fontSize: 11,
-                    }}
-                  />
-                  <ZAxis type="number" dataKey="z" range={[60, 400]} />
-                  <ReferenceLine
-                    x={volumeThreshold}
-                    stroke="var(--border)"
-                    strokeDasharray="4 4"
-                  />
-                  <ReferenceLine
-                    y={marginThreshold}
-                    stroke="var(--border)"
-                    strokeDasharray="4 4"
-                  />
-                  <Tooltip
-                    cursor={{ strokeDasharray: "3 3" }}
-                    content={<BcgScatterTooltip />}
-                  />
-                  <Scatter data={bcgData} name="Produtos">
-                    {bcgData.map((entry) => (
-                      <Cell key={entry.key} fill={entry.fill} />
-                    ))}
-                  </Scatter>
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
+            {filteredBcgData.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                Nenhum produto neste quadrante.
+              </p>
+            ) : (
+              <div className="h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart
+                    margin={{ top: 12, right: 16, bottom: 12, left: 8 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-border"
+                    />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      name="Volume"
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      label={{
+                        value: "Volume de vendas →",
+                        position: "insideBottom",
+                        offset: -4,
+                        fontSize: 11,
+                      }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      name="Margem"
+                      unit="%"
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      domain={[0, "auto"]}
+                      label={{
+                        value: "Margem % →",
+                        angle: -90,
+                        position: "insideLeft",
+                        fontSize: 11,
+                      }}
+                    />
+                    <ZAxis type="number" dataKey="z" range={[60, 400]} />
+                    <ReferenceLine
+                      x={volumeThreshold}
+                      stroke="var(--border)"
+                      strokeDasharray="4 4"
+                    />
+                    <ReferenceLine
+                      y={marginThreshold}
+                      stroke="var(--border)"
+                      strokeDasharray="4 4"
+                    />
+                    <Tooltip
+                      cursor={{ strokeDasharray: "3 3" }}
+                      content={<BcgScatterTooltip compare={compare} />}
+                    />
+                    <Scatter
+                      data={filteredBcgData}
+                      name="Produtos"
+                      cursor="pointer"
+                      onClick={(data) => {
+                        const row = data as
+                          | { key?: string; payload?: { key?: string } }
+                          | undefined;
+                        const key = row?.key ?? row?.payload?.key;
+                        if (key) setSelectedKey(key);
+                      }}
+                    >
+                      {filteredBcgData.map((entry) => (
+                        <Cell key={entry.key} fill={entry.fill} />
+                      ))}
+                      <LabelList
+                        dataKey="shortLabel"
+                        position="top"
+                        className="fill-foreground"
+                        style={{ fontSize: 10 }}
+                        content={(props) => {
+                          const { x, y, index } = props as {
+                            x?: number | string;
+                            y?: number | string;
+                            index?: number;
+                          };
+                          const row =
+                            typeof index === "number"
+                              ? filteredBcgData[index]
+                              : undefined;
+                          if (
+                            !row ||
+                            !labelKeys.has(row.key) ||
+                            x == null ||
+                            y == null
+                          ) {
+                            return null;
+                          }
+                          return (
+                            <text
+                              x={Number(x)}
+                              y={Number(y) - 10}
+                              textAnchor="middle"
+                              className="fill-muted-foreground"
+                              style={{ fontSize: 10 }}
+                            >
+                              {row.shortLabel}
+                            </text>
+                          );
+                        }}
+                      />
+                    </Scatter>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -692,84 +843,150 @@ function MargemPanel({
             </CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto pt-0">
-            <table className="w-full min-w-[40rem] border-collapse text-sm">
-              <thead>
-                <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  <th className="pb-2 pr-3 font-semibold">Produto</th>
-                  <th className="pb-2 pr-3 text-right font-semibold">
-                    Preço compra
-                  </th>
-                  <th className="pb-2 pr-3 text-right font-semibold">
-                    Preço venda
-                  </th>
-                  <th className="pb-2 pr-3 text-right font-semibold">Markup</th>
-                  <th className="pb-2 pr-3 text-right font-semibold">Margem</th>
-                  {compare ? (
-                    <th className="pb-2 text-right font-semibold">vs ant.</th>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((row) => (
-                  <tr
-                    key={row.key}
-                    className="border-b border-border/60 last:border-0"
-                  >
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-foreground">
-                        {row.label}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {row.quantity.toLocaleString("pt-BR", {
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        un · {BCG_QUADRANT_LABELS[row.quadrant]}
-                      </div>
-                    </td>
-                    <td className="py-3 pr-3 text-right tabular-nums">
-                      {formatBrl(row.costPrice)}
-                    </td>
-                    <td className="py-3 pr-3 text-right tabular-nums">
-                      {formatBrl(row.sellPrice)}
-                    </td>
-                    <td className="py-3 pr-3 text-right tabular-nums">
-                      {formatMarkup(row.markup)}
-                    </td>
-                    <td
-                      className={cn(
-                        "py-3 pr-3 text-right tabular-nums font-medium",
-                        marginToneClass(row.marginPct),
-                      )}
-                    >
-                      {formatPct(row.marginPct, 0)}
-                    </td>
+            {filteredProducts.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                Nenhum produto neste quadrante.
+              </p>
+            ) : (
+              <table className="w-full min-w-[40rem] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <th className="pb-2 pr-3 font-semibold">Produto</th>
+                    <th className="pb-2 pr-3 text-right font-semibold">
+                      Preço compra
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-semibold">
+                      Preço venda
+                    </th>
+                    <th className="pb-2 pr-3 text-right font-semibold">Markup</th>
+                    <th className="pb-2 pr-3 text-right font-semibold">Margem</th>
                     {compare ? (
-                      <td
-                        className={cn(
-                          "py-3 text-right tabular-nums text-xs font-medium",
-                          row.marginDeltaPp != null &&
-                            row.marginDeltaPp > 0 &&
-                            "text-emerald-600",
-                          row.marginDeltaPp != null &&
-                            row.marginDeltaPp < 0 &&
-                            "text-red-600",
-                          (row.marginDeltaPp == null ||
-                            row.marginDeltaPp === 0) &&
-                            "text-muted-foreground",
-                        )}
-                      >
-                        {formatDeltaPp(row.marginDeltaPp)}
-                      </td>
+                      <th className="pb-2 text-right font-semibold">vs ant.</th>
                     ) : null}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredProducts.map((row) => (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40"
+                      onClick={() => setSelectedKey(row.key)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedKey(row.key);
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                    >
+                      <td className="py-3 pr-3">
+                        <div className="flex items-start gap-2">
+                          <span
+                            className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{
+                              backgroundColor: QUADRANT_COLORS[row.quadrant],
+                            }}
+                            aria-hidden
+                          />
+                          <div>
+                            <div className="font-medium text-foreground">
+                              {row.label}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {row.quantity.toLocaleString("pt-BR", {
+                                maximumFractionDigits: 2,
+                              })}{" "}
+                              un · {BCG_QUADRANT_LABELS[row.quadrant]}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums">
+                        {formatBrl(row.costPrice)}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums">
+                        {formatBrl(row.sellPrice)}
+                      </td>
+                      <td className="py-3 pr-3 text-right tabular-nums">
+                        {formatMarkup(row.markup)}
+                      </td>
+                      <td className="py-3 pr-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="hidden h-1.5 w-12 overflow-hidden rounded-full bg-muted sm:block">
+                            <div
+                              className="h-full rounded-full bg-current opacity-70"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, row.marginPct ?? 0))}%`,
+                              }}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "tabular-nums font-medium",
+                              marginToneClass(row.marginPct),
+                            )}
+                          >
+                            {formatPct(row.marginPct, 0)}
+                          </span>
+                        </div>
+                      </td>
+                      {compare ? (
+                        <td
+                          className={cn(
+                            "py-3 text-right tabular-nums text-xs font-medium",
+                            row.marginDeltaPp != null &&
+                              row.marginDeltaPp > 0 &&
+                              "text-emerald-600",
+                            row.marginDeltaPp != null &&
+                              row.marginDeltaPp < 0 &&
+                              "text-red-600",
+                            (row.marginDeltaPp == null ||
+                              row.marginDeltaPp === 0) &&
+                              "text-muted-foreground",
+                          )}
+                        >
+                          {formatDeltaPp(row.marginDeltaPp)}
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </CardContent>
         </Card>
       )}
+
+      <CmvProductDetailSheet
+        product={selectedProduct}
+        open={selectedKey != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedKey(null);
+        }}
+        compare={compare}
+      />
     </>
   );
+}
+
+function gapCta(gap: {
+  productId: string | null;
+  recipeId: string | null;
+}): { to: string; label: string } {
+  if (gap.productId) {
+    return {
+      to: `/app/produtos?highlight=${encodeURIComponent(gap.productId)}`,
+      label: "Abrir produto",
+    };
+  }
+  if (gap.recipeId) {
+    return {
+      to: "/app/produtos?estoque=receitas",
+      label: "Abrir ficha",
+    };
+  }
+  return { to: "/app/produtos", label: "Abrir produtos" };
 }
 
 function QualidadePanel({
@@ -817,6 +1034,7 @@ function QualidadePanel({
           ) : (
             <ul className="divide-y divide-border/70">
               {gaps.map((gap) => {
+                const cta = gapCta(gap);
                 return (
                   <li
                     key={gap.key}
@@ -847,8 +1065,8 @@ function QualidadePanel({
                       size="sm"
                       className="shrink-0"
                     >
-                      <Link to="/app/produtos">
-                        Abrir produtos
+                      <Link to={cta.to}>
+                        {cta.label}
                         <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
                       </Link>
                     </Button>

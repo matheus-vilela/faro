@@ -25,6 +25,7 @@ import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
 import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoFornecedoresGlobais";
 import { Dre } from "@/pages/Dre";
+import { Orcamento } from "@/pages/Orcamento";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
@@ -116,7 +117,16 @@ function AuthenticatedLayout() {
           <Route path="faturamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FaturamentoEpoc /></PermissionRouteGuard>} />
           <Route path="formas-de-pagamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FormasPagamento /></PermissionRouteGuard>} />
           <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
-          <Route path="fluxo-de-caixa" element={<PermissionRouteGuard permission="contas_a_pagar"><FluxoDeCaixa /></PermissionRouteGuard>} />
+          <Route
+            path="fluxo-de-caixa"
+            element={
+              <PermissionRouteGuard
+                permissions={["contas_a_pagar", "vendas_realizadas"]}
+              >
+                <FluxoDeCaixa />
+              </PermissionRouteGuard>
+            }
+          />
           <Route
             path="boletos"
             element={<Navigate to="/app/contas-a-pagar" replace />}
@@ -148,6 +158,7 @@ function AuthenticatedLayout() {
               </AdminRoute>
             }
           />
+          <Route path="orcamento" element={<PermissionRouteGuard permission="dre"><Orcamento /></PermissionRouteGuard>} />
           <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
           <Route path="configuracoes" element={<PermissionRouteGuard permission="configuracoes"><ConfiguracoesLayout /></PermissionRouteGuard>}>
             <Route index element={<Navigate to="usuarios" replace />} />

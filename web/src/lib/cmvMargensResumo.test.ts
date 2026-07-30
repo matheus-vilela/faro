@@ -4,6 +4,8 @@ import {
   buildCmvMargensDashboard,
   classifyBcg,
   CMV_MARGIN_TARGET_PCT,
+  countByQuadrant,
+  priceToReachMargin,
 } from "@/lib/cmvMargensResumo";
 import type { RevenueEntry } from "@/types/revenue";
 
@@ -42,6 +44,35 @@ describe("classifyBcg", () => {
     expect(classifyBcg(10, 60, 50)).toBe("aposta");
     expect(classifyBcg(10, 40, 50)).toBe("abacaxi");
     expect(BCG_QUADRANT_LABELS.estrela).toBe("Estrela");
+  });
+});
+
+describe("priceToReachMargin", () => {
+  it("calcula preço para margem alvo", () => {
+    // custo 45 → preço para 55% = 45 / 0.45 = 100
+    expect(priceToReachMargin(45, 55)).toBeCloseTo(100, 5);
+  });
+
+  it("retorna null com custo inválido", () => {
+    expect(priceToReachMargin(0)).toBeNull();
+    expect(priceToReachMargin(-1)).toBeNull();
+  });
+});
+
+describe("countByQuadrant", () => {
+  it("conta produtos por quadrante", () => {
+    const counts = countByQuadrant([
+      { quadrant: "estrela" },
+      { quadrant: "estrela" },
+      { quadrant: "vaca" },
+      { quadrant: "abacaxi" },
+    ] as never);
+    expect(counts).toEqual({
+      estrela: 2,
+      vaca: 1,
+      aposta: 0,
+      abacaxi: 1,
+    });
   });
 });
 
@@ -99,6 +130,9 @@ describe("buildCmvMargensDashboard", () => {
     expect(dash.products.length).toBe(2);
 
     const heineken = dash.products.find((p) => p.key === "product:p1")!;
+    expect(heineken.productId).toBe("p1");
+    expect(heineken.recipeId).toBeNull();
+    expect(heineken.shortLabel).toBe("Heineken");
     expect(heineken.sellPrice).toBeCloseTo(14, 5);
     expect(heineken.costPrice).toBeCloseTo(6.4, 5);
     expect(heineken.markup).toBeCloseTo(14 / 6.4, 5);
@@ -108,6 +142,42 @@ describe("buildCmvMargensDashboard", () => {
     expect(dash.kpis.pendingGapCount).toBeGreaterThanOrEqual(1);
     expect(dash.kpis.reconciledPct).toBeLessThan(100);
     expect(dash.insight.length).toBeGreaterThan(0);
+    expect(dash.insight).toMatch(/sem CMV/i);
+  });
+
+  it("gera insight acionável quando CMV está completo", () => {
+    const entries = [
+      entry({
+        id: "1",
+        title: "Heineken Long Neck",
+        product_id: "p1",
+        quantity: 20,
+        net_amount: 200,
+        cmv_amount: 100, // 50% margem — perto da meta 55%
+        entry_date: "2026-07-15",
+      }),
+      entry({
+        id: "2",
+        title: "Água",
+        product_id: "p2",
+        quantity: 5,
+        net_amount: 50,
+        cmv_amount: 10, // 80% margem
+        entry_date: "2026-07-15",
+      }),
+    ];
+    const dash = buildCmvMargensDashboard({
+      entries,
+      period: "today",
+      todayYmd: "2026-07-15",
+      sort: "volume",
+      productNameById,
+      recipeNameById,
+    });
+    expect(dash.gaps).toHaveLength(0);
+    expect(dash.insight).toMatch(/Vaca leiteira|Estrela|margem/i);
+    const heineken = dash.products.find((p) => p.key === "product:p1")!;
+    expect(heineken.shortLabel).toBe("Heineken");
   });
 
   it("ordena por pior margem", () => {
@@ -193,5 +263,7 @@ describe("buildCmvMargensDashboard", () => {
     expect(dash.products).toHaveLength(1);
     expect(dash.products[0]!.label).toBe("Caipirinha");
     expect(dash.products[0]!.key).toBe("recipe:r1");
+    expect(dash.products[0]!.recipeId).toBe("r1");
+    expect(dash.products[0]!.productId).toBeNull();
   });
 });

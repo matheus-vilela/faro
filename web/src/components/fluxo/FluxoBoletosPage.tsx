@@ -129,10 +129,13 @@ export type FluxoBoletosPageConfig = {
 export function FluxoBoletosPage({
   config,
   afterHeader,
+  embedded = false,
 }: {
   config: FluxoBoletosPageConfig;
   /** Conteúdo renderizado logo abaixo do PageHeader (ex.: abas). */
   afterHeader?: ReactNode;
+  /** Sem PageShell/PageHeader — o pai já renderiza o chrome. */
+  embedded?: boolean;
 }) {
   const {
     flowType,
@@ -939,27 +942,38 @@ export function FluxoBoletosPage({
     </button>
   );
 
-  return (
-    <PageShell>
-      <PageHeader
-        title={title}
-        description={description}
-        icon={PageIcon}
-        action={
-          <Button
-            onClick={() => {
-              setCreateBoletoDefaultDueDate(undefined);
-              setBoletoSheetOpen(true);
-            }}
-            className="h-10 w-full shrink-0 sm:w-auto"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            {addButtonLabel}
-          </Button>
-        }
-      />
+  const addButton = (
+    <Button
+      onClick={() => {
+        setCreateBoletoDefaultDueDate(undefined);
+        setBoletoSheetOpen(true);
+      }}
+      className="h-10 w-full shrink-0 sm:w-auto"
+    >
+      <Plus className="h-4 w-4 mr-2" />
+      {addButtonLabel}
+    </Button>
+  );
 
-      {afterHeader}
+  const body = (
+    <>
+      {embedded ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">{description}</p>
+          {addButton}
+        </div>
+      ) : (
+        <PageHeader
+          title={title}
+          description={description}
+          icon={PageIcon}
+          action={addButton}
+        />
+      )}
+
+      {!embedded && afterHeader ? (
+        <div className="w-fit max-w-full">{afterHeader}</div>
+      ) : null}
 
       <ReferencePeriodCard
         value={period}
@@ -1794,6 +1808,12 @@ export function FluxoBoletosPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </>
   );
+
+  if (embedded) {
+    return <div className="flex flex-col gap-4">{body}</div>;
+  }
+
+  return <PageShell>{body}</PageShell>;
 }

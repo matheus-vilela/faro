@@ -7,6 +7,10 @@ import {
   type CategoryTotals,
 } from "@/lib/dre/computeDre";
 import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
+import {
+  dreHasMappedMovement,
+  dreHasOnlyUnclassified,
+} from "@/lib/dre/dreMovement";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto } from "@/types/expense";
@@ -38,6 +42,9 @@ export interface UseDreReportState {
   categoryTotals: CategoryTotals;
   computed: DreComputed | null;
   periodLabel: string;
+  hasMappedMovement: boolean;
+  hasOnlyUnclassified: boolean;
+  reload: () => Promise<void>;
 }
 
 const MONTH_NAMES = [
@@ -197,6 +204,25 @@ export function useDreReport(
     salesCmvInPeriod,
   ]);
 
+  const hasMappedMovement = useMemo(
+    () => dreHasMappedMovement(computed, salesCmvInPeriod, categoryTotals),
+    [computed, salesCmvInPeriod, categoryTotals],
+  );
+
+  const hasOnlyUnclassified = useMemo(
+    () =>
+      dreHasOnlyUnclassified(
+        boletosInPeriod.length,
+        hasMappedMovement,
+        categoryTotals.semCategoriaCount,
+      ),
+    [
+      boletosInPeriod.length,
+      hasMappedMovement,
+      categoryTotals.semCategoriaCount,
+    ],
+  );
+
   const periodLabel = `${MONTH_NAMES[period.month - 1]} ${period.year}`;
 
   return {
@@ -209,5 +235,8 @@ export function useDreReport(
     categoryTotals,
     computed,
     periodLabel,
+    hasMappedMovement,
+    hasOnlyUnclassified,
+    reload: load,
   };
 }

@@ -29,12 +29,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
+  hasAnyPermission,
   hasPermission,
   type PermissionKey,
 } from "@/lib/permissions";
 import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import {
+  ArrowLeftRight,
   BarChart3,
   Bell,
   Building2,
@@ -53,6 +55,7 @@ import {
   Receipt,
   Settings2,
   Sun,
+  Target,
   TrendingDown,
   TrendingUp,
   Truck,
@@ -65,6 +68,8 @@ type NavItem = {
   url: string;
   icon: LucideIcon;
   permission: PermissionKey;
+  /** Quando informado, item visível se o usuário tiver ao menos uma permissão. */
+  permissions?: PermissionKey[];
   /** Só marca ativo na URL exata (evita sub-rotas, ex. /desenvolvimento vs /desenvolvimento/fornecedores). */
   exact?: boolean;
 };
@@ -139,6 +144,13 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         permission: "vendas_realizadas",
       },
       {
+        title: "Fluxo de caixa",
+        url: "/app/fluxo-de-caixa",
+        icon: ArrowLeftRight,
+        permission: "contas_a_pagar",
+        permissions: ["contas_a_pagar", "vendas_realizadas"],
+      },
+      {
         title: "Faturamento",
         url: "/app/faturamento",
         icon: Receipt,
@@ -157,7 +169,13 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         permission: "vendas_realizadas",
       },
       {
-        title: "DRE",
+        title: "Orçamento",
+        url: "/app/orcamento",
+        icon: Target,
+        permission: "dre",
+      },
+      {
+        title: "DRE / Resultado",
         url: "/app/dre",
         icon: BarChart3,
         permission: "dre",
@@ -262,6 +280,9 @@ function AppLayoutContent() {
       items: section.items.filter((item) => {
         if (section.adminOnly && isAdmin) return true;
         if (isCompanyOwner) return true;
+        if (item.permissions?.length) {
+          return hasAnyPermission(currentPermissions, item.permissions);
+        }
         return hasPermission(currentPermissions, item.permission);
       }),
     }))

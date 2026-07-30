@@ -25,7 +25,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   produtos: "Produtos e estoque",
   contas_a_pagar: "Contas a pagar",
   vendas_realizadas: "Vendas realizadas",
-  dre: "DRE",
+  dre: "DRE / Resultado",
   alertas: "Alertas",
   integracoes: "Integrações",
   configuracoes: "Configurações",
@@ -81,6 +81,7 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   ) {
     return "vendas_realizadas";
   }
+  if (path.startsWith("/app/orcamento")) return "dre";
   if (path.startsWith("/app/dre")) return "dre";
   if (path.startsWith("/app/alertas")) return "alertas";
   if (path.startsWith("/app/integracoes")) return "integracoes";

@@ -37,7 +37,7 @@ export function PageHeader({
           <h1 className="text-xl font-bold tracking-tight">{title}</h1>
         )}
         {description != null && description !== false && (
-          <p className="text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
         )}
       </div>
       {action ? (
