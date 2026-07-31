@@ -146,7 +146,7 @@ export function Companies() {
   const [searchParams] = useSearchParams();
   const gestao = searchParams.get("gestao") === "1";
 
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const {
     groupsWithCompanies,
     currentCompany,
@@ -227,7 +227,7 @@ export function Companies() {
   }, [editDocument, editingCompany, editFocusCnpjLock]);
 
   const isGroupOwner = (g: CompanyGroup) =>
-    !!user && g.owner_user_id === user.id;
+    isAdmin || (!!user && g.owner_user_id === user.id);
 
   const handleSelectCompany = (company: Company) => {
     setCurrentCompany(company);

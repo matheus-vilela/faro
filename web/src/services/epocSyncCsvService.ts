@@ -87,6 +87,24 @@ async function patchOnboardingAfterInvokeSuccess(
   data: EpocSyncCsvResponse,
 ): Promise<void> {
   if (!data.ok) return;
+
+  if (data.continuing === true) {
+    const progress =
+      typeof data.message === "string" && data.message.trim()
+        ? data.message.trim().slice(0, 500)
+        : data.days_done != null && data.days_planned != null
+          ? `A buscar vendas no EPOC (${data.days_done}/${data.days_planned} dias)…`
+          : "A buscar vendas no EPOC em lotes…";
+    await patchCompanyOnboardingPdv(companyId, {
+      portal_busy: true,
+      portal_outcome: null,
+      portal_message: progress,
+      sync: true,
+      import_error: null,
+    });
+    return;
+  }
+
   const patch: Parameters<typeof patchCompanyOnboardingPdv>[1] = {
     portal_busy: false,
     portal_outcome: "success",
@@ -161,6 +179,12 @@ export type InvokeEpocCsvSyncOptions = {
 export type EpocSyncCsvResponse = {
   ok: boolean;
   error?: string;
+  /** True enquanto a edge encadeia lotes de dias (download CSV ainda em curso). */
+  continuing?: boolean;
+  product_sync_run_id?: string;
+  days_done?: number;
+  days_planned?: number;
+  days_chunk?: number;
   steps?: EpocSyncStep[];
   steps_prefix?: string;
   tblExport_found?: boolean;
@@ -334,9 +358,19 @@ export function triggerEpocCsvSyncInBackground(
       return;
     }
     if (data.ok) {
-      console.info(
-        "[epoc-sync-csv] concluído (CSV no Storage, em segundo plano).",
-      );
+      if (data.continuing) {
+        console.info(
+          "[epoc-sync-csv] em curso (lotes); o portal continua a sincronizar.",
+          {
+            days_done: data.days_done,
+            days_planned: data.days_planned,
+          },
+        );
+      } else {
+        console.info(
+          "[epoc-sync-csv] concluído (CSV no Storage, em segundo plano).",
+        );
+      }
     } else {
       console.warn("[epoc-sync-csv]", data.error ?? "ok false");
     }

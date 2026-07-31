@@ -1,25 +1,29 @@
 /**
- * Exporta relatório EPOC `mod_rel_faturamento` → CSV consolidado com coluna `secao`.
+ * Exporta relatório EPOC `mod_rel_produto_sintetico` → CSV (`#tblExport`).
  * Uso principal: ferramentas de desenvolvimento (validação manual).
+ * Mesmo módulo/filtro do sync de produtos (`epoc-sync-csv`).
  *
  * POST { company_id, data_de?, data_ate?, consulta_dias_br? }
  * Datas em dd/MM/aaaa. Default: ontem (America/Sao_Paulo).
+ *
+ * Fase 2 (acoes): modulo + NaoMenu + token + data_de/data_ate +
+ * busca_grupo_evento=-1 + filtrar=FORM
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
-import {
-  buildFaturamentoConsolidatedCsv,
-  extractFaturamentoRowsFromAcoesHtml,
-  MODULO_REL_FATURAMENTO,
-  type FaturamentoDayExtract,
-} from "../_shared/epocFaturamentoCsv.ts";
 import { htmlHasId, unwrapAcoesHtml } from "../_shared/epocHtmlExtract.ts";
 import { fetchEpocPortalPostWithRetry } from "../_shared/epocPortalFetch.ts";
 import {
   normalizeEpocBaseUrlInput,
   performEpocPortalLogin,
 } from "../_shared/epocPortalLoginSession.ts";
+import {
+  buildProdutoSinteticoConsolidatedCsv,
+  extractProdutoSinteticoRowsFromAcoesHtml,
+  MODULO_REL_PRODUTO_SINTETICO,
+  type ProdutoSinteticoDayExtract,
+} from "../_shared/epocProdutoSinteticoCsv.ts";
 import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -28,7 +32,7 @@ const corsHeaders: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const LOG = "[epoc-export-faturamento]";
+const LOG = "[epoc-export-venda-produtos]";
 const DEFAULT_LOGIN_PATH = "/index.php";
 const DEFAULT_NAOMENU = "123A";
 const PATH_VALIDADOR_OZ = "/validadorOz.php";
@@ -163,7 +167,6 @@ function parseBrDate(s: string): { y: number; m: number; d: number } | null {
   return { y, m: mo, d };
 }
 
-/** Intervalo inclusivo data_de → data_ate (máx. 31 dias). */
 function inclusiveDaysBr(dataDe: string, dataAte: string): string[] | null {
   const a = parseBrDate(dataDe);
   const b = parseBrDate(dataAte);
@@ -421,7 +424,7 @@ Deno.serve(async (req) => {
         acoesUrl,
         {
           method: "POST",
-          headers: headersAcoes(cookies, origin, validadorOzUrl),
+          headers: headersAcoes(cookies, origin, refererIndex),
           body: formBody,
           redirect: "follow",
           signal: timeout,
@@ -453,7 +456,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "validadorOz fase1 falhou." }, 502);
   }
   const acoes1 = await postAcoes("fase1", {
-    modulo: MODULO_REL_FATURAMENTO,
+    modulo: MODULO_REL_PRODUTO_SINTETICO,
     NaoMenu: naoMenu,
     action: "",
     codForm: "",
@@ -471,29 +474,31 @@ Deno.serve(async (req) => {
       {
         ok: false,
         error:
-          "Módulo de faturamento não carregou (sem ConteudoTela). Verifique NaoMenu/credenciais.",
+          "Módulo de venda de produtos não carregou (sem ConteudoTela). Verifique NaoMenu/credenciais.",
       },
       502,
     );
   }
 
-  const dayExtracts: FaturamentoDayExtract[] = [];
+  const dayExtracts: ProdutoSinteticoDayExtract[] = [];
   for (let i = 0; i < diasConsulta.length; i++) {
     const dia = diasConsulta[i]!;
     const suffix = `dia${String(i + 1).padStart(2, "0")}`;
     if (!(await postValidador(`fase2_${suffix}`))) {
       dayExtracts.push({
         dataConsulta: dia,
-        secaoCount: 0,
         rowCount: 0,
+        rawRowCount: 0,
         rows: [],
+        header: [],
         maxCols: 0,
         message: "validadorOz falhou; dia ignorado.",
       });
       continue;
     }
+    // Corpo alinhado ao sync de produtos (epoc-sync-csv).
     const acoesDia = await postAcoes(`fase2_${suffix}`, {
-      modulo: MODULO_REL_FATURAMENTO,
+      modulo: MODULO_REL_PRODUTO_SINTETICO,
       NaoMenu: naoMenu,
       token: tokenForBody,
       data_de: dia,
@@ -504,18 +509,21 @@ Deno.serve(async (req) => {
     if (!acoesDia.ok) {
       dayExtracts.push({
         dataConsulta: dia,
-        secaoCount: 0,
         rowCount: 0,
+        rawRowCount: 0,
         rows: [],
+        header: [],
         maxCols: 0,
         message: "acoes.php falhou; dia ignorado.",
       });
       continue;
     }
-    dayExtracts.push(extractFaturamentoRowsFromAcoesHtml(acoesDia.text, dia));
+    dayExtracts.push(
+      extractProdutoSinteticoRowsFromAcoesHtml(acoesDia.text, dia),
+    );
   }
 
-  const built = buildFaturamentoConsolidatedCsv(dayExtracts);
+  const built = buildProdutoSinteticoConsolidatedCsv(dayExtracts);
   if (built.totalRows === 0) {
     const msgs = dayExtracts
       .map((d) => (d.message ? `${d.dataConsulta}: ${d.message}` : null))
@@ -525,12 +533,12 @@ Deno.serve(async (req) => {
         ok: false,
         error:
           msgs[0] ??
-          "Nenhuma tabela em #spanImprimir na janela consultada.",
+          "Nenhuma tabela #tblExport com dados na janela consultada.",
         dias_consultados: diasConsulta,
         dias_detalhe: dayExtracts.map((d) => ({
           data_consulta: d.dataConsulta,
-          secoes: d.secaoCount,
-          linhas: d.rowCount,
+          itens: d.rowCount,
+          raw_rows: d.rawRowCount,
           message: d.message ?? null,
         })),
       },
@@ -543,9 +551,9 @@ Deno.serve(async (req) => {
       ? `_a_${diasConsulta[diasConsulta.length - 1]!.replace(/\//g, "-")}`
       : ""
   }`;
-  const fileName = `faturamento-${fileStamp}.csv`;
+  const fileName = `venda-produtos-${fileStamp}.csv`;
   const storagePath =
-    `${companyId}/epoc-faturamento/${new Date().toISOString().replace(/[:.]/g, "-")}-${fileName}`;
+    `${companyId}/epoc-venda-produtos/${new Date().toISOString().replace(/[:.]/g, "-")}-${fileName}`;
   const csvBytes = new TextEncoder().encode(built.csv);
 
   let downloadUrl: string | null = null;
@@ -585,12 +593,13 @@ Deno.serve(async (req) => {
     storage_path: storagePathOut,
     dias_consultados: diasConsulta,
     total_rows: built.totalRows,
+    total_itens: built.totalRows,
     max_cols: built.maxCols,
     dias_com_dados: built.diasComDados,
     dias_detalhe: dayExtracts.map((d) => ({
       data_consulta: d.dataConsulta,
-      secoes: d.secaoCount,
-      linhas: d.rowCount,
+      itens: d.rowCount,
+      raw_rows: d.rawRowCount,
       message: d.message ?? null,
     })),
   });

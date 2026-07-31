@@ -12,6 +12,8 @@ import {
 } from "@/components/desenvolvimento/NfeUnitPriceBreakdownCard";
 import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFaturamentoExportCard";
 import { EpocFaturamentoInterpretCard } from "@/components/desenvolvimento/EpocFaturamentoInterpretCard";
+import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
+import { EpocVendaProdutosInterpretCard } from "@/components/desenvolvimento/EpocVendaProdutosInterpretCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
@@ -374,6 +376,8 @@ export function Desenvolvimento() {
 
       {mainTab === "epoc" ? (
         <div className="space-y-6">
+          <EpocVendaProdutosExportCard />
+          <EpocVendaProdutosInterpretCard />
           <EpocFaturamentoExportCard />
           <EpocVendaServicosExportCard />
           <EpocFaturamentoInterpretCard />

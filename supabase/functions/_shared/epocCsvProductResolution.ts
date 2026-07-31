@@ -1,11 +1,10 @@
 /**
  * Resolução de produto na importação EPOC/CSV:
- * match exato por nome (produtos e fichas ativos), batch OpenAI para não encontrados.
+ * match exato por nome (produtos e fichas ativos); sem match → cria o produto.
+ * A IA não decide se o produto deve ser criado.
  */
 import {
-  batchResolveEpocUnmatchedWithOpenAi,
   type EpocOpenAiCreateHint,
-  type EpocOpenAiMatchAssignment,
   type EpocRecipeCatalogEntry,
 } from "./epocCsvProductMatchOpenAi.ts";
 import { appendProductUnitConversionOnProduct } from "./productUnitConversionsOnProduct.ts";
@@ -196,10 +195,9 @@ export function resolveEpocProductId(
   const canonicalName =
     canonicalProductName(catalogName || rawName) || lineKey;
 
-  const cachedExact = cache.get(exactKey);
   if (cache.has(exactKey)) {
     return {
-      productId: cachedExact,
+      productId: cache.get(exactKey) ?? null,
       lineKey,
       catalogName,
       canonicalName,
@@ -401,6 +399,10 @@ export function loadEpocOpenAiPlanFromMetadata(
 export type RunEpocProductMatchPipelineResult = {
   openAiPlanByExactName: Map<string, StoredEpocOpenAiPlan>;
   manualReviewExactNames: string[];
+  /** Produtos efetivamente inseridos neste chunk. */
+  productsAutoCreated: number;
+  /** IDs criados neste chunk (para config operacional). */
+  createdProductIds: string[];
 };
 
 export async function runEpocProductMatchPipeline(input: {
@@ -412,6 +414,7 @@ export async function runEpocProductMatchPipeline(input: {
   canonicalIndex: Map<string, string | null>;
   cache: Map<string, string | null>;
   priorOpenAiPlan: Map<string, StoredEpocOpenAiPlan>;
+  /** Mantido por compatibilidade; não decide mais criação de produto. */
   openaiApiKey: string;
   openaiModel: string;
   productEnsure: EpocProductEnsureCoordinator;
@@ -422,18 +425,18 @@ export async function runEpocProductMatchPipeline(input: {
 }): Promise<RunEpocProductMatchPipelineResult> {
   const openAiPlanByExactName = new Map(input.priorOpenAiPlan);
   const manualReviewExactNames: string[] = [];
-  const unmatchedForAi: { exactKey: string; raw: string }[] = [];
+  let productsAutoCreated = 0;
+  const createdProductIds: string[] = [];
 
   for (const [exactKey, raw] of input.uniqueNames) {
     if (input.cache.get(exactKey)) continue;
+
     const prior = openAiPlanByExactName.get(exactKey);
-    if (prior?.action === "MANUAL_REVIEW") {
-      manualReviewExactNames.push(exactKey);
-      continue;
-    }
     if (
       prior &&
-      (prior.action === "MATCH_PRODUCT" || prior.action === "MATCH_RECIPE") &&
+      (prior.action === "MATCH_PRODUCT" ||
+        prior.action === "MATCH_RECIPE" ||
+        prior.action === "CREATE_PRODUCT") &&
       prior.product_id
     ) {
       input.cache.set(exactKey, prior.product_id);
@@ -464,163 +467,49 @@ export async function runEpocProductMatchPipeline(input: {
         matched?.unit ?? "un",
         null,
       );
+      // Limpa MANUAL_REVIEW legado (ex.: ausência de OpenAI) quando já há match.
+      if (prior?.action === "MANUAL_REVIEW") {
+        openAiPlanByExactName.delete(exactKey);
+      }
       continue;
     }
 
-    if (
-      prior?.action === "CREATE_PRODUCT" ||
-      prior?.action === "CREATE_RECIPE"
-    ) {
-      await applyEpocOpenAiCreatePlan({
-        exactKey,
-        raw,
-        plan: {
-          ...prior,
-          action: "CREATE_PRODUCT",
-        },
-        ...input,
-        openAiPlanByExactName,
-      });
-      continue;
-    }
-
-    unmatchedForAi.push({ exactKey, raw });
-  }
-
-  if (unmatchedForAi.length && input.openaiApiKey) {
-    const labels = unmatchedForAi.map((u) => u.raw);
-    const aiMap = await batchResolveEpocUnmatchedWithOpenAi({
-      apiKey: input.openaiApiKey,
-      model: input.openaiModel,
-      csvLines: labels,
-      products: input.catalog,
-      recipes: input.recipes,
+    // Sem match por nome → cria produto (sem IA).
+    const created = await autoCreateEpocProductFromCsvName({
+      exactKey,
+      raw,
+      priorCreate: prior?.action === "CREATE_PRODUCT" ? prior : null,
+      ...input,
+      openAiPlanByExactName,
     });
-
-    for (let i = 0; i < unmatchedForAi.length; i++) {
-      const { exactKey, raw } = unmatchedForAi[i]!;
-      const assignment: EpocOpenAiMatchAssignment | undefined = aiMap.get(i);
-      if (!assignment) {
-        manualReviewExactNames.push(exactKey);
-        openAiPlanByExactName.set(exactKey, {
-          action: "MANUAL_REVIEW",
-          instructions:
-            "Sem resposta da IA; revisar manualmente ou repetir importação.",
-        });
-        continue;
-      }
-      const plan = assignmentToStoredPlan(assignment);
-      openAiPlanByExactName.set(exactKey, plan);
-      if (plan.action === "MANUAL_REVIEW") {
-        manualReviewExactNames.push(exactKey);
-        continue;
-      }
-      if (
-        (plan.action === "MATCH_PRODUCT" || plan.action === "MATCH_RECIPE") &&
-        plan.product_id
-      ) {
-        const pid = plan.product_id;
-        const prod =
-          input.catalog.find((p) => p.id === pid) ??
-          (await fetchActiveProductRowById(input.admin, input.companyId, pid));
-        if (prod) {
-          registerResolvedEpocProduct(
-            input.catalog,
-            input.canonicalIndex,
-            input.cache,
-            prod,
-            epocProductLineKey(raw),
-            prod.name,
-          );
-          await ensureProductSaleUnitUnConversion(
-            input.admin,
-            pid,
-            prod.unit ?? "un",
-            null,
-          );
-        } else {
-          manualReviewExactNames.push(exactKey);
-        }
-        continue;
-      }
-      if (plan.action === "CREATE_PRODUCT" || plan.action === "CREATE_RECIPE") {
-        await applyEpocOpenAiCreatePlan({
-          exactKey,
-          raw,
-          plan: {
-            ...plan,
-            action: "CREATE_PRODUCT",
-          },
-          ...input,
-          openAiPlanByExactName,
-        });
-      }
+    if (created?.created && created.productId) {
+      productsAutoCreated += 1;
+      createdProductIds.push(created.productId);
     }
-  } else if (unmatchedForAi.length) {
-    for (const { exactKey } of unmatchedForAi) {
+    if (!created?.productId) {
       manualReviewExactNames.push(exactKey);
       openAiPlanByExactName.set(exactKey, {
         action: "MANUAL_REVIEW",
         instructions:
-          "OPENAI_API_KEY ausente; cadastre o produto ou configure a chave.",
+          created?.ambiguous
+            ? "Mais de um produto ativo com o mesmo nome exato; consolidar cadastro."
+            : "Falha ao criar produto automaticamente; revisar cadastro.",
       });
     }
   }
 
-  return { openAiPlanByExactName, manualReviewExactNames };
-}
-
-function assignmentToStoredPlan(a: EpocOpenAiMatchAssignment): StoredEpocOpenAiPlan {
-  if (a.action === "MATCH_PRODUCT") {
-    return {
-      action: a.action,
-      product_id: a.product_id ?? null,
-    };
-  }
-  if (a.action === "MATCH_RECIPE") {
-    return {
-      action: a.action,
-      product_id: a.product_id ?? null,
-      recipe_id: a.recipe_id ?? null,
-    };
-  }
-  if (a.action === "CREATE_PRODUCT" || a.action === "CREATE_RECIPE") {
-    return {
-      action: "CREATE_PRODUCT",
-      create: a.create ?? null,
-    };
-  }
   return {
-    action: "MANUAL_REVIEW",
-    instructions: a.instructions ?? "Revisão manual necessária.",
+    openAiPlanByExactName,
+    manualReviewExactNames,
+    productsAutoCreated,
+    createdProductIds,
   };
 }
 
-async function fetchActiveProductRowById(
-  admin: SupabaseAdmin,
-  companyId: string,
-  productId: string,
-): Promise<EpocCatalogProduct | null> {
-  const { data, error } = await admin
-    .from("products")
-    .select("id, name, unit, canonical_name")
-    .eq("company_id", companyId)
-    .eq("id", productId)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (error || !data?.id) return null;
-  return {
-    id: String(data.id),
-    name: String(data.name ?? ""),
-    unit: (data.unit as string | null) ?? null,
-    canonical_name: (data.canonical_name as string | null) ?? null,
-  };
-}
-
-async function applyEpocOpenAiCreatePlan(ctx: {
+async function autoCreateEpocProductFromCsvName(ctx: {
   exactKey: string;
   raw: string;
-  plan: StoredEpocOpenAiPlan;
+  priorCreate: StoredEpocOpenAiPlan | null;
   admin: SupabaseAdmin;
   companyId: string;
   catalog: EpocCatalogProduct[];
@@ -633,11 +522,19 @@ async function applyEpocOpenAiCreatePlan(ctx: {
   deriveOperationalType: (categoryName: string, raw: string) => string;
   defaultCategoryName: string;
   openAiPlanByExactName: Map<string, StoredEpocOpenAiPlan>;
-}): Promise<void> {
-  const create = ctx.plan.create;
-  if (!create?.catalog_name) return;
-  const catalogName = epocCatalogDisplayName(create.catalog_name);
-  const unit = (create.unit || "un").trim().toLowerCase() || "un";
+}): Promise<{
+  productId: string | null;
+  created: boolean;
+  ambiguous: boolean;
+}> {
+  const hint = ctx.priorCreate?.create ?? null;
+  const catalogName = epocCatalogDisplayName(
+    hint?.catalog_name?.trim() || ctx.raw,
+  );
+  const unit =
+    (hint?.unit || ctx.inferUnit(ctx.raw, ctx.catalog) || "un")
+      .trim()
+      .toLowerCase() || "un";
   const autoOp = ctx.deriveOperationalType(ctx.defaultCategoryName, ctx.raw);
   const ensured = await ctx.productEnsure.ensure({
     rawName: ctx.raw,
@@ -647,13 +544,34 @@ async function applyEpocOpenAiCreatePlan(ctx: {
     inferredUnit: unit,
     autoStock: ctx.mapStockControl(autoOp),
   });
-  if (!ensured.productId) return;
+  if (!ensured.productId) {
+    return {
+      productId: null,
+      created: false,
+      ambiguous: ensured.ambiguous,
+    };
+  }
   await ensureProductSaleUnitUnConversion(
     ctx.admin,
     ensured.productId,
     unit,
-    create.un_per_stock_unit ?? null,
+    hint?.un_per_stock_unit ?? null,
   );
+  ctx.openAiPlanByExactName.set(ctx.exactKey, {
+    action: "CREATE_PRODUCT",
+    product_id: ensured.productId,
+    create: {
+      catalog_name: catalogName,
+      unit,
+      un_per_stock_unit: hint?.un_per_stock_unit ?? null,
+      instructions: "Produto criado automaticamente (sem match por nome).",
+    },
+  });
+  return {
+    productId: ensured.productId,
+    created: ensured.created,
+    ambiguous: false,
+  };
 }
 
 /** Garante conversão da unidade de estoque para UN (vendas EPOC em un). */

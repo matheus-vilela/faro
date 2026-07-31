@@ -108,11 +108,58 @@ async function processOneJob(
     {
       resume: true,
       logTag: LOG,
-      timeoutMs: 120_000,
+      // Um turno curto: o processador já faz 1–2 chunks; o self-call encadeia o resto.
+      // Timeout alto demais + chain inline longo deixava o job órfão em 0/N.
+      timeoutMs: 90_000,
     },
   );
 
   await heartbeatEpocCsvImportJob(admin, jobId, token);
+
+  const leaseBusy =
+    session.body?.skipped === true &&
+    session.body?.reason === "chunk_lease_busy";
+  const transientFail =
+    !session.ok &&
+    session.body?.skipped !== true &&
+    (session.status === 0 ||
+      /abort|timeout|timed out|network/i.test(session.error ?? ""));
+
+  // Continuar: ainda há chunks, lease ocupado por invocação irmã, ou timeout transitório.
+  // NÃO tratar lease_busy como "concluído" (bug que deixava o card em 0/N).
+  if (session.continuing === true || leaseBusy || transientFail) {
+    await heartbeatEpocCsvImportJob(admin, jobId, token);
+    selfInvokeEpocCsvImportWorker(
+      supabaseUrl,
+      // Self-call com service role para auth estável (cron bearer também serve).
+      serviceKey || selfBearer,
+      { job_id: jobId, worker_token: token },
+      LOG,
+    );
+    console.log(LOG, JSON.stringify({
+      fase: "self_invoke",
+      job_id: jobId,
+      resume: claim.csv_resume_row_index,
+      action: claim.action,
+      continuing: session.continuing === true,
+      lease_busy: leaseBusy,
+      transient_fail: transientFail,
+      session_ok: session.ok,
+      session_error: session.error ?? null,
+    }));
+    return {
+      ok: true,
+      job_id: jobId,
+      worker_token: token,
+      continuing: true,
+      chained: true,
+      lease_busy: leaseBusy,
+      detail: session.body,
+      ...(transientFail
+        ? { session_error: session.error ?? "falha transitória no turno" }
+        : {}),
+    };
+  }
 
   if (!session.ok && session.body?.skipped === true) {
     return {
@@ -131,31 +178,6 @@ async function processOneJob(
       job_id: jobId,
       worker_token: token,
       error: session.error ?? "falha no turno de chunks",
-      detail: session.body,
-    };
-  }
-
-  if (session.continuing === true) {
-    await heartbeatEpocCsvImportJob(admin, jobId, token);
-    selfInvokeEpocCsvImportWorker(
-      supabaseUrl,
-      // Self-call com service role para auth estável (cron bearer também serve).
-      serviceKey || selfBearer,
-      { job_id: jobId, worker_token: token },
-      LOG,
-    );
-    console.log(LOG, JSON.stringify({
-      fase: "self_invoke",
-      job_id: jobId,
-      resume: claim.csv_resume_row_index,
-      action: claim.action,
-    }));
-    return {
-      ok: true,
-      job_id: jobId,
-      worker_token: token,
-      continuing: true,
-      chained: true,
       detail: session.body,
     };
   }

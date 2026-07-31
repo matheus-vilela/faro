@@ -551,6 +551,17 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       );
       return;
     }
+    if (res.continuing) {
+      toast.message(
+        res.message?.trim() ||
+          (res.days_done != null && res.days_planned != null
+            ? `Download do CSV em lotes (${res.days_done}/${res.days_planned} dias). Continua em segundo plano.`
+            : "Download do CSV em lotes — continua em segundo plano."),
+        { duration: 8000 },
+      );
+      await load();
+      return;
+    }
     if (res.flow_diagnostic?.blocked_at) {
       toast.warning(res.flow_diagnostic.summary, { duration: 12_000 });
     } else if (res.csv_uploaded) {
@@ -607,6 +618,16 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         toast.error(
           res.error ?? "Falha ao repetir a sincronização desta(s) data(s).",
         );
+        return;
+      }
+      if (res.continuing) {
+        toast.message(
+          res.message?.trim() ||
+            "Download do CSV em lotes — continua em segundo plano.",
+          { duration: 8000 },
+        );
+        await load();
+        void loadHistory();
         return;
       }
       toast.success(

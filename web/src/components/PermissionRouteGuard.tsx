@@ -1,3 +1,4 @@
+import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   hasAnyPermission,
@@ -21,9 +22,15 @@ export function PermissionRouteGuard({
   children: React.ReactNode;
 }) {
   const { currentRole, currentPermissions, loading } = useCompany();
+  const { isAdmin } = useAuth();
   const location = useLocation();
 
   if (loading) return null;
+
+  // Admin global: qualquer rota/ação da plataforma.
+  if (isAdmin) {
+    return <>{children}</>;
+  }
 
   if (ownerOnly) {
     if (!isOwnerRole(currentRole)) {

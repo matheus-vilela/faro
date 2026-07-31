@@ -5,11 +5,17 @@
  * (`ConteudoTela`, `tblExport`) e URL assinada. O sucesso só é declarado quando a
  * fase 2 contém `id=tblExport`; mesmo no erro o JSON inclui o trace com as URLs.
  *
+ * Janelas longas (onboarding / multi-dia): processa `max_days` (default 3) por
+ * invocação, grava CSV parcial no Storage e auto-chama-se (`continue_chain`) até
+ * concluir — evita idle timeout ~150s. No fim faz merge, enfileira import e dispara
+ * serviços/faturamento async.
+ *
  * O CSV consolidado inclui apenas linhas de dados com a coluna "Total recebido(R$)"
  * preenchida (célula não vazia após trim), quando essa coluna existir no cabeçalho.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import {
   buildEpocSyncFlowDiagnostic,
   type EpocFlowDiagnostic,
@@ -33,6 +39,10 @@ import {
   type OnboardingPdvPatch,
 } from "../_shared/onboardingPdvPatch.ts";
 import { triggerEpocDailyExtrasInBackground } from "../_shared/triggerEpocDailyExtras.ts";
+import {
+  triggerEpocSyncCsvContinueInBackground,
+  type EpocSyncCsvContinuePayload,
+} from "../_shared/triggerEpocSyncCsvContinue.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +51,13 @@ const corsHeaders: Record<string, string> = {
 };
 
 const LOG = "[epoc-sync-csv]";
+
+/** Dias processados por invocação (evita idle timeout ~150s). */
+const DEFAULT_MAX_DAYS_PER_INVOKE = 3;
+const MAX_DAYS_PER_INVOKE_CAP = 5;
+/** Limite de elos da cadeia (ex.: 60×3 ≈ 180 dias). */
+const MAX_PRODUCT_CHAIN_ATTEMPTS = 60;
+const PRODUCT_CHAIN_SETTINGS_KEY = "epoc_product_csv_chain";
 
 const DEFAULT_LOGIN_PATH = "/index.php";
 
@@ -612,6 +629,45 @@ function matrixToCsv(header: string[], rows: string[][]): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** Junta partes CSV (1.ª com cabeçalho; restantes saltam a 1.ª linha). */
+function mergeCsvPartTexts(parts: string[]): string {
+  const nonEmpty = parts.map((p) => p.trim()).filter((p) => p.length > 0);
+  if (nonEmpty.length === 0) return "";
+  let out = nonEmpty[0];
+  for (let i = 1; i < nonEmpty.length; i++) {
+    const lines = nonEmpty[i].split(/\r?\n/).filter((l) => l.length > 0);
+    if (lines.length <= 1) continue;
+    out = `${out.replace(/\s+$/, "")}\n${lines.slice(1).join("\n")}`;
+  }
+  return out.endsWith("\n") ? out : `${out}\n`;
+}
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+type ProductCsvChainState = {
+  run_id: string;
+  status: "fetching" | "done" | "failed";
+  sync_mode: string;
+  steps_prefix: string;
+  dias_planned: string[];
+  dias_done: string[];
+  part_paths: string[];
+  header_base: string[];
+  total_dias_com_tabela: number;
+  total_linhas_dados: number;
+  requested_by: string;
+  chain_attempt: number;
+  consulta_dias_br?: string[] | null;
+  updated_at: string;
+  last_error?: string | null;
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -641,6 +697,17 @@ Deno.serve(async (req) => {
     sync_mode?: string;
     requested_by?: string;
     consulta_dias_br?: unknown;
+    continue_chain?: unknown;
+    chain_attempt?: unknown;
+    max_days?: unknown;
+    product_sync_run_id?: unknown;
+    steps_prefix?: unknown;
+    dias_planned_br?: unknown;
+    dias_done_br?: unknown;
+    part_paths?: unknown;
+    header_base?: unknown;
+    total_dias_com_tabela?: unknown;
+    total_linhas_dados?: unknown;
   };
   let body: SyncBody = {};
   try {
@@ -664,6 +731,41 @@ Deno.serve(async (req) => {
     body.consulta_dias_br,
   );
 
+  const continueChainReq = body.continue_chain === true;
+  const chainAttemptRaw =
+    typeof body.chain_attempt === "number" && Number.isFinite(body.chain_attempt)
+      ? Math.floor(body.chain_attempt)
+      : 0;
+  const chainAttempt = Math.max(0, chainAttemptRaw);
+  const maxDaysRaw =
+    typeof body.max_days === "number" && Number.isFinite(body.max_days)
+      ? Math.floor(body.max_days)
+      : DEFAULT_MAX_DAYS_PER_INVOKE;
+  const maxDaysPerInvoke = Math.min(
+    MAX_DAYS_PER_INVOKE_CAP,
+    Math.max(1, maxDaysRaw),
+  );
+  const bodyProductSyncRunId =
+    typeof body.product_sync_run_id === "string"
+      ? body.product_sync_run_id.trim()
+      : "";
+  const bodyStepsPrefix =
+    typeof body.steps_prefix === "string" ? body.steps_prefix.trim() : "";
+  const bodyDiasPlanned = asStringArray(body.dias_planned_br);
+  const bodyDiasDone = asStringArray(body.dias_done_br);
+  const bodyPartPaths = asStringArray(body.part_paths);
+  const bodyHeaderBase = asStringArray(body.header_base);
+  const bodyTotalDiasComTabela =
+    typeof body.total_dias_com_tabela === "number" &&
+      Number.isFinite(body.total_dias_com_tabela)
+      ? Math.max(0, Math.floor(body.total_dias_com_tabela))
+      : 0;
+  const bodyTotalLinhasDados =
+    typeof body.total_linhas_dados === "number" &&
+      Number.isFinite(body.total_linhas_dados)
+      ? Math.max(0, Math.floor(body.total_linhas_dados))
+      : 0;
+
   const admin = createClient(supabaseUrl, serviceKey);
   const serviceKeyNorm = serviceKey.trim();
   const bearerNorm = bearer.trim();
@@ -679,15 +781,9 @@ Deno.serve(async (req) => {
     const rbRaw =
       typeof body.requested_by === "string" ? body.requested_by.trim() : "";
     if (rbRaw) {
-      const { data: link } = await admin
-        .from("user_companies")
-        .select("user_id")
-        .eq("company_id", companyId)
-        .eq("user_id", rbRaw)
-        .maybeSingle();
-      if (!link) {
+      if (!(await userHasCompanyAccess(admin, rbRaw, companyId))) {
         return json(
-          { ok: false, error: "requested_by não pertence a esta unidade" },
+          { ok: false, error: "requested_by sem acesso a esta unidade" },
           403,
         );
       }
@@ -704,12 +800,27 @@ Deno.serve(async (req) => {
       const owner = list.find((m) => m.role === "owner");
       const picked = owner?.user_id ?? list[0]?.user_id;
       if (!picked) {
-        return json(
-          { ok: false, error: "Unidade sem utilizador em user_companies" },
-          400,
-        );
+        // Sem membros: usa qualquer admin global como requested_by (FK auth.users).
+        const { data: adm } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("is_admin", true)
+          .limit(1)
+          .maybeSingle();
+        if (!adm?.id) {
+          return json(
+            {
+              ok: false,
+              error:
+                "Unidade sem utilizador em user_companies e sem admin global",
+            },
+            400,
+          );
+        }
+        userIdForJob = adm.id as string;
+      } else {
+        userIdForJob = picked;
       }
-      userIdForJob = picked;
     }
 
     const integRes = await admin
@@ -732,17 +843,11 @@ Deno.serve(async (req) => {
     }
     userIdForJob = user.id;
 
-    const { data: member } = await supabase
-      .from("user_companies")
-      .select("role")
-      .eq("company_id", companyId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!member) {
+    if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
       return json({ ok: false, error: "Sem acesso a esta unidade" }, 403);
     }
 
-    const integRes = await supabase
+    const integRes = await admin
       .from("company_integrations")
       .select("enabled, settings")
       .eq("company_id", companyId)
@@ -822,9 +927,84 @@ Deno.serve(async (req) => {
   }
 
   const fileStamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const stepsPrefix = `${companyId}/epoc-sync/${fileStamp}/`;
+  let stepsPrefix =
+    continueChainReq && bodyStepsPrefix
+      ? bodyStepsPrefix.endsWith("/")
+        ? bodyStepsPrefix
+        : `${bodyStepsPrefix}/`
+      : `${companyId}/epoc-sync/${fileStamp}/`;
   const signedTtl = 60 * 60;
   const steps: StepRecord[] = [];
+
+  async function persistProductCsvChain(
+    state: ProductCsvChainState | null,
+  ): Promise<void> {
+    const { data: fresh } = await admin
+      .from("company_integrations")
+      .select("settings")
+      .eq("company_id", companyId)
+      .eq("provider", "epoc")
+      .maybeSingle();
+    const base =
+      (fresh?.settings as Record<string, unknown> | null) ??
+      (raw as Record<string, unknown>);
+    const next: Record<string, unknown> = { ...base };
+    if (state == null) {
+      delete next[PRODUCT_CHAIN_SETTINGS_KEY];
+    } else {
+      next[PRODUCT_CHAIN_SETTINGS_KEY] = state;
+    }
+    await admin
+      .from("company_integrations")
+      .update({
+        settings: next,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("company_id", companyId)
+      .eq("provider", "epoc");
+  }
+
+  function readStoredProductChain(): ProductCsvChainState | null {
+    const v = raw[PRODUCT_CHAIN_SETTINGS_KEY];
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const o = v as Record<string, unknown>;
+    const runId = typeof o.run_id === "string" ? o.run_id.trim() : "";
+    const status = o.status;
+    if (!runId || (status !== "fetching" && status !== "done" && status !== "failed")) {
+      return null;
+    }
+    return {
+      run_id: runId,
+      status,
+      sync_mode: typeof o.sync_mode === "string" ? o.sync_mode : syncMode,
+      steps_prefix:
+        typeof o.steps_prefix === "string" ? o.steps_prefix : stepsPrefix,
+      dias_planned: asStringArray(o.dias_planned),
+      dias_done: asStringArray(o.dias_done),
+      part_paths: asStringArray(o.part_paths),
+      header_base: asStringArray(o.header_base),
+      total_dias_com_tabela:
+        typeof o.total_dias_com_tabela === "number"
+          ? Math.max(0, Math.floor(o.total_dias_com_tabela))
+          : 0,
+      total_linhas_dados:
+        typeof o.total_linhas_dados === "number"
+          ? Math.max(0, Math.floor(o.total_linhas_dados))
+          : 0,
+      requested_by:
+        typeof o.requested_by === "string" ? o.requested_by : userIdForJob,
+      chain_attempt:
+        typeof o.chain_attempt === "number"
+          ? Math.max(0, Math.floor(o.chain_attempt))
+          : 0,
+      consulta_dias_br: asStringArray(o.consulta_dias_br),
+      updated_at:
+        typeof o.updated_at === "string"
+          ? o.updated_at
+          : new Date().toISOString(),
+      last_error: typeof o.last_error === "string" ? o.last_error : null,
+    };
+  }
 
   /** Faz upload do conteúdo do passo no Storage e devolve o registo já com signed URL. */
   async function recordStepWithUpload(
@@ -1002,6 +1182,11 @@ Deno.serve(async (req) => {
         metadata: opts.syncRun.metadata,
         flowDiagnostic,
       });
+    }
+    try {
+      await persistProductCsvChain(null);
+    } catch {
+      /* ignore */
     }
     if (!opts?.skipPortalPatch) {
       await patchOb({
@@ -1324,58 +1509,245 @@ Deno.serve(async (req) => {
 
   // --- Fase 2: janela de dias (consulta diária no EPOC) ----------------------
   // Serviços/faturamento correm depois, em `epoc-retry-daily-extras` (evita idle timeout 150s).
-  let diasConsulta: string[];
+  // Produtos: lotes de `max_days` + auto-chamada (`continue_chain`) para não estourar o timeout.
+  let diasPlanned: string[];
   let diasConsultaLabel: string;
-  if (manualConsultaDias?.length) {
-    diasConsulta = manualConsultaDias;
+  let productSyncRunId: string;
+  let diasDonePrior: string[] = [];
+  let partPaths: string[] = [];
+  let priorHeaderBase: string[] = [];
+  let accumulatedDiasComTabela = 0;
+  let accumulatedLinhasDados = 0;
+  let chainAttemptEffective = chainAttempt;
+
+  const storedChain = readStoredProductChain();
+
+  if (continueChainReq) {
+    const fromBody = bodyDiasPlanned.length > 0;
+    const fromStore =
+      !fromBody &&
+      storedChain?.status === "fetching" &&
+      storedChain.dias_planned.length > 0;
+    if (!fromBody && !fromStore) {
+      return json(
+        {
+          ok: false,
+          error:
+            "continue_chain sem dias_planned_br (nem estado epoc_product_csv_chain).",
+        },
+        400,
+      );
+    }
+    if (fromBody) {
+      diasPlanned = bodyDiasPlanned;
+      diasDonePrior = bodyDiasDone;
+      partPaths = [...bodyPartPaths];
+      priorHeaderBase = [...bodyHeaderBase];
+      accumulatedDiasComTabela = bodyTotalDiasComTabela;
+      accumulatedLinhasDados = bodyTotalLinhasDados;
+      productSyncRunId = bodyProductSyncRunId || storedChain?.run_id ||
+        crypto.randomUUID();
+      if (bodyStepsPrefix) {
+        stepsPrefix = bodyStepsPrefix.endsWith("/")
+          ? bodyStepsPrefix
+          : `${bodyStepsPrefix}/`;
+      } else if (storedChain?.steps_prefix) {
+        stepsPrefix = storedChain.steps_prefix.endsWith("/")
+          ? storedChain.steps_prefix
+          : `${storedChain.steps_prefix}/`;
+      }
+    } else {
+      const sc = storedChain!;
+      diasPlanned = sc.dias_planned;
+      diasDonePrior = sc.dias_done;
+      partPaths = [...sc.part_paths];
+      priorHeaderBase = [...sc.header_base];
+      accumulatedDiasComTabela = sc.total_dias_com_tabela;
+      accumulatedLinhasDados = sc.total_linhas_dados;
+      productSyncRunId = sc.run_id;
+      chainAttemptEffective = Math.max(chainAttempt, sc.chain_attempt);
+      stepsPrefix = sc.steps_prefix.endsWith("/")
+        ? sc.steps_prefix
+        : `${sc.steps_prefix}/`;
+    }
     diasConsultaLabel =
-      diasConsulta.length === 1
-        ? `dia ${diasConsulta[0]} (repetição)`
-        : `${diasConsulta.length} dia(s) (repetição)`;
-  } else if (syncMode === "onboarding_initial") {
-    diasConsulta = onboardingEpocConsultaDaysSaoPaulo();
-    diasConsultaLabel =
-      diasConsulta.length >= 2
-        ? `onboarding: ${diasConsulta[0]} → ${diasConsulta[diasConsulta.length - 1]} (America/Sao_Paulo)`
-        : diasConsulta.length === 1
-          ? `onboarding: ${diasConsulta[0]} (America/Sao_Paulo)`
-          : "onboarding (sem dias)";
-  } else if (syncMode === "previous_day") {
-    diasConsulta = [yesterdayDateBrInTz("America/Sao_Paulo")];
-    diasConsultaLabel = "dia anterior (America/Sao_Paulo)";
+      diasPlanned.length >= 2
+        ? `cadeia produtos: ${diasPlanned[0]} → ${diasPlanned[diasPlanned.length - 1]} (${diasDonePrior.length}/${diasPlanned.length} feitos)`
+        : diasPlanned.length === 1
+          ? `cadeia produtos: ${diasPlanned[0]}`
+          : "cadeia produtos (sem dias)";
+  } else if (
+    storedChain?.status === "fetching" &&
+    syncMode !== "previous_day" &&
+    storedChain.sync_mode === syncMode &&
+    storedChain.dias_planned.length > 0 &&
+    (storedChain.dias_done.length > 0 || storedChain.chain_attempt > 0)
+  ) {
+    // Fallback: retoma cadeia interrompida (trigger falhou / cold start).
+    const ageMs = Date.now() - Date.parse(storedChain.updated_at || "");
+    const stale = !Number.isFinite(ageMs) || ageMs > 3 * 60 * 60 * 1000;
+    if (!stale) {
+      log("product_chain_resume_from_settings", {
+        company_id: companyId,
+        run_id: storedChain.run_id,
+        done: storedChain.dias_done.length,
+        planned: storedChain.dias_planned.length,
+        age_ms: ageMs,
+      });
+      diasPlanned = storedChain.dias_planned;
+      diasDonePrior = storedChain.dias_done;
+      partPaths = [...storedChain.part_paths];
+      priorHeaderBase = [...storedChain.header_base];
+      accumulatedDiasComTabela = storedChain.total_dias_com_tabela;
+      accumulatedLinhasDados = storedChain.total_linhas_dados;
+      productSyncRunId = storedChain.run_id;
+      chainAttemptEffective = storedChain.chain_attempt;
+      stepsPrefix = storedChain.steps_prefix.endsWith("/")
+        ? storedChain.steps_prefix
+        : `${storedChain.steps_prefix}/`;
+      diasConsultaLabel =
+        `retoma cadeia produtos (${diasDonePrior.length}/${diasPlanned.length})`;
+    } else {
+      await persistProductCsvChain(null);
+      if (manualConsultaDias?.length) {
+        diasPlanned = manualConsultaDias;
+        diasConsultaLabel =
+          diasPlanned.length === 1
+            ? `dia ${diasPlanned[0]} (repetição)`
+            : `${diasPlanned.length} dia(s) (repetição)`;
+      } else if (syncMode === "onboarding_initial") {
+        diasPlanned = onboardingEpocConsultaDaysSaoPaulo();
+        diasConsultaLabel =
+          diasPlanned.length >= 2
+            ? `onboarding: ${diasPlanned[0]} → ${diasPlanned[diasPlanned.length - 1]} (America/Sao_Paulo)`
+            : diasPlanned.length === 1
+              ? `onboarding: ${diasPlanned[0]} (America/Sao_Paulo)`
+              : "onboarding (sem dias)";
+      } else if (syncMode === "previous_day") {
+        diasPlanned = [yesterdayDateBrInTz("America/Sao_Paulo")];
+        diasConsultaLabel = "dia anterior (America/Sao_Paulo)";
+      } else {
+        diasPlanned = lastNDaysBr(10);
+        diasConsultaLabel = "últimos 10 dias";
+      }
+      productSyncRunId = crypto.randomUUID();
+    }
   } else {
-    diasConsulta = lastNDaysBr(10);
-    diasConsultaLabel = "últimos 10 dias";
+    if (manualConsultaDias?.length) {
+      diasPlanned = manualConsultaDias;
+      diasConsultaLabel =
+        diasPlanned.length === 1
+          ? `dia ${diasPlanned[0]} (repetição)`
+          : `${diasPlanned.length} dia(s) (repetição)`;
+    } else if (syncMode === "onboarding_initial") {
+      diasPlanned = onboardingEpocConsultaDaysSaoPaulo();
+      diasConsultaLabel =
+        diasPlanned.length >= 2
+          ? `onboarding: ${diasPlanned[0]} → ${diasPlanned[diasPlanned.length - 1]} (America/Sao_Paulo)`
+          : diasPlanned.length === 1
+            ? `onboarding: ${diasPlanned[0]} (America/Sao_Paulo)`
+            : "onboarding (sem dias)";
+    } else if (syncMode === "previous_day") {
+      diasPlanned = [yesterdayDateBrInTz("America/Sao_Paulo")];
+      diasConsultaLabel = "dia anterior (America/Sao_Paulo)";
+    } else {
+      diasPlanned = lastNDaysBr(10);
+      diasConsultaLabel = "últimos 10 dias";
+    }
+    productSyncRunId = crypto.randomUUID();
+    if (storedChain) {
+      await persistProductCsvChain(null);
+    }
   }
-  const headerBase: string[] = [];
+
+  const pendingDays = diasPlanned.filter((d) => !diasDonePrior.includes(d));
+  const diasConsulta = pendingDays.slice(0, maxDaysPerInvoke);
+  const willContinueAfterChunk = pendingDays.length > diasConsulta.length;
+  const chainingMode =
+    willContinueAfterChunk ||
+    diasDonePrior.length > 0 ||
+    partPaths.length > 0 ||
+    diasPlanned.length > maxDaysPerInvoke;
+
+  if (willContinueAfterChunk && chainAttemptEffective >= MAX_PRODUCT_CHAIN_ATTEMPTS) {
+    await persistProductCsvChain({
+      run_id: productSyncRunId,
+      status: "failed",
+      sync_mode: syncMode,
+      steps_prefix: stepsPrefix,
+      dias_planned: diasPlanned,
+      dias_done: diasDonePrior,
+      part_paths: partPaths,
+      header_base: priorHeaderBase,
+      total_dias_com_tabela: accumulatedDiasComTabela,
+      total_linhas_dados: accumulatedLinhasDados,
+      requested_by: userIdForJob,
+      chain_attempt: chainAttemptEffective,
+      consulta_dias_br: manualConsultaDias,
+      updated_at: new Date().toISOString(),
+      last_error: "Limite de elos da cadeia de produtos atingido",
+    });
+    return await failJson(
+      504,
+      "O download do CSV de produtos excedeu o número máximo de lotes. Tente novamente.",
+      {
+        product_sync_run_id: productSyncRunId,
+        chain_attempt: chainAttemptEffective,
+        days_done: diasDonePrior.length,
+        days_planned: diasPlanned.length,
+      },
+    );
+  }
+
+  const headerBase: string[] = [...priorHeaderBase];
   const linhasCsvFinal: string[][] = [];
   /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
-  let totalRecebidoColIndex = -1;
-  let totalDiasComTabela = 0;
-  let totalLinhasDados = 0;
+  let totalRecebidoColIndex =
+    headerBase.length > 0 ? findTotalRecebidoColumnIndex(headerBase) : -1;
+  let totalDiasComTabela = accumulatedDiasComTabela;
+  let totalLinhasDados = accumulatedLinhasDados;
   /** Erro textual do próprio portal (ex.: «sem eventos com esse filtro»), por dia consultado. */
   const mensagemPortalPorDiaBr: Record<string, string> = {};
 
-  const BATCH_SIZE = 20;
+  log("fase2_chunk", {
+    company_id: companyId,
+    product_sync_run_id: productSyncRunId,
+    chain_attempt: chainAttemptEffective,
+    planned: diasPlanned.length,
+    done_prior: diasDonePrior.length,
+    chunk: diasConsulta.length,
+    will_continue: willContinueAfterChunk,
+    chaining_mode: chainingMode,
+  });
+
+  const BATCH_SIZE = maxDaysPerInvoke;
   for (
     let batchStart = 0;
     batchStart < diasConsulta.length;
     batchStart += BATCH_SIZE
   ) {
     const batchDays = diasConsulta.slice(batchStart, batchStart + BATCH_SIZE);
+    const batchOrdinal =
+      Math.floor(diasDonePrior.length / Math.max(1, maxDaysPerInvoke)) +
+      Math.floor(batchStart / BATCH_SIZE) +
+      1;
     recordStepWithoutUpload(
-      `fase2_batch_${String(Math.floor(batchStart / BATCH_SIZE) + 1).padStart(2, "0")}`,
-      `Consulta paralela de ${batchDays.length} dia(s)`,
+      `fase2_batch_${String(batchOrdinal).padStart(2, "0")}`,
+      `Consulta paralela de ${batchDays.length} dia(s) (lote ${batchOrdinal})`,
       {
         status: "ok",
         message: `Executando ${batchDays.length} requisições em paralelo.`,
-        detalhes: { dias: batchDays },
+        detalhes: {
+          dias: batchDays,
+          product_sync_run_id: productSyncRunId,
+          chain_attempt: chainAttemptEffective,
+        },
       },
     );
 
     const batchResults = await Promise.all(
       batchDays.map(async (dia, idx) => {
-        const globalIdx = batchStart + idx + 1;
+        const globalIdx = diasDonePrior.length + batchStart + idx + 1;
         const suffix = `dia${String(globalIdx).padStart(2, "0")}`;
         const vDia = await callValidador(`fase2_${suffix}`);
         if (vDia.status === "fail") {
@@ -1518,7 +1890,208 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Dispara serviços/faturamento em background (chunks) — não bloqueia a resposta.
+  const diasDoneNext = [...diasDonePrior, ...diasConsulta];
+
+  let chunkPartUploaded = false;
+  if (chainingMode && headerBase.length > 0 && linhasCsvFinal.length > 0) {
+    const partCsv = matrixToCsv(["data_consumo", ...headerBase], linhasCsvFinal);
+    const partFileName =
+      `part-chunk-${String(chainAttemptEffective).padStart(2, "0")}.csv`;
+    const partStep = await recordStepWithUpload(
+      `csv_part_chunk_${String(chainAttemptEffective).padStart(2, "0")}`,
+      `CSV parcial produtos (lote ${chainAttemptEffective + 1})`,
+      partFileName,
+      new TextEncoder().encode(partCsv),
+      "text/csv",
+      {
+        status: "ok",
+        detalhes: {
+          linhas: linhasCsvFinal.length,
+          dias_chunk: diasConsulta,
+          product_sync_run_id: productSyncRunId,
+        },
+      },
+    );
+    if (partStep.storage_path) {
+      partPaths.push(partStep.storage_path);
+      chunkPartUploaded = true;
+    } else {
+      log("csv_part_upload_falhou", {
+        company_id: companyId,
+        chain_attempt: chainAttemptEffective,
+        detalhes: partStep.detalhes,
+      });
+    }
+  }
+
+  const chainStateNow: ProductCsvChainState = {
+    run_id: productSyncRunId,
+    status: willContinueAfterChunk ? "fetching" : "done",
+    sync_mode: syncMode,
+    steps_prefix: stepsPrefix,
+    dias_planned: diasPlanned,
+    dias_done: diasDoneNext,
+    part_paths: partPaths,
+    header_base: headerBase,
+    total_dias_com_tabela: totalDiasComTabela,
+    total_linhas_dados: totalLinhasDados,
+    requested_by: userIdForJob,
+    chain_attempt: chainAttemptEffective,
+    consulta_dias_br: manualConsultaDias,
+    updated_at: new Date().toISOString(),
+    last_error: null,
+  };
+
+  if (
+    willContinueAfterChunk &&
+    linhasCsvFinal.length > 0 &&
+    !chunkPartUploaded
+  ) {
+    await persistProductCsvChain({
+      ...chainStateNow,
+      dias_done: diasDonePrior,
+      status: "fetching",
+      last_error: "Falha ao gravar CSV parcial do lote",
+    });
+    return await failJson(
+      500,
+      "Falha ao gravar o lote parcial do CSV no Storage. Tente novamente — o progresso anterior será retomado.",
+      {
+        product_sync_run_id: productSyncRunId,
+        chain_attempt: chainAttemptEffective,
+        days_done: diasDonePrior.length,
+        days_planned: diasPlanned.length,
+      },
+    );
+  }
+
+  await persistProductCsvChain(
+    willContinueAfterChunk || chainingMode ? chainStateNow : null,
+  );
+
+  if (willContinueAfterChunk) {
+    const progressMsg =
+      `A buscar vendas no EPOC (${diasDoneNext.length}/${diasPlanned.length} dias)…`;
+    await patchOb({
+      portal_busy: true,
+      portal_outcome: null,
+      portal_message: progressMsg,
+      sync: true,
+      import_error: null,
+    });
+
+    const continuePayload: EpocSyncCsvContinuePayload = {
+      company_id: companyId,
+      sync_mode: syncMode,
+      continue_chain: true,
+      chain_attempt: chainAttemptEffective + 1,
+      max_days: maxDaysPerInvoke,
+      product_sync_run_id: productSyncRunId,
+      steps_prefix: stepsPrefix,
+      dias_planned_br: diasPlanned,
+      dias_done_br: diasDoneNext,
+      part_paths: partPaths,
+      header_base: headerBase,
+      total_dias_com_tabela: totalDiasComTabela,
+      total_linhas_dados: totalLinhasDados,
+      requested_by: userIdForJob,
+      ...(manualConsultaDias?.length
+        ? { consulta_dias_br: manualConsultaDias }
+        : {}),
+    };
+    triggerEpocSyncCsvContinueInBackground({
+      supabaseUrl,
+      serviceKey,
+      payload: continuePayload,
+      logTag: LOG,
+    });
+    recordStepWithoutUpload(
+      "product_chain_queued",
+      "Próximo lote de produtos (auto-chamada)",
+      {
+        status: "ok",
+        message: progressMsg,
+        detalhes: {
+          next_chain_attempt: chainAttemptEffective + 1,
+          days_done: diasDoneNext.length,
+          days_planned: diasPlanned.length,
+          part_paths: partPaths.length,
+        },
+      },
+    );
+    log("product_chain_continue", {
+      company_id: companyId,
+      product_sync_run_id: productSyncRunId,
+      next_attempt: chainAttemptEffective + 1,
+      days_done: diasDoneNext.length,
+      days_planned: diasPlanned.length,
+    });
+    return json({
+      ok: true,
+      continuing: true,
+      product_sync_run_id: productSyncRunId,
+      chain_attempt: chainAttemptEffective,
+      days_done: diasDoneNext.length,
+      days_planned: diasPlanned.length,
+      days_chunk: diasConsulta.length,
+      part_paths_count: partPaths.length,
+      steps_prefix: stepsPrefix,
+      steps,
+      signed_url_expires_in: signedTtl,
+      message: progressMsg,
+    });
+  }
+
+  // --- Consolidação final (último lote ou janela curta) ---------------------
+  let csvMergedFromParts: string | null = null;
+  if (chainingMode && partPaths.length > 0) {
+    const partTexts: string[] = [];
+    for (const p of partPaths) {
+      const { data: blob, error: dlErr } = await admin.storage
+        .from("company-setup")
+        .download(p);
+      if (dlErr || !blob) {
+        log("csv_part_download_falhou", {
+          path: p,
+          message: dlErr?.message ?? "blob vazio",
+        });
+        continue;
+      }
+      partTexts.push(await blob.text());
+    }
+    csvMergedFromParts = mergeCsvPartTexts(partTexts);
+    // Se o último lote falhou no upload, ainda junta as linhas em memória.
+    if (
+      !chunkPartUploaded &&
+      headerBase.length > 0 &&
+      linhasCsvFinal.length > 0
+    ) {
+      csvMergedFromParts = mergeCsvPartTexts([
+        csvMergedFromParts,
+        matrixToCsv(["data_consumo", ...headerBase], linhasCsvFinal),
+      ]);
+    }
+    if (csvMergedFromParts.trim().length > 0) {
+      const lineCount = csvMergedFromParts
+        .split(/\r?\n/)
+        .filter((l) => l.trim().length > 0).length;
+      // cabeçalho + dados
+      totalLinhasDados = Math.max(0, lineCount - 1);
+    }
+  } else if (
+    chainingMode &&
+    !chunkPartUploaded &&
+    headerBase.length > 0 &&
+    linhasCsvFinal.length > 0
+  ) {
+    // Cadeia sem partes no storage (uploads falharam): usa memória deste lote.
+    csvMergedFromParts = matrixToCsv(
+      ["data_consumo", ...headerBase],
+      linhasCsvFinal,
+    );
+  }
+
+  // Dispara serviços/faturamento em background (chunks) — só no fim dos produtos.
   triggerEpocDailyExtrasInBackground({
     supabaseUrl,
     serviceKey,
@@ -1534,19 +2107,24 @@ Deno.serve(async (req) => {
       status: "ok",
       message:
         "Busca de serviços e faturamento enfileirada em segundo plano (chunks).",
-      detalhes: { dias: diasConsulta.length },
+      detalhes: { dias: diasPlanned.length },
     },
   );
 
   const syncGaps = await listEpocSyncGaps(admin, companyId);
   const partialSummary =
     buildPartialSyncSummary(syncGaps) ??
-    (diasConsulta.length > 0
-      ? `Sync parcial: produtos processados; serviços/faturamento a concluir em segundo plano (${diasConsulta.length} dia(s)).`
+    (diasPlanned.length > 0
+      ? `Sync parcial: produtos processados; serviços/faturamento a concluir em segundo plano (${diasPlanned.length} dia(s)).`
       : null);
 
-  if (headerBase.length === 0) {
-    const diasComFeedbackPortal = diasConsulta
+  const hasCsvData =
+    (csvMergedFromParts != null && csvMergedFromParts.trim().length > 0) ||
+    (headerBase.length > 0 && linhasCsvFinal.length > 0) ||
+    totalLinhasDados > 0;
+
+  if (!hasCsvData && headerBase.length === 0) {
+    const diasComFeedbackPortal = diasPlanned
       .map((d) => {
         const m = mensagemPortalPorDiaBr[d];
         return m ? `${d}: ${m}` : null;
@@ -1554,15 +2132,15 @@ Deno.serve(async (req) => {
       .filter((x): x is string => x != null);
 
     let summary: string;
-    if (diasConsulta.length === 1) {
-      const d0 = diasConsulta[0];
+    if (diasPlanned.length === 1) {
+      const d0 = diasPlanned[0];
       const mPortal = mensagemPortalPorDiaBr[d0];
       summary = mPortal
         ? `${d0}: ${mPortal}`
         : `Sem dados de receitas no EPOC para o dia ${d0}.`;
     } else if (diasComFeedbackPortal.length > 0) {
       summary = diasComFeedbackPortal.join(" · ");
-      if (diasComFeedbackPortal.length < diasConsulta.length) {
+      if (diasComFeedbackPortal.length < diasPlanned.length) {
         summary +=
           " — demais dias na janela sem mensagem explícita do portal (sem #tblExport).";
       }
@@ -1575,7 +2153,7 @@ Deno.serve(async (req) => {
       message: summary,
       detalhes: {
         outcome: "no_tbl_export",
-        dias: diasConsulta,
+        dias: diasPlanned,
         sync_mode: syncMode,
         dias_consulta_label: diasConsultaLabel,
         ...(Object.keys(mensagemPortalPorDiaBr).length > 0
@@ -1588,18 +2166,19 @@ Deno.serve(async (req) => {
       loginOk: true,
       tblExportFound: false,
       portalSearchSummary: summary,
-      diasConsultados: diasConsulta.length,
+      diasConsultados: diasPlanned.length,
     });
 
     const epocCsvSyncRunId = await recordEpocCsvSyncRun({
       outcome: "no_tbl_export",
       summary,
-      datesConsulted: diasConsulta,
+      datesConsulted: diasPlanned,
       flowDiagnostic,
       metadata: {
         dias_consulta_label: diasConsultaLabel,
         tbl_export_found: false,
         manual_consulta: !!manualConsultaDias?.length,
+        product_sync_run_id: productSyncRunId,
         ...(Object.keys(mensagemPortalPorDiaBr).length > 0
           ? { portal_por_dia: mensagemPortalPorDiaBr }
           : {}),
@@ -1613,6 +2192,8 @@ Deno.serve(async (req) => {
       sync: false,
     });
 
+    await persistProductCsvChain(null);
+
     const isDailyPreviousDayOnly =
       syncMode === "previous_day" && !manualConsultaDias?.length;
 
@@ -1624,12 +2205,13 @@ Deno.serve(async (req) => {
         epoc_daily_sync_last_attempt_ok: true,
         epoc_daily_sync_last_attempt_outcome: "no_tbl_export",
         epoc_daily_sync_last_attempt_error: null,
-        epoc_daily_sync_last_consulted_day_br: diasConsulta[0] ?? null,
+        epoc_daily_sync_last_consulted_day_br: diasPlanned[0] ?? null,
         epoc_partial_sync_summary: partialSummary,
         epoc_partial_sync_missing_services_days: syncGaps.services,
         epoc_partial_sync_missing_faturamento_days: syncGaps.faturamento,
         epoc_partial_sync_at: nowIso,
       };
+      delete nextSettings[PRODUCT_CHAIN_SETTINGS_KEY];
       const { error: upDailyErr } = await admin
         .from("company_integrations")
         .update({
@@ -1648,9 +2230,9 @@ Deno.serve(async (req) => {
         ok: true,
         outcome: "no_tbl_export",
         message: summary,
-        consulted_day_br: diasConsulta[0] ?? null,
+        consulted_day_br: diasPlanned[0] ?? null,
         tblExport_found: false,
-        dias_consultados: diasConsulta.length,
+        dias_consultados: diasPlanned.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
         flow_diagnostic: flowDiagnostic,
         steps_prefix: stepsPrefix,
@@ -1662,16 +2244,18 @@ Deno.serve(async (req) => {
 
     {
       const nowIso = new Date().toISOString();
+      const nextSettings: Record<string, unknown> = {
+        ...raw,
+        epoc_partial_sync_summary: partialSummary,
+        epoc_partial_sync_missing_services_days: syncGaps.services,
+        epoc_partial_sync_missing_faturamento_days: syncGaps.faturamento,
+        epoc_partial_sync_at: nowIso,
+      };
+      delete nextSettings[PRODUCT_CHAIN_SETTINGS_KEY];
       await admin
         .from("company_integrations")
         .update({
-          settings: {
-            ...raw,
-            epoc_partial_sync_summary: partialSummary,
-            epoc_partial_sync_missing_services_days: syncGaps.services,
-            epoc_partial_sync_missing_faturamento_days: syncGaps.faturamento,
-            epoc_partial_sync_at: nowIso,
-          },
+          settings: nextSettings,
           updated_at: nowIso,
         })
         .eq("company_id", companyId)
@@ -1683,10 +2267,11 @@ Deno.serve(async (req) => {
       summary,
       {
         tblExport_found: false,
-        dias_consultados: diasConsulta.length,
+        dias_consultados: diasPlanned.length,
         epoc_csv_sync_run_id: epocCsvSyncRunId,
         outcome: "no_tbl_export",
         partial_sync_summary: partialSummary,
+        product_sync_run_id: productSyncRunId,
       },
       {
         skipPortalPatch: true,
@@ -1697,7 +2282,10 @@ Deno.serve(async (req) => {
 
   // --- CSV final consolidado -------------------------------------------------
   const csvHeader = ["data_consumo", ...headerBase];
-  const csvGenerated = matrixToCsv(csvHeader, linhasCsvFinal);
+  const csvGenerated =
+    csvMergedFromParts && csvMergedFromParts.trim().length > 0
+      ? csvMergedFromParts
+      : matrixToCsv(csvHeader, linhasCsvFinal);
   let csvStoragePath: string | null = null;
   let csvFileName: string | null = null;
   let csvSizeBytes = 0;
@@ -1743,11 +2331,13 @@ Deno.serve(async (req) => {
         status: "ok",
         detalhes: {
           origem: csvOrigemMeta,
-          dias_consultados: diasConsulta.length,
+          dias_consultados: diasPlanned.length,
           dias_com_tabela: totalDiasComTabela,
           linhas_dados: totalLinhasDados,
           linhas_csv_total: csvGenerated.split(/\r?\n/).filter(Boolean).length,
           filtro_total_recebido_coluna_encontrada: totalRecebidoColIndex >= 0,
+          product_sync_run_id: productSyncRunId,
+          partes_csv: partPaths.length,
           previa: previewText(csvGenerated, 800),
         },
       },
@@ -1790,6 +2380,7 @@ Deno.serve(async (req) => {
   nextSettings.epoc_partial_sync_missing_faturamento_days =
     syncGaps.faturamento;
   nextSettings.epoc_partial_sync_at = nowIso;
+  delete nextSettings[PRODUCT_CHAIN_SETTINGS_KEY];
 
   const { error: upIntegErr } = await admin
     .from("company_integrations")
@@ -1925,7 +2516,7 @@ Deno.serve(async (req) => {
   const epocCsvSyncRunId = await recordEpocCsvSyncRun({
     outcome: "success",
     summary: successSummary,
-    datesConsulted: diasConsulta,
+    datesConsulted: diasPlanned,
     flowDiagnostic,
     metadata: {
       tbl_export_found: true,
@@ -1934,17 +2525,23 @@ Deno.serve(async (req) => {
       csv_storage_path: csvStoragePath,
       csv_revenue_import_job_id: csvRevenueImportJobId,
       dias_consulta_label: diasConsultaLabel,
+      product_sync_run_id: productSyncRunId,
+      chained: chainingMode,
     },
   });
 
   log("concluido", {
     steps: steps.length,
     csv_revenue_import_job_id: csvRevenueImportJobId,
+    product_sync_run_id: productSyncRunId,
+    chained: chainingMode,
     flow_blocked_at: flowDiagnostic.blocked_at,
   });
 
   return json({
     ok: true,
+    continuing: false,
+    product_sync_run_id: productSyncRunId,
     steps_prefix: stepsPrefix,
     steps,
     tblExport_found: true,

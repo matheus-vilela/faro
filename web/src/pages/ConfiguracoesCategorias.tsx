@@ -40,7 +40,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import {
   buildChildrenMap,
   categoryPathLabel,
@@ -48,7 +48,6 @@ import {
   TIPO_LABEL,
 } from "@/lib/companyCategoryLabels";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
-import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type {
@@ -84,8 +83,8 @@ const TIPOS_DESPESA: TipoCategoria[] = [
 ];
 
 export function ConfiguracoesCategorias() {
-  const { currentCompany, currentRole } = useCompany();
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
+  const { currentCompany } = useCompany();
+  const isOwner = useIsOwnerAccess();
   const [rows, setRows] = useState<CompanyCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

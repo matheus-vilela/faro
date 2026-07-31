@@ -148,7 +148,7 @@ function mergeCompanyFromRealtimeRow(
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAdmin, loading: authLoading } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [userCompanies, setUserCompanies] = useState<UserCompany[]>([]);
   const [groups, setGroups] = useState<CompanyGroup[]>([]);
@@ -162,15 +162,38 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   );
   const [loading, setLoading] = useState(true);
 
-  const applyActiveMembership = useCallback((uc: UserCompany | undefined) => {
-    setCurrentRole(uc?.role ?? null);
-    setCurrentPermissions(uc?.permissions ?? []);
-    setCurrentProfileName(
-      isOwnerRole(uc?.role) ? "Proprietário" : (uc?.permissionProfileName ?? null),
-    );
-  }, []);
+  const applyActiveMembership = useCallback(
+    (uc: UserCompany | undefined) => {
+      if (isAdmin) {
+        // Admin age com poder de proprietário em qualquer unidade, com ou sem membership.
+        setCurrentRole("owner");
+        setCurrentPermissions(["*"]);
+        setCurrentProfileName(
+          uc?.permissionProfileName === "Admin Faro"
+            ? "Admin Faro"
+            : isOwnerRole(uc?.role)
+              ? "Proprietário"
+              : (uc?.permissionProfileName ?? "Admin Faro"),
+        );
+        return;
+      }
+      setCurrentRole(uc?.role ?? null);
+      setCurrentPermissions(uc?.permissions ?? []);
+      setCurrentProfileName(
+        isOwnerRole(uc?.role)
+          ? "Proprietário"
+          : (uc?.permissionProfileName ?? null),
+      );
+    },
+    [isAdmin],
+  );
 
   const fetchCompanies = useCallback(async () => {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
     if (!user) {
       setCompanies([]);
       setUserCompanies([]);
@@ -192,75 +215,124 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       )
       .eq("user_id", user.id);
 
-    if (!ucData?.length) {
-      setCompanies([]);
-      setUserCompanies([]);
-      setGroups([]);
-      setCurrentCompanyState(null);
-      setCurrentRole(null);
-      setCurrentPermissions([]);
-      setCurrentProfileName(null);
-      setLoading(false);
-      return;
+    const membershipByCompanyId = new Map(
+      ((ucData ?? []) as UcRow[]).map((uc) => [uc.company_id, uc]),
+    );
+
+    let rows: CompanyRow[] = [];
+
+    if (isAdmin) {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("*, company_groups(*)")
+        .order("name", { ascending: true });
+      if (error) {
+        setCompanies([]);
+        setUserCompanies([]);
+        setGroups([]);
+        setCurrentCompanyState(null);
+        setCurrentRole(null);
+        setCurrentPermissions([]);
+        setCurrentProfileName(null);
+        setLoading(false);
+        return;
+      }
+      rows = (data ?? []) as CompanyRow[];
+    } else {
+      if (!ucData?.length) {
+        setCompanies([]);
+        setUserCompanies([]);
+        setGroups([]);
+        setCurrentCompanyState(null);
+        setCurrentRole(null);
+        setCurrentPermissions([]);
+        setCurrentProfileName(null);
+        setLoading(false);
+        return;
+      }
+
+      const companyIds = ucData.map((uc) => uc.company_id);
+      const { data, error } = await supabase
+        .from("companies")
+        .select("*, company_groups(*)")
+        .in("id", companyIds);
+
+      if (error) {
+        setCompanies([]);
+        setUserCompanies([]);
+        setGroups([]);
+        setCurrentCompanyState(null);
+        setCurrentRole(null);
+        setCurrentPermissions([]);
+        setCurrentProfileName(null);
+        setLoading(false);
+        return;
+      }
+      rows = (data ?? []) as CompanyRow[];
     }
 
-    const companyIds = ucData.map((uc) => uc.company_id);
-    const { data, error } = await supabase
-      .from("companies")
-      .select("*, company_groups(*)")
-      .in("id", companyIds);
+    const companyList: Company[] = rows.map((row) => {
+      const { company_groups: _g, ...rest } = row;
+      return rest as Company;
+    });
+    setCompanies(companyList);
 
-    if (error) {
-      setCompanies([]);
-      setUserCompanies([]);
-      setGroups([]);
-      setCurrentCompanyState(null);
-      setCurrentRole(null);
-      setCurrentPermissions([]);
-      setCurrentProfileName(null);
-    } else {
-      const rows = (data ?? []) as CompanyRow[];
-      const companyList: Company[] = rows.map((row) => {
-        const { company_groups: _g, ...rest } = row;
-        return rest as Company;
-      });
-      setCompanies(companyList);
+    const groupById = new Map<string, CompanyGroup>();
+    for (const row of rows) {
+      const g = normalizeGroupEmbed(row.company_groups);
+      if (g) groupById.set(g.id, g);
+    }
 
-      const groupById = new Map<string, CompanyGroup>();
-      for (const row of rows) {
-        const g = normalizeGroupEmbed(row.company_groups);
-        if (g) groupById.set(g.id, g);
+    if (isAdmin) {
+      const { data: allGroups } = await supabase
+        .from("company_groups")
+        .select("*")
+        .order("name", { ascending: true });
+      for (const g of (allGroups ?? []) as CompanyGroup[]) {
+        groupById.set(g.id, g);
       }
-      const groupList = [...groupById.values()].sort((a, b) =>
-        a.name.localeCompare(b.name, "pt-BR"),
-      );
-      setGroups(groupList);
+    }
 
-      const ucs: UserCompany[] = companyList.map((c) => {
-        const uc = ucData.find((u) => u.company_id === c.id) as UcRow | undefined;
-        const role = parseRole(uc?.role);
-        const profile = uc?.company_permission_profiles ?? null;
+    const groupList = [...groupById.values()].sort((a, b) =>
+      a.name.localeCompare(b.name, "pt-BR"),
+    );
+    setGroups(groupList);
+
+    const ucs: UserCompany[] = companyList.map((c) => {
+      const uc = membershipByCompanyId.get(c.id);
+      if (uc) {
+        const role = parseRole(uc.role);
+        const profile = uc.company_permission_profiles ?? null;
         const profilePerms = parsePermissionKeys(profile?.permissions);
         return {
           company: c,
           role,
-          permissionProfileId: uc?.permission_profile_id ?? null,
+          permissionProfileId: uc.permission_profile_id ?? null,
           permissionProfileName: profile?.name ?? null,
-          permissions: permissionsForRole(role, profilePerms),
+          permissions: isAdmin
+            ? ["*"]
+            : permissionsForRole(role, profilePerms),
         };
-      });
-      setUserCompanies(ucs);
+      }
+      return {
+        company: c,
+        role: "member" as const,
+        permissionProfileId: null,
+        permissionProfileName: isAdmin ? "Admin Faro" : null,
+        permissions: isAdmin ? ["*"] : [],
+      };
+    });
+    setUserCompanies(ucs);
 
-      const lastId = localStorage.getItem(getLastCompanyStorageKey(user.id));
-      const lastUserCompany = lastId
-        ? ucs.find((uc) => uc.company.id === lastId)
-        : null;
-      const active = lastUserCompany ?? ucs[0] ?? null;
-      setCurrentCompanyState(active?.company ?? companyList[0] ?? null);
-      applyActiveMembership(active ?? ucs[0]);
-    }
+    const lastId = localStorage.getItem(getLastCompanyStorageKey(user.id));
+    const lastUserCompany = lastId
+      ? ucs.find((uc) => uc.company.id === lastId)
+      : null;
+    const active = lastUserCompany ?? ucs[0] ?? null;
+    setCurrentCompanyState(active?.company ?? companyList[0] ?? null);
+    applyActiveMembership(active ?? ucs[0]);
     setLoading(false);
-  }, [user, applyActiveMembership]);
+  }, [user, isAdmin, authLoading, applyActiveMembership]);
 
   const groupsWithCompanies = useMemo(
     () =>
@@ -278,10 +350,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const isGroupOwner = useMemo(() => {
     if (!user || !currentGroup) return false;
+    if (isAdmin) return true;
     return currentGroup.owner_user_id === user.id;
-  }, [user, currentGroup]);
+  }, [user, currentGroup, isAdmin]);
 
-  const isCompanyOwner = isOwnerRole(currentRole);
+  const isCompanyOwner = isOwnerRole(currentRole) || isAdmin;
 
   useEffect(() => {
     fetchCompanies();
@@ -408,6 +481,15 @@ export function useCompany() {
 
 export function useHasPermission(key: PermissionKey): boolean {
   const { currentPermissions, isCompanyOwner } = useCompany();
+  const { isAdmin } = useAuth();
+  if (isAdmin) return true;
   if (isCompanyOwner) return true;
   return hasPermission(currentPermissions, key);
+}
+
+/** Proprietário da unidade **ou** admin global Faro. */
+export function useIsOwnerAccess(): boolean {
+  const { isCompanyOwner } = useCompany();
+  const { isAdmin } = useAuth();
+  return isAdmin || isCompanyOwner;
 }

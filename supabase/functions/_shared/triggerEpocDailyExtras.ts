@@ -24,6 +24,8 @@ export function triggerEpocDailyExtrasInBackground(opts: {
   /** Se true, o worker encadeia a si próprio enquanto houver gaps. */
   continueChain?: boolean;
   maxDays?: number;
+  /** Tentativa de cadeia (0 = primeira); limita retries em falha total. */
+  chainAttempt?: number;
   logTag?: string;
 }): void {
   const base = opts.supabaseUrl.replace(/\/$/, "");
@@ -44,6 +46,7 @@ export function triggerEpocDailyExtrasInBackground(opts: {
           kinds: ["services", "faturamento"],
           max_days: opts.maxDays ?? 3,
           continue_chain: opts.continueChain !== false,
+          chain_attempt: opts.chainAttempt ?? 0,
           // service role: o handler aceita JWT de serviço
           invoked_by: "service",
         }),
@@ -54,6 +57,7 @@ export function triggerEpocDailyExtrasInBackground(opts: {
         JSON.stringify({
           fase: "trigger_result",
           company_id: opts.companyId,
+          chain_attempt: opts.chainAttempt ?? 0,
           status: res.status,
           previa: text.slice(0, 300),
         }),

@@ -76,6 +76,15 @@ export function DashboardIntegrationCsvRevenueCard({
     return () => window.clearInterval(timer);
   }, [processingSales, confirmPhase, showResumeImportButton]);
 
+  // Realtime às vezes atrasa; refetch periódico enquanto o import corre.
+  useEffect(() => {
+    if (!processingSales || confirmPhase) return;
+    const poll = window.setInterval(() => {
+      void refetchCompanies();
+    }, 8_000);
+    return () => window.clearInterval(poll);
+  }, [processingSales, confirmPhase, refetchCompanies]);
+
   const { title, subtitle, showSpinner, icon } = useMemo(() => {
     if (confirmPhase) {
       return {
@@ -191,6 +200,12 @@ export function DashboardIntegrationCsvRevenueCard({
         toast.error(
           res.error?.slice(0, 240) ??
             "Não foi possível repetir a sincronização com o portal EPOC.",
+        );
+      } else if (res.continuing) {
+        toast.message(
+          res.message?.trim() ||
+            "Sincronização em lotes iniciada — o download do CSV continua em segundo plano.",
+          { duration: 6000 },
         );
       } else {
         toast.success(

@@ -8,8 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useCompany } from "@/contexts/CompanyContext";
-import { canOwnerAccess } from "@/lib/roles";
+import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import type { Expense } from "@/types/expense";
 import { ArrowRight, Loader2, MessageCircle } from "lucide-react";
@@ -25,7 +24,8 @@ function formatBrl(amount: number): string {
 }
 
 export function PendingWhatsappExpensesCard() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
+  const isOwner = useIsOwnerAccess();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<
     Pick<Expense, "id" | "supplier_name" | "created_at" | "expense_items">[]
@@ -34,7 +34,7 @@ export function PendingWhatsappExpensesCard() {
   const [sheetExpenseId, setSheetExpenseId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!currentCompany?.id || !currentRole || !canOwnerAccess(currentRole)) {
+    if (!currentCompany?.id || !isOwner) {
       setLoading(false);
       setItems([]);
       return;
@@ -61,7 +61,7 @@ export function PendingWhatsappExpensesCard() {
         "id" | "supplier_name" | "created_at" | "expense_items"
       >[],
     );
-  }, [currentCompany?.id, currentRole]);
+  }, [currentCompany?.id, isOwner]);
 
   useEffect(() => {
     void load();
@@ -87,7 +87,7 @@ export function PendingWhatsappExpensesCard() {
     void load();
   };
 
-  if (!currentRole || !canOwnerAccess(currentRole) || items.length === 0) {
+  if (!isOwner || items.length === 0) {
     return null;
   }
 

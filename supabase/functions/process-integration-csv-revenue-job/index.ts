@@ -2,19 +2,12 @@
  * Processa `integration_csv_revenue_import_jobs` em **várias invocações** (cursor
  * `csv_resume_row_index` + continuação via fila pgmq `csv_revenue_import_continue`),
  * até percorrer todo o CSV: coluna "Total recebido(R$)" + `data_consumo`.
- * Lançamento: **venda de produto** (`entry_mode: product_sale`), produto pelo nome
- * (coluna Produto / Nome do produto, igual ao cadastro), **quantidade** na coluna **Quant.** (aliases),
- * **gross_amount** = total da coluna "Total recebido(R$)", **pricing_mode: total**.
- * Título da receita: nome do produto na linha.
- * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR + opcionalmente um único
- * prompt OpenAI por chunk (`OPENAI_API_KEY`, `OPENAI_REVENUE_CLASSIFY_MODEL`) mapeando o rótulo
- * da linha para uma folha existente (ex.: vendas de bebidas, taxa de serviço, delivery).
- * Produtos: deduplicação (canonical + tokens fuzzy, ex. "AGUA COM GAS" → cadastro existente),
- * reconsulta ao banco antes do INSERT, coordenador anti-paralelo, cache entre chunks.
- * Vendas EPOC: quantidade em UN; baixa de estoque via `sale_unit_code` + `products.unit_conversions`.
- * `product_operational_config` (AUTO/CONFIGURADO) e `product_category_assignments`.
- * Produtos novos são cadastrados como venda direta; candidatos a ficha técnica aparecem
- * no dashboard quando só têm saída de estoque (sem entrada).
+ * Lançamento: **venda de produto** (`entry_mode: product_sale`).
+ * Produto: coluna **Codigo** → `products.sku` (acha ou cria com unit=un).
+ * Categoria de catálogo: coluna **Grupo** → `company_product_categories` (acha ou cria).
+ * Fluxo de produto: apenas por Codigo + Grupo (sem match por nome).
+ * Quantidade na coluna Quant.; gross_amount = "Total recebido(R$)"; pricing_mode: total.
+ * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR (sem IA).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
  * Corpo inicial: `{ "job_id" }` ou `{ "record": { "id" } }`.
@@ -32,15 +25,9 @@ import {
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
 import {
-  batchClassifyRevenueLeavesWithOpenAi,
   classifyRevenueCategoryHeuristic,
-  deriveOperationalTypeForAutoProduct,
   filterOperationalRevenueLeaves,
-  leafById,
-  mapOperationalTypeToStockControl,
-  needsOpenAiRefinement,
   pickDefaultRevenueLeaf,
-  suggestCompanyProductCatalogCategoryId,
   type RevenueOperationalLeaf,
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
@@ -49,20 +36,11 @@ import {
   resolveOnboardingCsvJobPatchEnabled,
 } from "../_shared/onboardingPdvPatch.ts";
 import {
-  buildCanonicalProductIndex,
-  EpocProductEnsureCoordinator,
-  epocExactNameKey,
-  epocProductLineKey,
-  ensureProductSaleUnitUnConversion,
-  loadEpocOpenAiPlanFromMetadata,
-  loadProductIdCacheFromMetadata,
-  productIdCacheExactNameToMetadata,
-  productIdCacheToMetadata,
-  resolveEpocProductId,
-  runEpocProductMatchPipeline,
-  type EpocCatalogProduct,
-} from "../_shared/epocCsvProductResolution.ts";
-import type { EpocRecipeCatalogEntry } from "../_shared/epocCsvProductMatchOpenAi.ts";
+  ensureEpocProductBySku,
+  loadSkuProductCacheFromMetadata,
+  skuProductCacheToMetadata,
+} from "../_shared/epocCsvProductBySku.ts";
+import { epocProductLineKey } from "../_shared/epocCsvProductResolution.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -71,7 +49,7 @@ const corsHeaders: Record<string, string> = {
 };
 
 const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
-/** Cabeçalhos aceites para o nome da linha (título do lançamento e match de produto). */
+/** Cabeçalhos aceites para o nome do produto (só rótulo do lançamento). */
 const COL_PRODUTO_ALIASES = [
   "Produto",
   "Nome do produto",
@@ -79,6 +57,10 @@ const COL_PRODUTO_ALIASES = [
   "Descrição",
   "Descricao",
 ];
+/** Código EPOC → `products.sku`. */
+const COL_CODIGO_ALIASES = ["Codigo", "Código", "Cod.", "Cod", "SKU"];
+/** Grupo EPOC → categoria de catálogo de produto. */
+const COL_GRUPO_ALIASES = ["Grupo", "Grupos", "Grupo produto", "Grupo Produto"];
 /** Coluna de quantidade vendida (normalização ignora acentos e espaços no cabeçalho). */
 const COL_QUANT_ALIASES = [
   "Quant.",
@@ -134,7 +116,7 @@ function sanitizeCell(s: string): string {
     .trim();
 }
 
-/** Nome de produto para comparar CSV ↔ cadastro (acentos e espaços colapsados). */
+/** Nome de produto para título do lançamento. */
 function normalizeCatalogName(s: string): string {
   return sanitizeCell(s)
     .toLowerCase()
@@ -142,33 +124,6 @@ function normalizeCatalogName(s: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function inferUnitFromProductName(
-  productName: string,
-  catalog: Array<{ id: string; name: string; unit?: string | null }>,
-): string {
-  const n = normalizeCatalogName(productName);
-  if (/\b(kg|quilo|quilos)\b/.test(n)) return "kg";
-  if (/\b(g|grama|gramas)\b/.test(n)) return "g";
-  if (/\b(l|litro|litros)\b/.test(n)) return "l";
-  if (/\b(ml|mililitro|mililitros)\b/.test(n)) return "ml";
-
-  const unitCount = new Map<string, number>();
-  for (const p of catalog) {
-    const u = sanitizeCell(p.unit ?? "").toLowerCase();
-    if (!u) continue;
-    unitCount.set(u, (unitCount.get(u) ?? 0) + 1);
-  }
-  let best = "un";
-  let bestCount = -1;
-  for (const [u, c] of unitCount.entries()) {
-    if (c > bestCount) {
-      best = u;
-      bestCount = c;
-    }
-  }
-  return best;
 }
 
 /** Índice da coluna de quantidade: aliases exactos, depois heurística no cabeçalho já normalizado. */
@@ -197,6 +152,31 @@ function resolveProductColumnIndex(normHeaders: string[]): number {
     const h = normHeaders[i]!;
     if (h.includes("produto")) return i;
     if (h.includes("descricao")) return i;
+  }
+  return -1;
+}
+
+function resolveCodigoColumnIndex(normHeaders: string[]): number {
+  for (const alias of COL_CODIGO_ALIASES) {
+    const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
+    if (j >= 0) return j;
+  }
+  for (let i = 0; i < normHeaders.length; i++) {
+    const h = normHeaders[i]!;
+    if (h === "codigo" || h === "cod" || h === "sku") return i;
+    if (h.startsWith("codigo") || h.startsWith("cod")) return i;
+  }
+  return -1;
+}
+
+function resolveGrupoColumnIndex(normHeaders: string[]): number {
+  for (const alias of COL_GRUPO_ALIASES) {
+    const j = normHeaders.indexOf(normalizeHeaderLabel(alias));
+    if (j >= 0) return j;
+  }
+  for (let i = 0; i < normHeaders.length; i++) {
+    const h = normHeaders[i]!;
+    if (h === "grupo" || h.startsWith("grupo")) return i;
   }
   return -1;
 }
@@ -234,7 +214,8 @@ type IgnoredRowReason =
   | "entry_date_invalid"
   | "product_name_empty"
   | "quantity_invalid"
-  | "product_ambiguous"
+  | "epoc_product_unresolved"
+  | "unit_conversion_failed"
   | "product_create_failed";
 
 type IgnoredRowDiagnostic = {
@@ -336,61 +317,6 @@ function parseBrQuantity(s: string): number | null {
   const v = Number(x);
   if (!Number.isFinite(v) || v <= 0) return null;
   return Math.round(v * 10_000) / 10_000;
-}
-
-async function loadProductCatalog(
-  admin: ReturnType<typeof createClient>,
-  companyId: string,
-): Promise<
-  | {
-      ok: true;
-      catalog: Array<{ id: string; name: string; unit?: string | null }>;
-    }
-  | { ok: false; message: string }
-> {
-  const { data, error } = await admin
-    .from("products")
-    .select("id, name, unit, canonical_name")
-    .eq("company_id", companyId)
-    .eq("is_active", true);
-  if (error) {
-    console.error(
-      "[process-integration-csv-revenue-job] products",
-      error.message,
-    );
-    return { ok: false, message: error.message };
-  }
-  const catalog = (data ?? []) as EpocCatalogProduct[];
-  return { ok: true, catalog };
-}
-
-async function loadRecipeCatalog(
-  admin: ReturnType<typeof createClient>,
-  companyId: string,
-): Promise<
-  | { ok: true; recipes: EpocRecipeCatalogEntry[] }
-  | { ok: false; message: string }
-> {
-  const { data, error } = await admin
-    .from("recipes")
-    .select("id, name, output_product_id, active")
-    .eq("company_id", companyId)
-    .eq("active", true);
-  if (error) {
-    console.error(
-      "[process-integration-csv-revenue-job] recipes",
-      error.message,
-    );
-    return { ok: false, message: error.message };
-  }
-  const recipes = (data ?? []).map((r) => ({
-    id: String(r.id),
-    name: String(r.name ?? "").trim(),
-    output_product_id: r.output_product_id
-      ? String(r.output_product_id)
-      : null,
-  }));
-  return { ok: true, recipes };
 }
 
 function extractJobId(body: Record<string, unknown>): string | null {
@@ -686,11 +612,6 @@ async function runCsvRevenueImportForJob(
       );
     }
 
-    const { data: productCatalogCategories } = await admin
-      .from("company_product_categories")
-      .select("id, name")
-      .eq("company_id", job.company_id);
-
     const { data: fileBlob, error: dlErr } = await admin.storage
       .from(job.storage_bucket)
       .download(job.storage_path);
@@ -790,24 +711,13 @@ async function runCsvRevenueImportForJob(
         `Coluna de produto não encontrada (tente Produto, Nome do produto, Descrição). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
       );
     }
-
-    const productCatalogLoad = await loadProductCatalog(admin, job.company_id);
-    if (!productCatalogLoad.ok) {
+    const codigoCol = resolveCodigoColumnIndex(normHeaders);
+    if (codigoCol < 0) {
       return await fail(
-        `Falha ao ler o catálogo de produtos: ${productCatalogLoad.message}`,
+        `Coluna Codigo não encontrada (necessário para identificar/criar o produto). Cabeçalhos: ${headers.slice(0, 15).join("; ")}…`,
       );
     }
-    const recipeCatalogLoad = await loadRecipeCatalog(admin, job.company_id);
-    if (!recipeCatalogLoad.ok) {
-      return await fail(
-        `Falha ao ler fichas técnicas: ${recipeCatalogLoad.message}`,
-      );
-    }
-    const productCatalog: EpocCatalogProduct[] = [...productCatalogLoad.catalog];
-    const recipeCatalog: EpocRecipeCatalogEntry[] = [
-      ...recipeCatalogLoad.recipes,
-    ];
-    const canonicalProductIndex = buildCanonicalProductIndex(productCatalog);
+    const grupoCol = resolveGrupoColumnIndex(normHeaders);
 
     const startOffset = Math.max(0, Number(job.csv_resume_row_index ?? 0) || 0);
     if (startOffset > rows.length) {
@@ -943,85 +853,37 @@ async function runCsvRevenueImportForJob(
     let productsAutoCreatedChunk = 0;
     let recipesAutoCreatedChunk = 0;
 
-    const productIdCache = loadProductIdCacheFromMetadata(priorMeta);
-
-    const productEnsure = new EpocProductEnsureCoordinator(
-      admin,
-      job.company_id,
-      productCatalog,
-      canonicalProductIndex,
-      productIdCache,
-    );
-
-    const priorCatByProduct =
-      priorMeta.epoc_revenue_category_by_product &&
-      typeof priorMeta.epoc_revenue_category_by_product === "object" &&
-      !Array.isArray(priorMeta.epoc_revenue_category_by_product)
-        ? (priorMeta.epoc_revenue_category_by_product as Record<
-            string,
-            StoredRevenueCat
-          >)
-        : {};
-    const catByKey: Record<string, StoredRevenueCat> = { ...priorCatByProduct };
-
-    const openaiApiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
-    const openaiClassifyModel =
-      Deno.env.get("OPENAI_REVENUE_CLASSIFY_MODEL")?.trim() || "gpt-4o-mini";
-    const openaiProductMatchModel =
-      Deno.env.get("OPENAI_EPOC_PRODUCT_MATCH_MODEL")?.trim() ||
-      openaiClassifyModel;
-
     const chunkEndExclusive = Math.min(
       rows.length,
       startOffset + ROWS_HARD_CAP,
     );
 
-    const uniqueEpocNames = new Map<string, string>();
-    for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
-      const row = rows[pi]!;
-      const totalCell = sanitizeCell(row[totalCol] ?? "");
-      if (parseBrMoney(totalCell) == null) continue;
-      const rawDate = sanitizeCell(row[dataConsumoIdx] ?? "");
-      if (!parseFlexibleDate(rawDate)) continue;
-      const rawP =
-        produtoCol >= 0
-          ? sanitizeCell(row[produtoCol] ?? "").replace(/\s+/g, " ")
-          : "";
-      if (!rawP) continue;
-      if (parseBrQuantity(sanitizeCell(row[quantCol] ?? "")) == null) continue;
-      const exactKey = epocExactNameKey(rawP);
-      if (!exactKey) continue;
-      if (!uniqueEpocNames.has(exactKey)) uniqueEpocNames.set(exactKey, rawP);
-    }
+    const skuProductCache = loadSkuProductCacheFromMetadata(priorMeta);
+    const productCategoryCache = new Map<string, string>();
+    const createdProductIdsThisChunk = new Set<string>();
 
-    const priorOpenAiPlan = loadEpocOpenAiPlanFromMetadata(priorMeta);
-    const matchPipeline = await runEpocProductMatchPipeline({
-      admin,
-      companyId: job.company_id,
-      uniqueNames: uniqueEpocNames,
-      catalog: productCatalog,
-      recipes: recipeCatalog,
-      canonicalIndex: canonicalProductIndex,
-      cache: productIdCache,
-      priorOpenAiPlan,
-      openaiApiKey,
-      openaiModel: openaiProductMatchModel,
-      productEnsure,
-      inferUnit: inferUnitFromProductName,
-      mapStockControl: mapOperationalTypeToStockControl,
-      deriveOperationalType: deriveOperationalTypeForAutoProduct,
-      defaultCategoryName: defaultLeaf.name,
-    });
-    const manualReviewExactNames = new Set(
-      matchPipeline.manualReviewExactNames,
-    );
-    const openAiPlanByExactName = matchPipeline.openAiPlanByExactName;
-    const pendingHeuristic = new Map<
-      string,
-      { raw: string; pick: ReturnType<typeof classifyRevenueCategoryHeuristic> }
-    >();
-    const uncertainKeysOrder: string[] = [];
-    const uncertainLabels: string[] = [];
+    const catByKey: Record<string, StoredRevenueCat> = {};
+    const priorCat = priorMeta.epoc_revenue_category_by_product;
+    if (priorCat && typeof priorCat === "object" && !Array.isArray(priorCat)) {
+      for (const [k, v] of Object.entries(priorCat as Record<string, unknown>)) {
+        if (!k || !v || typeof v !== "object" || Array.isArray(v)) continue;
+        const row = v as Record<string, unknown>;
+        const subId =
+          typeof row.subcategory_id === "string" ? row.subcategory_id.trim() : "";
+        if (!subId) continue;
+        catByKey[k] = {
+          subcategory_id: subId,
+          category_id:
+            typeof row.category_id === "string" ? row.category_id : null,
+          confidence: Number(row.confidence ?? 0) || 0,
+          reason: typeof row.reason === "string" ? row.reason : "",
+          src:
+            row.src === "openai" || row.src === "default" || row.src === "heuristic"
+              ? row.src
+              : "heuristic",
+        };
+      }
+    }
 
     for (let pi = startOffset; pi < chunkEndExclusive; pi++) {
       const row = rows[pi]!;
@@ -1038,65 +900,15 @@ async function runCsvRevenueImportForJob(
 
       const k = epocProductLineKey(rawP);
       if (!k || catByKey[k]) continue;
-      if (pendingHeuristic.has(k)) continue;
 
       const h = classifyRevenueCategoryHeuristic(rawP, leaves, defaultLeaf);
-      if (!needsOpenAiRefinement(h)) {
-        catByKey[k] = {
-          subcategory_id: h.subcategoryId,
-          category_id: h.categoryId,
-          confidence: h.confidence,
-          reason: h.reason,
-          src: "heuristic",
-        };
-      } else {
-        pendingHeuristic.set(k, { raw: rawP, pick: h });
-        uncertainKeysOrder.push(k);
-        uncertainLabels.push(rawP);
-      }
-    }
-
-    if (uncertainLabels.length && openaiApiKey) {
-      const aiMap = await batchClassifyRevenueLeavesWithOpenAi({
-        apiKey: openaiApiKey,
-        model: openaiClassifyModel,
-        leaves,
-        labels: uncertainLabels,
-      });
-      for (let i = 0; i < uncertainKeysOrder.length; i++) {
-        const k = uncertainKeysOrder[i]!;
-        const lid = aiMap.get(i);
-        const leaf = lid ? leafById(leaves, lid) : null;
-        if (leaf) {
-          catByKey[k] = {
-            subcategory_id: leaf.id,
-            category_id: leaf.parent_id,
-            confidence: 0.86,
-            reason: "openai_batch",
-            src: "openai",
-          };
-        } else {
-          const ph = pendingHeuristic.get(k)!;
-          catByKey[k] = {
-            subcategory_id: ph.pick.subcategoryId,
-            category_id: ph.pick.categoryId,
-            confidence: ph.pick.confidence,
-            reason: ph.pick.reason,
-            src: "default",
-          };
-        }
-      }
-    } else {
-      for (const k of uncertainKeysOrder) {
-        const ph = pendingHeuristic.get(k)!;
-        catByKey[k] = {
-          subcategory_id: ph.pick.subcategoryId,
-          category_id: ph.pick.categoryId,
-          confidence: ph.pick.confidence,
-          reason: ph.pick.reason,
-          src: "heuristic",
-        };
-      }
+      catByKey[k] = {
+        subcategory_id: h.subcategoryId,
+        category_id: h.categoryId,
+        confidence: h.confidence,
+        reason: h.reason,
+        src: "heuristic",
+      };
     }
 
     const pushDiagnostic = (d: IgnoredRowDiagnostic) => {
@@ -1109,6 +921,7 @@ async function runCsvRevenueImportForJob(
 
     const t0 = Date.now();
     let idx = startOffset;
+    let lastProgressPatchAt = startOffset;
     while (idx < rows.length) {
       if (idx - startOffset >= ROWS_HARD_CAP) break;
       if (Date.now() - t0 >= TIME_BUDGET_MS) break;
@@ -1201,61 +1014,10 @@ async function runCsvRevenueImportForJob(
       const rowSubcategoryId = scRowForLine?.subcategory_id ?? defaultLeaf.id;
       const rowCategoryId = scRowForLine?.category_id ?? defaultLeaf.parent_id;
 
-      const exactKeyRow = epocExactNameKey(rawProdutoForMatch);
-      if (manualReviewExactNames.has(exactKeyRow)) {
+      const rawCodigo = sanitizeCell(row[codigoCol] ?? "");
+      if (!rawCodigo) {
         skippedChunk += 1;
         skipNoProductChunk += 1;
-        const plan = openAiPlanByExactName.get(exactKeyRow);
-        pushDiagnostic({
-          row_index: idx + 1,
-          entry_date_raw: rawDate,
-          product_name_raw: rawProdutoForMatch,
-          quantity_raw: qtyCell,
-          total_received_raw: totalCell,
-          reason: "epoc_manual_review",
-          details:
-            plan?.instructions ??
-            "Item sem match exato; revisar cadastro conforme orientação da importação.",
-          action: "linha ignorada",
-        });
-        idx += 1;
-        continue;
-      }
-
-      const productResolve = resolveEpocProductId(
-        rawProdutoForMatch,
-        productCatalog,
-        productIdCache,
-        canonicalProductIndex,
-        recipeCatalog,
-      );
-      let productId = productResolve.productId;
-      const catalogName = productResolve.catalogName;
-
-      if (productResolve.ambiguous) {
-        skippedChunk += 1;
-        skipNoProductChunk += 1;
-        pushDiagnostic({
-          row_index: idx + 1,
-          entry_date_raw: rawDate,
-          product_name_raw: rawProdutoForMatch,
-          quantity_raw: qtyCell,
-          total_received_raw: totalCell,
-          reason: "product_ambiguous",
-          details:
-            productResolve.ambiguousReason === "canonical"
-              ? "Mais de um produto com o mesmo nome canônico"
-              : "Mais de um produto com o mesmo nome normalizado",
-          action: "linha ignorada; consolidar nomes duplicados no cadastro",
-        });
-        idx += 1;
-        continue;
-      }
-
-      if (!productId) {
-        skippedChunk += 1;
-        skipNoProductChunk += 1;
-        const plan = openAiPlanByExactName.get(exactKeyRow);
         pushDiagnostic({
           row_index: idx + 1,
           entry_date_raw: rawDate,
@@ -1263,25 +1025,51 @@ async function runCsvRevenueImportForJob(
           quantity_raw: qtyCell,
           total_received_raw: totalCell,
           reason: "epoc_product_unresolved",
-          details:
-            plan?.instructions ??
-            plan?.create?.instructions ??
-            "Sem match exato no cadastro; aguardando resolução da importação.",
+          details: "Codigo do produto vazio",
           action: "linha ignorada",
         });
         idx += 1;
         continue;
       }
 
-      const hubUnit =
-        productCatalog.find((p) => p.id === productId)?.unit ?? "un";
-      await ensureProductSaleUnitUnConversion(
+      const rawGrupo =
+        grupoCol >= 0
+          ? sanitizeCell(row[grupoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+
+      const ensured = await ensureEpocProductBySku({
         admin,
-        productId,
-        hubUnit,
-        openAiPlanByExactName.get(exactKeyRow)?.create?.un_per_stock_unit ??
-          null,
-      );
+        companyId: job.company_id,
+        sku: rawCodigo,
+        name: rawProdutoForMatch,
+        grupoName: rawGrupo || null,
+        skuCache: skuProductCache,
+        categoryCache: productCategoryCache,
+      });
+      if (!ensured.productId) {
+        skippedChunk += 1;
+        skipNoProductChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "epoc_product_unresolved",
+          details: ensured.error ?? "Falha ao criar/identificar produto pelo Codigo.",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
+      const productId = ensured.productId;
+      if (ensured.created) {
+        createdNewProductThisIteration = true;
+        productsAutoCreatedChunk += 1;
+        createdProductIdsThisChunk.add(productId);
+      } else if (createdProductIdsThisChunk.has(productId)) {
+        createdNewProductThisIteration = true;
+      }
 
       let batchId = batchByDate.get(entryDate);
       if (!batchId) {
@@ -1367,24 +1155,18 @@ async function runCsvRevenueImportForJob(
       }
 
       if (createdNewProductThisIteration && productId) {
-        const leafForAutoCreate =
-          leaves.find((l) => l.id === rowSubcategoryId) ?? defaultLeaf;
-        const autoOpType = deriveOperationalTypeForAutoProduct(
-          leafForAutoCreate.name,
-          rawProdutoForMatch,
-        );
         const { error: pocErr } = await admin
           .from("product_operational_config")
           .insert({
             company_id: job.company_id,
             product_id: productId,
-            suggested_operational_type: autoOpType,
-            suggested_score: 0.82,
+            suggested_operational_type: "PRODUTO_REVENDA",
+            suggested_score: 1,
             suggestion_reasons: {
               epoc_csv_revenue_import: true,
-              revenue_category: scRowForLine?.reason ?? null,
+              by_sku: true,
             },
-            final_operational_type: autoOpType,
+            final_operational_type: "PRODUTO_REVENDA",
             final_decision_source: "AUTO",
             configuration_status: "CONFIGURADO",
             configuration_completeness: {},
@@ -1395,30 +1177,28 @@ async function runCsvRevenueImportForJob(
             pocErr.message,
           );
         }
-
-        const sugPc = suggestCompanyProductCatalogCategoryId(
-          rawProdutoForMatch,
-          (productCatalogCategories ?? []) as { id: string; name: string }[],
-        );
-        if (sugPc) {
-          const { error: pcaErr } = await admin
-            .from("product_category_assignments")
-            .insert({
-              company_id: job.company_id,
-              product_id: productId,
-              category_id: sugPc.categoryId,
-            });
-          if (pcaErr && !/duplicate key/i.test(pcaErr.message)) {
-            console.error(
-              "[process-integration-csv-revenue-job] product_category_assignments",
-              pcaErr.message,
-            );
-          }
-        }
       }
 
       createdChunk += 1;
       idx += 1;
+
+      // Atualiza o card antes do fim do chunk (evita UI presa em 0/N durante o 1.º lote).
+      if (
+        onboardingCsvJob &&
+        idx - lastProgressPatchAt >= 5
+      ) {
+        lastProgressPatchAt = idx;
+        await patchOnboardingPdv(
+          admin,
+          job.company_id,
+          {
+            sales_sync: idx,
+            import_status: "processing",
+            ...onboardingPdvJobFields,
+          },
+          "[process-integration-csv-revenue-job]",
+        ).catch(() => undefined);
+      }
     }
 
     const nextOffset = idx;
@@ -1434,13 +1214,7 @@ async function runCsvRevenueImportForJob(
     const newMeta: Record<string, unknown> = {
       ...priorMeta,
       epoc_revenue_category_by_product: catByKey,
-      epoc_product_id_by_line_key: productIdCacheToMetadata(productIdCache),
-      epoc_product_id_by_exact_name: productIdCacheExactNameToMetadata(
-        productIdCache,
-      ),
-      epoc_openai_plan_by_exact_name: Object.fromEntries(
-        openAiPlanByExactName,
-      ),
+      epoc_product_id_by_sku: skuProductCacheToMetadata(skuProductCache),
       batch_by_reference_date: batchMapObj,
       csv_total_data_rows: Math.max(
         Number(priorMeta.csv_total_data_rows ?? 0) || 0,
@@ -1461,6 +1235,12 @@ async function runCsvRevenueImportForJob(
     };
 
     if (!done) {
+      // Sem avanço de cursor: evita loop infinito de continuação (lease/timeout).
+      if (nextOffset <= startOffset) {
+        return await fail(
+          "Importação sem progresso neste chunk (cursor não avançou). Tente Retomar importação.",
+        );
+      }
       if (onboardingCsvJob) {
         const { data: obMid } = await admin
           .from("companies")
@@ -1808,9 +1588,11 @@ Deno.serve(async (req) => {
 
   const orchestrated = body.orchestrated === true;
 
-  // Processa vários chunks na mesma invocação (não depende só do fire-and-forget
-  // da fila — evita ficar preso em 20/N após o 1.º chunk).
-  const maxInline = intFromEnv("CSV_REVENUE_IMPORT_INLINE_CHAIN", 8, 1, 40);
+  // Com orchestrated=true o worker já faz self-call; chain inline longo + download
+  // do CSV em cada chunk estoura o timeout do orquestrador e o job fica em 0/N.
+  const maxInline = orchestrated
+    ? intFromEnv("CSV_REVENUE_IMPORT_ORCHESTRATED_CHAIN", 2, 1, 6)
+    : intFromEnv("CSV_REVENUE_IMPORT_INLINE_CHAIN", 8, 1, 40);
   const first = await runCsvRevenueImportForJob(
     admin,
     supabaseUrl,

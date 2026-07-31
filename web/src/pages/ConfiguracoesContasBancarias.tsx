@@ -25,8 +25,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useCompany } from "@/contexts/CompanyContext";
-import { canOwnerAccess } from "@/lib/roles";
+import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import {
   BANK_ACCOUNT_TYPE_OPTIONS,
@@ -46,9 +45,9 @@ function mapSupabaseError(message: string): string {
 }
 
 export function ConfiguracoesContasBancarias() {
-  const { currentCompany, currentRole } = useCompany();
+  const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
+  const isOwner = useIsOwnerAccess();
 
   const [rows, setRows] = useState<CompanyBankAccount[]>([]);
   const [loading, setLoading] = useState(true);

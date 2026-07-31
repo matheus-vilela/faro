@@ -5,6 +5,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { recoverEpocCsvRevenueImport } from "../_shared/enqueueEpocCsvRevenueImportJob.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -70,17 +71,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Sessão inválida" }, 401);
   }
 
-  const { data: member } = await userClient
-    .from("user_companies")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!member) {
+  const admin = createClient(supabaseUrl, serviceKey);
+  if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
     return json({ ok: false, error: "Sem acesso a esta unidade" }, 403);
   }
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   const result = await recoverEpocCsvRevenueImport(admin, {
     companyId,

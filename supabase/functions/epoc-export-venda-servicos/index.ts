@@ -9,6 +9,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { htmlHasId, unwrapAcoesHtml } from "../_shared/epocHtmlExtract.ts";
 import { fetchEpocPortalPostWithRetry } from "../_shared/epocPortalFetch.ts";
 import {
@@ -244,17 +245,12 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Sessão inválida" }, 401);
   }
 
-  const { data: member } = await supabase
-    .from("user_companies")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!member) {
+  const admin = createClient(supabaseUrl, serviceKey);
+  if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
     return json({ ok: false, error: "Sem acesso a esta unidade" }, 403);
   }
 
-  const { data: integ, error: integErr } = await supabase
+  const { data: integ, error: integErr } = await admin
     .from("company_integrations")
     .select("enabled, settings")
     .eq("company_id", companyId)
@@ -546,7 +542,6 @@ Deno.serve(async (req) => {
     );
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
   const fileStamp = `${diasConsulta[0]!.replace(/\//g, "-")}${
     diasConsulta.length > 1
       ? `_a_${diasConsulta[diasConsulta.length - 1]!.replace(/\//g, "-")}`

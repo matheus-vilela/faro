@@ -152,9 +152,11 @@ export function CompanySelector() {
                     {company.name}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {role === "owner"
-                      ? ROLE_LABELS.owner
-                      : permissionProfileName ?? ROLE_LABELS.member}
+                    {permissionProfileName === "Admin Faro"
+                      ? "Admin Faro"
+                      : role === "owner"
+                        ? ROLE_LABELS.owner
+                        : permissionProfileName ?? ROLE_LABELS.member}
                   </span>
                 </div>
                 {company.id === currentCompany.id && (

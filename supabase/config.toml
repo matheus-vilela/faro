@@ -83,6 +83,10 @@ verify_jwt = false
 [functions.epoc-export-venda-servicos]
 verify_jwt = false
 
+# Export CSV venda de produtos (produto sintético) EPOC (dev tools). JWT no handler.
+[functions.epoc-export-venda-produtos]
+verify_jwt = false
+
 # Retry serviços/faturamento em dias com sync parcial. JWT no handler.
 [functions.epoc-retry-daily-extras]
 verify_jwt = false

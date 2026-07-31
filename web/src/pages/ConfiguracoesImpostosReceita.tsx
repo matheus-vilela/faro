@@ -16,13 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import {
   buildChildrenMap,
   categoryPathLabel,
   isLeafCategory,
 } from "@/lib/companyCategoryLabels";
-import { canOwnerAccess } from "@/lib/roles";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueTaxType } from "@/types/revenue";
@@ -34,8 +33,8 @@ import { toast } from "sonner";
 type DraftRow = { tax_type: RevenueTaxType; tax_value: string };
 
 export function ConfiguracoesImpostosReceita() {
-  const { currentCompany, currentRole } = useCompany();
-  const isOwner = currentRole ? canOwnerAccess(currentRole) : false;
+  const { currentCompany } = useCompany();
+  const isOwner = useIsOwnerAccess();
   const companyId = currentCompany?.id;
 
   const [categories, setCategories] = useState<CompanyCategory[]>([]);

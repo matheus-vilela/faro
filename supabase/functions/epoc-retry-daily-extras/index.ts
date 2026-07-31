@@ -4,6 +4,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { MODULO_REL_FATURAMENTO } from "../_shared/epocFaturamentoCsv.ts";
 import { fetchEpocPortalPostWithRetry } from "../_shared/epocPortalFetch.ts";
 import {
@@ -130,6 +131,7 @@ Deno.serve(async (req) => {
     days_iso?: unknown;
     max_days?: unknown;
     continue_chain?: unknown;
+    chain_attempt?: unknown;
   };
   let body: Body = {};
   try {
@@ -154,6 +156,12 @@ Deno.serve(async (req) => {
   const maxDaysRaw = typeof body.max_days === "number" ? body.max_days : 3;
   const maxDays = Math.min(8, Math.max(1, Math.floor(maxDaysRaw)));
   const continueChain = body.continue_chain !== false;
+  const chainAttemptRaw =
+    typeof body.chain_attempt === "number" ? body.chain_attempt : 0;
+  const chainAttempt = Math.max(
+    0,
+    Math.min(80, Math.floor(chainAttemptRaw)),
+  );
 
   const bearer = authHeader.slice("Bearer ".length).trim();
   const isServiceInvoke = bearer.length > 0 && bearer === serviceKey.trim();
@@ -167,13 +175,10 @@ Deno.serve(async (req) => {
     } = await supabase.auth.getUser();
     if (!user) return json({ ok: false, error: "Sessão inválida" }, 401);
 
-    const { data: member } = await supabase
-      .from("user_companies")
-      .select("role")
-      .eq("company_id", companyId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!member) return json({ ok: false, error: "Sem acesso" }, 403);
+    const adminGate = createClient(supabaseUrl, serviceKey);
+    if (!(await userHasCompanyAccess(adminGate, user.id, companyId))) {
+      return json({ ok: false, error: "Sem acesso" }, 403);
+    }
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
@@ -425,18 +430,28 @@ Deno.serve(async (req) => {
 
   const stillMissing =
     remainingGaps.services.length + remainingGaps.faturamento.length;
-  // Só encadeia se houve progresso (evita loop infinito em falha sistémica).
-  if (continueChain && stillMissing > 0 && okCount > 0) {
+  // Encadeia enquanto houver gaps. Se okCount=0 (falha transitória no portal),
+  // ainda tenta algumas vezes — antes parava na 1.ª falha e o card ficava em 51 dias.
+  const maxFailChains = 6;
+  const shouldChain =
+    continueChain &&
+    stillMissing > 0 &&
+    (okCount > 0 || chainAttempt < maxFailChains) &&
+    chainAttempt < 60;
+  if (shouldChain) {
     triggerEpocDailyExtrasInBackground({
       supabaseUrl,
       serviceKey,
       companyId,
       continueChain: true,
       maxDays,
+      chainAttempt: chainAttempt + 1,
       logTag: LOG,
     });
     log("chain_next", {
       company_id: companyId,
+      chain_attempt: chainAttempt + 1,
+      ok_count: okCount,
       remaining_services: remainingGaps.services.length,
       remaining_faturamento: remainingGaps.faturamento.length,
     });
@@ -451,6 +466,7 @@ Deno.serve(async (req) => {
     details,
     partial_sync_summary: summary,
     remaining: remainingGaps,
-    chained: continueChain && stillMissing > 0,
+    chained: shouldChain,
+    chain_attempt: chainAttempt,
   });
 });

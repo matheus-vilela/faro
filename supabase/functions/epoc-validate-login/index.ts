@@ -1,9 +1,10 @@
 /**
  * Valida URL + usuário + senha do portal EPOC (login real) antes de concluir onboarding.
- * JWT de utilizador + membership em `user_companies`. Não persiste integração.
+ * JWT de utilizador + (membership em `user_companies` **ou** admin global). Não persiste integração.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 
 const corsHeaders: Record<string, string> = {
@@ -50,7 +51,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !anonKey) {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !anonKey || !serviceKey) {
     return json(
       {
         success: false,
@@ -151,13 +153,8 @@ Deno.serve(async (req) => {
     );
   }
 
-  const { data: member } = await supabase
-    .from("user_companies")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!member) {
+  const admin = createClient(supabaseUrl, serviceKey);
+  if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
     return json(
       {
         success: false,
