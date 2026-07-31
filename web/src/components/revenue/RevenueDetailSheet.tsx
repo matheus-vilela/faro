@@ -610,7 +610,10 @@ export function RevenueDetailSheet({
   return (
     <>
       <Sheet open={!!revenueEntryId} onOpenChange={handleSheetOpenChange}>
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <SheetContent
+          className="z-[70] overflow-y-auto sm:max-w-lg"
+          overlayClassName="z-[70]"
+        >
           {loading && (
             <p className="text-sm text-muted-foreground py-8">Carregando…</p>
           )}

@@ -7,7 +7,7 @@ import {
   RevenueEntriesCalendar,
   type RevenueCalendarDayListPayload,
 } from "@/components/revenue/RevenueEntriesCalendar";
-import { RevenueDaySaleListCard } from "@/components/revenue/RevenueDaySaleListCard";
+import { RevenueDaySalesSheet } from "@/components/revenue/RevenueDaySalesSheet";
 import { RevenueDetailSheet } from "@/components/revenue/RevenueDetailSheet";
 import {
   RevenueSalesList,
@@ -1057,38 +1057,19 @@ export function Receitas() {
         formatCurrency={formatCurrency}
       />
 
-      <Sheet
+      <RevenueDaySalesSheet
+        payload={revenueCalendarDayList}
         open={!!revenueCalendarDayList}
-        onOpenChange={(o) => !o && setRevenueCalendarDayList(null)}
-      >
-        <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-          <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
-            <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
-            <SheetDescription className="capitalize">
-              {revenueCalendarDayList?.title}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
-            {revenueCalendarDayList &&
-              revenueCalendarDayList.items.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma venda neste dia.
-                </p>
-              )}
-            {(revenueCalendarDayList?.items ?? []).map((e) => (
-              <RevenueDaySaleListCard
-                key={e.id}
-                entry={e}
-                formatCurrency={formatCurrency}
-                onClick={() => {
-                  setRevenueCalendarDayList(null);
-                  setDetailRevenueId(e.id);
-                }}
-              />
-            ))}
-          </div>
-        </SheetContent>
-      </Sheet>
+        onOpenChange={(o) => {
+          if (!o && detailRevenueId) return;
+          if (!o) setRevenueCalendarDayList(null);
+        }}
+        formatCurrency={formatCurrency}
+        onProductClick={(id) => {
+          setDetailRevenueId(id);
+        }}
+        modal={!detailRevenueId}
+      />
 
       <Sheet open={sheetOpen} onOpenChange={handleOpenSheet}>
         <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-xl">

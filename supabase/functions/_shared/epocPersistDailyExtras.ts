@@ -119,12 +119,15 @@ export async function persistServicesFromAcoesHtml(
     const name = (r[3] ?? "").trim();
     if (!code || !name) continue;
 
-    const quantity = parsePtBrNumber(r[4] ?? "") ?? 0;
-    const unitPrice = parsePtBrNumber(r[5] ?? "") ?? 0;
-    const grossValue = parsePtBrNumber(r[6] ?? "") ?? 0;
-    const discount = parsePtBrNumber(r[7] ?? "") ?? 0;
-    const surcharge = parsePtBrNumber(r[8] ?? "") ?? 0;
-    const allocation = parsePtBrNumber(r[9] ?? "") ?? 0;
+    // Linha CSV: [data, secao, col_1…]. Índices r[2]=col_1 …
+    // col_9 = total da venda do serviço no dia (não usar col_8).
+    const quantity = parsePtBrNumber(r[4] ?? "") ?? 0; // col_3
+    const unitPrice = parsePtBrNumber(r[5] ?? "") ?? 0; // col_4
+    const grossValue = parsePtBrNumber(r[6] ?? "") ?? 0; // col_5
+    const discount = parsePtBrNumber(r[7] ?? "") ?? 0; // col_6
+    const surcharge = parsePtBrNumber(r[8] ?? "") ?? 0; // col_7
+    // r[9] = col_8 (valor intermédio / rateio) — não é o total a exibir.
+    const allocation = parsePtBrNumber(r[10] ?? "") ?? 0; // col_9
 
     const { data: existing, error: findErr } = await admin
       .from("services")

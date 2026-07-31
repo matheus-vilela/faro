@@ -57,6 +57,10 @@ verify_jwt = false
 [functions.epoc-sync-csv]
 verify_jwt = false
 
+# Sync diário produtos+serviços+faturamento (CSVs no Storage + persist extras).
+[functions.epoc-sync-day]
+verify_jwt = false
+
 [functions.epoc-daily-sync]
 verify_jwt = false
 

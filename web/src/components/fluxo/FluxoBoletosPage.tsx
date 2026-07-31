@@ -89,16 +89,22 @@ import type {
   FluxoBoletoRow,
 } from "@/types/expenseSeries";
 import type { RevenueEntry } from "@/types/revenue";
+import {
+  serviceDailySaleDisplayAmount,
+  serviceDailySaleTitle,
+  type ServiceDailySaleCalendarRow,
+} from "@/types/serviceDailySale";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
 import {
   type RevenueCalendarDayListPayload,
   RevenueEntriesCalendar,
 } from "../revenue/RevenueEntriesCalendar";
+import { RevenueDaySalesSheet } from "../revenue/RevenueDaySalesSheet";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -107,6 +113,25 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 };
 
 const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
+
+const SERVICE_SALES_SELECT =
+  "id, sale_date, quantity, unit_price, gross_value, discount, surcharge, allocation, service:services(id, code, name)";
+
+function normalizeServiceDailySales(
+  rows: ServiceDailySaleCalendarRow[],
+): ServiceDailySaleCalendarRow[] {
+  return rows.map((row) => {
+    const rawService = row.service as
+      | ServiceDailySaleCalendarRow["service"]
+      | ServiceDailySaleCalendarRow["service"][]
+      | null
+      | undefined;
+    const service = Array.isArray(rawService)
+      ? (rawService[0] ?? null)
+      : (rawService ?? null);
+    return { ...row, service };
+  });
+}
 
 function fluxoBoletoSupplierLabel(b: FluxoBoletoRow): string | null {
   return b.supplier?.name?.trim() || null;
@@ -164,6 +189,12 @@ export function FluxoBoletosPage({
   const [calendarBoletos, setCalendarBoletos] = useState<FluxoBoletoRow[]>([]);
   const [calendarRevenueEntries, setCalendarRevenueEntries] = useState<
     RevenueEntry[]
+  >([]);
+  const [calendarServiceSales, setCalendarServiceSales] = useState<
+    ServiceDailySaleCalendarRow[]
+  >([]);
+  const [monthServiceSales, setMonthServiceSales] = useState<
+    ServiceDailySaleCalendarRow[]
   >([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const isReceivableFlow = flowType === "receivable";
@@ -289,23 +320,61 @@ export function FluxoBoletosPage({
       period.year,
     );
     try {
-      const data = await fetchAllInRange<RevenueEntry>(
-        supabase
-          .from("revenue_entries")
-          .select("*")
-          .eq("company_id", companyId)
-          .gte("entry_date", startIso)
-          .lte("entry_date", endIso)
-          .order("entry_date", { ascending: true })
-          .order("created_at", { ascending: true }),
-      );
+      const [data, servicesData] = await Promise.all([
+        fetchAllInRange<RevenueEntry>(
+          supabase
+            .from("revenue_entries")
+            .select("*")
+            .eq("company_id", companyId)
+            .gte("entry_date", startIso)
+            .lte("entry_date", endIso)
+            .order("entry_date", { ascending: true })
+            .order("created_at", { ascending: true }),
+        ),
+        fetchAllInRange<ServiceDailySaleCalendarRow>(
+          supabase
+            .from("service_daily_sales")
+            .select(SERVICE_SALES_SELECT)
+            .eq("company_id", companyId)
+            .gte("sale_date", startIso)
+            .lte("sale_date", endIso)
+            .order("sale_date", { ascending: true }),
+        ),
+      ]);
       setCalendarRevenueEntries(data);
+      setCalendarServiceSales(normalizeServiceDailySales(servicesData));
     } catch (e) {
       console.error(e);
       toast.error("Não foi possível carregar o calendário de vendas.");
       setCalendarRevenueEntries([]);
+      setCalendarServiceSales([]);
     }
     setCalendarLoading(false);
+  }, [companyId, period.month, period.year, isReceivableFlow]);
+
+  const fetchMonthServiceSales = useCallback(async () => {
+    if (!companyId || !isReceivableFlow) {
+      setMonthServiceSales([]);
+      return;
+    }
+    const { start, end } = getMonthRange(period.month, period.year);
+    const startYmd = start.slice(0, 10);
+    const endYmd = end.slice(0, 10);
+    try {
+      const data = await fetchAllInRange<ServiceDailySaleCalendarRow>(
+        supabase
+          .from("service_daily_sales")
+          .select(SERVICE_SALES_SELECT)
+          .eq("company_id", companyId)
+          .gte("sale_date", startYmd)
+          .lte("sale_date", endYmd)
+          .order("sale_date", { ascending: false }),
+      );
+      setMonthServiceSales(normalizeServiceDailySales(data));
+    } catch (e) {
+      console.error(e);
+      setMonthServiceSales([]);
+    }
   }, [companyId, period.month, period.year, isReceivableFlow]);
 
   const fetchBoletosList = useCallback(async () => {
@@ -420,6 +489,10 @@ export function FluxoBoletosPage({
   }, [fetchBoletosList]);
 
   useEffect(() => {
+    queueMicrotask(() => void fetchMonthServiceSales());
+  }, [fetchMonthServiceSales]);
+
+  useEffect(() => {
     queueMicrotask(() => void fetchPayableTotals());
   }, [fetchPayableTotals]);
 
@@ -490,13 +563,18 @@ export function FluxoBoletosPage({
   }, [boletoResumo?.id]);
 
   const refreshAll = useCallback(() => {
-    if (isReceivableFlow) void fetchCalendarRevenueEntries();
-    else void fetchCalendarBoletos();
+    if (isReceivableFlow) {
+      void fetchCalendarRevenueEntries();
+      void fetchMonthServiceSales();
+    } else {
+      void fetchCalendarBoletos();
+    }
     void fetchBoletosList();
     void fetchPayableTotals();
   }, [
     fetchCalendarBoletos,
     fetchCalendarRevenueEntries,
+    fetchMonthServiceSales,
     fetchBoletosList,
     fetchPayableTotals,
     isReceivableFlow,
@@ -918,29 +996,15 @@ export function FluxoBoletosPage({
     payableReceiptContext,
   ]);
 
-  const revenueCalendarDayItems = revenueCalendarDayList?.items ?? [];
-
-  const renderRevenueCalendarDayCompactCard = (e: RevenueEntry) => (
-    <button
-      key={e.id}
-      type="button"
-      onClick={() => {
-        setRevenueCalendarDayList(null);
-        setDetailRevenueId(e.id);
-      }}
-      className="flex w-full flex-col gap-1.5 rounded-lg border border-emerald-600/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 dark:border-emerald-500/35"
-    >
-      <p className="text-sm font-medium leading-snug">{e.title}</p>
-      <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
-        <span className="text-xs text-muted-foreground">
-          {formatDate(e.entry_date)}
-        </span>
-        <p className="text-base font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-          {formatCurrency(Number(e.net_amount))}
-        </p>
-      </div>
-    </button>
-  );
+  const filteredMonthServiceSales = useMemo(() => {
+    const term = debouncedSearch.trim().toLowerCase();
+    if (!term) return monthServiceSales;
+    return monthServiceSales.filter((s) => {
+      const title = serviceDailySaleTitle(s).toLowerCase();
+      const code = (s.service?.code ?? "").toLowerCase();
+      return title.includes(term) || code.includes(term);
+    });
+  }, [monthServiceSales, debouncedSearch]);
 
   const addButton = (
     <Button
@@ -1014,6 +1078,7 @@ export function FluxoBoletosPage({
           month={period.month}
           year={period.year}
           entries={calendarRevenueEntries}
+          serviceSales={calendarServiceSales}
           loading={calendarLoading}
           onDayListOpen={setRevenueCalendarDayList}
           formatCurrency={formatCurrency}
@@ -1156,16 +1221,82 @@ export function FluxoBoletosPage({
             </div>
             {loadingList ? (
               <p className="text-muted-foreground">Carregando...</p>
-            ) : boletosList.length === 0 ? (
+            ) : boletosList.length === 0 &&
+              filteredMonthServiceSales.length === 0 ? (
               <p className="text-muted-foreground">{emptyListMessage}</p>
             ) : (
               <div className="space-y-6">
-                <div className="space-y-2">
-                  {boletosList.map((b) => renderListCard(b))}
-                </div>
+                {boletosList.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block size-2.5 rounded-sm bg-emerald-500"
+                        aria-hidden
+                      />
+                      <h3 className="text-sm font-semibold">Produtos</h3>
+                    </div>
+                    {boletosList.map((b) => renderListCard(b))}
+                  </div>
+                )}
+                {filteredMonthServiceSales.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block size-2.5 rounded-sm bg-sky-500"
+                        aria-hidden
+                      />
+                      <h3 className="text-sm font-semibold">Serviços</h3>
+                      <Badge
+                        variant="outline"
+                        className="border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300"
+                      >
+                        {filteredMonthServiceSales.length}
+                      </Badge>
+                    </div>
+                    {filteredMonthServiceSales.map((s) => (
+                      <div
+                        key={s.id}
+                        className="flex flex-col gap-3 rounded-lg border border-sky-600/25 p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 dark:border-sky-500/30"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium leading-snug">
+                              {serviceDailySaleTitle(s)}
+                            </p>
+                            <Badge
+                              variant="outline"
+                              className="border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300"
+                            >
+                              Serviço
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDate(s.sale_date)}
+                            {" · "}
+                            Qtde{" "}
+                            {Number(s.quantity).toLocaleString("pt-BR")}
+                          </p>
+                        </div>
+                        <p className="text-lg font-bold tabular-nums text-sky-700 dark:text-sky-400 sm:text-right">
+                          {formatCurrency(serviceDailySaleDisplayAmount(s))}
+                        </p>
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      Catálogo completo em{" "}
+                      <Link
+                        to="/app/servicos"
+                        className="font-medium text-foreground underline-offset-2 hover:underline"
+                      >
+                        Serviços
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                )}
               </div>
             )}
-            {!loadingList && (
+            {!loadingList && boletosList.length > 0 && (
               <Pagination
                 page={boletosPage}
                 totalCount={boletosListCount}
@@ -1329,34 +1460,19 @@ export function FluxoBoletosPage({
       )}
 
       {isReceivableFlow && (
-        <Sheet
+        <RevenueDaySalesSheet
+          payload={revenueCalendarDayList}
           open={!!revenueCalendarDayList}
-          onOpenChange={(o) => !o && setRevenueCalendarDayList(null)}
-        >
-          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
-              <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
-              <SheetDescription className="capitalize">
-                {revenueCalendarDayList?.title}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 py-4">
-              {revenueCalendarDayList &&
-                revenueCalendarDayList.items.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhuma venda neste dia.
-                  </p>
-                )}
-              {revenueCalendarDayItems.length > 0 && (
-                <div className="space-y-2">
-                  {revenueCalendarDayItems.map((e) =>
-                    renderRevenueCalendarDayCompactCard(e),
-                  )}
-                </div>
-              )}
-            </div>
-          </SheetContent>
-        </Sheet>
+          onOpenChange={(o) => {
+            if (!o && detailRevenueId) return;
+            if (!o) setRevenueCalendarDayList(null);
+          }}
+          formatCurrency={formatCurrency}
+          onProductClick={(id) => {
+            setDetailRevenueId(id);
+          }}
+          modal={!detailRevenueId}
+        />
       )}
 
       {isReceivableFlow && (
