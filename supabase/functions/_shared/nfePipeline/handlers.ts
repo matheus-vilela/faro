@@ -194,12 +194,13 @@ async function handleFetchPage(
     if (existing?.id) {
       const alreadyDownloaded = existing.fetch_status === "downloaded";
       if (alreadyDownloaded) {
-        // mantém downloaded; só atualiza metadados leves
+        // Mantém downloaded; atualiza metadados + cycle_id (histórico desta consulta).
         await admin.from("nfe_documents").update({
           focus_version: focusVersion,
           situacao,
           nfe_completa: completa,
           focus_payload: cab,
+          cycle_id: state.cycle_id,
           updated_at: nowIso(),
         }).eq("id", existing.id);
       } else {
@@ -469,7 +470,7 @@ async function handleProcessNfe(
   return processNfeDocumentById(admin, job.company_id, documentId);
 }
 
-async function recordConsultaHistoryIfNotesFound(
+async function recordConsultaHistory(
   admin: SupabaseClient,
   companyId: string,
   cycleId: string | null,
@@ -490,7 +491,6 @@ async function recordConsultaHistoryIfNotesFound(
   }
 
   const n = nfesEncontradas ?? 0;
-  if (n <= 0) return;
 
   const { count: xmlTotal, error: xmlErr } = await admin
     .from("nfe_documents")
@@ -614,7 +614,7 @@ async function handleCloseCycle(
 
   if (processFailedN > 0) {
     // Backlog de interpretação com falha permanente — não fecha onboarding.
-    await recordConsultaHistoryIfNotesFound(
+    await recordConsultaHistory(
       admin,
       companyId,
       state.cycle_id,
@@ -699,7 +699,7 @@ async function handleCloseCycle(
 
   if (updErr) return { ok: false, error: updErr.message };
 
-  await recordConsultaHistoryIfNotesFound(
+  await recordConsultaHistory(
     admin,
     companyId,
     state.cycle_id,

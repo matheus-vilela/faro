@@ -6,6 +6,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -20,7 +27,8 @@ import {
   formatNumberPtBr,
 } from "@/lib/formatMoneyPtBr";
 import { supabase } from "@/lib/supabase";
-import { Receipt } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ArrowDownAZ, ArrowUpAZ, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -60,6 +68,23 @@ type FiscalLinha = {
   valor?: string;
 };
 
+type SortKey =
+  | "faturamento_date"
+  | "produtos"
+  | "servicos"
+  | "quantity"
+  | "ticket_medio"
+  | "total";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "faturamento_date", label: "Dia" },
+  { value: "produtos", label: "Total produtos" },
+  { value: "servicos", label: "Total serviços" },
+  { value: "quantity", label: "Qtd. transações" },
+  { value: "ticket_medio", label: "Ticket médio" },
+  { value: "total", label: "Total" },
+];
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     return v as Record<string, unknown>;
@@ -83,6 +108,51 @@ function moneyFromMaybePtBr(raw: string | number | null | undefined): string {
   return raw;
 }
 
+function SortableTh({
+  label,
+  column,
+  sortKey,
+  sortAsc,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  column: SortKey;
+  sortKey: SortKey;
+  sortAsc: boolean;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  const active = sortKey === column;
+  return (
+    <th
+      className={cn(
+        "px-3 py-2.5 font-medium",
+        align === "right" && "text-right",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          align === "right" && "flex-row-reverse",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}
+        {active ? (
+          sortAsc ? (
+            <ArrowUpAZ className="size-3.5 opacity-70" />
+          ) : (
+            <ArrowDownAZ className="size-3.5 opacity-70" />
+          )
+        ) : null}
+      </button>
+    </th>
+  );
+}
+
 export function FaturamentoEpoc() {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
@@ -92,11 +162,25 @@ export function FaturamentoEpoc() {
   const [page, setPage] = useState(1);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [minTotal, setMinTotal] = useState("");
+  const [maxTotal, setMaxTotal] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("faturamento_date");
+  const [sortAsc, setSortAsc] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [detail, setDetail] = useState<FaturamentoRow | null>(null);
   const [payments, setPayments] = useState<PaymentLine[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+    setPage(1);
+  };
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -114,10 +198,14 @@ export function FaturamentoEpoc() {
         { count: "exact" },
       )
       .eq("company_id", companyId)
-      .order("faturamento_date", { ascending: false })
+      .order(sortKey, { ascending: sortAsc })
       .range(from, to);
     if (dateFrom) q = q.gte("faturamento_date", dateFrom);
     if (dateTo) q = q.lte("faturamento_date", dateTo);
+    const minN = parseFloat(minTotal.replace(",", "."));
+    const maxN = parseFloat(maxTotal.replace(",", "."));
+    if (Number.isFinite(minN)) q = q.gte("total", minN);
+    if (Number.isFinite(maxN)) q = q.lte("total", maxN);
     const { data, error, count: c } = await q;
     setLoading(false);
     if (error) {
@@ -126,7 +214,7 @@ export function FaturamentoEpoc() {
     }
     setRows((data ?? []) as FaturamentoRow[]);
     setCount(c ?? 0);
-  }, [companyId, page, dateFrom, dateTo]);
+  }, [companyId, page, dateFrom, dateTo, minTotal, maxTotal, sortKey, sortAsc]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -134,7 +222,7 @@ export function FaturamentoEpoc() {
 
   useEffect(() => {
     setPage(1);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, minTotal, maxTotal]);
 
   const openDetail = async (row: FaturamentoRow) => {
     setDetail(row);
@@ -159,6 +247,8 @@ export function FaturamentoEpoc() {
   const produtos = asTabela5Grupo(ps?.produtos);
   const servicos = asTabela5Grupo(ps?.servicos);
   const fiscal = asFiscalLines(detail?.fiscal_json);
+
+  const hasFilters = !!(dateFrom || dateTo || minTotal || maxTotal);
 
   return (
     <PageShell className="space-y-6">
@@ -189,7 +279,69 @@ export function FaturamentoEpoc() {
             className="w-auto"
           />
         </div>
-        {(dateFrom || dateTo) && (
+        <div className="space-y-1.5">
+          <Label htmlFor="fat-min-total">Total mín.</Label>
+          <Input
+            id="fat-min-total"
+            inputMode="decimal"
+            placeholder="0,00"
+            value={minTotal}
+            onChange={(e) => setMinTotal(e.target.value)}
+            className="w-28"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="fat-max-total">Total máx.</Label>
+          <Input
+            id="fat-max-total"
+            inputMode="decimal"
+            placeholder="0,00"
+            value={maxTotal}
+            onChange={(e) => setMaxTotal(e.target.value)}
+            className="w-28"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Ordenar por</Label>
+          <div className="flex items-center gap-1.5">
+            <Select
+              value={sortKey}
+              onValueChange={(v) => {
+                setSortKey(v as SortKey);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-9 w-[10.5rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-9 shrink-0"
+              title={sortAsc ? "Crescente" : "Decrescente"}
+              onClick={() => {
+                setSortAsc((v) => !v);
+                setPage(1);
+              }}
+            >
+              {sortAsc ? (
+                <ArrowUpAZ className="size-4" />
+              ) : (
+                <ArrowDownAZ className="size-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+        {hasFilters ? (
           <Button
             type="button"
             variant="ghost"
@@ -197,18 +349,20 @@ export function FaturamentoEpoc() {
             onClick={() => {
               setDateFrom("");
               setDateTo("");
+              setMinTotal("");
+              setMaxTotal("");
             }}
           >
-            Limpar filtro
+            Limpar filtros
           </Button>
-        )}
+        ) : null}
         <Button type="button" variant="outline" size="sm" asChild>
           <Link to="/app/formas-de-pagamento">Formas de pagamento</Link>
         </Button>
       </div>
 
       <Card>
-        <CardContent className="divide-y p-0">
+        <CardContent className="p-0">
           {loading ? (
             <p className="text-muted-foreground p-4 text-sm">A carregar…</p>
           ) : rows.length === 0 ? (
@@ -216,27 +370,89 @@ export function FaturamentoEpoc() {
               Nenhum faturamento sincronizado neste período.
             </p>
           ) : (
-            rows.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => void openDetail(row)}
-                className="hover:bg-muted/40 flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors"
-              >
-                <div>
-                  <p className="font-medium">
-                    {formatIsoDateBr(row.faturamento_date)}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    Produtos {formatMoneyPtBr(Number(row.produtos))} · Serviços{" "}
-                    {formatMoneyPtBr(Number(row.servicos))}
-                  </p>
-                </div>
-                <p className="font-mono text-sm tabular-nums">
-                  {formatMoneyPtBr(Number(row.total))}
-                </p>
-              </button>
-            ))
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[780px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-left text-xs">
+                    <SortableTh
+                      label="Dia"
+                      column="faturamento_date"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                    />
+                    <SortableTh
+                      label="Total produtos"
+                      column="produtos"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTh
+                      label="Total serviços"
+                      column="servicos"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTh
+                      label="Qtd. transações"
+                      column="quantity"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTh
+                      label="Ticket médio"
+                      column="ticket_medio"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTh
+                      label="Total"
+                      column="total"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="cursor-pointer border-b last:border-0 hover:bg-muted/40"
+                      onClick={() => void openDetail(row)}
+                    >
+                      <td className="px-3 py-2.5 font-medium whitespace-nowrap">
+                        {formatIsoDateBr(row.faturamento_date)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatMoneyPtBr(Number(row.produtos))}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatMoneyPtBr(Number(row.servicos))}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatNumberPtBr(Number(row.quantity), 0)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatMoneyPtBr(Number(row.ticket_medio))}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {formatMoneyPtBr(Number(row.total))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

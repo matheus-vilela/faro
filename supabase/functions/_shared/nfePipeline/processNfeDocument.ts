@@ -10,7 +10,7 @@ import {
   persistStagingInterpretExpenseAndBoletos,
   resolveProductsForInterpretLog,
 } from "../stagingNfeInterpretPostProcess.ts";
-import { enqueueJob } from "./db.ts";
+import { enqueueJob, loadSyncState } from "./db.ts";
 import { NFE_XML_BUCKET } from "./env.ts";
 import type { JobResult } from "./types.ts";
 
@@ -85,6 +85,10 @@ export async function processNfeDocumentById(
   }
 
   try {
+    const syncState = await loadSyncState(admin, companyId);
+    const isOnboarding = syncState?.mode === "onboarding";
+    const finalizeRecebimentoAndStock = isOnboarding;
+
     await ensureSupplierForInterpretLog(admin, companyId, interpret);
 
     const { catalog, error: catErr } = await fetchProductCatalogForStagingInterpret(
@@ -110,6 +114,7 @@ export async function processNfeDocumentById(
       undefined,
       stockApplied,
       "supplier_certainty",
+      finalizeRecebimentoAndStock,
     );
 
     await persistStagingInterpretExpenseAndBoletos(
@@ -119,6 +124,7 @@ export async function processNfeDocumentById(
       productIdByLineIndex,
       undefined,
       stockApplied,
+      { finalizeRecebimentoAndStock },
     );
 
     await admin.from("nfe_documents").update({
@@ -146,6 +152,8 @@ export async function processNfeDocumentById(
       company_id: companyId,
       document_id: documentId,
       chave,
+      mode: syncState?.mode ?? "unknown",
+      finalize_recebimento: finalizeRecebimentoAndStock,
       linhas: interpret.produtos.length,
       produtos_resolvidos: productIdByLineIndex.size,
       stock_no_create: stockApplied.size,
@@ -157,6 +165,7 @@ export async function processNfeDocumentById(
         chave,
         lines: interpret.produtos.length,
         resolved: productIdByLineIndex.size,
+        finalize_recebimento: finalizeRecebimentoAndStock,
       },
     };
   } catch (e) {

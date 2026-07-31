@@ -339,9 +339,38 @@ async function insertProductFromStagingInterpret(
     typeof buildNewProductCatalogFromNfeLine
   >["conversions"],
   contexto: string,
-  stock: { quantity: number; unitValue: number },
-): Promise<string | null> {
+  stock: { quantity: number; unitValue: number } | null,
+): Promise<{ productId: string | null; stockApplied: boolean }> {
   const row = productRowForDbInsert(payload);
+
+  // Fluxo steady: cadastra produto sem entrada de stock (aguarda recebimento).
+  if (!stock) {
+    const insertPayload: Record<string, unknown> = {
+      ...row,
+      company_id: companyId,
+      current_quantity: 0,
+    };
+    if (conversions.length > 0) {
+      insertPayload.unit_conversions = conversions;
+    }
+    const { data: ins, error: insErr } = await admin
+      .from("products")
+      .insert(insertPayload)
+      .select("id")
+      .single();
+    if (insErr || !ins?.id) {
+      console.error(
+        LOG,
+        "produto_insert_sem_estoque_err",
+        contexto,
+        insErr?.message ?? "sem_id",
+        JSON.stringify({ nome: row.name ?? null }),
+      );
+      return { productId: null, stockApplied: false };
+    }
+    return { productId: String(ins.id), stockApplied: false };
+  }
+
   const created = await createProductWithStockIn(admin, {
     companyId,
     product: row,
@@ -362,9 +391,9 @@ async function insertProductFromStagingInterpret(
         nome: row.name ?? null,
       }),
     );
-    return null;
+    return { productId: null, stockApplied: false };
   }
-  return created.productId;
+  return { productId: created.productId, stockApplied: true };
 }
 
 const CRITERIO_PRODUTO_CRIADO: Record<string, string> = {
@@ -438,6 +467,7 @@ async function stagingInterpretCreateProduct(
     sink: StagingInterpretPreviewSink;
     lineIndex: number;
   },
+  applyStockOnCreate = true,
 ): Promise<{ productId: string | null; stockApplied: boolean }> {
   const nomeProduto = String(built.payload.name ?? "").trim() || "—";
   const stockQty = Math.max(0, Number(line.quantidade) || 0);
@@ -456,10 +486,13 @@ async function stagingInterpretCreateProduct(
       criterio: contexto,
       planned_product: plannedProductFromBuilt(previewId, built, contexto),
     });
-    return { productId: previewId, stockApplied: stockQty > 0 };
+    return {
+      productId: previewId,
+      stockApplied: applyStockOnCreate && stockQty > 0,
+    };
   }
 
-  if (stockQty <= 0) {
+  if (applyStockOnCreate && stockQty <= 0) {
     console.error(
       LOG,
       "produto_skip_sem_movimentacao",
@@ -472,28 +505,34 @@ async function stagingInterpretCreateProduct(
     return { productId: null, stockApplied: false };
   }
 
-  const newId = await insertProductFromStagingInterpret(
+  const inserted = await insertProductFromStagingInterpret(
     admin,
     companyId,
     built.payload,
     built.conversions,
     contexto,
-    { quantity: stockQty, unitValue: stockUnitValue },
+    applyStockOnCreate
+      ? { quantity: stockQty, unitValue: stockUnitValue }
+      : null,
   );
-  if (!newId) return { productId: null, stockApplied: false };
+  if (!inserted.productId) return { productId: null, stockApplied: false };
+  const newId = inserted.productId;
   console.log(
     LOG,
-    "produto_criado_com_estoque",
+    inserted.stockApplied
+      ? "produto_criado_com_estoque"
+      : "produto_criado_sem_estoque",
     JSON.stringify({
       product_id: newId,
       nome: nomeProduto,
       unidade: built.payload.unit ?? null,
-      quantidade_entrada: stockQty,
+      quantidade_entrada: applyStockOnCreate ? stockQty : 0,
       valor_unitario: stockUnitValue,
       conversoes: built.conversions.length,
       pack_note: built.registrationNote,
       criterio: contexto,
       criterio_descricao: criterioProdutoCriadoLabel(contexto),
+      stock_applied: inserted.stockApplied,
     }),
   );
   registerNewProductInStagingCatalog(
@@ -502,7 +541,7 @@ async function stagingInterpretCreateProduct(
     catalogRowFromStagingInsert(newId, built.payload),
   );
   chunkProductDedupeByKey.set(dedupeKey, newId);
-  return { productId: newId, stockApplied: true };
+  return { productId: newId, stockApplied: inserted.stockApplied };
 }
 
 /** Localiza fornecedor da empresa pelo CPF/CNPJ da NF (já deve ter sido ensured antes). */
@@ -704,7 +743,8 @@ export type ResolveProductsMatchMode = "legacy" | "supplier_certainty";
 
 /**
  * 2) Produtos (determinístico): identificadores do XML → criar só se nenhum bater.
- * Produto novo só é criado com movimentação de entrada na mesma TX.
+ * No onboarding, produto novo é criado com movimentação de entrada na mesma TX.
+ * No steady (`applyStockOnCreate=false`), só cadastra o produto — stock no recebimento.
  * `stockAppliedByLineIndex` marca linhas cuja entrada já foi feita no create
  * (para `expense_items.stock_added = true` e não duplicar no finalize).
  *
@@ -722,6 +762,7 @@ export async function resolveProductsForInterpretLog(
   previewSink?: StagingInterpretPreviewSink,
   stockAppliedByLineIndex?: Set<number>,
   matchMode: ResolveProductsMatchMode = "legacy",
+  applyStockOnCreate = true,
 ): Promise<void> {
   if (!interpret.parse_ok) return;
 
@@ -870,6 +911,7 @@ export async function resolveProductsForInterpretLog(
       "sem_identificador_existente",
       line,
       previewCtx,
+      applyStockOnCreate,
     );
     if (created.productId) {
       productIdByLineIndex.set(lineIndex, created.productId);
@@ -1013,44 +1055,62 @@ function extractedFromStagingInterpret(
 }
 
 /**
+ * Garante `recebimentos` em status pendente (sem stock / sem marcar itens).
+ */
+async function ensurePendingRecebimento(
+  admin: SupabaseAdmin,
+  expenseId: string,
+  companyId: string,
+): Promise<string | null> {
+  const { data: existingRec, error: selRecErr } = await admin
+    .from("recebimentos")
+    .select("id, status")
+    .eq("expense_id", expenseId)
+    .maybeSingle();
+  if (selRecErr) {
+    console.error(LOG, "recebimento_select_err", selRecErr.message);
+    return null;
+  }
+  if (existingRec?.id != null) {
+    return String(existingRec.id);
+  }
+
+  const { data: insRec, error: insRecErr } = await admin
+    .from("recebimentos")
+    .insert({
+      company_id: companyId,
+      expense_id: expenseId,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+  if (insRecErr) {
+    const { data: again } = await admin
+      .from("recebimentos")
+      .select("id")
+      .eq("expense_id", expenseId)
+      .maybeSingle();
+    if (again?.id != null) return String(again.id);
+    console.error(LOG, "recebimento_insert_err", insRecErr.message);
+    return null;
+  }
+  return insRec?.id != null ? String(insRec.id) : null;
+}
+
+/**
  * Garante `recebimentos`, aplica entrada de stock (`apply_xml_import_direct_stock_for_expense`)
- * e marca o card como recebido (staging / service_role).
+ * e marca o card como recebido (onboarding / staging).
  */
 async function finalizeStagingRecebimentoEStock(
   admin: SupabaseAdmin,
   expenseId: string,
   companyId: string,
 ): Promise<void> {
-  let recebimentoId: string | null = null;
-  const { data: existingRec, error: selRecErr } = await admin
-    .from("recebimentos")
-    .select("id")
-    .eq("expense_id", expenseId)
-    .maybeSingle();
-  if (selRecErr) {
-    console.error(LOG, "recebimento_select_err", selRecErr.message);
-    return;
-  }
-  if (existingRec?.id != null) {
-    recebimentoId = String(existingRec.id);
-  } else {
-    const { data: insRec, error: insRecErr } = await admin
-      .from("recebimentos")
-      .insert({ company_id: companyId, expense_id: expenseId })
-      .select("id")
-      .single();
-    if (insRecErr) {
-      const { data: again } = await admin
-        .from("recebimentos")
-        .select("id")
-        .eq("expense_id", expenseId)
-        .maybeSingle();
-      if (again?.id != null) recebimentoId = String(again.id);
-      else console.error(LOG, "recebimento_insert_err", insRecErr.message);
-    } else if (insRec?.id != null) {
-      recebimentoId = String(insRec.id);
-    }
-  }
+  let recebimentoId = await ensurePendingRecebimento(
+    admin,
+    expenseId,
+    companyId,
+  );
 
   if (!recebimentoId) {
     console.error(
@@ -1133,8 +1193,17 @@ async function finalizeStagingRecebimentoEStock(
  * Grava totais do bloco ICMSTot em `financial_reconciliation_json` para conferência (desconto, IPI, PIS, COFINS, etc.).
  * `document_total` na despesa usa **`vNF`** do ICMSTot quando existir; senão o total da interpretação ou a soma das linhas.
  * Evita duplicata por empresa + fornecedor + nº/série (índice único + RPC `expense_find_duplicate_by_supplier_document`).
- * Ao fim: recebimento como concluído + entrada de stock (`apply_xml_import_direct_stock_for_expense`).
+ * Onboarding: recebimento concluído + stock. Steady: recebimento pendente (confirmação manual).
  */
+export type PersistStagingExpenseOptions = {
+  /**
+   * true = onboarding Focus (recebimento `received` + stock).
+   * false = fluxo contínuo (recebimento `pending`, sem stock automático).
+   * Default true para compatibilidade com staging/preview legado.
+   */
+  finalizeRecebimentoAndStock?: boolean;
+};
+
 export async function persistStagingInterpretExpenseAndBoletos(
   admin: SupabaseAdmin,
   companyId: string,
@@ -1142,8 +1211,12 @@ export async function persistStagingInterpretExpenseAndBoletos(
   productIdByLineIndex: ReadonlyMap<number, string>,
   previewSink?: StagingInterpretPreviewSink,
   stockAppliedByLineIndex?: ReadonlySet<number>,
+  options?: PersistStagingExpenseOptions,
 ): Promise<void> {
   if (!interpret.parse_ok) return;
+
+  const finalizeRecebimentoAndStock =
+    options?.finalizeRecebimentoAndStock !== false;
 
   const produtos = interpret.produtos ?? [];
   if (produtos.length === 0) {
@@ -1335,7 +1408,8 @@ export async function persistStagingInterpretExpenseAndBoletos(
       financial_reconciliation_json: financialReconciliation,
       planned_expense: duplicateId ? null : expenseRow,
       planned_items: duplicateId ? [] : itemRows,
-      would_finalize_recebimento_and_stock: !duplicateId,
+      would_finalize_recebimento_and_stock:
+        !duplicateId && finalizeRecebimentoAndStock,
     };
     previewSink.boletos = duplicateId ? [] : boletoRows;
     return;
@@ -1400,7 +1474,22 @@ export async function persistStagingInterpretExpenseAndBoletos(
     }
   }
 
-  await finalizeStagingRecebimentoEStock(admin, expenseId, companyId);
+  if (finalizeRecebimentoAndStock) {
+    await finalizeStagingRecebimentoEStock(admin, expenseId, companyId);
+  } else {
+    const recebimentoId = await ensurePendingRecebimento(
+      admin,
+      expenseId,
+      companyId,
+    );
+    if (!recebimentoId) {
+      console.error(
+        LOG,
+        "recebimento_pendente_sem_id",
+        JSON.stringify({ expense_id: expenseId }),
+      );
+    }
+  }
 }
 
 /** Dry-run completo da interpretação staging (sem inserts). */

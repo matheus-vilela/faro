@@ -24,7 +24,9 @@ export function serviceDailySaleDisplayAmount(
   return Number(row.gross_value) || 0;
 }
 
-export function serviceDailySaleTitle(row: ServiceDailySaleCalendarRow): string {
+export function serviceDailySaleTitle(
+  row: ServiceDailySaleCalendarRow,
+): string {
   const name = row.service?.name?.trim();
   const code = row.service?.code?.trim();
   if (name && code) return `${name} (${code})`;

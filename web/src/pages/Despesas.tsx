@@ -389,9 +389,11 @@ export function Despesas() {
       .order("reference_date", { ascending: false })
       .order("created_at", { ascending: false });
     if (!searchActive) {
-      exQuery = exQuery
-        .gte("reference_date", startDate)
-        .lte("reference_date", endDate);
+      // Competência no mês OU despesa criada/importada neste mês (NF-e antiga
+      // sincronizada agora continua visível em Despesas).
+      exQuery = exQuery.or(
+        `and(reference_date.gte.${startDate},reference_date.lte.${endDate}),and(created_at.gte.${start},created_at.lte.${end})`,
+      );
     }
     if (onlyPendingApproval) {
       exQuery = exQuery
@@ -877,7 +879,7 @@ export function Despesas() {
         description={
           debouncedSearch.trim()
             ? "Com filtro de texto ativo, a busca considera todas as competências"
-            : "Lista filtrada pelo mês de competência da nota fiscal"
+            : "Lista filtrada pelo mês de competência ou pela data de importação da nota"
         }
       />
 
@@ -1548,7 +1550,7 @@ export function Despesas() {
                 ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
                 : debouncedSearch.trim()
                   ? "Nenhuma nota fiscal encontrada para este filtro. A conta a pagar pode existir com vencimento em outro mês — confira em Contas a pagar ou altere o mês de competência acima."
-                  : "Nenhuma nota fiscal cadastrada neste mês de competência."}
+                  : "Nenhuma nota fiscal neste mês (por competência ou data de importação)."}
             </p>
           ) : (
             <div className="space-y-3">

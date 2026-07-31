@@ -1,10 +1,5 @@
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCompany } from "@/contexts/CompanyContext";
 import { localDateYmd } from "@/lib/boletoPayment";
 import { formatBrl } from "@/lib/dre/formatBrl";
@@ -24,7 +19,14 @@ import {
 } from "@/lib/vendasRealizadasResumo";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
-import { Loader2 } from "lucide-react";
+import {
+  Banknote,
+  Hash,
+  Loader2,
+  Receipt,
+  Ticket,
+  type LucideIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
@@ -113,40 +115,131 @@ function KpiCard({
   delta,
   compareLabel,
   formatValue,
+  icon: Icon,
+  tone = "neutral",
 }: {
   label: string;
   delta: ResumoKpiDelta;
   compareLabel: string;
   formatValue: (v: number) => string;
+  icon: LucideIcon;
+  tone?: "neutral" | "success" | "accent";
 }) {
   const pct = delta.pctChange;
   const positive = pct != null && pct > 0;
   const negative = pct != null && pct < 0;
   const flat = pct === 0 || pct == null;
 
+  const valueClass =
+    tone === "success"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : tone === "accent"
+        ? "text-sky-700 dark:text-sky-400"
+        : "text-foreground";
+
+  const iconWrapClass =
+    tone === "success"
+      ? "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-600/15 dark:text-emerald-300"
+      : tone === "accent"
+        ? "bg-sky-500/10 text-sky-800 ring-1 ring-sky-600/15 dark:text-sky-300"
+        : "bg-muted text-muted-foreground ring-1 ring-border/60";
+
   return (
-    <Card className="shadow-sm">
-      <CardContent className="space-y-2 p-4 sm:p-5">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="text-2xl font-bold tracking-tight tabular-nums text-foreground sm:text-[1.65rem]">
-          {formatValue(delta.current)}
-        </p>
+    <Card className="border-border/80 py-4 shadow-sm">
+      <CardContent className="flex flex-col gap-2 px-4 sm:px-5">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <span
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-lg",
+              iconWrapClass,
+            )}
+            aria-hidden
+          >
+            <Icon className="size-4" />
+          </span>
+        </div>
         <p
           className={cn(
-            "flex items-center gap-1 text-xs font-medium",
-            positive && "text-emerald-600",
-            negative && "text-red-600",
-            flat && "text-muted-foreground",
+            "text-2xl font-bold tracking-tight tabular-nums sm:text-[1.65rem]",
+            valueClass,
           )}
         >
-          {positive && <span aria-hidden>▲</span>}
-          {negative && <span aria-hidden>▼</span>}
-          <span>
-            {formatPct(pct)} {compareLabel}
-          </span>
+          {formatValue(delta.current)}
         </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums",
+              positive &&
+                "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+              negative && "bg-red-500/10 text-red-700 dark:text-red-300",
+              flat && "bg-muted text-muted-foreground",
+            )}
+          >
+            {positive ? <span aria-hidden>▲</span> : null}
+            {negative ? <span aria-hidden>▼</span> : null}
+            {formatPct(pct)}
+          </span>
+          <span className="text-xs text-muted-foreground">{compareLabel}</span>
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PaymentDonutTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{
+    payload?: {
+      name?: string;
+      value?: number;
+      share?: number;
+      key?: string;
+    };
+    color?: string;
+  }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  const color = payload[0]?.color ?? "var(--primary)";
+  const name = row.name?.trim() || "Forma de pagamento";
+  const amount = Number(row.value) || 0;
+  const share = typeof row.share === "number" ? row.share : null;
+
+  return (
+    <div className="min-w-[11rem] rounded-xl border border-border/80 bg-popover px-3.5 py-3 text-popover-foreground shadow-lg ring-1 ring-border/40">
+      <div className="flex items-start gap-2.5">
+        <span
+          className="mt-1 size-2.5 shrink-0 rounded-sm ring-1 ring-black/5 dark:ring-white/10"
+          style={{ backgroundColor: color }}
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="text-sm leading-snug font-semibold">{name}</p>
+          <div className="space-y-0.5">
+            <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              Valor total
+            </p>
+            <p className="text-sm font-bold tabular-nums">
+              {formatBrl(amount)}
+            </p>
+          </div>
+          <div className="space-y-0.5 border-t border-border/70 pt-2">
+            <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              Participação
+            </p>
+            <p className="text-sm font-semibold tabular-nums">
+              {share == null ? "—" : formatSharePct(share)}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -170,11 +263,11 @@ function PaymentParticipationDonut({
     <Card className="shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-semibold">
-          Participação por forma
+          Participação por forma de pagamento
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="relative mx-auto h-44 w-44">
+        <div className="relative mx-auto h-64 w-64">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -195,6 +288,11 @@ function PaymentParticipationDonut({
                   />
                 ))}
               </Pie>
+              <Tooltip
+                content={<PaymentDonutTooltip />}
+                cursor={false}
+                wrapperStyle={{ outline: "none", zIndex: 1000 }}
+              />
             </PieChart>
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
@@ -368,46 +466,46 @@ export function VendasRealizadasResumo() {
 
       const [revenueRows, epocPaymentRows, epocFatRows, catRows] =
         await Promise.all([
-        fetchAllInRange<RevenueEntry>(
+          fetchAllInRange<RevenueEntry>(
+            supabase
+              .from("revenue_entries")
+              .select("*")
+              .eq("company_id", companyId)
+              .gte("entry_date", fetchStart)
+              .lte("entry_date", fetchEnd)
+              .order("entry_date", { ascending: true }),
+          ),
+          fetchAllInRange(
+            supabase
+              .from("epoc_faturamento_daily_payment_methods")
+              .select(
+                "faturamento_date, amount, payment_method_id, payment_methods ( sku, name )",
+              )
+              .eq("company_id", companyId)
+              .gte("faturamento_date", fetchStart)
+              .lte("faturamento_date", fetchEnd)
+              .order("faturamento_date", { ascending: true }),
+          ).then((rows) => normalizeEpocPaymentRows(rows)),
+          fetchAllInRange(
+            supabase
+              .from("epoc_faturamento_daily")
+              .select(
+                "faturamento_date, quantity, produtos, servicos, taxas, total, ticket_medio",
+              )
+              .eq("company_id", companyId)
+              .gte("faturamento_date", fetchStart)
+              .lte("faturamento_date", fetchEnd)
+              .order("faturamento_date", { ascending: true }),
+          ).then((rows) => rows as unknown as EpocFaturamentoDayInput[]),
           supabase
-            .from("revenue_entries")
+            .from("company_categories")
             .select("*")
             .eq("company_id", companyId)
-            .gte("entry_date", fetchStart)
-            .lte("entry_date", fetchEnd)
-            .order("entry_date", { ascending: true }),
-        ),
-        fetchAllInRange(
-          supabase
-            .from("epoc_faturamento_daily_payment_methods")
-            .select(
-              "faturamento_date, amount, payment_method_id, payment_methods ( sku, name )",
-            )
-            .eq("company_id", companyId)
-            .gte("faturamento_date", fetchStart)
-            .lte("faturamento_date", fetchEnd)
-            .order("faturamento_date", { ascending: true }),
-        ).then((rows) => normalizeEpocPaymentRows(rows)),
-        fetchAllInRange(
-          supabase
-            .from("epoc_faturamento_daily")
-            .select(
-              "faturamento_date, quantity, produtos, servicos, taxas, total, ticket_medio",
-            )
-            .eq("company_id", companyId)
-            .gte("faturamento_date", fetchStart)
-            .lte("faturamento_date", fetchEnd)
-            .order("faturamento_date", { ascending: true }),
-        ).then((rows) => rows as unknown as EpocFaturamentoDayInput[]),
-        supabase
-          .from("company_categories")
-          .select("*")
-          .eq("company_id", companyId)
-          .then(({ data, error }) => {
-            if (error) throw error;
-            return (data as CompanyCategory[]) ?? [];
-          }),
-      ]);
+            .then(({ data, error }) => {
+              if (error) throw error;
+              return (data as CompanyCategory[]) ?? [];
+            }),
+        ]);
 
       const productIds = [
         ...new Set(
@@ -550,30 +648,36 @@ export function VendasRealizadasResumo() {
         </div>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="Vendas brutas"
               delta={dashboard.kpis.gross}
               compareLabel={ranges.compareLabel}
               formatValue={formatBrl}
+              icon={Receipt}
             />
             <KpiCard
               label="Vendas líquidas"
               delta={dashboard.kpis.net}
               compareLabel={ranges.compareLabel}
               formatValue={formatBrl}
+              icon={Banknote}
+              tone="success"
             />
             <KpiCard
               label="Transações"
               delta={dashboard.kpis.count}
               compareLabel={ranges.compareLabel}
               formatValue={(v) => Math.round(v).toLocaleString("pt-BR")}
+              icon={Hash}
             />
             <KpiCard
               label="Tíquete médio"
               delta={dashboard.kpis.ticket}
               compareLabel={ranges.compareLabel}
               formatValue={formatBrl}
+              icon={Ticket}
+              tone="accent"
             />
           </div>
 
@@ -596,8 +700,8 @@ export function VendasRealizadasResumo() {
                   className={cn(
                     "h-8 rounded-full px-3 text-sm font-medium shadow-none",
                     active
-                      ? "bg-background text-foreground shadow-sm hover:bg-background"
-                      : "text-muted-foreground hover:bg-transparent hover:text-foreground",
+                      ? "bg-ring text-foreground shadow-sm hover:!bg-ring/80"
+                      : "text-muted-foreground hover:bg-ring hover:text-foreground",
                   )}
                 >
                   {opt.label}

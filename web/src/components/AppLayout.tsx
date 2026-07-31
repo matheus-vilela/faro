@@ -38,7 +38,6 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeftRight,
   BarChart3,
-  Bell,
   Building2,
   ConciergeBell,
   CreditCard,
@@ -74,162 +73,163 @@ type NavItem = {
   exact?: boolean;
 };
 
-const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] = [
-  {
-    label: "Principal",
-    items: [
-      {
-        title: "Dashboard",
-        url: "/app",
-        icon: LayoutDashboard,
-        permission: "dashboard",
-      },
-    ],
-  },
-  {
-    label: "Operação",
-    items: [
-      {
-        title: "Notas Fiscais",
-        url: "/app/despesas",
-        icon: FileText,
-        permission: "despesas",
-      },
+const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
+  [
+    {
+      label: "Principal",
+      items: [
+        {
+          title: "Dashboard",
+          url: "/app",
+          icon: LayoutDashboard,
+          permission: "dashboard",
+        },
+      ],
+    },
+    {
+      label: "Operação",
+      items: [
+        {
+          title: "Notas Fiscais",
+          url: "/app/despesas",
+          icon: FileText,
+          permission: "despesas",
+        },
 
-      {
-        title: "Recebimento de mercadorias",
-        url: "/app/recebimento",
-        icon: PackageCheck,
-        permission: "recebimento",
-      },
-      {
-        title: "Checklists",
-        url: "/app/checklists",
-        icon: ListChecks,
-        permission: "checklists",
-      },
-      {
-        title: "Fornecedores",
-        url: "/app/fornecedores",
-        icon: Truck,
-        permission: "fornecedores",
-      },
-      {
-        title: "Produtos e estoque",
-        url: "/app/produtos",
-        icon: Package,
-        permission: "produtos",
-      },
-      {
-        title: "Serviços",
-        url: "/app/servicos",
-        icon: ConciergeBell,
-        permission: "produtos",
-      },
-    ],
-  },
-  {
-    label: "Financeiro",
-    items: [
-      {
-        title: "Contas a pagar",
-        url: "/app/contas-a-pagar",
-        icon: TrendingDown,
-        permission: "contas_a_pagar",
-      },
-      {
-        title: "Vendas realizadas",
-        url: "/app/vendas-realizadas",
-        icon: TrendingUp,
-        permission: "vendas_realizadas",
-      },
-      {
-        title: "Fluxo de caixa",
-        url: "/app/fluxo-de-caixa",
-        icon: ArrowLeftRight,
-        permission: "contas_a_pagar",
-        permissions: ["contas_a_pagar", "vendas_realizadas"],
-      },
-      {
-        title: "Faturamento",
-        url: "/app/faturamento",
-        icon: Receipt,
-        permission: "vendas_realizadas",
-      },
-      {
-        title: "Formas de pagamento",
-        url: "/app/formas-de-pagamento",
-        icon: CreditCard,
-        permission: "vendas_realizadas",
-      },
-      {
-        title: "CMV & Margens",
-        url: "/app/cmv-margens",
-        icon: Percent,
-        permission: "vendas_realizadas",
-      },
-      {
-        title: "Orçamento",
-        url: "/app/orcamento",
-        icon: Target,
-        permission: "dre",
-      },
-      {
-        title: "DRE / Resultado",
-        url: "/app/dre",
-        icon: BarChart3,
-        permission: "dre",
-      },
-    ],
-  },
-  {
-    label: "Gestão",
-    items: [
-      {
-        title: "Alertas",
-        url: "/app/alertas",
-        icon: Bell,
-        permission: "alertas",
-      },
-      {
-        title: "Integrações",
-        url: "/app/integracoes",
-        icon: Plug,
-        permission: "integracoes",
-      },
-    ],
-  },
-  {
-    label: "Desenvolvimento",
-    adminOnly: true,
-    items: [
-      {
-        title: "Ferramentas",
-        url: "/app/desenvolvimento",
-        icon: FlaskConical,
-        permission: "dashboard",
-        exact: true,
-      },
-      {
-        title: "Fornecedores globais",
-        url: "/app/desenvolvimento/fornecedores",
-        icon: Truck,
-        permission: "dashboard",
-      },
-    ],
-  },
-  {
-    label: "Sistema",
-    items: [
-      {
-        title: "Configurações",
-        url: "/app/configuracoes",
-        icon: Settings2,
-        permission: "configuracoes",
-      },
-    ],
-  },
-];
+        {
+          title: "Recebimento de mercadorias",
+          url: "/app/recebimento",
+          icon: PackageCheck,
+          permission: "recebimento",
+        },
+        {
+          title: "Checklists",
+          url: "/app/checklists",
+          icon: ListChecks,
+          permission: "checklists",
+        },
+        {
+          title: "Fornecedores",
+          url: "/app/fornecedores",
+          icon: Truck,
+          permission: "fornecedores",
+        },
+        {
+          title: "Produtos e estoque",
+          url: "/app/produtos",
+          icon: Package,
+          permission: "produtos",
+        },
+        {
+          title: "Serviços",
+          url: "/app/servicos",
+          icon: ConciergeBell,
+          permission: "produtos",
+        },
+      ],
+    },
+    {
+      label: "Financeiro",
+      items: [
+        {
+          title: "Contas a pagar",
+          url: "/app/contas-a-pagar",
+          icon: TrendingDown,
+          permission: "contas_a_pagar",
+        },
+        {
+          title: "Vendas realizadas",
+          url: "/app/vendas-realizadas",
+          icon: TrendingUp,
+          permission: "vendas_realizadas",
+        },
+        {
+          title: "Fluxo de caixa",
+          url: "/app/fluxo-de-caixa",
+          icon: ArrowLeftRight,
+          permission: "contas_a_pagar",
+          permissions: ["contas_a_pagar", "vendas_realizadas"],
+        },
+        {
+          title: "Faturamento",
+          url: "/app/faturamento",
+          icon: Receipt,
+          permission: "vendas_realizadas",
+        },
+        {
+          title: "Formas de pagamento",
+          url: "/app/formas-de-pagamento",
+          icon: CreditCard,
+          permission: "vendas_realizadas",
+        },
+        {
+          title: "CMV & Margens",
+          url: "/app/cmv-margens",
+          icon: Percent,
+          permission: "vendas_realizadas",
+        },
+        {
+          title: "Orçamento",
+          url: "/app/orcamento",
+          icon: Target,
+          permission: "dre",
+        },
+        {
+          title: "DRE / Resultado",
+          url: "/app/dre",
+          icon: BarChart3,
+          permission: "dre",
+        },
+      ],
+    },
+    {
+      label: "Gestão",
+      items: [
+        // {
+        //   title: "Alertas",
+        //   url: "/app/alertas",
+        //   icon: Bell,
+        //   permission: "alertas",
+        // },
+        {
+          title: "Integrações",
+          url: "/app/integracoes",
+          icon: Plug,
+          permission: "integracoes",
+        },
+      ],
+    },
+    {
+      label: "Desenvolvimento",
+      adminOnly: true,
+      items: [
+        {
+          title: "Ferramentas",
+          url: "/app/desenvolvimento",
+          icon: FlaskConical,
+          permission: "dashboard",
+          exact: true,
+        },
+        {
+          title: "Fornecedores globais",
+          url: "/app/desenvolvimento/fornecedores",
+          icon: Truck,
+          permission: "dashboard",
+        },
+      ],
+    },
+    {
+      label: "Sistema",
+      items: [
+        {
+          title: "Configurações",
+          url: "/app/configuracoes",
+          icon: Settings2,
+          permission: "configuracoes",
+        },
+      ],
+    },
+  ];
 
 function isNavActive(pathname: string, url: string, exact?: boolean): boolean {
   if (url === "/app") {
@@ -269,12 +269,19 @@ export function AppLayout() {
 function AppLayoutContent() {
   const { user, signOut, isAdmin } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { currentCompany, currentRole, currentPermissions, isCompanyOwner, currentProfileName } =
-    useCompany();
+  const {
+    currentCompany,
+    currentRole,
+    currentPermissions,
+    isCompanyOwner,
+    currentProfileName,
+  } = useCompany();
   const location = useLocation();
   const { isMobile } = useSidebar();
 
-  const navSections = NAV_SECTIONS.filter((section) => !section.adminOnly || isAdmin)
+  const navSections = NAV_SECTIONS.filter(
+    (section) => !section.adminOnly || isAdmin,
+  )
     .map((section) => ({
       label: section.label,
       items: section.items.filter((item) => {
