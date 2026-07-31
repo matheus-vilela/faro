@@ -131,6 +131,8 @@ export interface Boleto {
   updated_at: string
 }
 
-export function isBoletoPayable(b: Pick<Boleto, 'flow_type'>): boolean {
+export function isBoletoPayable(b: {
+  flow_type?: BoletoFlowType | string | null
+}): boolean {
   return b.flow_type !== 'receivable'
 }

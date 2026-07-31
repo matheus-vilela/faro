@@ -104,11 +104,7 @@ export async function persistServicesFromAcoesHtml(
 
   const extracted = extractVendaServicosRowsFromAcoesHtml(acoesHtml, diaBr);
   if (extracted.itensCount === 0) {
-    const msg = extracted.message ?? "Sem itens de serviços.";
-    // Dia sem serviços vendidos ainda conta como ok (não é falha de fetch).
-    if (msg.includes("Sem id=tblExport") || msg.includes("não pôde ser")) {
-      return { ok: false, error: msg, itens: 0 };
-    }
+    // Dia sem venda de serviços (ou sem o bloco no HTML) = ok, não é gap.
     await upsertEpocSyncDayStatus(admin, companyId, saleDate, {
       services_ok: true,
       services_error: null,
@@ -204,11 +200,12 @@ export async function persistFaturamentoFromAcoesHtml(
 
   const extracted = extractFaturamentoRowsFromAcoesHtml(acoesHtml, diaBr);
   if (extracted.rowCount === 0) {
-    return {
-      ok: false,
-      error: extracted.message ?? "Sem dados de faturamento.",
-      itens: 0,
-    };
+    // Sem faturamento no dia (portal sem spanImprimir/tabelas) = ok, como produtos/serviços.
+    await upsertEpocSyncDayStatus(admin, companyId, faturamentoDate, {
+      faturamento_ok: true,
+      faturamento_error: null,
+    });
+    return { ok: true, itens: 0 };
   }
 
   const csvRows = faturamentoRowsToCsvRows(diaBr, extracted.rows);
@@ -218,10 +215,12 @@ export async function persistFaturamentoFromAcoesHtml(
 
   const geral = t3?.totalGeral;
   if (!geral) {
-    return {
-      ok: false,
-      error: 'Faturamento sem linha "Total Geral:".',
-    };
+    // HTML veio sem "Total Geral" — trata como dia sem faturamento utilizável, não como gap.
+    await upsertEpocSyncDayStatus(admin, companyId, faturamentoDate, {
+      faturamento_ok: true,
+      faturamento_error: null,
+    });
+    return { ok: true, itens: 0 };
   }
 
   const produtosServicosJson = t5

@@ -14,6 +14,8 @@ function cat(
     parent_id: null,
     sort_order: 0,
     ordem: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
     natureza: "DESPESA",
     tipo: "FIXA",
     papel_receita_dre: null,

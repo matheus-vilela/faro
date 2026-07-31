@@ -94,15 +94,17 @@ function boletoSideSub(boleto: Boleto, refDate: string, extra?: string) {
   return parts.filter(Boolean).join(" · ");
 }
 
+type UiPairRow = {
+  key: string;
+  kind: "forte" | "provavel";
+  pair: MatchPairSuggestion;
+  line: BankStatementLine;
+  boleto: Boleto;
+  done: boolean;
+};
+
 type UiRow =
-  | {
-      key: string;
-      kind: "forte" | "provavel";
-      pair: MatchPairSuggestion;
-      line: BankStatementLine;
-      boleto: Boleto;
-      done: boolean;
-    }
+  | UiPairRow
   | {
       key: string;
       kind: "sobanco";
@@ -306,7 +308,7 @@ export function BankReconciliationPanel({
   const totalMov = rows.length || 1;
   const concilPct = Math.round((matchedCount / totalMov) * 100);
   const safePairs = pendingRows.filter(
-    (r): r is Extract<UiRow, { kind: "forte" }> => r.kind === "forte",
+    (r): r is UiPairRow & { kind: "forte" } => r.kind === "forte",
   );
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));

@@ -508,12 +508,7 @@ export function VendasRealizadasResumo() {
     [dashboard.daily],
   );
 
-  const hasSales = entries.some(
-    (e) =>
-      e.revenue_type === "operational" &&
-      e.entry_date.slice(0, 10) >= ranges.currentStart &&
-      e.entry_date.slice(0, 10) <= ranges.currentEnd,
-  );
+  const hasSales = dashboard.hasPeriodSales;
   const maxChampionShare = dashboard.champions.reduce(
     (m, r) => Math.max(m, r.revenueShare),
     0,

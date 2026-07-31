@@ -123,7 +123,7 @@ export async function fetchDreHistory(
     const key = periodKey(period);
     const rows = bolByPeriod.get(key) ?? [];
     const filtered = rows.filter((b) => {
-      if (!b.revenue_entry_id || !isBoletoPayable(b as { flow_type?: string | null })) {
+      if (!b.revenue_entry_id || !isBoletoPayable(b)) {
         return true;
       }
       const cat = b.company_category_id

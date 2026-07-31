@@ -7,7 +7,6 @@ import {
   CASH_FLOW_PREFS_STORAGE_PREFIX,
   DEFAULT_CASH_FLOW_PREFS,
   type CashFlowDiagnostics,
-  type CashFlowProjection,
   type CashFlowSimulationPrefs,
   type HorizonWeeks,
   type OpeningBalanceHint,
@@ -62,18 +61,6 @@ function savePrefs(companyId: string, prefs: CashFlowSimulationPrefs): void {
     // ignore quota / private mode
   }
 }
-
-const EMPTY_PROJECTION: CashFlowProjection = {
-  buckets: [],
-  kpis: {
-    openingBalance: 0,
-    totalInflows: 0,
-    totalOutflows: 0,
-    minBalance: 0,
-    endingBalance: 0,
-  },
-  meta: { clampedToLastBucketCount: 0 },
-};
 
 const EMPTY_DIAGNOSTICS: CashFlowDiagnostics = {
   pendingInHorizon: 0,

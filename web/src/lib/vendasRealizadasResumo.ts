@@ -93,6 +93,8 @@ export type ResumoDashboard = {
     count: ResumoKpiDelta;
     ticket: ResumoKpiDelta;
   };
+  /** Há realizado no período atual (EPOC ou lançamentos). */
+  hasPeriodSales: boolean;
   champions: ResumoChampionRow[];
   payments: ResumoPaymentRow[];
   daily: ResumoDailyPoint[];
@@ -523,6 +525,40 @@ function buildDailySeries(
   return points;
 }
 
+/** Série diária a partir do faturamento EPOC (líquido = produtos + serviços). */
+function buildDailySeriesFromFaturamento(
+  days: EpocFaturamentoDayInput[],
+  ranges: ResumoRanges,
+  period: ResumoPeriodFilter,
+): ResumoDailyPoint[] {
+  const byDate = new Map<string, number>();
+  for (const d of days) {
+    const key = d.faturamento_date.slice(0, 10);
+    const net = (Number(d.produtos) || 0) + (Number(d.servicos) || 0);
+    byDate.set(key, (byDate.get(key) ?? 0) + net);
+  }
+
+  const points: ResumoDailyPoint[] = [];
+  const len = daysInclusive(ranges.currentStart, ranges.currentEnd);
+  for (let i = 0; i < len; i++) {
+    const date = addDaysYmd(ranges.currentStart, i);
+    let label: string;
+    if (period === "today") {
+      label = "Hoje";
+    } else if (period === "month") {
+      label = dayOfMonthLabel(date);
+    } else {
+      label = weekdayShort(date);
+    }
+    points.push({
+      date,
+      label,
+      net: byDate.get(date) ?? 0,
+    });
+  }
+  return points;
+}
+
 function buildCategories(
   entries: RevenueEntry[],
   categoriesById: Map<string, CompanyCategory>,
@@ -596,14 +632,16 @@ export function buildVendasRealizadasResumo(input: {
     ),
   );
 
-  const hasFaturamentoKpis =
-    fatCurrent.length > 0 || fatPrevious.length > 0;
-  const curM = hasFaturamentoKpis
-    ? sumFaturamentoMetrics(fatCurrent)
-    : sumMetrics(current);
-  const prevM = hasFaturamentoKpis
-    ? sumFaturamentoMetrics(fatPrevious)
-    : sumMetrics(previous);
+  // Fonte por período: EPOC do intervalo selecionado; senão lançamentos do mesmo intervalo.
+  // (Antes um OR global fazia o período atual zerar quando só o anterior tinha EPOC.)
+  const curM =
+    fatCurrent.length > 0
+      ? sumFaturamentoMetrics(fatCurrent)
+      : sumMetrics(current);
+  const prevM =
+    fatPrevious.length > 0
+      ? sumFaturamentoMetrics(fatPrevious)
+      : sumMetrics(previous);
 
   const epocCurrent = (input.epocPayments ?? []).filter((line) =>
     inRange(
@@ -616,8 +654,21 @@ export function buildVendasRealizadasResumo(input: {
   const payments =
     paymentsFromEpoc.length > 0 ? paymentsFromEpoc : buildPayments(current);
 
+  const daily =
+    fatCurrent.length > 0
+      ? buildDailySeriesFromFaturamento(fatCurrent, ranges, input.period)
+      : buildDailySeries(current, ranges, input.period);
+
+  const hasPeriodSales =
+    fatCurrent.length > 0 ||
+    current.length > 0 ||
+    curM.gross > 0 ||
+    curM.net > 0 ||
+    curM.count > 0;
+
   return {
     ranges,
+    hasPeriodSales,
     kpis: {
       gross: toDelta(curM.gross, prevM.gross),
       net: toDelta(curM.net, prevM.net),
@@ -631,7 +682,7 @@ export function buildVendasRealizadasResumo(input: {
       input.recipeNameById,
     ),
     payments,
-    daily: buildDailySeries(current, ranges, input.period),
+    daily,
     categories: buildCategories(current, input.categoriesById),
   };
 }

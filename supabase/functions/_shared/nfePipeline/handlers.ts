@@ -469,6 +469,68 @@ async function handleProcessNfe(
   return processNfeDocumentById(admin, job.company_id, documentId);
 }
 
+async function recordConsultaHistoryIfNotesFound(
+  admin: SupabaseClient,
+  companyId: string,
+  cycleId: string | null,
+  onboarding: boolean,
+): Promise<void> {
+  if (!cycleId) return;
+
+  const { count: nfesEncontradas, error: countErr } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("cycle_id", cycleId)
+    .neq("fetch_status", "ignored");
+
+  if (countErr) {
+    console.warn(LOG, "consulta_history_count", companyId, countErr.message);
+    return;
+  }
+
+  const n = nfesEncontradas ?? 0;
+  if (n <= 0) return;
+
+  const { count: xmlTotal, error: xmlErr } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("cycle_id", cycleId)
+    .eq("fetch_status", "downloaded")
+    .not("xml_storage_path", "is", null);
+
+  if (xmlErr) {
+    console.warn(LOG, "consulta_history_xml_count", companyId, xmlErr.message);
+  }
+
+  const { error: insErr } = await admin.from("nfe_consulta_history").upsert(
+    {
+      company_id: companyId,
+      exec_id: cycleId,
+      consulta_at: nowIso(),
+      nfes_encontradas: n,
+      staging_xml_total: xmlTotal ?? 0,
+      onboarding,
+    },
+    { onConflict: "company_id,exec_id" },
+  );
+
+  if (insErr) {
+    console.warn(LOG, "consulta_history_insert", companyId, insErr.message);
+    return;
+  }
+
+  console.log(LOG, JSON.stringify({
+    fase: "consulta_history",
+    company_id: companyId,
+    exec_id: cycleId,
+    nfes_encontradas: n,
+    staging_xml_total: xmlTotal ?? 0,
+    onboarding,
+  }));
+}
+
 async function handleCloseCycle(
   admin: SupabaseClient,
   job: NfeJobRow,
@@ -552,6 +614,12 @@ async function handleCloseCycle(
 
   if (processFailedN > 0) {
     // Backlog de interpretação com falha permanente — não fecha onboarding.
+    await recordConsultaHistoryIfNotesFound(
+      admin,
+      companyId,
+      state.cycle_id,
+      state.mode === "onboarding",
+    );
     await admin.from("nfe_sync_state").update({
       status: "needs_attention",
       last_error: `${processFailedN} xml(s) falharam na interpretação`,
@@ -630,6 +698,13 @@ async function handleCloseCycle(
   }).eq("company_id", companyId);
 
   if (updErr) return { ok: false, error: updErr.message };
+
+  await recordConsultaHistoryIfNotesFound(
+    admin,
+    companyId,
+    state.cycle_id,
+    state.mode === "onboarding",
+  );
 
   // Espelha cursor no JSON legado focusnfe (compat UI).
   const co = await loadCompanyFocus(admin, companyId);

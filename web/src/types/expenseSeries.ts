@@ -38,12 +38,17 @@ export type ExpenseSeriesMaster = {
   anchor_boleto: Boleto;
 };
 
-export type FluxoBoletoRow = Boleto & {
+export type FluxoBoletoRow = Omit<Boleto, "supplier"> & {
   is_projected?: boolean;
   series_master_expense_id?: string | null;
   occurrence_month?: string | null;
   is_series_exception?: boolean;
-  supplier?: { id: string; name: string; document: string | null } | null;
+  /** Embed opcional (fluxo / série); `document` vem do join com suppliers. */
+  supplier?: {
+    id?: string;
+    name?: string | null;
+    document?: string | null;
+  } | null;
 };
 
 export type SeriesEditScope = "single_month" | "from_month" | "until_next_adjustment";
