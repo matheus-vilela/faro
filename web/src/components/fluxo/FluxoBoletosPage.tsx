@@ -89,15 +89,11 @@ import type {
   FluxoBoletoRow,
 } from "@/types/expenseSeries";
 import type { RevenueEntry } from "@/types/revenue";
-import {
-  serviceDailySaleDisplayAmount,
-  serviceDailySaleTitle,
-  type ServiceDailySaleCalendarRow,
-} from "@/types/serviceDailySale";
+import type { ServiceDailySaleCalendarRow } from "@/types/serviceDailySale";
 import type { LucideIcon } from "lucide-react";
 import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
 import {
@@ -105,6 +101,7 @@ import {
   RevenueEntriesCalendar,
 } from "../revenue/RevenueEntriesCalendar";
 import { RevenueDaySalesSheet } from "../revenue/RevenueDaySalesSheet";
+import { VendasRealizadasListTable } from "./VendasRealizadasListTable";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   boleto: "Boleto",
@@ -117,15 +114,19 @@ const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 const SERVICE_SALES_SELECT =
   "id, sale_date, quantity, unit_price, gross_value, discount, surcharge, allocation, service:services(id, code, name)";
 
+/** Shape bruto do PostgREST (embed many-to-one pode vir como array). */
+type ServiceDailySaleDbRow = Omit<ServiceDailySaleCalendarRow, "service"> & {
+  service?:
+    | ServiceDailySaleCalendarRow["service"]
+    | NonNullable<ServiceDailySaleCalendarRow["service"]>[]
+    | null;
+};
+
 function normalizeServiceDailySales(
-  rows: ServiceDailySaleCalendarRow[],
+  rows: ServiceDailySaleDbRow[],
 ): ServiceDailySaleCalendarRow[] {
   return rows.map((row) => {
-    const rawService = row.service as
-      | ServiceDailySaleCalendarRow["service"]
-      | ServiceDailySaleCalendarRow["service"][]
-      | null
-      | undefined;
+    const rawService = row.service;
     const service = Array.isArray(rawService)
       ? (rawService[0] ?? null)
       : (rawService ?? null);
@@ -331,7 +332,7 @@ export function FluxoBoletosPage({
             .order("entry_date", { ascending: true })
             .order("created_at", { ascending: true }),
         ),
-        fetchAllInRange<ServiceDailySaleCalendarRow>(
+        fetchAllInRange<ServiceDailySaleDbRow>(
           supabase
             .from("service_daily_sales")
             .select(SERVICE_SALES_SELECT)
@@ -361,7 +362,7 @@ export function FluxoBoletosPage({
     const startYmd = start.slice(0, 10);
     const endYmd = end.slice(0, 10);
     try {
-      const data = await fetchAllInRange<ServiceDailySaleCalendarRow>(
+      const data = await fetchAllInRange<ServiceDailySaleDbRow>(
         supabase
           .from("service_daily_sales")
           .select(SERVICE_SALES_SELECT)
@@ -400,25 +401,20 @@ export function FluxoBoletosPage({
         setBoletosList(filtered.slice(pageStart, pageStart + PAGE_SIZE));
       } else {
         setBoletosMonthFiltered([]);
-        let query = supabase
-          .from("boletos")
-          .select("*", { count: "exact" })
-          .eq("company_id", companyId)
-          .eq("flow_type", flowType)
-          .eq("exclude_from_fluxo", false)
-          .gte("due_date", startYmd)
-          .lte("due_date", endYmd)
-          .order("due_date", { ascending: true });
-        if (debouncedSearch.trim()) {
-          const term = `%${debouncedSearch.trim()}%`;
-          query = query.or(`description.ilike.${term},provider.ilike.${term}`);
-        }
-        const { data, count } = await query.range(
-          (boletosPage - 1) * PAGE_SIZE,
-          boletosPage * PAGE_SIZE - 1,
+        // Recebíveis: carrega o mês inteiro; filtros/ordenação/paginação na tabela.
+        const data = await fetchAllInRange<FluxoBoletoRow>(
+          supabase
+            .from("boletos")
+            .select("*")
+            .eq("company_id", companyId)
+            .eq("flow_type", flowType)
+            .eq("exclude_from_fluxo", false)
+            .gte("due_date", startYmd)
+            .lte("due_date", endYmd)
+            .order("due_date", { ascending: true }),
         );
-        setBoletosList((data as FluxoBoletoRow[]) ?? []);
-        setBoletosListCount(count ?? 0);
+        setBoletosList(data);
+        setBoletosListCount(data.length);
       }
     } catch (e) {
       console.error(e);
@@ -428,14 +424,7 @@ export function FluxoBoletosPage({
       setBoletosListCount(0);
     }
     setLoadingList(false);
-  }, [
-    companyId,
-    period.month,
-    period.year,
-    debouncedSearch,
-    boletosPage,
-    flowType,
-  ]);
+  }, [companyId, period.month, period.year, flowType, debouncedSearch, boletosPage]);
 
   const fetchPayableTotals = useCallback(async () => {
     if (!companyId || isReceivableFlow) {
@@ -996,16 +985,6 @@ export function FluxoBoletosPage({
     payableReceiptContext,
   ]);
 
-  const filteredMonthServiceSales = useMemo(() => {
-    const term = debouncedSearch.trim().toLowerCase();
-    if (!term) return monthServiceSales;
-    return monthServiceSales.filter((s) => {
-      const title = serviceDailySaleTitle(s).toLowerCase();
-      const code = (s.service?.code ?? "").toLowerCase();
-      return title.includes(term) || code.includes(term);
-    });
-  }, [monthServiceSales, debouncedSearch]);
-
   const addButton = (
     <Button
       onClick={() => {
@@ -1211,98 +1190,17 @@ export function FluxoBoletosPage({
           </CardHeader>
 
           <CardContent>
-            <div className="mb-4 flex flex-wrap gap-3 items-center">
-              <Input
-                placeholder={searchPlaceholder}
-                value={boletosSearch}
-                onChange={(e) => setBoletosSearch(e.target.value)}
-                className="max-w-sm"
-              />
-            </div>
-            {loadingList ? (
-              <p className="text-muted-foreground">Carregando...</p>
-            ) : boletosList.length === 0 &&
-              filteredMonthServiceSales.length === 0 ? (
-              <p className="text-muted-foreground">{emptyListMessage}</p>
-            ) : (
-              <div className="space-y-6">
-                {boletosList.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block size-2.5 rounded-sm bg-emerald-500"
-                        aria-hidden
-                      />
-                      <h3 className="text-sm font-semibold">Produtos</h3>
-                    </div>
-                    {boletosList.map((b) => renderListCard(b))}
-                  </div>
-                )}
-                {filteredMonthServiceSales.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block size-2.5 rounded-sm bg-sky-500"
-                        aria-hidden
-                      />
-                      <h3 className="text-sm font-semibold">Serviços</h3>
-                      <Badge
-                        variant="outline"
-                        className="border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300"
-                      >
-                        {filteredMonthServiceSales.length}
-                      </Badge>
-                    </div>
-                    {filteredMonthServiceSales.map((s) => (
-                      <div
-                        key={s.id}
-                        className="flex flex-col gap-3 rounded-lg border border-sky-600/25 p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 dark:border-sky-500/30"
-                      >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium leading-snug">
-                              {serviceDailySaleTitle(s)}
-                            </p>
-                            <Badge
-                              variant="outline"
-                              className="border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300"
-                            >
-                              Serviço
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(s.sale_date)}
-                            {" · "}
-                            Qtde{" "}
-                            {Number(s.quantity).toLocaleString("pt-BR")}
-                          </p>
-                        </div>
-                        <p className="text-lg font-bold tabular-nums text-sky-700 dark:text-sky-400 sm:text-right">
-                          {formatCurrency(serviceDailySaleDisplayAmount(s))}
-                        </p>
-                      </div>
-                    ))}
-                    <p className="text-xs text-muted-foreground">
-                      Catálogo completo em{" "}
-                      <Link
-                        to="/app/servicos"
-                        className="font-medium text-foreground underline-offset-2 hover:underline"
-                      >
-                        Serviços
-                      </Link>
-                      .
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            {!loadingList && boletosList.length > 0 && (
-              <Pagination
-                page={boletosPage}
-                totalCount={boletosListCount}
-                onPageChange={setBoletosPage}
-              />
-            )}
+            <VendasRealizadasListTable
+              boletos={boletosList}
+              serviceSales={monthServiceSales}
+              categories={companyCategories}
+              categoriesById={categoriesById}
+              loading={loadingList}
+              emptyMessage={emptyListMessage}
+              formatCurrency={formatCurrency}
+              pageSize={PAGE_SIZE}
+              onSelectBoleto={setBoletoResumo}
+            />
           </CardContent>
         </Card>
       )}

@@ -24,7 +24,7 @@ export const VENDAS_REALIZADAS_FLUXO_CONFIG: FluxoBoletosPageConfig = {
   periodDescription: "Calendário e lista usam este mês",
   listTitle: "Vendas realizadas",
   listDescription:
-    "Entradas do mês: produtos (receitas/contas a receber) e serviços sincronizados do PDV",
+    "Tabela do mês: produtos e serviços, com filtros de texto, datas, tipo, status e categoria",
   searchPlaceholder: "Filtrar por descrição, origem ou serviço...",
   emptyListMessage: "Nenhuma venda realizada neste mês",
   addButtonLabel: "Adicionar entrada",

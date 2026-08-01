@@ -457,9 +457,12 @@ export function buildCmvMargensDashboard(input: {
   productNameById: Map<string, string>;
   recipeNameById: Map<string, string>;
   productMetaById?: Map<string, ProductCmvMeta>;
+  weekStartsOn?: number;
 }): CmvMargensDashboard {
   const productMetaById = input.productMetaById ?? new Map();
-  const ranges = getResumoRanges(input.period, input.todayYmd);
+  const ranges = getResumoRanges(input.period, input.todayYmd, null, {
+    weekStartsOn: input.weekStartsOn,
+  });
   const operational = input.entries.filter(
     (e) => e.revenue_type === "operational",
   );

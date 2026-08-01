@@ -1,4 +1,5 @@
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
+import { supabasePublic } from "@/lib/supabasePublic";
 
 export function buildCertificateDelegationPublicUrl(token: string): string {
   const origin =
@@ -23,7 +24,10 @@ export async function createSetupCertificateDelegationLink(
   if (!o?.ok) {
     return {
       ok: false,
-      error: typeof o?.error === "string" ? o.error : "Não foi possível gerar o link.",
+      error:
+        typeof o?.error === "string"
+          ? o.error
+          : "Não foi possível gerar o link.",
     };
   }
   const token = String(o.token ?? "");
@@ -69,11 +73,7 @@ export async function getActiveSetupCertificateDelegationLink(
 
 export async function getSetupCertificateDelegationPublic(
   token: string,
-): Promise<
-  | { ok: true; companyName: string }
-  | { ok: false; error: string }
-> {
-  const { supabasePublic } = await import("@/lib/supabasePublic");
+): Promise<{ ok: true; companyName: string } | { ok: false; error: string }> {
   const { data, error } = await supabasePublic.rpc(
     "get_setup_certificate_delegation_public",
     { p_token: token },

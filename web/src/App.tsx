@@ -16,6 +16,7 @@ import { ConfiguracoesCategorias } from "@/pages/ConfiguracoesCategorias";
 import { ConfiguracoesImpostosReceita } from "@/pages/ConfiguracoesImpostosReceita";
 import { ConfiguracoesWhatsapp } from "@/pages/ConfiguracoesWhatsapp";
 import { ConfiguracoesContasBancarias } from "@/pages/ConfiguracoesContasBancarias";
+import { ConfiguracoesSemanaContabil } from "@/pages/ConfiguracoesSemanaContabil";
 import { ConfiguracoesUsuarios } from "@/pages/ConfiguracoesUsuarios";
 import { Checklists } from "@/pages/Checklists";
 import { ConfirmarRecebimento } from "@/pages/ConfirmarRecebimento";
@@ -115,7 +116,12 @@ function AuthenticatedLayout() {
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
           <Route path="faturamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FaturamentoEpoc /></PermissionRouteGuard>} />
-          <Route path="formas-de-pagamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FormasPagamento /></PermissionRouteGuard>} />
+          <Route
+            path="formas-de-pagamento"
+            element={
+              <Navigate to="/app/configuracoes/formas-de-pagamento" replace />
+            }
+          />
           <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
           <Route
             path="fluxo-de-caixa"
@@ -181,6 +187,11 @@ function AuthenticatedLayout() {
               element={<ConfiguracoesImpostosReceita />}
             />
             <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
+            <Route path="formas-de-pagamento" element={<FormasPagamento />} />
+            <Route
+              path="semana-contabil"
+              element={<ConfiguracoesSemanaContabil />}
+            />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/empresas" replace />} />

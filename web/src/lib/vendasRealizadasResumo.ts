@@ -5,7 +5,59 @@ import {
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 
-export type ResumoPeriodFilter = "today" | "last7" | "month";
+export type ResumoPeriodFilter = "today" | "last7" | "month" | "custom";
+
+export type ResumoCustomRange = {
+  start: string;
+  end: string;
+};
+
+/** Opções de calendário da unidade (semana contábil). */
+export type ResumoRangeOptions = {
+  /**
+   * Dia em que a semana contábil começa (0=domingo … 6=sábado).
+   * Default: 1 (segunda-feira).
+   */
+  weekStartsOn?: number;
+};
+
+/** Nomes longos dos dias (índice = Date.getDay()). */
+export const WEEKDAY_LONG_PT = [
+  "Domingo",
+  "Segunda-feira",
+  "Terça-feira",
+  "Quarta-feira",
+  "Quinta-feira",
+  "Sexta-feira",
+  "Sábado",
+] as const;
+
+export function normalizeWeekStartsOn(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 6) return 1;
+  return n;
+}
+
+/** Dia de término da semana contábil (= início + 6). */
+export function accountingWeekEndsOn(weekStartsOn: number): number {
+  return (normalizeWeekStartsOn(weekStartsOn) + 6) % 7;
+}
+
+export function weekdayIndexFromYmd(ymd: string): number {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  return new Date(y || 1970, (m || 1) - 1, d || 1).getDay();
+}
+
+/** Primeiro dia da semana contábil que contém `ymd`. */
+export function startOfAccountingWeek(
+  ymd: string,
+  weekStartsOn: number,
+): string {
+  const startOn = normalizeWeekStartsOn(weekStartsOn);
+  const dow = weekdayIndexFromYmd(ymd);
+  const delta = (dow - startOn + 7) % 7;
+  return addDaysYmd(ymd.slice(0, 10), -delta);
+}
 
 export type ResumoRankingMode = "product" | "payment";
 
@@ -20,6 +72,19 @@ export type ResumoRanges = {
   periodShortLabel: string;
   fetchStart: string;
   fetchEnd: string;
+};
+
+/** Linha de confronto entre possíveis fontes de “venda líquida”. */
+export type NetSalesSourceRow = {
+  key: string;
+  label: string;
+  value: number;
+  /** Diferença vs KPI de vendas líquidas exibido no card. */
+  diffVsKpiNet: number;
+  note?: string;
+  isKpi?: boolean;
+  /** Destaque visual (ex.: pendura). */
+  emphasis?: boolean;
 };
 
 export type ResumoKpiMetrics = {
@@ -65,6 +130,8 @@ export type ResumoPaymentRow = {
   /** Valor total no período (fonte: faturamento EPOC). */
   amount: number;
   share: number;
+  /** Se false, não entra no KPI de vendas líquidas / relatórios de receita. */
+  includeInNetSales: boolean;
 };
 
 /** Linha diária de forma de pagamento vinda do faturamento EPOC. */
@@ -72,7 +139,11 @@ export type EpocPaymentLineInput = {
   faturamento_date: string;
   amount: number | null;
   payment_method_id: string;
-  payment_methods: { sku: string; name: string } | null;
+  payment_methods: {
+    sku: string;
+    name: string;
+    include_in_net_sales?: boolean | null;
+  } | null;
 };
 
 /** Dia de faturamento EPOC (Total Geral da tabela_3). */
@@ -216,9 +287,28 @@ export function categoryGroupLabel(
   return companyCategoryDisplayName(leaf);
 }
 
+function normalizeCustomRange(
+  custom: ResumoCustomRange | null | undefined,
+  todayYmd: string,
+): { start: string; end: string } {
+  const fallbackStart = addDaysYmd(todayYmd, -6);
+  let start = (custom?.start || fallbackStart).slice(0, 10);
+  let end = (custom?.end || todayYmd).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) start = fallbackStart;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) end = todayYmd;
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  return { start, end };
+}
+
 export function getResumoRanges(
   period: ResumoPeriodFilter,
   todayYmd: string,
+  custom?: ResumoCustomRange | null,
+  options?: ResumoRangeOptions | null,
 ): ResumoRanges {
   if (period === "today") {
     const yesterday = addDaysYmd(todayYmd, -1);
@@ -259,21 +349,240 @@ export function getResumoRanges(
     };
   }
 
-  // last7 (default)
-  const currentStart = addDaysYmd(todayYmd, -6);
-  const previousEnd = addDaysYmd(currentStart, -1);
-  const previousStart = addDaysYmd(previousEnd, -6);
+  if (period === "custom") {
+    const { start, end } = normalizeCustomRange(custom, todayYmd);
+    const len = daysInclusive(start, end);
+    const previousEnd = addDaysYmd(start, -1);
+    const previousStart = addDaysYmd(previousEnd, -(len - 1));
+    return {
+      currentStart: start,
+      currentEnd: end,
+      previousStart,
+      previousEnd,
+      compareLabel: "vs período anterior",
+      championsTitle: "período selecionado",
+      periodShortLabel: "período",
+      fetchStart: previousStart,
+      fetchEnd: end,
+    };
+  }
+
+  // last7 → semana contábil atual (início configurável → hoje), vs mesma janela na semana anterior
+  const weekStartsOn = normalizeWeekStartsOn(options?.weekStartsOn);
+  const currentStart = startOfAccountingWeek(todayYmd, weekStartsOn);
+  const previousStart = addDaysYmd(currentStart, -7);
+  const previousEnd = addDaysYmd(todayYmd, -7);
+  const endsOn = accountingWeekEndsOn(weekStartsOn);
   return {
     currentStart,
     currentEnd: todayYmd,
     previousStart,
     previousEnd,
     compareLabel: "vs semana anterior",
-    championsTitle: "últimos 7 dias",
-    periodShortLabel: "7 dias",
+    championsTitle: "esta semana",
+    periodShortLabel: `${WEEKDAY_SHORT[weekStartsOn] ?? "Sem"}–${WEEKDAY_SHORT[endsOn] ?? "Sem"}`,
     fetchStart: previousStart,
     fetchEnd: todayYmd,
   };
+}
+
+function dailyPointLabel(
+  period: ResumoPeriodFilter,
+  date: string,
+  rangeLen: number,
+): string {
+  if (period === "today") return "Hoje";
+  if (period === "month" || (period === "custom" && rangeLen > 7)) {
+    return dayOfMonthLabel(date);
+  }
+  return weekdayShort(date);
+}
+
+/** Detecta forma de pagamento “pendura” (conta do cliente / fiado). */
+export function isPenduraPaymentMethod(
+  sku?: string | null,
+  name?: string | null,
+): boolean {
+  const blob = `${sku ?? ""} ${name ?? ""}`.toLowerCase();
+  return /pendura/.test(blob);
+}
+
+/** Default true quando o flag não veio no payload (legado / join incompleto). */
+export function paymentMethodCountsInNetSales(
+  paymentMethods:
+    | { include_in_net_sales?: boolean | null }
+    | null
+    | undefined,
+): boolean {
+  return paymentMethods?.include_in_net_sales !== false;
+}
+
+export function sumEpocPenduraPayments(
+  lines: EpocPaymentLineInput[],
+): number {
+  let total = 0;
+  for (const line of lines) {
+    if (
+      isPenduraPaymentMethod(
+        line.payment_methods?.sku,
+        line.payment_methods?.name,
+      )
+    ) {
+      total += Number(line.amount) || 0;
+    }
+  }
+  return total;
+}
+
+export function sumEpocPaymentAmounts(
+  lines: EpocPaymentLineInput[],
+  mode: "all" | "net_sales" = "net_sales",
+): number {
+  let total = 0;
+  for (const line of lines) {
+    if (
+      mode === "net_sales" &&
+      !paymentMethodCountsInNetSales(line.payment_methods)
+    ) {
+      continue;
+    }
+    total += Number(line.amount) || 0;
+  }
+  return total;
+}
+
+/**
+ * Confronta todas as fontes possíveis de “venda líquida” no período atual
+ * para achar divergências (KPI atual = soma das formas de pagamento EPOC,
+ * ou produtos+serviços / net dos lançamentos quando não há formas).
+ */
+export function buildNetSalesSourceBreakdown(input: {
+  fatDays: EpocFaturamentoDayInput[];
+  epocPayments: EpocPaymentLineInput[];
+  revenueEntries: RevenueEntry[];
+  /** Soma de service_daily_sales (allocation ou gross) no período. */
+  serviceDailySalesTotal: number;
+  kpiNet: number;
+  kpiGross: number;
+}): NetSalesSourceRow[] {
+  let epocProdutos = 0;
+  let epocServicos = 0;
+  let epocTaxas = 0;
+  let epocTotal = 0;
+  for (const d of input.fatDays) {
+    epocProdutos += Number(d.produtos) || 0;
+    epocServicos += Number(d.servicos) || 0;
+    epocTaxas += Number(d.taxas) || 0;
+    epocTotal += Number(d.total) || 0;
+  }
+  const epocProdutosMaisServicos = epocProdutos + epocServicos;
+  const epocTotalMenosTaxas = epocTotal - epocTaxas;
+  const epocPagamentos = input.epocPayments.reduce(
+    (s, line) => s + (Number(line.amount) || 0),
+    0,
+  );
+  const epocPendura = sumEpocPenduraPayments(input.epocPayments);
+  const penduraShare =
+    epocPagamentos > 0 ? epocPendura / epocPagamentos : 0;
+
+  const operational = input.revenueEntries.filter(
+    (e) => e.revenue_type === "operational",
+  );
+  let revenueNet = 0;
+  let revenueGross = 0;
+  for (const e of operational) {
+    revenueNet += Number(e.net_amount) || 0;
+    revenueGross += Number(e.gross_amount) || 0;
+  }
+
+  const row = (
+    key: string,
+    label: string,
+    value: number,
+    note?: string,
+    opts?: { isKpi?: boolean; emphasis?: boolean },
+  ): NetSalesSourceRow => ({
+    key,
+    label,
+    value,
+    diffVsKpiNet: value - input.kpiNet,
+    note,
+    isKpi: opts?.isKpi,
+    emphasis: opts?.emphasis,
+  });
+
+  const penduraPctLabel =
+    penduraShare > 0
+      ? ` (${(penduraShare * 100).toLocaleString("pt-BR", {
+          maximumFractionDigits: 1,
+        })}% da soma)`
+      : "";
+
+  return [
+    row(
+      "kpi_net",
+      "KPI vendas líquidas (card)",
+      input.kpiNet,
+      "Valor exibido no resumo (soma das formas de pagamento EPOC; senão produtos+serviços ou net dos lançamentos)",
+      { isKpi: true },
+    ),
+    row(
+      "kpi_gross",
+      "KPI vendas brutas (card)",
+      input.kpiGross,
+      "EPOC total ou gross dos lançamentos",
+    ),
+    row("epoc_produtos", "EPOC · produtos", epocProdutos),
+    row("epoc_servicos", "EPOC · serviços", epocServicos),
+    row(
+      "epoc_pagamentos",
+      "EPOC · soma formas de pagamento",
+      epocPagamentos,
+      epocPendura > 0
+        ? `Inclui pendura: ${epocPendura.toLocaleString("pt-BR", {
+            style: "currency",
+            currency: "BRL",
+          })}${penduraPctLabel}. Fonte do card de vendas líquidas`
+        : "Fonte do card de vendas líquidas quando há formas no período",
+    ),
+    row(
+      "epoc_pendura",
+      "EPOC · pendura (dentro das formas)",
+      epocPendura,
+      "Parte da soma de formas de pagamento identificada como pendura",
+      { emphasis: true },
+    ),
+    row(
+      "epoc_prod_serv",
+      "EPOC · produtos + serviços",
+      epocProdutosMaisServicos,
+      "Fallback de líquidas quando não há formas de pagamento no período",
+    ),
+    row("epoc_taxas", "EPOC · taxas", epocTaxas),
+    row("epoc_total", "EPOC · total (brutas)", epocTotal),
+    row(
+      "epoc_total_menos_taxas",
+      "EPOC · total − taxas",
+      epocTotalMenosTaxas,
+      "Deve aproximar produtos + serviços se o fechamento for consistente",
+    ),
+    row(
+      "revenue_net",
+      "Lançamentos · net_amount (operacional)",
+      revenueNet,
+    ),
+    row(
+      "revenue_gross",
+      "Lançamentos · gross_amount (operacional)",
+      revenueGross,
+    ),
+    row(
+      "service_daily",
+      "Serviços diários (service_daily_sales)",
+      input.serviceDailySalesTotal,
+      "Detalhe de vendas de serviço; não inclui produtos",
+    ),
+  ];
 }
 
 function inRange(ymd: string, start: string, end: string): boolean {
@@ -297,9 +606,10 @@ function sumMetrics(entries: RevenueEntry[]): ResumoKpiMetrics {
 }
 
 /**
- * KPIs a partir do faturamento diário EPOC:
+ * KPIs a partir do faturamento diário EPOC (campos da tabela diária):
  * - brutas = `total`
- * - líquidas = produtos + serviços (sem taxas)
+ * - líquidas (fallback) = produtos + serviços — o card do resumo prefere a soma
+ *   das formas de pagamento quando houver linhas em `epoc_faturamento_daily_payment_methods`
  * - transações = `quantity`
  * - tíquete = total / quantity (ponderado no período)
  */
@@ -415,7 +725,13 @@ function buildChampions(
 function finalizePaymentRows(
   map: Map<
     string,
-    { key: string; label: string; shortLabel: string; amount: number }
+    {
+      key: string;
+      label: string;
+      shortLabel: string;
+      amount: number;
+      includeInNetSales: boolean;
+    }
   >,
 ): ResumoPaymentRow[] {
   const total = [...map.values()].reduce((s, r) => s + r.amount, 0);
@@ -427,13 +743,20 @@ function finalizePaymentRows(
       shortLabel: row.shortLabel,
       amount: row.amount,
       share: total > 0 ? row.amount / total : 0,
+      includeInNetSales: row.includeInNetSales,
     }));
 }
 
 function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
   const map = new Map<
     string,
-    { key: string; label: string; shortLabel: string; amount: number }
+    {
+      key: string;
+      label: string;
+      shortLabel: string;
+      amount: number;
+      includeInNetSales: boolean;
+    }
   >();
 
   for (const e of entries) {
@@ -445,7 +768,13 @@ function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
     if (prev) {
       prev.amount += amount;
     } else {
-      map.set(key, { key, label, shortLabel, amount });
+      map.set(key, {
+        key,
+        label,
+        shortLabel,
+        amount,
+        includeInNetSales: true,
+      });
     }
   }
 
@@ -468,7 +797,13 @@ export function buildPaymentsFromEpoc(
 ): ResumoPaymentRow[] {
   const map = new Map<
     string,
-    { key: string; label: string; shortLabel: string; amount: number }
+    {
+      key: string;
+      label: string;
+      shortLabel: string;
+      amount: number;
+      includeInNetSales: boolean;
+    }
   >();
 
   for (const line of lines) {
@@ -478,15 +813,19 @@ export function buildPaymentsFromEpoc(
     const label = name || sku || "Forma sem nome";
     const shortLabel = shortPaymentLabel(label, sku);
     const amount = Number(line.amount) || 0;
+    const includeInNetSales = paymentMethodCountsInNetSales(
+      line.payment_methods,
+    );
     const prev = map.get(key);
     if (prev) {
       prev.amount += amount;
+      prev.includeInNetSales = prev.includeInNetSales && includeInNetSales;
       if (name && prev.label === (sku || "Forma sem nome")) {
         prev.label = name;
         prev.shortLabel = shortPaymentLabel(name, sku);
       }
     } else {
-      map.set(key, { key, label, shortLabel, amount });
+      map.set(key, { key, label, shortLabel, amount, includeInNetSales });
     }
   }
 
@@ -508,24 +847,42 @@ function buildDailySeries(
   const len = daysInclusive(ranges.currentStart, ranges.currentEnd);
   for (let i = 0; i < len; i++) {
     const date = addDaysYmd(ranges.currentStart, i);
-    let label: string;
-    if (period === "today") {
-      label = "Hoje";
-    } else if (period === "month") {
-      label = dayOfMonthLabel(date);
-    } else {
-      label = weekdayShort(date);
-    }
     points.push({
       date,
-      label,
+      label: dailyPointLabel(period, date, len),
       net: byDate.get(date) ?? 0,
     });
   }
   return points;
 }
 
-/** Série diária a partir do faturamento EPOC (líquido = produtos + serviços). */
+/** Série diária a partir das formas de pagamento EPOC (líquidas = soma do dia). */
+function buildDailySeriesFromPayments(
+  lines: EpocPaymentLineInput[],
+  ranges: ResumoRanges,
+  period: ResumoPeriodFilter,
+): ResumoDailyPoint[] {
+  const byDate = new Map<string, number>();
+  for (const line of lines) {
+    if (!paymentMethodCountsInNetSales(line.payment_methods)) continue;
+    const key = line.faturamento_date.slice(0, 10);
+    byDate.set(key, (byDate.get(key) ?? 0) + (Number(line.amount) || 0));
+  }
+
+  const points: ResumoDailyPoint[] = [];
+  const len = daysInclusive(ranges.currentStart, ranges.currentEnd);
+  for (let i = 0; i < len; i++) {
+    const date = addDaysYmd(ranges.currentStart, i);
+    points.push({
+      date,
+      label: dailyPointLabel(period, date, len),
+      net: byDate.get(date) ?? 0,
+    });
+  }
+  return points;
+}
+
+/** Série diária a partir do faturamento EPOC (fallback = produtos + serviços). */
 function buildDailySeriesFromFaturamento(
   days: EpocFaturamentoDayInput[],
   ranges: ResumoRanges,
@@ -542,17 +899,9 @@ function buildDailySeriesFromFaturamento(
   const len = daysInclusive(ranges.currentStart, ranges.currentEnd);
   for (let i = 0; i < len; i++) {
     const date = addDaysYmd(ranges.currentStart, i);
-    let label: string;
-    if (period === "today") {
-      label = "Hoje";
-    } else if (period === "month") {
-      label = dayOfMonthLabel(date);
-    } else {
-      label = weekdayShort(date);
-    }
     points.push({
       date,
-      label,
+      label: dailyPointLabel(period, date, len),
       net: byDate.get(date) ?? 0,
     });
   }
@@ -600,8 +949,17 @@ export function buildVendasRealizadasResumo(input: {
   epocPayments?: EpocPaymentLineInput[];
   /** Dias de faturamento EPOC para os KPIs (fonte preferencial). */
   epocFaturamentoDays?: EpocFaturamentoDayInput[];
+  /** Obrigatório quando period === "custom". */
+  customRange?: ResumoCustomRange | null;
+  /** Dia de início da semana contábil (0=dom … 6=sáb). */
+  weekStartsOn?: number;
 }): ResumoDashboard {
-  const ranges = getResumoRanges(input.period, input.todayYmd);
+  const ranges = getResumoRanges(
+    input.period,
+    input.todayYmd,
+    input.customRange,
+    { weekStartsOn: input.weekStartsOn },
+  );
   const operational = input.entries.filter(
     (e) => e.revenue_type === "operational",
   );
@@ -650,14 +1008,32 @@ export function buildVendasRealizadasResumo(input: {
       ranges.currentEnd,
     ),
   );
+  const epocPrevious = (input.epocPayments ?? []).filter((line) =>
+    inRange(
+      line.faturamento_date.slice(0, 10),
+      ranges.previousStart,
+      ranges.previousEnd,
+    ),
+  );
+
+  // Vendas líquidas (card): soma das formas com include_in_net_sales.
+  if (epocCurrent.length > 0) {
+    curM.net = sumEpocPaymentAmounts(epocCurrent, "net_sales");
+  }
+  if (epocPrevious.length > 0) {
+    prevM.net = sumEpocPaymentAmounts(epocPrevious, "net_sales");
+  }
+
   const paymentsFromEpoc = buildPaymentsFromEpoc(epocCurrent);
   const payments =
     paymentsFromEpoc.length > 0 ? paymentsFromEpoc : buildPayments(current);
 
   const daily =
-    fatCurrent.length > 0
-      ? buildDailySeriesFromFaturamento(fatCurrent, ranges, input.period)
-      : buildDailySeries(current, ranges, input.period);
+    epocCurrent.length > 0
+      ? buildDailySeriesFromPayments(epocCurrent, ranges, input.period)
+      : fatCurrent.length > 0
+        ? buildDailySeriesFromFaturamento(fatCurrent, ranges, input.period)
+        : buildDailySeries(current, ranges, input.period);
 
   const hasPeriodSales =
     fatCurrent.length > 0 ||

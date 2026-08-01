@@ -40,7 +40,6 @@ import {
   BarChart3,
   Building2,
   ConciergeBell,
-  CreditCard,
   FileText,
   FlaskConical,
   LayoutDashboard,
@@ -154,12 +153,6 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           title: "Faturamento",
           url: "/app/faturamento",
           icon: Receipt,
-          permission: "vendas_realizadas",
-        },
-        {
-          title: "Formas de pagamento",
-          url: "/app/formas-de-pagamento",
-          icon: CreditCard,
           permission: "vendas_realizadas",
         },
         {

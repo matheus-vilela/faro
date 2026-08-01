@@ -27,6 +27,7 @@ type PaymentMethodRow = {
   sku: string;
   name: string;
   is_active: boolean;
+  include_in_net_sales: boolean;
   created_at: string;
 };
 
@@ -60,7 +61,9 @@ export function FormasPagamento() {
     const to = from + PAGE_SIZE - 1;
     let q = supabase
       .from("payment_methods")
-      .select("id, sku, name, is_active, created_at", { count: "exact" })
+      .select("id, sku, name, is_active, include_in_net_sales, created_at", {
+        count: "exact",
+      })
       .eq("company_id", companyId)
       .order("name", { ascending: true })
       .range(from, to);
@@ -74,7 +77,12 @@ export function FormasPagamento() {
       toast.error(error.message);
       return;
     }
-    setRows((data ?? []) as PaymentMethodRow[]);
+    setRows(
+      ((data ?? []) as PaymentMethodRow[]).map((r) => ({
+        ...r,
+        include_in_net_sales: r.include_in_net_sales !== false,
+      })),
+    );
     setCount(c ?? 0);
   }, [companyId, page, debouncedSearch]);
 
@@ -100,6 +108,7 @@ export function FormasPagamento() {
       sku,
       name,
       is_active: true,
+      include_in_net_sales: true,
     });
     setCreating(false);
     if (error) {
@@ -130,6 +139,7 @@ export function FormasPagamento() {
       .update({
         name,
         is_active: detail.is_active,
+        include_in_net_sales: detail.include_in_net_sales,
         updated_at: new Date().toISOString(),
       })
       .eq("id", detail.id)
@@ -148,7 +158,7 @@ export function FormasPagamento() {
     <PageShell className="space-y-6">
       <PageHeader
         title="Formas de pagamento"
-        description="Catálogo usado no faturamento EPOC. O SKU é o código antes do « - » no relatório; o nome pode ser ajustado aqui."
+        description="Catálogo usado no faturamento EPOC. Defina se cada forma entra nos totais de venda líquida e relatórios de receita (ex.: reembolso pode ficar de fora)."
         icon={CreditCard}
         action={
           <Button type="button" onClick={() => setCreateOpen(true)}>
@@ -190,16 +200,23 @@ export function FormasPagamento() {
                     {row.sku}
                   </p>
                 </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-xs",
-                    row.is_active
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {row.is_active ? "Ativa" : "Inativa"}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-xs",
+                      row.is_active
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {row.is_active ? "Ativa" : "Inativa"}
+                  </span>
+                  {!row.include_in_net_sales ? (
+                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-800 dark:text-amber-300">
+                      Fora da líquida
+                    </span>
+                  ) : null}
+                </div>
               </button>
             ))
           )}
@@ -294,6 +311,23 @@ export function FormasPagamento() {
                       setDetail({ ...detail, is_active: v })
                     }
                   />
+                </div>
+                <div className="space-y-1.5 rounded-md border px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="pm-net-sales">Contabilizar na venda líquida</Label>
+                    <Switch
+                      id="pm-net-sales"
+                      checked={detail.include_in_net_sales}
+                      onCheckedChange={(v) =>
+                        setDetail({ ...detail, include_in_net_sales: v })
+                      }
+                    />
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Desative para formas como reembolso: o valor continua
+                    visível no faturamento, mas não entra no total líquido nem
+                    em relatórios de receita futuros (DRE etc.).
+                  </p>
                 </div>
                 <p className="text-muted-foreground text-xs">
                   O SKU não pode ser alterado (chave do relatório EPOC).

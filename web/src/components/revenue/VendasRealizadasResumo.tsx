@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useCompany } from "@/contexts/CompanyContext";
 import { localDateYmd } from "@/lib/boletoPayment";
 import { formatBrl } from "@/lib/dre/formatBrl";
+import { addDaysYmd } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -10,6 +12,8 @@ import {
   buildVendasRealizadasResumo,
   formatCompactBrl,
   getResumoRanges,
+  isPenduraPaymentMethod,
+  normalizeWeekStartsOn,
   type EpocFaturamentoDayInput,
   type EpocPaymentLineInput,
   type ResumoKpiDelta,
@@ -28,6 +32,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -44,8 +49,9 @@ import {
 
 const PERIOD_OPTIONS: { value: ResumoPeriodFilter; label: string }[] = [
   { value: "today", label: "Hoje" },
-  { value: "last7", label: "Últimos 7 dias" },
+  { value: "last7", label: "Esta semana" },
   { value: "month", label: "Este mês" },
+  { value: "custom", label: "Personalizado" },
 ];
 
 function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
@@ -55,8 +61,16 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
       amount: number | null;
       payment_method_id: string;
       payment_methods:
-        | { sku: string; name: string }
-        | { sku: string; name: string }[]
+        | {
+            sku: string;
+            name: string;
+            include_in_net_sales?: boolean | null;
+          }
+        | {
+            sku: string;
+            name: string;
+            include_in_net_sales?: boolean | null;
+          }[]
         | null;
     };
     const pm = Array.isArray(row.payment_methods)
@@ -66,7 +80,13 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
       faturamento_date: row.faturamento_date,
       amount: row.amount,
       payment_method_id: row.payment_method_id,
-      payment_methods: pm,
+      payment_methods: pm
+        ? {
+            sku: pm.sku,
+            name: pm.name,
+            include_in_net_sales: pm.include_in_net_sales !== false,
+          }
+        : null,
     };
   });
 }
@@ -343,6 +363,14 @@ function PaymentMethodsPanel({
 }) {
   const maxShare = rows.reduce((m, r) => Math.max(m, r.share), 0);
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
+  const netSalesAmount = rows
+    .filter((r) => r.includeInNetSales)
+    .reduce((s, r) => s + r.amount, 0);
+  const excludedAmount = totalAmount - netSalesAmount;
+  const penduraAmount = rows
+    .filter((r) => isPenduraPaymentMethod(r.key, r.label) || isPenduraPaymentMethod(null, r.shortLabel))
+    .reduce((s, r) => s + r.amount, 0);
+  const penduraShare = totalAmount > 0 ? penduraAmount / totalAmount : 0;
 
   if (rows.length === 0) {
     return (
@@ -365,6 +393,25 @@ function PaymentMethodsPanel({
           <CardTitle className="text-base font-semibold">
             Como seu cliente pagou — {championsTitle}
           </CardTitle>
+          <div className="space-y-1 text-sm">
+            <p className="font-medium text-foreground">
+              Contabilizado na líquida: {formatBrl(netSalesAmount)}
+              {excludedAmount > 0 ? (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  (excluído: {formatBrl(excludedAmount)})
+                </span>
+              ) : null}
+            </p>
+            {penduraAmount > 0 ? (
+              <p className="font-medium text-amber-800 dark:text-amber-300">
+                Pendura no período: {formatBrl(penduraAmount)} (
+                {(penduraShare * 100).toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
+                % da soma das formas)
+              </p>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto pt-0">
           <table className="w-full min-w-[28rem] border-collapse text-sm">
@@ -381,13 +428,37 @@ function PaymentMethodsPanel({
                   maxShare > 0
                     ? Math.min(100, (row.share / maxShare) * 100)
                     : 0;
+                const isPendura =
+                  isPenduraPaymentMethod(row.key, row.label) ||
+                  isPenduraPaymentMethod(null, row.shortLabel);
+                const excluded = !row.includeInNetSales;
                 return (
                   <tr
                     key={row.key}
-                    className="border-b border-border/60 last:border-0"
+                    className={cn(
+                      "border-b border-border/60 last:border-0",
+                      isPendura && "bg-amber-500/10",
+                      excluded && "bg-muted/40",
+                    )}
                   >
-                    <td className="py-3 pr-3 font-medium text-foreground">
+                    <td
+                      className={cn(
+                        "py-3 pr-3 font-medium text-foreground",
+                        isPendura && "text-amber-900 dark:text-amber-200",
+                        excluded && "text-muted-foreground",
+                      )}
+                    >
                       {row.label}
+                      {isPendura ? (
+                        <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                          pendura
+                        </span>
+                      ) : null}
+                      {excluded ? (
+                        <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          fora da líquida
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-3 pr-3 text-right tabular-nums font-medium">
                       {formatBrl(row.amount)}
@@ -396,7 +467,14 @@ function PaymentMethodsPanel({
                       <div className="flex items-center gap-2">
                         <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
                           <div
-                            className="h-full rounded-full bg-primary"
+                            className={cn(
+                              "h-full rounded-full",
+                              excluded
+                                ? "bg-muted-foreground/40"
+                                : isPendura
+                                  ? "bg-amber-500"
+                                  : "bg-primary",
+                            )}
                             style={{ width: `${barPct}%` }}
                           />
                         </div>
@@ -415,8 +493,15 @@ function PaymentMethodsPanel({
 
       <div className="lg:col-span-2">
         <PaymentParticipationDonut
-          rows={rows}
-          totalAmount={totalAmount}
+          rows={(() => {
+            const included = rows.filter((r) => r.includeInNetSales);
+            const t = included.reduce((s, r) => s + r.amount, 0);
+            return included.map((r) => ({
+              ...r,
+              share: t > 0 ? r.amount / t : 0,
+            }));
+          })()}
+          totalAmount={netSalesAmount}
           periodShortLabel={periodShortLabel}
         />
       </div>
@@ -429,6 +514,10 @@ export function VendasRealizadasResumo() {
   const companyId = currentCompany?.id;
 
   const [period, setPeriod] = useState<ResumoPeriodFilter>("last7");
+  const [customStart, setCustomStart] = useState(() =>
+    addDaysYmd(localDateYmd(), -6),
+  );
+  const [customEnd, setCustomEnd] = useState(() => localDateYmd());
   const [rankingMode, setRankingMode] = useState<ResumoRankingMode>("product");
   const [entries, setEntries] = useState<RevenueEntry[]>([]);
   const [epocPayments, setEpocPayments] = useState<EpocPaymentLineInput[]>([]);
@@ -445,9 +534,37 @@ export function VendasRealizadasResumo() {
   const [loading, setLoading] = useState(true);
 
   const todayYmd = localDateYmd();
+  const weekStartsOn = normalizeWeekStartsOn(
+    currentCompany?.accounting_week_starts_on,
+  );
+  const rangeOptions = useMemo(
+    () => ({ weekStartsOn }),
+    [weekStartsOn],
+  );
+  const customRange = useMemo(
+    () => ({ start: customStart, end: customEnd }),
+    [customStart, customEnd],
+  );
   const ranges = useMemo(
-    () => getResumoRanges(period, todayYmd),
-    [period, todayYmd],
+    () => getResumoRanges(period, todayYmd, customRange, rangeOptions),
+    [period, todayYmd, customRange, rangeOptions],
+  );
+
+  const selectPeriod = useCallback(
+    (next: ResumoPeriodFilter) => {
+      if (next === "custom" && period !== "custom") {
+        const preset = getResumoRanges(
+          period,
+          localDateYmd(),
+          null,
+          rangeOptions,
+        );
+        setCustomStart(preset.currentStart);
+        setCustomEnd(preset.currentEnd);
+      }
+      setPeriod(next);
+    },
+    [period, rangeOptions],
   );
 
   const fetchData = useCallback(async () => {
@@ -462,7 +579,12 @@ export function VendasRealizadasResumo() {
 
     setLoading(true);
     try {
-      const { fetchStart, fetchEnd } = getResumoRanges(period, localDateYmd());
+      const { fetchStart, fetchEnd } = getResumoRanges(
+        period,
+        localDateYmd(),
+        { start: customStart, end: customEnd },
+        { weekStartsOn },
+      );
 
       const [revenueRows, epocPaymentRows, epocFatRows, catRows] =
         await Promise.all([
@@ -479,7 +601,7 @@ export function VendasRealizadasResumo() {
             supabase
               .from("epoc_faturamento_daily_payment_methods")
               .select(
-                "faturamento_date, amount, payment_method_id, payment_methods ( sku, name )",
+                "faturamento_date, amount, payment_method_id, payment_methods ( sku, name, include_in_net_sales )",
               )
               .eq("company_id", companyId)
               .gte("faturamento_date", fetchStart)
@@ -560,7 +682,7 @@ export function VendasRealizadasResumo() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, period]);
+  }, [companyId, period, customStart, customEnd, weekStartsOn]);
 
   useEffect(() => {
     void fetchData();
@@ -583,6 +705,8 @@ export function VendasRealizadasResumo() {
         recipeNameById,
         epocPayments,
         epocFaturamentoDays,
+        customRange,
+        weekStartsOn,
       }),
     [
       entries,
@@ -594,6 +718,8 @@ export function VendasRealizadasResumo() {
       recipeNameById,
       epocPayments,
       epocFaturamentoDays,
+      customRange,
+      weekStartsOn,
     ],
   );
 
@@ -614,31 +740,73 @@ export function VendasRealizadasResumo() {
 
   return (
     <div className="space-y-4">
-      <div
-        className="flex flex-wrap gap-2"
-        role="group"
-        aria-label="Período do resumo"
-      >
-        {PERIOD_OPTIONS.map((opt) => {
-          const active = period === opt.value;
-          return (
-            <Button
-              key={opt.value}
-              type="button"
-              variant={active ? "default" : "outline"}
-              size="sm"
-              onClick={() => setPeriod(opt.value)}
-              className={cn(
-                "h-9 rounded-full px-4 text-sm font-medium",
-                active
-                  ? "bg-foreground text-background hover:bg-foreground/90 hover:text-background"
-                  : "bg-background",
-              )}
+      <div className="flex flex-col gap-3">
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label="Período do resumo"
+        >
+          {PERIOD_OPTIONS.map((opt) => {
+            const active = period === opt.value;
+            return (
+              <Button
+                key={opt.value}
+                type="button"
+                variant={active ? "default" : "outline"}
+                size="sm"
+                onClick={() => selectPeriod(opt.value)}
+                className={cn(
+                  "h-9 rounded-full px-4 text-sm font-medium",
+                  active
+                    ? "bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+                    : "bg-background",
+                )}
+              >
+                {opt.label}
+              </Button>
+            );
+          })}
+        </div>
+        {period === "last7" ? (
+          <p className="text-xs text-muted-foreground">
+            Semana contábil {ranges.currentStart} → {ranges.currentEnd} (
+            {ranges.periodShortLabel}).{" "}
+            <Link
+              to="/app/configuracoes/semana-contabil"
+              className="font-medium text-primary underline-offset-2 hover:underline"
             >
-              {opt.label}
-            </Button>
-          );
-        })}
+              Alterar dias da semana
+            </Link>
+          </p>
+        ) : null}
+        {period === "custom" ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              De
+              <Input
+                type="date"
+                value={customStart}
+                max={customEnd}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="h-9 w-[11.5rem]"
+              />
+            </label>
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              Até
+              <Input
+                type="date"
+                value={customEnd}
+                min={customStart}
+                max={todayYmd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="h-9 w-[11.5rem]"
+              />
+            </label>
+            <p className="pb-2 text-xs text-muted-foreground">
+              {ranges.currentStart} → {ranges.currentEnd}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {loading ? (

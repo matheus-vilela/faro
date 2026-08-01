@@ -76,8 +76,7 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
     path.startsWith("/app/vendas") ||
     path.startsWith("/app/receitas") ||
     path.startsWith("/app/cmv-margens") ||
-    path.startsWith("/app/faturamento") ||
-    path.startsWith("/app/formas-de-pagamento")
+    path.startsWith("/app/faturamento")
   ) {
     return "vendas_realizadas";
   }

@@ -28,7 +28,7 @@ import { formatBrl } from "@/lib/dre/formatBrl";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
-import { getResumoRanges } from "@/lib/vendasRealizadasResumo";
+import { getResumoRanges, normalizeWeekStartsOn } from "@/lib/vendasRealizadasResumo";
 import type { RevenueEntry } from "@/types/revenue";
 import {
   AlertTriangle,
@@ -56,7 +56,7 @@ import {
 
 const PERIOD_OPTIONS: { value: CmvPeriodFilter; label: string }[] = [
   { value: "today", label: "Hoje" },
-  { value: "last7", label: "Últimos 7 dias" },
+  { value: "last7", label: "Esta semana" },
   { value: "month", label: "Este mês" },
 ];
 
@@ -230,6 +230,9 @@ export function CmvMargens() {
   const [loading, setLoading] = useState(true);
 
   const todayYmd = localDateYmd();
+  const weekStartsOn = normalizeWeekStartsOn(
+    currentCompany?.accounting_week_starts_on,
+  );
 
   const fetchData = useCallback(async () => {
     if (!companyId) {
@@ -240,7 +243,12 @@ export function CmvMargens() {
 
     setLoading(true);
     try {
-      const { fetchStart, fetchEnd } = getResumoRanges(period, localDateYmd());
+      const { fetchStart, fetchEnd } = getResumoRanges(
+        period,
+        localDateYmd(),
+        null,
+        { weekStartsOn },
+      );
 
       const revenueRows = await fetchAllInRange<RevenueEntry>(
         supabase
@@ -330,7 +338,7 @@ export function CmvMargens() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, period]);
+  }, [companyId, period, weekStartsOn]);
 
   useEffect(() => {
     void fetchData();
@@ -346,6 +354,7 @@ export function CmvMargens() {
         productNameById,
         recipeNameById,
         productMetaById,
+        weekStartsOn,
       }),
     [
       entries,
@@ -355,6 +364,7 @@ export function CmvMargens() {
       productNameById,
       recipeNameById,
       productMetaById,
+      weekStartsOn,
     ],
   );
 

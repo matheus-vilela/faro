@@ -357,7 +357,7 @@ export function FaturamentoEpoc() {
           </Button>
         ) : null}
         <Button type="button" variant="outline" size="sm" asChild>
-          <Link to="/app/formas-de-pagamento">Formas de pagamento</Link>
+          <Link to="/app/configuracoes/formas-de-pagamento">Formas de pagamento</Link>
         </Button>
       </div>
 

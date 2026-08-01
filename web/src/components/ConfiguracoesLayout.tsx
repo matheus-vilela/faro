@@ -20,7 +20,9 @@ import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
+  CalendarRange,
   FolderTree,
+  CreditCard,
   Landmark,
   MessageCircle,
   Percent,
@@ -56,6 +58,16 @@ const SUB_LINKS = [
     to: "/app/configuracoes/impostos-receita",
     label: "Impostos na receita",
     icon: Percent,
+  },
+  {
+    to: "/app/configuracoes/formas-de-pagamento",
+    label: "Formas de pagamento",
+    icon: CreditCard,
+  },
+  {
+    to: "/app/configuracoes/semana-contabil",
+    label: "Semana contábil",
+    icon: CalendarRange,
   },
 ] as const;
 

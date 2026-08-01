@@ -1036,7 +1036,7 @@ export function Receitas() {
               <Link to="/app/faturamento">Ver faturamento</Link>
             </Button>
             <Button type="button" variant="ghost" size="sm" asChild>
-              <Link to="/app/formas-de-pagamento">Formas de pagamento</Link>
+              <Link to="/app/configuracoes/formas-de-pagamento">Formas de pagamento</Link>
             </Button>
           </div>
         </CardContent>

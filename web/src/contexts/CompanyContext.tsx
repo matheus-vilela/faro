@@ -64,6 +64,11 @@ export interface Company {
   } | null;
   /** Preferências de notificação WhatsApp (número + regras). */
   notification?: CompanyNotificationEntry[] | null;
+  /**
+   * Dia de início da semana contábil (0=domingo … 6=sábado).
+   * Default no banco: 1 (segunda-feira).
+   */
+  accounting_week_starts_on?: number | null;
 }
 
 export interface UserCompany {
@@ -117,12 +122,30 @@ type UcRow = {
   company_id: string;
   role: string;
   permission_profile_id: string | null;
-  company_permission_profiles: {
-    id: string;
-    name: string;
-    permissions: unknown;
-  } | null;
+  company_permission_profiles:
+    | {
+        id: string;
+        name: string;
+        permissions: unknown;
+      }
+    | {
+        id: string;
+        name: string;
+        permissions: unknown;
+      }[]
+    | null;
 };
+
+function normalizePermissionProfile(
+  raw: UcRow["company_permission_profiles"],
+): {
+  id: string;
+  name: string;
+  permissions: unknown;
+} | null {
+  if (!raw) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
 
 function permissionsForRole(
   role: UserCompanyRole,
@@ -216,7 +239,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       .eq("user_id", user.id);
 
     const membershipByCompanyId = new Map(
-      ((ucData ?? []) as UcRow[]).map((uc) => [uc.company_id, uc]),
+      ((ucData ?? []) as unknown as UcRow[]).map((uc) => [uc.company_id, uc]),
     );
 
     let rows: CompanyRow[] = [];
@@ -302,7 +325,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       const uc = membershipByCompanyId.get(c.id);
       if (uc) {
         const role = parseRole(uc.role);
-        const profile = uc.company_permission_profiles ?? null;
+        const profile = normalizePermissionProfile(
+          uc.company_permission_profiles,
+        );
         const profilePerms = parsePermissionKeys(profile?.permissions);
         return {
           company: c,

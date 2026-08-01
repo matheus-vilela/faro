@@ -35,6 +35,12 @@ export function getDocumentTitle(pathname: string): string {
   if (path.startsWith("/app/configuracoes/whatsapp")) {
     return tab("WhatsApp");
   }
+  if (path.startsWith("/app/configuracoes/formas-de-pagamento")) {
+    return tab("Formas de pagamento");
+  }
+  if (path.startsWith("/app/configuracoes/semana-contabil")) {
+    return tab("Semana contábil");
+  }
   if (path.startsWith("/app/configuracoes/usuarios")) {
     return tab("Usuários e acessos");
   }
@@ -58,7 +64,6 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/contas-a-pagar", label: "Contas a pagar" },
     { prefix: "/app/vendas-realizadas", label: "Vendas realizadas" },
     { prefix: "/app/faturamento", label: "Faturamento" },
-    { prefix: "/app/formas-de-pagamento", label: "Formas de pagamento" },
     { prefix: "/app/cmv-margens", label: "CMV & Margens" },
     { prefix: "/app/fluxo-de-caixa", label: "Fluxo de caixa" },
     { prefix: "/app/fornecedores", label: "Fornecedores" },
