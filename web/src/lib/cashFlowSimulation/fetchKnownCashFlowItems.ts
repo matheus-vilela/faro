@@ -55,8 +55,14 @@ function outflowLabels(b: {
   provider?: string | null;
   supplier?: { name?: string | null } | null;
 }): { description?: string; counterpartyLabel?: string } {
-  const description = formatBoletoFluxoDescription(b) || undefined;
-  const counterpartyLabel = boletoCounterpartyLabel(b) ?? undefined;
+  const description =
+    formatBoletoFluxoDescription({ description: b.description ?? "" }) ||
+    undefined;
+  const counterpartyLabel =
+    boletoCounterpartyLabel({
+      provider: b.provider ?? null,
+      supplier: b.supplier,
+    }) ?? undefined;
   return { description, counterpartyLabel };
 }
 
@@ -66,15 +72,13 @@ async function fetchPaidBoletosInRange(
   startYmd: string,
   endYmd: string,
 ): Promise<PaidBoletoRow[]> {
-  const select =
-    flowType === "payable"
-      ? "id, description, due_date, amount, paid_amount, paid_at, status, exclude_from_fluxo, flow_type, provider, supplier:suppliers(id, name)"
-      : "id, description, due_date, amount, paid_amount, paid_at, status, exclude_from_fluxo, flow_type, provider";
-
-  return fetchAllInRange<PaidBoletoRow>(
+  // Select fixo; cast porque o tipado do embed many-to-one vem como array.
+  const rows = await fetchAllInRange(
     supabase
       .from("boletos")
-      .select(select)
+      .select(
+        "id, description, due_date, amount, paid_amount, paid_at, status, exclude_from_fluxo, flow_type, provider, supplier:suppliers(id, name)",
+      )
       .eq("company_id", companyId)
       .eq("flow_type", flowType)
       .eq("status", "paid")
@@ -83,6 +87,7 @@ async function fetchPaidBoletosInRange(
       .lte("paid_at", `${endYmd}T23:59:59.999`)
       .order("paid_at", { ascending: true }),
   );
+  return rows as PaidBoletoRow[];
 }
 
 export async function fetchKnownCashFlowItems(input: {
