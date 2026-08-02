@@ -40,6 +40,7 @@ export function FluxoDeCaixa() {
     currentCompany?.id,
     currentPermissions,
     isCompanyOwner,
+    currentCompany?.accounting_week_starts_on,
   );
 
   const showEmptyState = !loading && !error && !hasVisibleMovements;

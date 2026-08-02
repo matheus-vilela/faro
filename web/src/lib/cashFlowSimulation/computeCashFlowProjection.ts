@@ -1,4 +1,8 @@
 import { addDaysYmd } from "@/lib/payableTotals";
+import {
+  normalizeWeekStartsOn,
+  startOfAccountingWeek,
+} from "@/lib/vendasRealizadasResumo";
 import { applyScenarioOffset } from "./scenarioPresets";
 import type {
   CashFlowBucketItem,
@@ -10,33 +14,22 @@ import type {
   ScenarioKey,
 } from "./types";
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function ymdFromDate(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-/** Segunda-feira da semana que contém a data (calendário local). */
+/** @deprecated Prefer startOfAccountingWeek com weekStartsOn da unidade. */
 export function getMondayOfWeekYmd(ymd: string): string {
-  const [y, m, day] = ymd.slice(0, 10).split("-").map(Number);
-  const d = new Date(y, m - 1, day);
-  const weekday = d.getDay();
-  const diff = weekday === 0 ? -6 : 1 - weekday;
-  d.setDate(d.getDate() + diff);
-  return ymdFromDate(d);
+  return startOfAccountingWeek(ymd, 1);
 }
 
 export function buildWeeklyBuckets(
   todayYmd: string,
   horizonWeeks: HorizonWeeks,
+  weekStartsOn: number = 1,
 ): { startYmd: string; endYmd: string; label: string }[] {
-  const firstMonday = getMondayOfWeekYmd(todayYmd);
+  const startOn = normalizeWeekStartsOn(weekStartsOn);
+  const firstWeekStart = startOfAccountingWeek(todayYmd, startOn);
   const buckets: { startYmd: string; endYmd: string; label: string }[] = [];
 
   for (let i = 0; i < horizonWeeks; i++) {
-    const startYmd = addDaysYmd(firstMonday, i * 7);
+    const startYmd = addDaysYmd(firstWeekStart, i * 7);
     const endYmd = addDaysYmd(startYmd, 6);
     const [sy, sm, sd] = startYmd.split("-").map(Number);
     const [ey, em, ed] = endYmd.split("-").map(Number);
@@ -71,32 +64,36 @@ function findBucketIndexInRange(
 
 export function resolveBucketAssignmentYmd(
   simulatedDateYmd: string,
-  todayYmd: string,
-  firstBucketStartYmd: string,
+  _todayYmd: string,
+  _firstBucketStartYmd: string,
 ): string {
-  if (simulatedDateYmd < todayYmd) {
-    return firstBucketStartYmd;
-  }
-  return simulatedDateYmd;
+  // Mantém a data simulada: NÃO empurra passado para a semana 1.
+  return simulatedDateYmd.slice(0, 10);
 }
 
 function resolveBucketIndex(
   assignYmd: string,
   weekDefs: { startYmd: string; endYmd: string }[],
-): { index: number; clampedToHorizon: boolean } {
+): { index: number; clampedToHorizon: boolean } | null {
   const inRange = findBucketIndexInRange(assignYmd, weekDefs);
   if (inRange != null) {
     return { index: inRange, clampedToHorizon: false };
   }
 
   const lastIdx = weekDefs.length - 1;
-  if (lastIdx < 0) return { index: 0, clampedToHorizon: false };
+  if (lastIdx < 0) return null;
 
-  if (assignYmd > weekDefs[lastIdx].endYmd) {
+  // Antes da semana 1 → fora do horizonte (não agrupa na semana atual).
+  if (assignYmd < weekDefs[0]!.startYmd) {
+    return null;
+  }
+
+  // Depois do horizonte → última semana (extrapolação de cenário).
+  if (assignYmd > weekDefs[lastIdx]!.endYmd) {
     return { index: lastIdx, clampedToHorizon: true };
   }
 
-  return { index: 0, clampedToHorizon: false };
+  return null;
 }
 
 export function toRawCashFlowItem(input: {
@@ -105,7 +102,9 @@ export function toRawCashFlowItem(input: {
   amount: number;
   dueDateYmd: string;
   description?: string;
+  counterpartyLabel?: string;
   isProjected?: boolean;
+  isSettled?: boolean;
 }): RawCashFlowItem {
   return {
     id: input.id,
@@ -113,26 +112,27 @@ export function toRawCashFlowItem(input: {
     amount: input.amount,
     dueDateYmd: input.dueDateYmd.slice(0, 10),
     description: input.description,
+    counterpartyLabel: input.counterpartyLabel,
     isProjected: input.isProjected,
+    isSettled: input.isSettled,
   };
 }
 
 export function applyScenarioToRawItems(
   items: RawCashFlowItem[],
   scenario: ScenarioKey,
-  todayYmd: string,
+  _todayYmd: string,
 ): CashFlowItem[] {
   return items.map((item) => {
-    const due = item.dueDateYmd.slice(0, 10);
-    // Vencidas pendentes: simular a partir de hoje para cenários alterarem a semana.
-    const anchorYmd = due < todayYmd ? todayYmd : due;
+    const baseYmd = item.dueDateYmd.slice(0, 10);
+    // Liquidados: data definitiva. Pendentes: offset a partir do vencimento
+    // (sem reancorar vencidas em "hoje", o que empurrava tudo para a semana 1).
+    const simulatedDateYmd = item.isSettled
+      ? baseYmd
+      : applyScenarioOffset(baseYmd, item.direction, scenario);
     return {
       ...item,
-      simulatedDateYmd: applyScenarioOffset(
-        anchorYmd,
-        item.direction,
-        scenario,
-      ),
+      simulatedDateYmd,
     };
   });
 }
@@ -167,9 +167,16 @@ export function computeCashFlowProjection(input: {
   openingBalance: number;
   todayYmd: string;
   horizonWeeks: HorizonWeeks;
+  /** Dia de início da semana contábil (0=dom … 6=sáb). Default: segunda. */
+  weekStartsOn?: number;
 }): CashFlowProjection {
   const openingBalance = parseOpeningBalance(input.openingBalance);
-  const weekDefs = buildWeeklyBuckets(input.todayYmd, input.horizonWeeks);
+  const weekStartsOn = normalizeWeekStartsOn(input.weekStartsOn ?? 1);
+  const weekDefs = buildWeeklyBuckets(
+    input.todayYmd,
+    input.horizonWeeks,
+    weekStartsOn,
+  );
   const firstBucketStart = weekDefs[0]?.startYmd ?? input.todayYmd;
   const scenarioItems = applyScenarioToRawItems(
     input.rawItems,
@@ -186,17 +193,17 @@ export function computeCashFlowProjection(input: {
     const amount = Number(item.amount) || 0;
     if (amount <= 0) continue;
 
-    const isOverdue = item.dueDateYmd < input.todayYmd;
+    const isOverdue =
+      !item.isSettled && item.dueDateYmd < input.todayYmd;
     const assignYmd = resolveBucketAssignmentYmd(
       item.simulatedDateYmd,
       input.todayYmd,
       firstBucketStart,
     );
-    const { index: bucketIdx, clampedToHorizon } = resolveBucketIndex(
-      assignYmd,
-      weekDefs,
-    );
+    const resolved = resolveBucketIndex(assignYmd, weekDefs);
+    if (!resolved) continue;
 
+    const { index: bucketIdx, clampedToHorizon } = resolved;
     if (clampedToHorizon) clampedToLastBucketCount += 1;
 
     const bucketItem: CashFlowBucketItem = {
@@ -266,9 +273,14 @@ export function computeCashFlowProjection(input: {
 export function getCashFlowFetchRange(
   todayYmd: string,
   horizonWeeks: HorizonWeeks,
+  weekStartsOn: number = 1,
 ): { startYmd: string; endYmd: string } {
-  const lookbackStart = addDaysYmd(todayYmd, -90);
-  const firstMonday = getMondayOfWeekYmd(todayYmd);
-  const horizonEnd = addDaysYmd(firstMonday, horizonWeeks * 7 - 1);
-  return { startYmd: lookbackStart, endYmd: horizonEnd };
+  // Janela = semanas do detalhamento (semana 1 = atual). Sem lookback de 90 dias
+  // que puxava histórico antigo e acabava agrupado na semana 1.
+  const firstWeekStart = startOfAccountingWeek(
+    todayYmd,
+    normalizeWeekStartsOn(weekStartsOn),
+  );
+  const horizonEnd = addDaysYmd(firstWeekStart, horizonWeeks * 7 - 1);
+  return { startYmd: firstWeekStart, endYmd: horizonEnd };
 }

@@ -106,10 +106,12 @@ export async function fetchCashFlowDiagnostics(input: {
   pendingInHorizon: number;
   includePayables: boolean;
   includeReceivables: boolean;
+  weekStartsOn?: number;
 }): Promise<CashFlowDiagnostics> {
   const { endYmd: horizonEnd } = getCashFlowFetchRange(
     input.todayYmd,
     input.horizonWeeks,
+    input.weekStartsOn ?? 1,
   );
 
   const outsideQueries: Promise<number>[] = [];

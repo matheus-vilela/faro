@@ -48,7 +48,7 @@ export function CashFlowEmptyState({
 
   if (diagnostics.overduePendingCount > 0) {
     reasons.push(
-      `${diagnostics.overduePendingCount} conta(s) vencida(s) pendente(s) (${formatBrl(diagnostics.overduePendingPayablesAmount)} a pagar, ${formatBrl(diagnostics.overduePendingReceivablesAmount)} a receber) — devem impactar a semana 1 quando dentro do horizonte.`,
+      `${diagnostics.overduePendingCount} conta(s) vencida(s) pendente(s) (${formatBrl(diagnostics.overduePendingPayablesAmount)} a pagar, ${formatBrl(diagnostics.overduePendingReceivablesAmount)} a receber) — ficam fora das semanas do horizonte (vencimento anterior à semana atual); use o saldo inicial para refletir o caixa real.`,
     );
   }
 

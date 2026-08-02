@@ -14,6 +14,7 @@ import {
   type ScenarioKey,
 } from "@/lib/cashFlowSimulation/types";
 import { hasPermission } from "@/lib/permissions";
+import { normalizeWeekStartsOn } from "@/lib/vendasRealizadasResumo";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 function storageKey(companyId: string): string {
@@ -82,7 +83,9 @@ export function useCashFlowSimulation(
   companyId: string | undefined,
   permissions: readonly string[] | null | undefined,
   isCompanyOwner = false,
+  accountingWeekStartsOn: number | null | undefined = 1,
 ) {
+  const weekStartsOn = normalizeWeekStartsOn(accountingWeekStartsOn);
   const [prefs, setPrefsState] = useState<CashFlowSimulationPrefs>(
     DEFAULT_CASH_FLOW_PREFS,
   );
@@ -154,6 +157,7 @@ export function useCashFlowSimulation(
           horizonWeeks: prefs.horizonWeeks,
           includePayables,
           includeReceivables,
+          weekStartsOn,
         }),
         fetchOpeningBalanceHint({
           companyId,
@@ -170,6 +174,7 @@ export function useCashFlowSimulation(
         pendingInHorizon: items.length,
         includePayables,
         includeReceivables,
+        weekStartsOn,
       });
 
       setRawItems(items);
@@ -189,6 +194,7 @@ export function useCashFlowSimulation(
     prefs.horizonWeeks,
     includePayables,
     includeReceivables,
+    weekStartsOn,
   ]);
 
   useEffect(() => {
@@ -203,6 +209,7 @@ export function useCashFlowSimulation(
         openingBalance: prefs.openingBalance,
         todayYmd,
         horizonWeeks: prefs.horizonWeeks,
+        weekStartsOn,
       }),
     [
       rawItems,
@@ -210,6 +217,7 @@ export function useCashFlowSimulation(
       prefs.openingBalance,
       prefs.horizonWeeks,
       todayYmd,
+      weekStartsOn,
     ],
   );
 

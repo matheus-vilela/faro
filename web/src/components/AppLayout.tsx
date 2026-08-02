@@ -175,23 +175,23 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
         },
       ],
     },
-    {
-      label: "Gestão",
-      items: [
-        // {
-        //   title: "Alertas",
-        //   url: "/app/alertas",
-        //   icon: Bell,
-        //   permission: "alertas",
-        // },
-        {
-          title: "Integrações",
-          url: "/app/integracoes",
-          icon: Plug,
-          permission: "integracoes",
-        },
-      ],
-    },
+    // {
+    //   label: "Gestão",
+    //   items: [
+    //     // {
+    //     //   title: "Alertas",
+    //     //   url: "/app/alertas",
+    //     //   icon: Bell,
+    //     //   permission: "alertas",
+    //     // },
+    //     // {
+    //     //   title: "Integrações",
+    //     //   url: "/app/integracoes",
+    //     //   icon: Plug,
+    //     //   permission: "integracoes",
+    //     // },
+    //   ],
+    // },
     {
       label: "Desenvolvimento",
       adminOnly: true,
@@ -214,6 +214,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
     {
       label: "Sistema",
       items: [
+        {
+          title: "Integrações",
+          url: "/app/integracoes",
+          icon: Plug,
+          permission: "integracoes",
+        },
         {
           title: "Configurações",
           url: "/app/configuracoes",

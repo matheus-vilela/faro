@@ -5,9 +5,15 @@ export type RawCashFlowItem = {
   id: string;
   direction: CashFlowDirection;
   amount: number;
+  /** Data-base do movimento: vencimento (pendente) ou data do pagamento (liquidado). */
   dueDateYmd: string;
+  /** Descrição / NF / detalhe do lançamento. */
   description?: string;
+  /** Fornecedor ou beneficiário (saídas). */
+  counterpartyLabel?: string;
   isProjected?: boolean;
+  /** Já liquidado — data definitiva, sem offset de cenário. */
+  isSettled?: boolean;
 };
 
 export type CashFlowItem = RawCashFlowItem & {
