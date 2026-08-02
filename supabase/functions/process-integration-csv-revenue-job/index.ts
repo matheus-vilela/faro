@@ -24,6 +24,7 @@ import {
 } from "../_shared/csvRevenueImportQueue.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { buildEpocImportJobFlowDiagnostic } from "../_shared/epocFlowDiagnostic.ts";
+import { patchEpocCsvSyncRunFlowDiagnosticFromImportJob } from "../_shared/patchEpocCsvSyncRunFlowDiagnostic.ts";
 import {
   classifyRevenueCategoryHeuristic,
   filterOperationalRevenueLeaves,
@@ -551,6 +552,31 @@ async function runCsvRevenueImportForJob(
     csv_storage_path: job.storage_path,
   };
 
+  const linkedEpocCsvSyncRunId =
+    typeof jobMetaEarly.epoc_csv_sync_run_id === "string"
+      ? jobMetaEarly.epoc_csv_sync_run_id
+      : null;
+
+  const syncLinkedEpocRunDiagnostic = async (
+    importFlowDiagnostic: ReturnType<typeof buildEpocImportJobFlowDiagnostic>,
+  ) => {
+    try {
+      await patchEpocCsvSyncRunFlowDiagnosticFromImportJob(admin, {
+        jobId,
+        importFlowDiagnostic,
+        epocCsvSyncRunId: linkedEpocCsvSyncRunId,
+      });
+    } catch (e) {
+      console.warn(
+        "[process-integration-csv-revenue-job] patch_sync_run_diagnostic_falhou",
+        {
+          job_id: jobId,
+          message: e instanceof Error ? e.message : String(e),
+        },
+      );
+    }
+  };
+
   const fail = async (msg: string) => {
     await releaseCsvJobChunkLease(admin, jobId);
     const priorForFail =
@@ -593,6 +619,7 @@ async function runCsvRevenueImportForJob(
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);
+    await syncLinkedEpocRunDiagnostic(flowDiagnostic);
     return json({ ok: false, error: msg, flow_diagnostic: flowDiagnostic }, 422);
   };
 
@@ -671,6 +698,7 @@ async function runCsvRevenueImportForJob(
           updated_at: nowEmpty,
         })
         .eq("id", jobId);
+      await syncLinkedEpocRunDiagnostic(flowDiagnostic);
       return json({
         ok: true,
         job_id: jobId,
@@ -1397,6 +1425,8 @@ async function runCsvRevenueImportForJob(
         updated_at: now,
       })
       .eq("id", jobId);
+
+    await syncLinkedEpocRunDiagnostic(flowDiagnostic);
 
     return json({
       ok: true,

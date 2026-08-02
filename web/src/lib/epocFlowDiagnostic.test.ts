@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyImportOutcomeToSyncFlowDiagnostic,
   buildEpocImportJobFlowDiagnostic,
   buildEpocSyncFlowDiagnostic,
 } from "../../../supabase/functions/_shared/epocFlowDiagnostic.ts";
+import { inferEpocFlowDiagnosticFromLegacy } from "./epocFlowDiagnostic";
 
 describe("buildEpocSyncFlowDiagnostic", () => {
   it("marca falha no login", () => {
@@ -91,5 +93,76 @@ describe("buildEpocImportJobFlowDiagnostic", () => {
     expect(d.phases.csv_import.status).toBe("ok");
     expect(d.phases.csv_import.message).toContain("Nenhuma linha");
     expect(d.blocked_at).toBeNull();
+  });
+});
+
+describe("applyImportOutcomeToSyncFlowDiagnostic", () => {
+  it("atualiza fase 4 pendente quando o job conclui", () => {
+    const sync = buildEpocSyncFlowDiagnostic({
+      loginOk: true,
+      tblExportFound: true,
+      csvUploaded: true,
+      linhasDados: 72,
+      csvRevenueImportJobId: "job-1",
+    });
+    const imported = buildEpocImportJobFlowDiagnostic({
+      status: "COMPLETED",
+      csvTotalRows: 72,
+      revenueCreated: 72,
+      rowsSkipped: 0,
+    });
+    const merged = applyImportOutcomeToSyncFlowDiagnostic(sync, imported);
+    expect(merged.phases.csv_import.status).toBe("ok");
+    expect(merged.phases.csv_creation.status).toBe("ok");
+    expect(merged.phases.csv_creation.message).toContain("72");
+    expect(merged.blocked_at).toBeNull();
+    expect(merged.summary).toMatch(/Exportação concluída/i);
+  });
+
+  it("mantém pending se o job ainda está na fila", () => {
+    const sync = buildEpocSyncFlowDiagnostic({
+      loginOk: true,
+      tblExportFound: true,
+      csvUploaded: true,
+      linhasDados: 10,
+      csvRevenueImportJobId: "job-1",
+    });
+    const pending = buildEpocImportJobFlowDiagnostic({
+      status: "PENDING",
+      csvTotalRows: 10,
+    });
+    const merged = applyImportOutcomeToSyncFlowDiagnostic(sync, pending);
+    expect(merged.phases.csv_import.status).toBe("pending");
+  });
+});
+
+describe("inferEpocFlowDiagnosticFromLegacy", () => {
+  it("não deixa sync_run com fase 4 em curso após job COMPLETED", () => {
+    const frozen = buildEpocSyncFlowDiagnostic({
+      loginOk: true,
+      tblExportFound: true,
+      csvUploaded: true,
+      linhasDados: 72,
+      csvRevenueImportJobId: "job-1",
+    });
+    const d = inferEpocFlowDiagnosticFromLegacy({
+      kind: "sync_run",
+      outcome: "success",
+      summary: "CSV exportado com 72 linha(s) em 1 dia(s).",
+      metadata: {
+        flow_diagnostic: frozen,
+        csv_revenue_import_job_id: "job-1",
+      },
+      linkedImportJob: {
+        status: "COMPLETED",
+        metadata: {
+          csv_total_data_rows: 72,
+          revenue_entries_created_total: 72,
+          rows_skipped_total: 0,
+        },
+      },
+    });
+    expect(d.phases.csv_import.status).toBe("ok");
+    expect(d.phases.csv_import.message).toMatch(/72 receita/i);
   });
 });

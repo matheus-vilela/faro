@@ -129,6 +129,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [activeTab, setActiveTab] = useState<"config" | "history">("config");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [syncHistory, setSyncHistory] = useState<EpocSyncHistoryRow[]>([]);
+  /** Jobs ligados a sync_runs (inclui ids fora do top-N do histórico). */
+  const [importJobsById, setImportJobsById] = useState<
+    Map<string, EpocImportJobHistoryRow>
+  >(() => new Map());
   const [downloadingIgnoredReportJobId, setDownloadingIgnoredReportJobId] =
     useState<string | null>(null);
   const [historyDeleteOpen, setHistoryDeleteOpen] = useState(false);
@@ -270,6 +274,52 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       steps_prefix: r.steps_prefix != null ? String(r.steps_prefix) : null,
       metadata: (r.metadata ?? null) as Record<string, unknown> | null,
     }));
+
+    const jobsById = new Map<string, EpocImportJobHistoryRow>();
+    for (const job of jobRows) jobsById.set(job.id, job);
+
+    const missingLinkedJobIds = [
+      ...new Set(
+        runRows
+          .map((r) => r.metadata?.csv_revenue_import_job_id)
+          .filter(
+            (id): id is string =>
+              typeof id === "string" && id.length > 0 && !jobsById.has(id),
+          ),
+      ),
+    ].slice(0, 50);
+
+    if (missingLinkedJobIds.length > 0) {
+      const linkedRes = await supabase
+        .from("integration_csv_revenue_import_jobs")
+        .select(
+          "id, status, created_at, updated_at, error_message, storage_path, csv_resume_row_index, metadata",
+        )
+        .eq("company_id", companyId)
+        .eq("provider", "epoc")
+        .in("id", missingLinkedJobIds);
+      if (!linkedRes.error) {
+        for (const r of linkedRes.data ?? []) {
+          const job: EpocImportJobHistoryRow = {
+            rowKind: "import_job",
+            id: String(r.id),
+            status: r.status as EpocImportJobHistoryRow["status"],
+            created_at: String(r.created_at),
+            updated_at: String(r.updated_at),
+            error_message: r.error_message ?? null,
+            storage_path: String(r.storage_path ?? ""),
+            csv_resume_row_index:
+              r.csv_resume_row_index != null
+                ? Number(r.csv_resume_row_index)
+                : null,
+            metadata: (r.metadata ?? null) as Record<string, unknown> | null,
+          };
+          jobsById.set(job.id, job);
+        }
+      }
+    }
+
+    setImportJobsById(jobsById);
 
     const merged = [...jobRows, ...runRows].sort(
       (a, b) =>
@@ -1121,11 +1171,26 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                             portalPorDia,
                             item.dates_consulted,
                           );
+                        const linkedJobId =
+                          typeof item.metadata?.csv_revenue_import_job_id ===
+                          "string"
+                            ? item.metadata.csv_revenue_import_job_id
+                            : null;
+                        const linkedJob = linkedJobId
+                          ? importJobsById.get(linkedJobId)
+                          : undefined;
                         const flowDiagnostic = inferEpocFlowDiagnosticFromLegacy({
                           kind: "sync_run",
                           outcome: item.outcome,
                           summary: item.summary,
                           metadata: item.metadata,
+                          linkedImportJob: linkedJob
+                            ? {
+                                status: linkedJob.status,
+                                errorMessage: linkedJob.error_message,
+                                metadata: linkedJob.metadata,
+                              }
+                            : null,
                         });
                         return (
                           <div

@@ -2530,6 +2530,36 @@ Deno.serve(async (req) => {
     },
   });
 
+  if (epocCsvSyncRunId && csvRevenueImportJobId) {
+    const { data: jobRow } = await admin
+      .from("integration_csv_revenue_import_jobs")
+      .select("metadata")
+      .eq("id", csvRevenueImportJobId)
+      .maybeSingle();
+    const jobMeta =
+      jobRow?.metadata &&
+      typeof jobRow.metadata === "object" &&
+      !Array.isArray(jobRow.metadata)
+        ? (jobRow.metadata as Record<string, unknown>)
+        : {};
+    const { error: linkErr } = await admin
+      .from("integration_csv_revenue_import_jobs")
+      .update({
+        metadata: {
+          ...jobMeta,
+          epoc_csv_sync_run_id: epocCsvSyncRunId,
+        },
+      })
+      .eq("id", csvRevenueImportJobId);
+    if (linkErr) {
+      log("csv_job_link_sync_run_falhou", {
+        job_id: csvRevenueImportJobId,
+        sync_run_id: epocCsvSyncRunId,
+        message: linkErr.message,
+      });
+    }
+  }
+
   log("concluido", {
     steps: steps.length,
     csv_revenue_import_job_id: csvRevenueImportJobId,

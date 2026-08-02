@@ -2,8 +2,17 @@ import {
   FiscalCertificateConfigSection,
   useFiscalIntegrationStatus,
 } from "@/components/integrations/FiscalCertificateConfigSection";
+import { FiscalFlowDiagnosticPanel } from "@/components/integrations/FiscalFlowDiagnosticPanel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Sheet,
   SheetContent,
@@ -11,15 +20,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   FISCAL_SYNC_CONFLICT_MESSAGE,
   isFiscalSyncInProgress,
 } from "@/lib/companySyncLocks";
-import { cn } from "@/lib/utils";
+import { inferNfeFlowDiagnosticFromHistory } from "@/lib/nfeFlowDiagnostic";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import {
   listFocusNfeConsultaHistory,
+  purgeNfeConsultaHistory,
   type FocusNfeConsultaHistoryRow,
 } from "@/services/focusGetSyncNfeService";
 import { invokeNfePipelineForCompany } from "@/services/nfePipelineService";
@@ -35,14 +47,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 function asObj(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -58,6 +62,7 @@ function formatDateTimeBr(iso: string): string {
 }
 
 export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
+  const { isAdmin } = useAuth();
   const { refetchCompanies, userCompanies } = useCompany();
   const companyMeta = userCompanies.find(
     (uc) => uc.company.id === companyId,
@@ -72,6 +77,8 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
   const [history, setHistory] = useState<FocusNfeConsultaHistoryRow[]>([]);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purging, setPurging] = useState(false);
+  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
 
   const setupRaw = useMemo(
     () => asObj(companyMeta?.setup) as CompanySetupMap,
@@ -82,7 +89,10 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
     return String(xmlZip?.job_batch_id ?? "").trim();
   }, [setupRaw.xml_zip_import]);
 
-  const fiscalSyncBusy = isFiscalSyncInProgress(companyMeta?.onboarding_fiscal);
+  /** Onboarding com sync ativo (card do painel) — não bloqueia consulta manual. */
+  const fiscalOnboardingSyncActive = isFiscalSyncInProgress(
+    companyMeta?.onboarding_fiscal,
+  );
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -90,7 +100,11 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
     setHistoryLoading(false);
     if (!res.ok) {
       console.error(res.error);
-      toast.error("Não foi possível carregar o histórico de consultas.");
+      toast.error(
+        res.error?.trim()
+          ? `Não foi possível carregar o histórico: ${res.error}`
+          : "Não foi possível carregar o histórico de consultas.",
+      );
       return;
     }
     setHistory(res.rows);
@@ -106,24 +120,69 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
       toast.error("Configure o certificado A1 antes de consultar a SEFAZ.");
       return;
     }
-    if (fiscalSyncBusy) {
-      toast.message(FISCAL_SYNC_CONFLICT_MESSAGE);
-      return;
-    }
     setSyncing(true);
     try {
       const res = await invokeNfePipelineForCompany({ companyId });
-      await refetchCompanies();
-      if (activeTab === "history") await loadHistory();
+      try {
+        await refetchCompanies();
+      } catch {
+        /* ignore */
+      }
+      if (activeTab === "history") {
+        try {
+          await loadHistory();
+        } catch {
+          /* ignore */
+        }
+      }
       if (res.ok) {
         toast.success(
           "Consulta NF-e enfileirada. O processamento continua em segundo plano.",
         );
+        setActiveTab("history");
+        void loadHistory();
       } else {
-        toast.error(res.error);
+        toast.error(res.error || FISCAL_SYNC_CONFLICT_MESSAGE);
       }
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Falha ao consultar a SEFAZ.",
+      );
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleClearConsultaHistory = async () => {
+    if (!isAdmin) {
+      toast.error("Apenas administradores podem limpar o histórico.");
+      return;
+    }
+    setClearingHistory(true);
+    try {
+      const res = await purgeNfeConsultaHistory(companyId);
+      if (!res.ok) {
+        toast.error(
+          res.error === "forbidden"
+            ? "Sem permissão para limpar o histórico."
+            : res.error,
+        );
+        return;
+      }
+      toast.success(
+        res.deletedCount === 0
+          ? "Não havia registos de histórico nesta unidade."
+          : `${res.deletedCount} registo(s) de histórico removido(s).`,
+      );
+      setClearHistoryOpen(false);
+      setHistory([]);
+      await loadHistory();
+    } catch (e: unknown) {
+      toast.error(
+        e instanceof Error ? e.message : "Falha ao limpar o histórico.",
+      );
+    } finally {
+      setClearingHistory(false);
     }
   };
 
@@ -284,11 +343,17 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                       Nenhuma consulta registrada ainda.
                     </p>
                   )}
+                  {fiscalOnboardingSyncActive ? (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      Há uma sincronização de onboarding em curso; pode
+                      consultar de novo para acordar a fila.
+                    </p>
+                  ) : null}
                   <Button
                     type="button"
                     className="w-full"
                     onClick={() => void handleSyncNow()}
-                    disabled={!active || syncing || fiscalSyncBusy}
+                    disabled={!active || syncing}
                   >
                     {syncing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -305,8 +370,8 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                       Despesas do onboarding (XML)
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Remove despesas criadas no passo XML do assistente
-                      inicial (lote {onboardingBatchId.slice(0, 8)}…).
+                      Remove despesas criadas no passo XML do assistente inicial
+                      (lote {onboardingBatchId.slice(0, 8)}…).
                     </p>
                     <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-50">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -327,22 +392,37 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
               </>
             ) : (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-medium">Histórico de consultas</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void loadHistory()}
-                    disabled={historyLoading}
-                  >
-                    {historyLoading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Atualizar
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isAdmin ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setClearHistoryOpen(true)}
+                        disabled={historyLoading || clearingHistory}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Limpar histórico
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void loadHistory()}
+                      disabled={historyLoading}
+                    >
+                      {historyLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Atualizar
+                    </Button>
+                  </div>
                 </div>
                 {historyLoading ? (
                   <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -361,6 +441,26 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                   <div className="space-y-2">
                     {history.map((item) => {
                       const idShort = item.exec_id.slice(0, 8);
+                      const flowDiagnostic = inferNfeFlowDiagnosticFromHistory({
+                        summary: item.summary,
+                        flowDiagnostic: item.flow_diagnostic,
+                        nfesEncontradas: item.nfes_encontradas,
+                        stagingXmlTotal: item.staging_xml_total,
+                        listedCount: item.listed_count,
+                        downloadedCount: item.downloaded_count,
+                        processedCount: item.processed_count,
+                        failedCount: item.failed_count,
+                        ignoredCount: item.ignored_count,
+                      });
+                      const searchPending =
+                        flowDiagnostic.phases.nfe_search?.status === "pending";
+                      const outcomeLabel = flowDiagnostic.blocked_at
+                        ? "Consulta com pendências"
+                        : searchPending
+                          ? "Consulta enfileirada"
+                          : item.nfes_encontradas === 0
+                            ? "Consulta sem NF-e novas"
+                            : "Consulta registada";
                       return (
                         <div
                           key={item.exec_id}
@@ -369,7 +469,7 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                               <Clock3 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              Consulta registrada
+                              {outcomeLabel}
                             </span>
                             <span className="font-mono text-xs text-muted-foreground">
                               {idShort}…
@@ -380,14 +480,19 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                             {item.onboarding ? " · onboarding" : ""}
                           </p>
                           <p className="mt-2 text-sm text-foreground">
-                            {item.nfes_encontradas === 0
-                              ? "Nenhuma NF-e nova na consulta."
-                              : `${item.nfes_encontradas} NF-e(s) encontrada(s).`}
-                            {item.staging_xml_total != null &&
-                            item.staging_xml_total > 0
-                              ? ` · ${item.staging_xml_total} XML(s) em staging.`
-                              : ""}
+                            {item.summary?.trim() ||
+                              (item.nfes_encontradas === 0
+                                ? "Nenhuma NF-e nova na consulta."
+                                : `${item.nfes_encontradas} NF-e(s) encontrada(s).`)}
                           </p>
+                          {item.nfes_encontradas !== 0 && (
+                            <div className="mt-3">
+                              <FiscalFlowDiagnosticPanel
+                                diagnostic={flowDiagnostic}
+                                compact
+                              />
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -427,6 +532,48 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                 </>
               ) : (
                 "Confirmar exclusão"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clearHistoryOpen} onOpenChange={setClearHistoryOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Limpar histórico de consultas?</DialogTitle>
+            <DialogDescription>
+              Serão apagados todos os registos de histórico de consultas NF-e
+              desta unidade. Esta ação é irreversível e só está disponível para
+              administradores Faro.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-50">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p>
+              Não remove notas, despesas nem XMLs — apenas o histórico exibido
+              nesta aba.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setClearHistoryOpen(false)}
+              disabled={clearingHistory}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={clearingHistory}
+              onClick={() => void handleClearConsultaHistory()}
+            >
+              {clearingHistory ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />A limpar…
+                </>
+              ) : (
+                "Limpar histórico"
               )}
             </Button>
           </DialogFooter>

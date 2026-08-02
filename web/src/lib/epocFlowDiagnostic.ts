@@ -1,4 +1,5 @@
 export {
+  applyImportOutcomeToSyncFlowDiagnostic,
   buildEpocImportJobFlowDiagnostic,
   buildEpocSyncFlowDiagnostic,
   EPOC_FLOW_PHASE_LABELS,
@@ -12,6 +13,7 @@ export {
 } from "../../../supabase/functions/_shared/epocFlowDiagnostic.ts";
 
 import {
+  applyImportOutcomeToSyncFlowDiagnostic,
   buildEpocImportJobFlowDiagnostic,
   buildEpocSyncFlowDiagnostic,
   type EpocFlowDiagnostic,
@@ -34,12 +36,50 @@ export function epocFlowBlockedPhaseLabel(
   return report?.label ?? diagnostic.blocked_at;
 }
 
+export type LinkedEpocImportJobForDiagnostic = {
+  status: string;
+  errorMessage?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+function importJobFlowDiagnosticFromRow(
+  job: LinkedEpocImportJobForDiagnostic,
+): EpocFlowDiagnostic {
+  const meta = job.metadata ?? {};
+  const metaFlow = meta.flow_diagnostic;
+  if (metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)) {
+    const d = metaFlow as EpocFlowDiagnostic;
+    if (d.phases && d.summary) return d;
+  }
+  return buildEpocImportJobFlowDiagnostic({
+    status: job.status,
+    errorMessage: job.errorMessage,
+    csvTotalRows: Number(meta.csv_total_data_rows ?? 0) || 0,
+    revenueCreated: Number(meta.revenue_entries_created_total ?? 0) || 0,
+    rowsSkipped: Number(meta.rows_skipped_total ?? 0) || 0,
+    rowsSkippedNoProduct: Number(meta.rows_skipped_no_product ?? 0) || 0,
+  });
+}
+
+function withLinkedImportJob(
+  syncDiagnostic: EpocFlowDiagnostic,
+  linkedImportJob?: LinkedEpocImportJobForDiagnostic | null,
+): EpocFlowDiagnostic {
+  if (!linkedImportJob) return syncDiagnostic;
+  return applyImportOutcomeToSyncFlowDiagnostic(
+    syncDiagnostic,
+    importJobFlowDiagnosticFromRow(linkedImportJob),
+  );
+}
+
 /** Infere diagnóstico a partir de metadata legada (runs/jobs antigos). */
 export function inferEpocFlowDiagnosticFromLegacy(input: {
   kind: "sync_run";
   outcome: string;
   summary: string;
   metadata?: Record<string, unknown> | null;
+  /** Job ligado via metadata.csv_revenue_import_job_id (evita fase 4 stale). */
+  linkedImportJob?: LinkedEpocImportJobForDiagnostic | null;
 }): EpocFlowDiagnostic;
 export function inferEpocFlowDiagnosticFromLegacy(input: {
   kind: "import_job";
@@ -54,6 +94,7 @@ export function inferEpocFlowDiagnosticFromLegacy(
         outcome: string;
         summary: string;
         metadata?: Record<string, unknown> | null;
+        linkedImportJob?: LinkedEpocImportJobForDiagnostic | null;
       }
     | {
         kind: "import_job";
@@ -62,22 +103,20 @@ export function inferEpocFlowDiagnosticFromLegacy(
         metadata?: Record<string, unknown> | null;
       },
 ): EpocFlowDiagnostic {
+  if (input.kind === "import_job") {
+    return importJobFlowDiagnosticFromRow({
+      status: input.status,
+      errorMessage: input.errorMessage,
+      metadata: input.metadata,
+    });
+  }
+
   const metaFlow = input.metadata?.flow_diagnostic;
   if (metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)) {
     const d = metaFlow as EpocFlowDiagnostic;
-    if (d.phases && d.summary) return d;
-  }
-
-  if (input.kind === "import_job") {
-    const meta = input.metadata ?? {};
-    return buildEpocImportJobFlowDiagnostic({
-      status: input.status,
-      errorMessage: input.errorMessage,
-      csvTotalRows: Number(meta.csv_total_data_rows ?? 0) || 0,
-      revenueCreated: Number(meta.revenue_entries_created_total ?? 0) || 0,
-      rowsSkipped: Number(meta.rows_skipped_total ?? 0) || 0,
-      rowsSkippedNoProduct: Number(meta.rows_skipped_no_product ?? 0) || 0,
-    });
+    if (d.phases && d.summary) {
+      return withLinkedImportJob(d, input.linkedImportJob);
+    }
   }
 
   const meta = input.metadata ?? {};
@@ -85,33 +124,42 @@ export function inferEpocFlowDiagnosticFromLegacy(
   const summary = input.summary;
 
   if (outcome === "no_tbl_export") {
-    return buildEpocSyncFlowDiagnostic({
-      loginOk: true,
-      tblExportFound: false,
-      portalSearchSummary: summary,
-      diasConsultados: Array.isArray(input.metadata?.dias_consultados)
-        ? (input.metadata!.dias_consultados as unknown[]).length
-        : undefined,
-    });
+    return withLinkedImportJob(
+      buildEpocSyncFlowDiagnostic({
+        loginOk: true,
+        tblExportFound: false,
+        portalSearchSummary: summary,
+        diasConsultados: Array.isArray(input.metadata?.dias_consultados)
+          ? (input.metadata!.dias_consultados as unknown[]).length
+          : undefined,
+      }),
+      input.linkedImportJob,
+    );
   }
 
   if (outcome === "success") {
-    return buildEpocSyncFlowDiagnostic({
-      loginOk: true,
-      tblExportFound: true,
-      csvUploaded: meta.tbl_export_found !== false,
-      linhasDados: Number(meta.linhas_dados ?? 0) || undefined,
-      diasComTabela: Number(meta.dias_com_tabela ?? 0) || undefined,
-      csvRevenueImportJobId:
-        typeof meta.csv_revenue_import_job_id === "string"
-          ? meta.csv_revenue_import_job_id
-          : null,
-    });
+    return withLinkedImportJob(
+      buildEpocSyncFlowDiagnostic({
+        loginOk: true,
+        tblExportFound: true,
+        csvUploaded: meta.tbl_export_found !== false,
+        linhasDados: Number(meta.linhas_dados ?? 0) || undefined,
+        diasComTabela: Number(meta.dias_com_tabela ?? 0) || undefined,
+        csvRevenueImportJobId:
+          typeof meta.csv_revenue_import_job_id === "string"
+            ? meta.csv_revenue_import_job_id
+            : null,
+      }),
+      input.linkedImportJob,
+    );
   }
 
-  return buildEpocSyncFlowDiagnostic({
-    loginOk: outcome !== "failed",
-    syncOk: false,
-    syncError: summary,
-  });
+  return withLinkedImportJob(
+    buildEpocSyncFlowDiagnostic({
+      loginOk: outcome !== "failed",
+      syncOk: false,
+      syncError: summary,
+    }),
+    input.linkedImportJob,
+  );
 }

@@ -7,6 +7,7 @@
  * Claim (SKIP LOCKED) → executa jobs até budget de tempo.
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { isPlatformAdminUser } from "../_shared/companyAccess.ts";
 import {
   authorizeNfePipeline,
   corsHeaders,
@@ -41,7 +42,21 @@ Deno.serve(async (req) => {
 
   const auth = await authorizeNfePipeline(req, body);
   if (!auth.ok) return auth.response;
-  const { admin, mode } = auth;
+  const { admin, mode, userId } = auth;
+
+  // Invoke manual processa a fila global — só cron secret ou is_admin.
+  if (mode === "manual") {
+    if (!userId || !(await isPlatformAdminUser(admin, userId))) {
+      return json(
+        {
+          ok: false,
+          error:
+            "Apenas administradores da plataforma podem invocar o worker manualmente.",
+        },
+        403,
+      );
+    }
+  }
 
   const budgetMs = workerBudgetMs();
   const maxJobs = workerJobsPerTick();

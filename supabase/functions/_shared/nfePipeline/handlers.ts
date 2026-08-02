@@ -23,6 +23,11 @@ import {
 } from "./focusClient.ts";
 import { processNfeDocumentById } from "./processNfeDocument.ts";
 import type { JobResult, NfeJobRow } from "./types.ts";
+import {
+  buildNfeCycleFlowDiagnostic,
+  type NfeFlowDiagnostic,
+} from "../nfeFlowDiagnostic.ts";
+import { upsertQueuedNfeConsultaHistory } from "./consultaHistory.ts";
 
 const LOG = "[nfe-pipeline]";
 
@@ -72,7 +77,11 @@ async function handleSyncCompany(
     return { ok: false, error: "focusnfe.id_empresa ausente", fatal: true };
   }
 
-  const cycleId = crypto.randomUUID();
+  const payloadCycle =
+    typeof job.payload?.cycle_id === "string"
+      ? job.payload.cycle_id.trim()
+      : "";
+  const cycleId = payloadCycle || crypto.randomUUID();
   const { error: updErr } = await admin
     .from("nfe_sync_state")
     .update({
@@ -85,6 +94,22 @@ async function handleSyncCompany(
     })
     .eq("company_id", companyId);
   if (updErr) return { ok: false, error: updErr.message };
+
+  // Garante histórico com etapa 1 pendente (cron sem pré-registro no dispatcher).
+  try {
+    await upsertQueuedNfeConsultaHistory(admin, {
+      companyId,
+      cycleId,
+      onboarding: state.mode === "onboarding",
+    });
+  } catch (e) {
+    console.warn(
+      LOG,
+      "consulta_history_queued_sync_company",
+      companyId,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 
   if (co.onboarding_fiscal.sefaz_unavailable === true) {
     await clearOnboardingSefaz(admin, companyId);
@@ -140,6 +165,13 @@ async function handleFetchPage(
     if (state.mode === "onboarding" && (page.network || (page.status != null && page.status >= 500) || page.status === 429)) {
       await patchOnboardingSefazUnavailable(admin, companyId, page.error);
     }
+    await recordConsultaHistory(
+      admin,
+      companyId,
+      state.cycle_id,
+      state.mode === "onboarding",
+      { searchFailed: true, searchError: page.error },
+    );
     await admin.from("nfe_sync_state").update({
       status: "backoff",
       last_error: page.error.slice(0, 500),
@@ -475,60 +507,120 @@ async function recordConsultaHistory(
   companyId: string,
   cycleId: string | null,
   onboarding: boolean,
+  opts?: {
+    searchFailed?: boolean;
+    searchError?: string | null;
+    flowDiagnostic?: NfeFlowDiagnostic | null;
+  },
 ): Promise<void> {
   if (!cycleId) return;
 
-  const { count: nfesEncontradas, error: countErr } = await admin
-    .from("nfe_documents")
-    .select("id", { count: "exact", head: true })
-    .eq("company_id", companyId)
-    .eq("cycle_id", cycleId)
-    .neq("fetch_status", "ignored");
+  try {
+    const base = () =>
+      admin
+        .from("nfe_documents")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("cycle_id", cycleId);
 
-  if (countErr) {
-    console.warn(LOG, "consulta_history_count", companyId, countErr.message);
-    return;
-  }
+    const [
+      listedRes,
+      ignoredRes,
+      downloadedRes,
+      downloadFailedRes,
+      processedRes,
+      processFailedRes,
+    ] = await Promise.all([
+      base().neq("fetch_status", "ignored"),
+      base().eq("fetch_status", "ignored"),
+      base()
+        .eq("fetch_status", "downloaded")
+        .not("xml_storage_path", "is", null),
+      base().eq("fetch_status", "failed"),
+      base().eq("fetch_status", "downloaded").eq("process_status", "done"),
+      base().eq("fetch_status", "downloaded").eq("process_status", "failed"),
+    ]);
 
-  const n = nfesEncontradas ?? 0;
+    for (const res of [
+      listedRes,
+      ignoredRes,
+      downloadedRes,
+      downloadFailedRes,
+      processedRes,
+      processFailedRes,
+    ]) {
+      if (res.error) {
+        console.warn(LOG, "consulta_history_count", companyId, res.error.message);
+      }
+    }
 
-  const { count: xmlTotal, error: xmlErr } = await admin
-    .from("nfe_documents")
-    .select("id", { count: "exact", head: true })
-    .eq("company_id", companyId)
-    .eq("cycle_id", cycleId)
-    .eq("fetch_status", "downloaded")
-    .not("xml_storage_path", "is", null);
+    const listed = listedRes.count ?? 0;
+    const ignored = ignoredRes.count ?? 0;
+    const downloaded = downloadedRes.count ?? 0;
+    const downloadFailed = downloadFailedRes.count ?? 0;
+    const processed = processedRes.count ?? 0;
+    const processFailed = processFailedRes.count ?? 0;
 
-  if (xmlErr) {
-    console.warn(LOG, "consulta_history_xml_count", companyId, xmlErr.message);
-  }
+    const flowDiagnostic =
+      opts?.flowDiagnostic ??
+      buildNfeCycleFlowDiagnostic({
+        // Só marca falha de busca se o ciclo não listou nada (falha mid-paginação usa agregados).
+        searchFailed:
+          Boolean(opts?.searchFailed) && listed === 0 && ignored === 0,
+        searchError: opts?.searchError,
+        listed,
+        downloaded,
+        downloadFailed,
+        processed,
+        processFailed,
+        ignored,
+      });
 
-  const { error: insErr } = await admin.from("nfe_consulta_history").upsert(
-    {
+    // Sem consulta_at: preserva o horário do enqueue; DEFAULT now() só em insert novo.
+    const { error: insErr } = await admin.from("nfe_consulta_history").upsert(
+      {
+        company_id: companyId,
+        exec_id: cycleId,
+        nfes_encontradas: listed,
+        staging_xml_total: downloaded,
+        onboarding,
+        summary: flowDiagnostic.summary,
+        flow_diagnostic: flowDiagnostic,
+        listed_count: listed,
+        downloaded_count: downloaded,
+        processed_count: processed,
+        failed_count: processFailed + downloadFailed,
+        ignored_count: ignored,
+      },
+      { onConflict: "company_id,exec_id" },
+    );
+
+    if (insErr) {
+      console.warn(LOG, "consulta_history_insert", companyId, insErr.message);
+      return;
+    }
+
+    console.log(LOG, JSON.stringify({
+      fase: "consulta_history",
       company_id: companyId,
       exec_id: cycleId,
-      consulta_at: nowIso(),
-      nfes_encontradas: n,
-      staging_xml_total: xmlTotal ?? 0,
+      nfes_encontradas: listed,
+      staging_xml_total: downloaded,
+      processed,
+      process_failed: processFailed,
+      download_failed: downloadFailed,
+      ignored,
       onboarding,
-    },
-    { onConflict: "company_id,exec_id" },
-  );
-
-  if (insErr) {
-    console.warn(LOG, "consulta_history_insert", companyId, insErr.message);
-    return;
+      flow_blocked_at: flowDiagnostic.blocked_at,
+    }));
+  } catch (e) {
+    console.warn(
+      LOG,
+      "consulta_history_exception",
+      companyId,
+      e instanceof Error ? e.message : String(e),
+    );
   }
-
-  console.log(LOG, JSON.stringify({
-    fase: "consulta_history",
-    company_id: companyId,
-    exec_id: cycleId,
-    nfes_encontradas: n,
-    staging_xml_total: xmlTotal ?? 0,
-    onboarding,
-  }));
 }
 
 async function handleCloseCycle(

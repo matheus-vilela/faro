@@ -10,9 +10,35 @@ export type NfeDispatcherResponse = {
   due?: number;
 };
 
+async function extractFunctionsInvokeError(
+  error: unknown,
+  data: unknown,
+): Promise<string> {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const bodyErr = (data as { error?: unknown }).error;
+    if (typeof bodyErr === "string" && bodyErr.trim()) return bodyErr.trim();
+  }
+  const ctx =
+    error && typeof error === "object" && "context" in error
+      ? (error as { context: unknown }).context
+      : null;
+  if (ctx && typeof ctx === "object" && ctx !== null && "json" in ctx) {
+    try {
+      const j = await (ctx as Response).json();
+      if (j && typeof j === "object" && typeof (j as { error?: unknown }).error === "string") {
+        const msg = String((j as { error: string }).error).trim();
+        if (msg) return msg;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return formatSupabaseFunctionError(error);
+}
+
 /**
  * Acorda o pipeline NF-e para uma unidade (ensure state + enfileira sync_company).
- * O worker (cron 1 min) processa a fila.
+ * O worker processa a fila (cron ou wake imediato do dispatcher).
  */
 export async function invokeNfePipelineForCompany(input: {
   companyId: string;
@@ -37,16 +63,17 @@ export async function invokeNfePipelineForCompany(input: {
     body,
   });
 
-  if (error) {
-    return {
-      ok: false,
-      error: formatSupabaseFunctionError(error),
-    };
-  }
-
   const typed = (data ?? {}) as NfeDispatcherResponse;
   if (typed.ok === true) {
     return { ok: true, data: typed };
+  }
+
+  if (error) {
+    return {
+      ok: false,
+      error: await extractFunctionsInvokeError(error, data),
+      data: typed,
+    };
   }
 
   return {

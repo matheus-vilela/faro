@@ -8,16 +8,46 @@
  * - Enfileira sync_company para empresas due (next_sync_at)
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import {
   authorizeNfePipeline,
   corsHeaders,
   json,
   parseJsonBody,
 } from "../_shared/nfePipeline/auth.ts";
+import { enqueueSyncCompanyWithQueuedHistory } from "../_shared/nfePipeline/consultaHistory.ts";
 import { dispatcherCompaniesPerTick } from "../_shared/nfePipeline/env.ts";
-import { enqueueJob } from "../_shared/nfePipeline/db.ts";
 
 const LOG = "[nfe-dispatcher]";
+
+/** Acorda o worker imediatamente (cron secret); falha é só log. */
+async function wakeNfeWorker(): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.replace(/\/+$/, "");
+  const secret = Deno.env.get("FOCUS_NFE_RECEBIDAS_CRON_SECRET")?.trim();
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
+  if (!supabaseUrl || !secret) return;
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/nfe-worker`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        apikey: serviceKey || secret,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(LOG, "wake_worker_http", res.status, text.slice(0, 200));
+    }
+  } catch (e) {
+    console.warn(
+      LOG,
+      "wake_worker",
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -54,13 +84,8 @@ Deno.serve(async (req) => {
     if (!userId) {
       return json({ ok: false, error: "Sessão inválida." }, 401);
     }
-    const { data: membership } = await admin
-      .from("user_companies")
-      .select("company_id")
-      .eq("user_id", userId)
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!membership) {
+    // Membro da unidade ou profiles.is_admin (acesso a qualquer unidade).
+    if (!(await userHasCompanyAccess(admin, userId, companyId))) {
       return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
     }
 
@@ -85,29 +110,45 @@ Deno.serve(async (req) => {
     ensured = companyId;
 
     const priority = Number((state as { priority?: number } | null)?.priority ?? 0);
-    const enq = await enqueueJob(admin, {
-      type: "sync_company",
+    const onboarding =
+      String((state as { mode?: string } | null)?.mode ?? "") === "onboarding";
+    const enq = await enqueueSyncCompanyWithQueuedHistory(admin, {
       companyId,
-      payload: {},
       priority,
+      onboarding,
     });
     if (enq.error) {
       return json({ ok: false, error: enq.error, ensured }, 500);
     }
-    if (enq.id) enqueued += 1;
+    if (enq.jobId) enqueued += 1;
 
     console.log(LOG, JSON.stringify({
       fase: "manual_wake",
       company_id: companyId,
-      job_id: enq.id,
+      job_id: enq.jobId,
+      cycle_id: enq.cycleId,
     }));
+
+    // Fire-and-forget: não esperar o worker (pode demorar e estourar o timeout do invoke).
+    try {
+      // deno-lint-ignore no-explicit-any
+      const ER = (globalThis as any).EdgeRuntime;
+      if (ER && typeof ER.waitUntil === "function") {
+        ER.waitUntil(wakeNfeWorker());
+      } else {
+        void wakeNfeWorker();
+      }
+    } catch {
+      void wakeNfeWorker();
+    }
 
     return json({
       ok: true,
       mode,
       ensured,
       enqueued,
-      job_id: enq.id,
+      job_id: enq.jobId,
+      cycle_id: enq.cycleId,
     });
   }
 
@@ -165,6 +206,8 @@ Deno.serve(async (req) => {
   for (const row of rows) {
     const cid = String((row as { company_id: string }).company_id);
     const priority = Number((row as { priority?: number }).priority ?? 0);
+    const onboarding =
+      String((row as { mode?: string }).mode ?? "") === "onboarding";
 
     // Reserva agenda para não re-pick no próximo tick enquanto o job não arranca.
     await admin.from("nfe_sync_state").update({
@@ -172,18 +215,21 @@ Deno.serve(async (req) => {
       updated_at: new Date().toISOString(),
     }).eq("company_id", cid);
 
-    const enq = await enqueueJob(admin, {
-      type: "sync_company",
+    const enq = await enqueueSyncCompanyWithQueuedHistory(admin, {
       companyId: cid,
-      payload: {},
       priority,
+      onboarding,
     });
     if (enq.error) {
       details.push({ company_id: cid, error: enq.error });
       continue;
     }
-    if (enq.id) enqueued += 1;
-    details.push({ company_id: cid, job_id: enq.id });
+    if (enq.jobId) enqueued += 1;
+    details.push({
+      company_id: cid,
+      job_id: enq.jobId,
+      cycle_id: enq.cycleId,
+    });
   }
 
   console.log(LOG, JSON.stringify({

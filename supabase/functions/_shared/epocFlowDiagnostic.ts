@@ -396,3 +396,46 @@ export function buildEpocImportJobFlowDiagnostic(
     "Estado de importação desconhecido.",
   );
 }
+
+/**
+ * Atualiza a fase 4 (e resumo/bloqueio) de um diagnóstico de exportação
+ * quando o job de importação já saiu de «pending».
+ * Mantém as fases 1–3 do sync (mais fiéis ao portal).
+ */
+export function applyImportOutcomeToSyncFlowDiagnostic(
+  syncDiagnostic: EpocFlowDiagnostic,
+  importDiagnostic: EpocFlowDiagnostic,
+): EpocFlowDiagnostic {
+  if (syncDiagnostic.phases.csv_import.status !== "pending") {
+    return syncDiagnostic;
+  }
+  if (importDiagnostic.phases.csv_import.status === "pending") {
+    return syncDiagnostic;
+  }
+
+  const importPhase = importDiagnostic.phases.csv_import;
+  const blockedAt =
+    importDiagnostic.blocked_at === "csv_import"
+      ? ("csv_import" as const)
+      : null;
+
+  let summary: string;
+  if (importPhase.status === "ok") {
+    summary = importDiagnostic.summary?.trim()
+      ? `Exportação concluída. ${importDiagnostic.summary}`
+      : "Exportação e importação do CSV concluídas.";
+  } else if (importPhase.status === "warn" || importPhase.status === "fail") {
+    summary = importDiagnostic.summary;
+  } else {
+    summary = syncDiagnostic.summary;
+  }
+
+  return {
+    blocked_at: blockedAt,
+    summary,
+    phases: {
+      ...syncDiagnostic.phases,
+      csv_import: importPhase,
+    },
+  };
+}
