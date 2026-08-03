@@ -163,6 +163,14 @@ export function ProductStockLotsSection({
 
   const alerts = useMemo(() => summarizeLotAlerts(lots), [lots]);
 
+  if (loading && !isControlled) {
+    return null;
+  }
+
+  if (lots.length === 0) {
+    return null;
+  }
+
   return (
     <div
       className={cn(
@@ -234,68 +242,57 @@ export function ProductStockLotsSection({
         </div>
       </div>
 
-      {loading && !isControlled ? (
-        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Carregando lotes…
-        </div>
-      ) : lots.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">
-          Nenhum lote com validade registrado.
-        </p>
-      ) : (
-        <ul className="mt-4 space-y-2">
-          {lots.map((lot) => {
-            const status = lotExpiryStatus(lot.expiry_date);
-            return (
-              <li
-                key={lot.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/80 bg-background/90 px-3 py-2.5 text-sm"
-              >
-                <div>
-                  <p className="font-medium tabular-nums">
-                    {Number(lot.quantity).toLocaleString("pt-BR")} {unit}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Validade: {formatLotExpiryDate(lot.expiry_date)}
-                    {lot.stock_movement_id ? " · via movimentação" : null}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge
-                    variant={
-                      status === "expired"
-                        ? "destructive"
-                        : status === "near"
-                          ? "outline"
-                          : "secondary"
-                    }
-                    className={cn(
-                      status === "near" &&
-                        "border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-50",
-                    )}
+      <ul className="mt-4 space-y-2">
+        {lots.map((lot) => {
+          const status = lotExpiryStatus(lot.expiry_date);
+          return (
+            <li
+              key={lot.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/80 bg-background/90 px-3 py-2.5 text-sm"
+            >
+              <div>
+                <p className="font-medium tabular-nums">
+                  {Number(lot.quantity).toLocaleString("pt-BR")} {unit}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Validade: {formatLotExpiryDate(lot.expiry_date)}
+                  {lot.stock_movement_id ? " · via movimentação" : null}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={
+                    status === "expired"
+                      ? "destructive"
+                      : status === "near"
+                        ? "outline"
+                        : "secondary"
+                  }
+                  className={cn(
+                    status === "near" &&
+                      "border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-50",
+                  )}
+                >
+                  {LOT_EXPIRY_STATUS_LABEL[status]}
+                </Badge>
+                {!readOnly ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    disabled={saving}
+                    onClick={() => void removeLot(lot.id)}
+                    aria-label="Remover lote"
                   >
-                    {LOT_EXPIRY_STATUS_LABEL[status]}
-                  </Badge>
-                  {!readOnly ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      disabled={saving}
-                      onClick={() => void removeLot(lot.id)}
-                      aria-label="Remover lote"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
 
       {!readOnly ? (
         <div className="mt-5 rounded-xl border border-dashed border-amber-500/35 bg-background/60 p-4">

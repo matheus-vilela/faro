@@ -19,6 +19,7 @@ import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalog
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
+import { ProductRecipeLinksSection } from "@/components/products/ProductRecipeLinksSection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
   PRODUCT_SHEET_INPUT,
@@ -2881,6 +2882,18 @@ export function Produtos() {
                                 .eq("id", stockProduct.id)
                                 .maybeSingle();
                               if (data) setStockProduct(data as Product);
+                            }}
+                          />
+                        ) : null}
+
+                        {currentCompany?.id ? (
+                          <ProductRecipeLinksSection
+                            companyId={currentCompany.id}
+                            productId={stockProduct.id}
+                            productName={stockProduct.name}
+                            className={SHEET_SECTION}
+                            onChanged={() => {
+                              void fetchProducts();
                             }}
                           />
                         ) : null}

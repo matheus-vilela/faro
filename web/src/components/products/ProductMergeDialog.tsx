@@ -48,6 +48,11 @@ type ProductMergeDialogProps = {
   onMerged: (winnerId: string) => void;
   /** Pré-seleciona o outro produto (ex.: par sugerido no dashboard). */
   initialPartnerId?: string | null;
+  /**
+   * Se true, o source permanece no catálogo (ex.: produto vendido/PDV).
+   * Default false = partner permanece.
+   */
+  initialSurvivorIsSource?: boolean;
 };
 
 function unitLabel(code: string) {
@@ -141,6 +146,7 @@ export function ProductMergeDialog({
   formatCurrency,
   onMerged,
   initialPartnerId = null,
+  initialSurvivorIsSource = false,
 }: ProductMergeDialogProps) {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -148,7 +154,9 @@ export function ProductMergeDialog({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [partner, setPartner] = useState<Product | null>(null);
   const [partnerId, setPartnerId] = useState<string | null>(null);
-  const [survivorIsSource, setSurvivorIsSource] = useState(false);
+  const [survivorIsSource, setSurvivorIsSource] = useState(
+    initialSurvivorIsSource,
+  );
   const [step, setStep] = useState<"pick" | "confirm">("pick");
   const [merging, setMerging] = useState(false);
   const [winnerConversions, setWinnerConversions] = useState<
@@ -163,11 +171,12 @@ export function ProductMergeDialog({
 
   useEffect(() => {
     if (!open) return;
+    setSurvivorIsSource(initialSurvivorIsSource);
     if (initialPartnerId && initialPartnerId !== sourceProduct.id) {
       setPartnerId(initialPartnerId);
       setStep("confirm");
     }
-  }, [open, initialPartnerId, sourceProduct.id]);
+  }, [open, initialPartnerId, sourceProduct.id, initialSurvivorIsSource]);
 
   useEffect(() => {
     if (!open || !companyId) return;

@@ -2,7 +2,7 @@ import { DashboardImportReviewEpocRecipesNoIngredientsCard } from "./DashboardIm
 import { DashboardImportReviewPendingRevenueLinkCard } from "./DashboardImportReviewPendingRevenueLinkCard";
 import { DashboardProductRecipeMatchPanel } from "./DashboardProductRecipeMatchPanel";
 
-/** Revisão pós-importação: fichas pendentes, correlação estoque e ligação de vendas. */
+/** Revisão pós-importação: fichas pendentes, utilizações de compras e ligação de vendas. */
 export function DashboardImportReviewHub({
   companyId,
   refreshSignal,

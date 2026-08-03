@@ -575,6 +575,11 @@ export const EstoqueReceitasPanel = forwardRef<
         ingredient_movements_created: number;
       },
     ) => void;
+    /**
+     * Ao abrir ficha nova (sheetOnly / auto-open), inclui este produto
+     * como primeiro insumo (qty 1 na unidade do produto).
+     */
+    prefillIngredientProductId?: string | null;
   }
 >(function EstoqueReceitasPanel(
   {
@@ -591,6 +596,7 @@ export const EstoqueReceitasPanel = forwardRef<
     onSheetOpenChange,
     technicalSheetOutputProductId,
     onTechnicalSheetSaved,
+    prefillIngredientProductId,
   },
   ref,
 ) {
@@ -643,6 +649,7 @@ export const EstoqueReceitasPanel = forwardRef<
     prefillNewRecipeOutputProductId,
     initialOpenRecipeId,
     technicalSheetOutputProductId,
+    prefillIngredientProductId,
   ]);
 
   const ingredientExcludeProductId = useMemo(() => {
@@ -700,6 +707,49 @@ export const EstoqueReceitasPanel = forwardRef<
     prefillNewRecipeAutoOpen,
     products,
     loading,
+    onPrefillConsumed,
+  ]);
+
+  /** Abre ficha nova com um insumo pré-selecionado (ex.: correlação compra → ficha). */
+  useEffect(() => {
+    const ingId = prefillIngredientProductId?.trim();
+    if (!ingId) return;
+    if (loading) return;
+    if (initialOpenRecipeId?.trim() || technicalSheetPid) return;
+    if (prefillNewRecipeOutputProductId?.trim() && prefillNewRecipeAutoOpen) {
+      return;
+    }
+    const match = products.find((p) => p.id === ingId);
+    if (!match) return;
+    if (prefillHandledRef.current) return;
+    prefillHandledRef.current = true;
+    setEditingRecipeId(null);
+    setSheetMode("edit");
+    setName("");
+    setBatchYield("1");
+    setOutputId("");
+    const unit = (match.unit ?? "un").trim() || "un";
+    setIngs([
+      {
+        product_id: match.id,
+        quantity: "1",
+        unit_code: unit,
+      },
+    ]);
+    setSavedIngsSnapshot([]);
+    setSheetOpen(true);
+    toast.message(
+      `«${match.name}» já está como insumo. Escolha o produto de saída e complete a ficha.`,
+    );
+    onPrefillConsumed?.();
+  }, [
+    prefillIngredientProductId,
+    products,
+    loading,
+    initialOpenRecipeId,
+    technicalSheetPid,
+    prefillNewRecipeOutputProductId,
+    prefillNewRecipeAutoOpen,
     onPrefillConsumed,
   ]);
 

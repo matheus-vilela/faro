@@ -16,7 +16,7 @@ import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import type { ProductRecipeMatchRow } from "@/lib/onboardingProductRecipeMatch";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export type IngredientLinkConfig = {
@@ -159,9 +159,12 @@ export function DashboardRecipeMatchIngredientConfig({
     inputUnitCode,
   ]);
 
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   useEffect(() => {
-    onChange(config);
-  }, [config, onChange]);
+    onChangeRef.current(config);
+  }, [config]);
 
   if (loading) {
     return (
