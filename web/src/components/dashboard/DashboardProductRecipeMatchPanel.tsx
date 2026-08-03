@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -26,6 +36,7 @@ import {
   RECIPE_MATCH_SUGGESTION_THRESHOLD,
   recipeMatchCreateErrorMessage,
   recipeMatchSuggestionScore,
+  undoProductRecipeMatch,
   type ProductRecipeMatchRow,
 } from "@/lib/onboardingProductRecipeMatch";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
@@ -41,6 +52,7 @@ import {
   Merge,
   Search,
   Sparkles,
+  Undo2,
   UtensilsCrossed,
   X,
 } from "lucide-react";
@@ -345,6 +357,8 @@ export function DashboardProductRecipeMatchPanel({
   const [mergeSource, setMergeSource] = useState<Product | null>(null);
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [undoConfirmExit, setUndoConfirmExit] =
+    useState<ProductRecipeMatchRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -537,6 +551,31 @@ export function DashboardProductRecipeMatchPanel({
     onLinked?.();
   };
 
+  const runUndoRecipe = async (exit: ProductRecipeMatchRow) => {
+    if (!exit.recipe_id) return;
+    setBusyKey(`undo:${exit.product_id}`);
+    const res = await undoProductRecipeMatch(
+      supabase,
+      companyId,
+      exit.recipe_id,
+    );
+    setBusyKey(null);
+    setUndoConfirmExit(null);
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível desfazer a ficha.");
+      return;
+    }
+    toast.success(
+      `Ficha de «${exit.name}» desfeita. O produto voltou ao estoque normal.`,
+    );
+    if (expandedRecipeId === exit.product_id) {
+      setExpandedRecipeId(null);
+      setIngredientConfig(null);
+    }
+    void load();
+    onLinked?.();
+  };
+
   if (!loading && !error && exitOnly.length === 0 && entryOnly.length === 0) {
     return null;
   }
@@ -710,6 +749,24 @@ export function DashboardProductRecipeMatchPanel({
                             <ChefHat className="h-3.5 w-3.5" />
                             <span className="ml-1.5">Ficha</span>
                           </Button>
+                          {exit.recipe_id ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                              disabled={!!rowBusy}
+                              onClick={() => setUndoConfirmExit(exit)}
+                              title="Desfazer ficha técnica"
+                            >
+                              {busyKey === `undo:${exit.product_id}` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Undo2 className="h-3.5 w-3.5" />
+                              )}
+                              <span className="ml-1.5">Desfazer</span>
+                            </Button>
+                          ) : null}
                           <Button
                             type="button"
                             size="sm"
@@ -841,6 +898,58 @@ export function DashboardProductRecipeMatchPanel({
           }}
         />
       ) : null}
+
+      <AlertDialog
+        open={!!undoConfirmExit}
+        onOpenChange={(open) => {
+          if (!open) setUndoConfirmExit(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desfazer ficha técnica?</AlertDialogTitle>
+            <AlertDialogDescription className="text-pretty">
+              Isso remove a ficha
+              {undoConfirmExit ? ` de «${undoConfirmExit.name}»` : ""} e os
+              insumos ligados. O produto volta ao estoque normal e ambos
+              reaparecem na lista para unificar ou refazer o pareamento.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              type="button"
+              disabled={
+                !!undoConfirmExit &&
+                busyKey === `undo:${undoConfirmExit.product_id}`
+              }
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={
+                !undoConfirmExit ||
+                busyKey === `undo:${undoConfirmExit.product_id}`
+              }
+              onClick={(e) => {
+                e.preventDefault();
+                if (undoConfirmExit) void runUndoRecipe(undoConfirmExit);
+              }}
+            >
+              {undoConfirmExit &&
+              busyKey === `undo:${undoConfirmExit.product_id}` ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Desfazendo…
+                </>
+              ) : (
+                "Desfazer ficha"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

@@ -204,6 +204,59 @@ export function recipeMatchCreateErrorMessage(code: string | undefined): string 
   }
 }
 
+export async function undoProductRecipeMatch(
+  client: SupabaseClient,
+  companyId: string,
+  recipeId: string,
+): Promise<{ ok: boolean; output_product_id?: string; error?: string }> {
+  const { data, error } = await client.rpc("dashboard_product_recipe_undo", {
+    p_company_id: companyId,
+    p_recipe_id: recipeId,
+  });
+  if (error) return { ok: false, error: error.message };
+  const row = data as {
+    ok?: boolean;
+    output_product_id?: string;
+    error?: string;
+    message?: string;
+  };
+  if (!row?.ok) {
+    const code = row?.error ?? "unknown";
+    return {
+      ok: false,
+      error: recipeMatchUndoErrorMessage(code, row?.message),
+    };
+  }
+  return {
+    ok: true,
+    output_product_id: row.output_product_id
+      ? String(row.output_product_id)
+      : undefined,
+  };
+}
+
+export function recipeMatchUndoErrorMessage(
+  code: string | undefined,
+  fallbackMessage?: string,
+): string {
+  switch (code) {
+    case "recipe_not_found":
+      return "Ficha técnica não encontrada.";
+    case "recipe_sale_entries_exist":
+      return "Existem vendas ligadas à ficha; não é possível desfazer automaticamente.";
+    case "forbidden":
+      return "Sem permissão para esta unidade.";
+    case "not_authenticated":
+      return "Sessão expirada. Entre novamente.";
+    default:
+      return (
+        fallbackMessage ??
+        code ??
+        "Não foi possível desfazer a ficha técnica."
+      );
+  }
+}
+
 function normalizeText(s: string): string {
   return s
     .normalize("NFD")

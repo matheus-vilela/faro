@@ -52,6 +52,7 @@ import {
   saveProductTechnicalSheet,
   technicalSheetErrorMessage,
 } from "@/lib/productTechnicalSheet";
+import { undoProductRecipeMatch } from "@/lib/onboardingProductRecipeMatch";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
@@ -617,6 +618,7 @@ export const EstoqueReceitasPanel = forwardRef<
     NormalizedIngRow[]
   >([]);
   const [unsavedLeaveOpen, setUnsavedLeaveOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const unsavedLeaveProceedRef = useRef<(() => void) | null>(null);
   const unsavedLeaveResolveRef = useRef<
     ((result: "proceed" | "cancel") => void) | null
@@ -1188,17 +1190,20 @@ export const EstoqueReceitasPanel = forwardRef<
   const deleteRecipe = async () => {
     if (!editingRecipeId) return;
     setSaving(true);
-    const { error } = await supabase
-      .from("recipes")
-      .delete()
-      .eq("id", editingRecipeId);
+    const res = await undoProductRecipeMatch(
+      supabase,
+      companyId,
+      editingRecipeId,
+    );
     setSaving(false);
-    if (error) {
-      console.error(error);
-      toast.error("Não foi possível excluir a receita.");
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível excluir a receita.");
       return;
     }
-    toast.success("Receita excluída.");
+    toast.success(
+      "Receita excluída. O produto de saída voltou ao estoque normal.",
+    );
+    setDeleteConfirmOpen(false);
     setSheetOpen(false);
     setEditingRecipeId(null);
     setName("");
@@ -1664,7 +1669,7 @@ export const EstoqueReceitasPanel = forwardRef<
                       size="sm"
                       variant="destructive"
                       disabled={saving}
-                      onClick={() => void deleteRecipe()}
+                      onClick={() => setDeleteConfirmOpen(true)}
                     >
                       <Trash2 className="mr-1.5 h-4 w-4" />
                       Excluir
@@ -1851,6 +1856,48 @@ export const EstoqueReceitasPanel = forwardRef<
                 </>
               ) : (
                 "Salvar insumos"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open && !saving) setDeleteConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir ficha técnica?</AlertDialogTitle>
+            <AlertDialogDescription className="text-pretty">
+              Isso remove a ficha
+              {name.trim() ? ` «${name.trim()}»` : ""} e os insumos ligados. O
+              produto de saída volta ao estoque normal e pode ser correlacionado
+              de novo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={saving}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={saving || !editingRecipeId}
+              onClick={(e) => {
+                e.preventDefault();
+                void deleteRecipe();
+              }}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Excluindo…
+                </>
+              ) : (
+                "Excluir ficha"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
