@@ -7,6 +7,7 @@
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { corsHeaders } from "./cors.ts";
 
 const MAX_XML_BYTES = 4 * 1024 * 1024;
@@ -26,7 +27,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !anonKey) {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !anonKey || !serviceKey) {
     return json({ ok: false, error: "Configuração do servidor incompleta." }, 500);
   }
 
@@ -61,13 +63,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "XML demasiado grande (máx. 4 MB)." }, 413);
   }
 
-  const { data: member, error: memErr } = await supabase
-    .from("user_companies")
-    .select("company_id")
-    .eq("user_id", user.id)
-    .eq("company_id", companyId)
-    .maybeSingle();
-  if (memErr || !member) {
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
     return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
   }
 

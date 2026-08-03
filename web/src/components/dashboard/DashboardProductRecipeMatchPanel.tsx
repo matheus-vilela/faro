@@ -8,31 +8,43 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   DashboardRecipeMatchIngredientConfig,
   type IngredientLinkConfig,
 } from "@/components/dashboard/DashboardRecipeMatchIngredientConfig";
+import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
+import { dashboardImportReviewSetResolution } from "@/lib/dashboardImportReview";
+import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import {
   createProductRecipeMatch,
   fetchProductRecipeMatchLists,
+  linkProductRecipeMatch,
+  RECIPE_MATCH_SUGGESTION_THRESHOLD,
   recipeMatchCreateErrorMessage,
+  recipeMatchSuggestionScore,
   type ProductRecipeMatchRow,
-  type RecipeMatchDraftIngredient,
 } from "@/lib/onboardingProductRecipeMatch";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import type { Product } from "@/types/product";
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Check,
   ChefHat,
+  ChevronsUpDown,
+  EyeOff,
   Loader2,
-  Plus,
+  Merge,
   Search,
-  Trash2,
+  Sparkles,
   UtensilsCrossed,
+  X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 function formatQty(n: number, unit: string): string {
@@ -40,94 +52,275 @@ function formatQty(n: number, unit: string): string {
   return unit && unit !== "—" ? `${q} ${unit}` : q;
 }
 
-type ProductPickProps = {
-  rows: ProductRecipeMatchRow[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  search: string;
-  onSearchChange: (v: string) => void;
-  emptyLabel: string;
-  variant: "exit" | "entry";
-};
+function formatCurrency(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 
-function ProductPickList({
-  rows,
-  selectedId,
-  onSelect,
-  search,
-  onSearchChange,
-  emptyLabel,
-  variant,
-}: ProductPickProps) {
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => r.name.toLowerCase().includes(q));
-  }, [rows, search]);
+function productSub(row: ProductRecipeMatchRow): string {
+  const parts = [`Saldo: ${formatQty(row.current_quantity, row.unit)}`];
+  if (row.sku) parts.push(`SKU ${row.sku}`);
+  if (row.ean) parts.push(`EAN ${row.ean}`);
+  else if (row.barcode) parts.push(`Cód. ${row.barcode}`);
+  if (row.recipe_id) parts.push("já tem ficha");
+  return parts.join(" · ");
+}
 
-  const accent =
-    variant === "exit"
-      ? "border-violet-500/50 bg-violet-500/10 ring-violet-500/30"
-      : "border-sky-500/50 bg-sky-500/10 ring-sky-500/30";
-
+function SideCard({
+  title,
+  sub,
+  borderClass,
+}: {
+  title: string;
+  sub: string;
+  borderClass?: string;
+}) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Buscar por nome…"
-          className="h-9 pl-8"
-          aria-label="Buscar produto"
-        />
+    <div
+      className={cn(
+        "flex h-full min-w-0 items-center gap-3 rounded-lg border bg-background px-3 py-2.5",
+        borderClass,
+      )}
+    >
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <p className="truncate text-sm font-semibold leading-tight" title={title}>
+          {title}
+        </p>
+        {sub ? (
+          <p className="mt-0.5 truncate text-xs text-muted-foreground" title={sub}>
+            {sub}
+          </p>
+        ) : null}
       </div>
-      <ul className="max-h-[min(22rem,50vh)] min-h-[8rem] flex-1 space-y-1 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 p-1.5">
-        {filtered.length === 0 ? (
-          <li className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {emptyLabel}
-          </li>
-        ) : (
-          filtered.map((r) => {
-            const selected = selectedId === r.product_id;
-            return (
-              <li key={r.product_id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(r.product_id)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-lg border border-transparent px-2.5 py-2 text-left text-sm transition-colors hover:bg-background/80",
-                    selected && cn("ring-1", accent),
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-                      selected
-                        ? variant === "exit"
-                          ? "border-violet-600 bg-violet-600 text-white"
-                          : "border-sky-600 bg-sky-600 text-white"
-                        : "border-muted-foreground/40 bg-background",
-                    )}
-                    aria-hidden
-                  >
-                    {selected ? <Check className="h-3 w-3" /> : null}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{r.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      Saldo: {formatQty(r.current_quantity, r.unit)}
-                      {r.recipe_id ? " · já tem ficha" : null}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
-          })
-        )}
-      </ul>
     </div>
   );
+}
+
+function EntryPickField({
+  selected,
+  options,
+  scores,
+  onSelect,
+  onClear,
+  disabled,
+}: {
+  selected: ProductRecipeMatchRow | null;
+  options: ProductRecipeMatchRow[];
+  scores: Map<string, number>;
+  onSelect: (id: string) => void;
+  onClear: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  usePopoverListScrollFix(open, listRef);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = !q
+      ? options
+      : options.filter(
+          (r) =>
+            r.name.toLowerCase().includes(q) ||
+            (r.sku ?? "").toLowerCase().includes(q) ||
+            (r.ean ?? "").toLowerCase().includes(q) ||
+            (r.barcode ?? "").toLowerCase().includes(q),
+        );
+    return [...base].sort((a, b) => {
+      const sa = scores.get(a.product_id) ?? 0;
+      const sb = scores.get(b.product_id) ?? 0;
+      if (sb !== sa) return sb - sa;
+      return a.name.localeCompare(b.name, "pt-BR");
+    });
+  }, [options, search, scores]);
+
+  const selectedScore = selected
+    ? (scores.get(selected.product_id) ?? 0)
+    : 0;
+  const selectedSuggested =
+    selectedScore >= RECIPE_MATCH_SUGGESTION_THRESHOLD;
+
+  return (
+    <div className="flex h-full min-w-0 items-stretch gap-1">
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          if (disabled) return;
+          setOpen(next);
+          if (!next) setSearch("");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            className={cn(
+              "flex h-full min-h-[3.25rem] w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+              selected
+                ? "border-sky-500/40 bg-sky-500/5 hover:bg-sky-500/10"
+                : "border-dashed border-muted-foreground/35 bg-background hover:border-sky-500/40 hover:bg-muted/30",
+              disabled && "opacity-60",
+            )}
+          >
+            <div className="min-w-0 flex-1 overflow-hidden">
+              {selected ? (
+                <>
+                  <p className="flex items-center gap-1.5 truncate text-sm font-semibold leading-tight">
+                    <span className="truncate">{selected.name}</span>
+                    {selectedSuggested ? (
+                      <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[0.65rem] font-medium text-amber-900 dark:text-amber-100">
+                        <Sparkles className="h-3 w-3" aria-hidden />
+                        Sugestão
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {productSub(selected)}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Selecionar item comprado…
+                </p>
+              )}
+            </div>
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0"
+          align="start"
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <div className="border-b border-border p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, SKU ou EAN…"
+                className="h-9 pl-8"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div
+            ref={listRef}
+            className="max-h-64 overflow-y-auto overscroll-contain p-1"
+          >
+            {filtered.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                Nenhum item só com entrada disponível.
+              </p>
+            ) : (
+              filtered.map((r) => {
+                const score = scores.get(r.product_id) ?? 0;
+                const suggested = score >= RECIPE_MATCH_SUGGESTION_THRESHOLD;
+                const isSel = selected?.product_id === r.product_id;
+                return (
+                  <button
+                    key={r.product_id}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted",
+                      isSel && "bg-sky-500/10 ring-1 ring-sky-500/30",
+                    )}
+                    onClick={() => {
+                      onSelect(r.product_id);
+                      setOpen(false);
+                      setSearch("");
+                    }}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                        isSel
+                          ? "border-sky-600 bg-sky-600 text-white"
+                          : "border-muted-foreground/30",
+                      )}
+                    >
+                      {isSel ? <Check className="h-2.5 w-2.5" /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate font-medium">{r.name}</span>
+                        {suggested ? (
+                          <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[0.65rem] font-medium text-amber-900 dark:text-amber-100">
+                            <Sparkles className="h-3 w-3" aria-hidden />
+                            Sugestão
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {productSub(r)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {selected ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-auto w-9 shrink-0 self-center text-muted-foreground"
+          aria-label="Limpar seleção"
+          disabled={disabled}
+          onClick={onClear}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+async function fetchProductById(productId: string): Promise<Product | null> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", productId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as Product;
+}
+
+function buildAutoPairings(
+  exitOnly: ProductRecipeMatchRow[],
+  entryOnly: ProductRecipeMatchRow[],
+): Record<string, string> {
+  const used = new Set<string>();
+  const next: Record<string, string> = {};
+  const ranked = exitOnly
+    .map((exit) => {
+      let bestId: string | null = null;
+      let bestScore = 0;
+      for (const entry of entryOnly) {
+        const score = recipeMatchSuggestionScore(exit, entry);
+        if (score > bestScore) {
+          bestScore = score;
+          bestId = entry.product_id;
+        }
+      }
+      return { exitId: exit.product_id, bestId, bestScore };
+    })
+    .filter(
+      (r) =>
+        r.bestId &&
+        r.bestScore >= RECIPE_MATCH_SUGGESTION_THRESHOLD,
+    )
+    .sort((a, b) => b.bestScore - a.bestScore);
+
+  for (const r of ranked) {
+    if (!r.bestId || used.has(r.bestId)) continue;
+    used.add(r.bestId);
+    next[r.exitId] = r.bestId;
+  }
+  return next;
 }
 
 export function DashboardProductRecipeMatchPanel({
@@ -143,18 +336,15 @@ export function DashboardProductRecipeMatchPanel({
   const [error, setError] = useState<string | null>(null);
   const [exitOnly, setExitOnly] = useState<ProductRecipeMatchRow[]>([]);
   const [entryOnly, setEntryOnly] = useState<ProductRecipeMatchRow[]>([]);
-  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
-  const [selectedIngredientId, setSelectedIngredientId] = useState<
-    string | null
-  >(null);
-  const [exitSearch, setExitSearch] = useState("");
-  const [entrySearch, setEntrySearch] = useState("");
+  const [pairings, setPairings] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState("");
+  const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null);
   const [ingredientConfig, setIngredientConfig] =
     useState<IngredientLinkConfig | null>(null);
-  const [pendingIngredients, setPendingIngredients] = useState<
-    RecipeMatchDraftIngredient[]
-  >([]);
-  const [creating, setCreating] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [mergeSource, setMergeSource] = useState<Product | null>(null);
+  const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,15 +355,38 @@ export function DashboardProductRecipeMatchPanel({
       setError(res.error);
       setExitOnly([]);
       setEntryOnly([]);
+      setPairings({});
       return;
     }
     setExitOnly(res.exitOnly);
     setEntryOnly(res.entryOnly);
-    setSelectedOutputId((prev) =>
+    setPairings((prev) => {
+      const auto = buildAutoPairings(res.exitOnly, res.entryOnly);
+      const next: Record<string, string> = {};
+      for (const exit of res.exitOnly) {
+        const kept = prev[exit.product_id];
+        if (
+          kept &&
+          res.entryOnly.some((e) => e.product_id === kept)
+        ) {
+          next[exit.product_id] = kept;
+        } else if (auto[exit.product_id]) {
+          next[exit.product_id] = auto[exit.product_id];
+        }
+      }
+      // Evita dois exits apontando para o mesmo entry
+      const used = new Set<string>();
+      for (const [exitId, entryId] of Object.entries(next)) {
+        if (used.has(entryId)) {
+          delete next[exitId];
+        } else {
+          used.add(entryId);
+        }
+      }
+      return next;
+    });
+    setExpandedRecipeId((prev) =>
       prev && res.exitOnly.some((r) => r.product_id === prev) ? prev : null,
-    );
-    setSelectedIngredientId((prev) =>
-      prev && res.entryOnly.some((r) => r.product_id === prev) ? prev : null,
     );
   }, [companyId]);
 
@@ -181,90 +394,145 @@ export function DashboardProductRecipeMatchPanel({
     void load();
   }, [load, refreshSignal]);
 
-  const selectedOutput = exitOnly.find((r) => r.product_id === selectedOutputId);
-  const selectedIngredient = entryOnly.find(
-    (r) => r.product_id === selectedIngredientId,
+  const usedEntryIds = useMemo(
+    () => new Set(Object.values(pairings)),
+    [pairings],
   );
 
-  const outputHasRecipe = !!selectedOutput?.recipe_id;
+  const filteredExit = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return exitOnly;
+    return exitOnly.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        (r.sku ?? "").toLowerCase().includes(q) ||
+        (r.ean ?? "").toLowerCase().includes(q),
+    );
+  }, [exitOnly, filter]);
 
-  useEffect(() => {
-    setPendingIngredients([]);
-    setSelectedIngredientId(null);
-    setIngredientConfig(null);
-  }, [selectedOutputId]);
-
-  useEffect(() => {
-    setIngredientConfig(null);
-  }, [selectedIngredientId]);
-
-  const entryRowsForPick = useMemo(
-    () =>
-      entryOnly.filter(
-        (r) =>
-          r.product_id !== selectedOutputId &&
-          !pendingIngredients.some((p) => p.product_id === r.product_id),
-      ),
-    [entryOnly, pendingIngredients, selectedOutputId],
-  );
-
-  const canAddToList =
-    !!selectedOutputId &&
-    !outputHasRecipe &&
-    !!selectedIngredientId &&
-    selectedIngredientId !== selectedOutputId &&
-    ingredientConfig?.isValid === true &&
-    ingredientConfig.stockQuantityPreview != null;
-
-  const canCreateRecipe =
-    !!selectedOutputId &&
-    !outputHasRecipe &&
-    pendingIngredients.length > 0 &&
-    !creating;
-
-  const addToPendingList = () => {
-    if (!canAddToList || !selectedIngredient || !ingredientConfig) return;
-    const stockQty = ingredientConfig.stockQuantityPreview;
-    if (stockQty == null || stockQty <= 0) return;
-
-    setPendingIngredients((prev) => [
-      ...prev,
-      {
-        product_id: selectedIngredient.product_id,
-        name: selectedIngredient.name,
-        input_quantity: ingredientConfig.inputQuantity,
-        input_unit_code: ingredientConfig.inputUnitCode,
-        stock_quantity: stockQty,
-      },
-    ]);
-    toast.success(`«${selectedIngredient.name}» adicionado à lista da ficha.`);
-    setSelectedIngredientId(null);
-    setIngredientConfig(null);
-  };
-
-  const removeFromPending = (productId: string) => {
-    setPendingIngredients((prev) => prev.filter((p) => p.product_id !== productId));
-  };
-
-  const runCreateRecipe = async () => {
-    if (!canCreateRecipe || !selectedOutputId) return;
-    setCreating(true);
-    const res = await createProductRecipeMatch(supabase, {
-      companyId,
-      outputProductId: selectedOutputId,
-      ingredients: pendingIngredients,
+  const setPair = (exitId: string, entryId: string | null) => {
+    setPairings((prev) => {
+      const next = { ...prev };
+      if (!entryId) {
+        delete next[exitId];
+        return next;
+      }
+      for (const [eId, enId] of Object.entries(next)) {
+        if (eId !== exitId && enId === entryId) delete next[eId];
+      }
+      next[exitId] = entryId;
+      return next;
     });
-    setCreating(false);
+  };
+
+  const runDismiss = async (exit: ProductRecipeMatchRow) => {
+    setBusyKey(`dismiss:${exit.product_id}`);
+    const res = await dashboardImportReviewSetResolution(supabase, {
+      companyId,
+      productId: exit.product_id,
+      bucket: "EXIT_NO_ENTRY",
+      resolution: "DISMISSED",
+    });
+    setBusyKey(null);
     if (!res.ok) {
-      toast.error(recipeMatchCreateErrorMessage(res.error));
+      toast.error(res.error ?? "Não foi possível dispensar.");
       return;
     }
-    toast.success(
-      `Ficha técnica criada para «${selectedOutput?.name ?? "prato"}» com ${res.ingredients_count ?? pendingIngredients.length} insumo(s).`,
-    );
-    setPendingIngredients([]);
-    setSelectedOutputId(null);
-    setSelectedIngredientId(null);
+    toast.success(`«${exit.name}» dispensado desta revisão.`);
+    if (expandedRecipeId === exit.product_id) setExpandedRecipeId(null);
+    void load();
+    onLinked?.();
+  };
+
+  const runDismissEntry = async (entry: ProductRecipeMatchRow) => {
+    setBusyKey(`dismiss-entry:${entry.product_id}`);
+    const res = await dashboardImportReviewSetResolution(supabase, {
+      companyId,
+      productId: entry.product_id,
+      bucket: "ENTRY_NO_EXIT",
+      resolution: "DISMISSED",
+    });
+    setBusyKey(null);
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível dispensar.");
+      return;
+    }
+    toast.success(`«${entry.name}» dispensado desta revisão.`);
+    setPairings((prev) => {
+      const next = { ...prev };
+      for (const [exitId, entryId] of Object.entries(next)) {
+        if (entryId === entry.product_id) delete next[exitId];
+      }
+      return next;
+    });
+    void load();
+    onLinked?.();
+  };
+
+  const openMerge = async (exit: ProductRecipeMatchRow) => {
+    const entryId = pairings[exit.product_id];
+    if (!entryId) return;
+    setBusyKey(`merge:${exit.product_id}`);
+    const source = await fetchProductById(exit.product_id);
+    setBusyKey(null);
+    if (!source) {
+      toast.error("Não foi possível carregar o produto para unificar.");
+      return;
+    }
+    setMergeSource(source);
+    setMergePartnerId(entryId);
+    setMergeOpen(true);
+  };
+
+  const runRecipeAction = async (exit: ProductRecipeMatchRow) => {
+    const entryId = pairings[exit.product_id];
+    const entry = entryOnly.find((r) => r.product_id === entryId);
+    if (!entry || !ingredientConfig?.isValid) return;
+
+    setBusyKey(`recipe:${exit.product_id}`);
+    if (exit.recipe_id) {
+      const res = await linkProductRecipeMatch(supabase, {
+        companyId,
+        outputProductId: exit.product_id,
+        ingredientProductId: entry.product_id,
+        inputQuantity: ingredientConfig.inputQuantity,
+        inputUnitCode: ingredientConfig.inputUnitCode,
+      });
+      setBusyKey(null);
+      if (!res.ok) {
+        toast.error(recipeMatchCreateErrorMessage(res.error));
+        return;
+      }
+      toast.success(
+        res.already_linked
+          ? `«${entry.name}» já estava na ficha de «${exit.name}».`
+          : `Insumo «${entry.name}» ligado à ficha de «${exit.name}».`,
+      );
+    } else {
+      const res = await createProductRecipeMatch(supabase, {
+        companyId,
+        outputProductId: exit.product_id,
+        ingredients: [
+          {
+            product_id: entry.product_id,
+            name: entry.name,
+            input_quantity: ingredientConfig.inputQuantity,
+            input_unit_code: ingredientConfig.inputUnitCode,
+            stock_quantity: ingredientConfig.stockQuantityPreview ?? 0,
+          },
+        ],
+      });
+      setBusyKey(null);
+      if (!res.ok) {
+        toast.error(recipeMatchCreateErrorMessage(res.error));
+        return;
+      }
+      toast.success(
+        `Ficha técnica criada para «${exit.name}» com o insumo «${entry.name}».`,
+      );
+    }
+    setExpandedRecipeId(null);
+    setIngredientConfig(null);
     void load();
     onLinked?.();
   };
@@ -274,203 +542,305 @@ export function DashboardProductRecipeMatchPanel({
   }
 
   return (
-    <Card className="border-amber-500/25 bg-gradient-to-br from-card via-card to-amber-500/[0.06]">
-      <CardHeader className="pb-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-900 dark:text-amber-200">
-              <UtensilsCrossed className="h-5 w-5" aria-hidden />
+    <>
+      <Card className="border-amber-500/25 bg-gradient-to-br from-card via-card to-amber-500/[0.06]">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-900 dark:text-amber-200">
+                <UtensilsCrossed className="h-5 w-5" aria-hidden />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <CardTitle className="text-lg leading-snug">
+                  Correlacionar vendidos e comprados
+                </CardTitle>
+                <CardDescription className="text-pretty">
+                  Cada venda (só saída) pode ser pareada com um item comprado (só
+                  entrada): unifique o mesmo produto, monte ficha técnica ou
+                  dispense.
+                </CardDescription>
+              </div>
             </div>
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="text-lg leading-snug">
-                Relacionar fichas técnicas e insumos
-              </CardTitle>
-              <CardDescription className="text-pretty">
-                Escolha o prato (só saída), monte a lista de insumos (só entrada)
-                com conversões e quantidades — a ficha técnica só é criada ao
-                final, quando você confirmar.
-              </CardDescription>
-            </div>
+            {!loading ? (
+              <div
+                className="flex shrink-0 gap-2 text-sm tabular-nums"
+                aria-live="polite"
+              >
+                <span className="rounded-full border border-violet-500/35 bg-violet-500/10 px-2.5 py-0.5 font-medium text-violet-950 dark:text-violet-100">
+                  {exitOnly.length} só saída
+                </span>
+                <span className="rounded-full border border-sky-500/35 bg-sky-500/10 px-2.5 py-0.5 font-medium text-sky-950 dark:text-sky-100">
+                  {entryOnly.length} só entrada
+                </span>
+              </div>
+            ) : null}
           </div>
-          {!loading ? (
-            <div
-              className="flex shrink-0 gap-2 text-sm tabular-nums"
-              aria-live="polite"
-            >
-              <span className="rounded-full border border-violet-500/35 bg-violet-500/10 px-2.5 py-0.5 font-medium text-violet-950 dark:text-violet-100">
-                {exitOnly.length} só saída
-              </span>
-              <span className="rounded-full border border-sky-500/35 bg-sky-500/10 px-2.5 py-0.5 font-medium text-sky-950 dark:text-sky-100">
-                {entryOnly.length} só entrada
-              </span>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Analisando movimentações de estoque…
             </div>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Analisando movimentações de estoque…
-          </div>
-        ) : error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : (
-          <>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <section className="flex min-h-0 flex-col gap-2">
-                <div className="flex items-center gap-2 text-sm font-medium text-violet-900 dark:text-violet-200">
-                  <ArrowUpFromLine className="h-4 w-4 shrink-0" aria-hidden />
-                  Prato / ficha (só saída)
-                </div>
-                <ProductPickList
-                  rows={exitOnly}
-                  selectedId={selectedOutputId}
-                  onSelect={setSelectedOutputId}
-                  search={exitSearch}
-                  onSearchChange={setExitSearch}
-                  emptyLabel="Nenhum produto só com saída."
-                  variant="exit"
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : exitOnly.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhum produto só com saída. Itens só com entrada podem ser
+              dispensados abaixo, se não fizerem sentido para estoque/CMV.
+            </p>
+          ) : (
+            <>
+              <div className="relative max-w-md">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filtrar vendas…"
+                  className="h-9 pl-8"
                 />
-              </section>
-              <section className="flex min-h-0 flex-col gap-2">
-                <div className="flex items-center gap-2 text-sm font-medium text-sky-900 dark:text-sky-200">
-                  <ArrowDownToLine className="h-4 w-4 shrink-0" aria-hidden />
-                  Insumos (só entrada)
-                </div>
-                <ProductPickList
-                  rows={entryRowsForPick}
-                  selectedId={selectedIngredientId}
-                  onSelect={setSelectedIngredientId}
-                  search={entrySearch}
-                  onSearchChange={setEntrySearch}
-                  emptyLabel={
-                    selectedOutputId
-                      ? "Nenhum insumo disponível ou todos já na lista."
-                      : "Selecione o prato à esquerda primeiro."
-                  }
-                  variant="entry"
-                />
-              </section>
-            </div>
-
-            <div className="rounded-xl border border-border/80 bg-background/70 p-4">
-              <p className="mb-3 text-sm font-medium">Montar ficha técnica</p>
-
-              {selectedOutput ? (
-                <p className="mb-3 text-sm text-muted-foreground">
-                  <span className="text-foreground">Prato:</span>{" "}
-                  {selectedOutput.name}
-                  {outputHasRecipe ? (
-                    <span className="ml-2 text-amber-800 dark:text-amber-200">
-                      (já possui ficha — escolha outro prato)
-                    </span>
-                  ) : null}
-                </p>
-              ) : (
-                <p className="mb-3 text-sm text-muted-foreground">
-                  Selecione o prato na coluna da esquerda para começar.
-                </p>
-              )}
-
-              {pendingIngredients.length > 0 ? (
-                <div className="mb-4 space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Insumos na ficha ({pendingIngredients.length})
-                  </p>
-                  <ul className="space-y-1.5">
-                    {pendingIngredients.map((item) => (
-                      <li
-                        key={item.product_id}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm"
-                      >
-                        <span className="min-w-0">
-                          <span className="font-medium">{item.name}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {item.input_quantity.toLocaleString("pt-BR", {
-                              maximumFractionDigits: 4,
-                            })}{" "}
-                            {systemUnitLabel(item.input_unit_code)} / porção
-                            {" · "}
-                            {item.stock_quantity.toLocaleString("pt-BR", {
-                              maximumFractionDigits: 6,
-                            })}{" "}
-                            estoque
-                          </span>
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-destructive"
-                          aria-label={`Remover ${item.name}`}
-                          onClick={() => removeFromPending(item.product_id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : selectedOutputId && !outputHasRecipe ? (
-                <p className="mb-4 text-sm text-muted-foreground">
-                  Nenhum insumo na lista ainda. Adicione um ou mais insumos
-                  antes de criar a ficha.
-                </p>
-              ) : null}
-
-              {selectedIngredient && selectedOutputId && !outputHasRecipe ? (
-                <DashboardRecipeMatchIngredientConfig
-                  key={selectedIngredient.product_id}
-                  companyId={companyId}
-                  ingredient={selectedIngredient}
-                  onChange={setIngredientConfig}
-                />
-              ) : null}
-
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="sm:min-w-[11rem]"
-                  disabled={!canAddToList}
-                  onClick={addToPendingList}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Adicionar à lista
-                </Button>
-                <Button
-                  type="button"
-                  className="sm:min-w-[11rem]"
-                  disabled={!canCreateRecipe}
-                  onClick={() => void runCreateRecipe()}
-                >
-                  {creating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Criando ficha…
-                    </>
-                  ) : (
-                    <>
-                      <ChefHat className="mr-2 h-4 w-4" />
-                      Criar ficha técnica
-                    </>
-                  )}
-                </Button>
               </div>
 
-              <p className="mt-3 text-xs text-muted-foreground">
-                A receita no banco só é gravada ao clicar em{" "}
-                <strong className="font-medium text-foreground">
-                  Criar ficha técnica
-                </strong>
-                . Antes disso você pode cadastrar conversões, incluir vários
-                insumos e revisar a lista.
-              </p>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+              <div className="hidden gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
+                <div>Vendido (só saída)</div>
+                <div className="w-9" />
+                <div>Comprado (só entrada)</div>
+                <div className="min-w-[11rem] text-right">Ação</div>
+              </div>
+
+              <ul className="space-y-2">
+                {filteredExit.map((exit) => {
+                  const entryId = pairings[exit.product_id] ?? null;
+                  const entry =
+                    entryOnly.find((r) => r.product_id === entryId) ?? null;
+                  const scores = new Map(
+                    entryOnly.map((e) => [
+                      e.product_id,
+                      recipeMatchSuggestionScore(exit, e),
+                    ]),
+                  );
+                  const options = entryOnly.filter(
+                    (e) =>
+                      e.product_id === entryId ||
+                      !usedEntryIds.has(e.product_id),
+                  );
+                  const hasPair = !!entry;
+                  const score = entry
+                    ? (scores.get(entry.product_id) ?? 0)
+                    : 0;
+                  const isStrong =
+                    hasPair && score >= RECIPE_MATCH_SUGGESTION_THRESHOLD;
+                  const recipeOpen = expandedRecipeId === exit.product_id;
+                  const rowBusy = busyKey?.endsWith(`:${exit.product_id}`);
+
+                  return (
+                    <li key={exit.product_id} className="space-y-2">
+                      <div
+                        className={cn(
+                          "grid items-stretch gap-2 rounded-xl border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]",
+                          isStrong && "border-emerald-500/40 bg-emerald-500/5",
+                          hasPair &&
+                            !isStrong &&
+                            "border-amber-500/35 bg-amber-500/5",
+                        )}
+                      >
+                        <SideCard
+                          title={exit.name}
+                          sub={productSub(exit)}
+                          borderClass="border-violet-500/25"
+                        />
+                        <div
+                          className={cn(
+                            "mx-auto flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-full text-sm font-bold",
+                            isStrong
+                              ? "bg-emerald-500/20 text-emerald-600 ring-2 ring-emerald-500/30"
+                              : hasPair
+                                ? "bg-amber-500/15 text-amber-700"
+                                : "bg-muted text-muted-foreground",
+                          )}
+                          aria-hidden
+                        >
+                          {hasPair ? (isStrong ? "=" : "≈") : "?"}
+                        </div>
+                        <EntryPickField
+                          selected={entry}
+                          options={options}
+                          scores={scores}
+                          disabled={!!rowBusy}
+                          onSelect={(id) => setPair(exit.product_id, id)}
+                          onClear={() => {
+                            setPair(exit.product_id, null);
+                            if (expandedRecipeId === exit.product_id) {
+                              setExpandedRecipeId(null);
+                              setIngredientConfig(null);
+                            }
+                          }}
+                        />
+                        <div className="flex flex-wrap items-center justify-end gap-1.5 self-center sm:min-w-[11rem]">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={!hasPair || !!rowBusy}
+                            onClick={() => void openMerge(exit)}
+                            title="Mesmo produto — unificar cadastros"
+                          >
+                            {busyKey === `merge:${exit.product_id}` ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Merge className="h-3.5 w-3.5" />
+                            )}
+                            <span className="ml-1.5">Unificar</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={recipeOpen ? "default" : "outline"}
+                            disabled={!hasPair || !!rowBusy}
+                            onClick={() => {
+                              setExpandedRecipeId((prev) =>
+                                prev === exit.product_id
+                                  ? null
+                                  : exit.product_id,
+                              );
+                              setIngredientConfig(null);
+                            }}
+                            title="É ficha técnica — ligar/criar com este insumo"
+                          >
+                            <ChefHat className="h-3.5 w-3.5" />
+                            <span className="ml-1.5">Ficha</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            disabled={!!rowBusy}
+                            onClick={() => void runDismiss(exit)}
+                            title="Dispensar (serviço / sem par)"
+                          >
+                            {busyKey === `dismiss:${exit.product_id}` ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <EyeOff className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {recipeOpen && entry ? (
+                        <div className="rounded-xl border border-border/80 bg-background/80 p-4 sm:ml-0">
+                          <DashboardRecipeMatchIngredientConfig
+                            key={`${exit.product_id}:${entry.product_id}`}
+                            companyId={companyId}
+                            ingredient={entry}
+                            onChange={setIngredientConfig}
+                          />
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              disabled={
+                                !ingredientConfig?.isValid ||
+                                busyKey === `recipe:${exit.product_id}`
+                              }
+                              onClick={() => void runRecipeAction(exit)}
+                            >
+                              {busyKey === `recipe:${exit.product_id}` ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Salvando…
+                                </>
+                              ) : exit.recipe_id ? (
+                                <>
+                                  <ChefHat className="mr-2 h-4 w-4" />
+                                  Adicionar à ficha
+                                </>
+                              ) : (
+                                <>
+                                  <ChefHat className="mr-2 h-4 w-4" />
+                                  Criar ficha técnica
+                                </>
+                              )}
+                            </Button>
+                            <p className="self-center text-xs text-muted-foreground">
+                              {exit.recipe_id
+                                ? "O insumo entra na ficha já ligada a esta venda."
+                                : "A ficha nova fica ligada ao output de venda EPOC."}
+                              {ingredientConfig?.stockQuantityPreview != null
+                                ? ` · ${ingredientConfig.stockQuantityPreview.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} ${systemUnitLabel(entry.unit)} / porção`
+                                : null}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {entryOnly.some((e) => !usedEntryIds.has(e.product_id)) ? (
+                <div className="rounded-xl border border-dashed border-border/80 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Compras sem par na lista
+                  </p>
+                  <ul className="flex flex-wrap gap-2">
+                    {entryOnly
+                      .filter((e) => !usedEntryIds.has(e.product_id))
+                      .slice(0, 40)
+                      .map((e) => (
+                        <li key={e.product_id}>
+                          <div className="inline-flex items-center gap-1 rounded-full border border-sky-500/25 bg-sky-500/5 py-1 pl-2.5 pr-1 text-xs">
+                            <span className="max-w-[14rem] truncate font-medium">
+                              {e.name}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground"
+                              title="Dispensar compra"
+                              disabled={
+                                busyKey === `dismiss-entry:${e.product_id}`
+                              }
+                              onClick={() => void runDismissEntry(e)}
+                            >
+                              {busyKey === `dismiss-entry:${e.product_id}` ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <EyeOff className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {mergeSource ? (
+        <ProductMergeDialog
+          open={mergeOpen}
+          onOpenChange={(next) => {
+            setMergeOpen(next);
+            if (!next) {
+              setMergeSource(null);
+              setMergePartnerId(null);
+            }
+          }}
+          companyId={companyId}
+          sourceProduct={mergeSource}
+          formatCurrency={formatCurrency}
+          initialPartnerId={mergePartnerId}
+          onMerged={() => {
+            void load();
+            onLinked?.();
+          }}
+        />
+      ) : null}
+    </>
   );
 }

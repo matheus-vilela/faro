@@ -6,6 +6,9 @@ export type ProductRecipeMatchRow = {
   name: string;
   unit: string;
   current_quantity: number;
+  sku?: string | null;
+  ean?: string | null;
+  barcode?: string | null;
   recipe_id?: string | null;
 };
 
@@ -21,6 +24,9 @@ function parseMatchRow(
     name: String(o.name ?? "Produto").trim() || "Produto",
     unit: String(o.unit ?? "").trim() || "—",
     current_quantity: Number(o.current_quantity ?? 0),
+    sku: o.sku != null ? String(o.sku).trim() || null : null,
+    ean: o.ean != null ? String(o.ean).trim() || null : null,
+    barcode: o.barcode != null ? String(o.barcode).trim() || null : null,
   };
   if (withRecipe) {
     const rid = String(o.recipe_id ?? "").trim();
@@ -125,19 +131,111 @@ export async function createProductRecipeMatch(
   };
 }
 
+/** Liga insumo a ficha existente do output (ou cria ficha se ainda não houver). */
+export async function linkProductRecipeMatch(
+  client: SupabaseClient,
+  params: {
+    companyId: string;
+    outputProductId: string;
+    ingredientProductId: string;
+    inputQuantity: number;
+    inputUnitCode: string;
+    upsertConversion?: boolean;
+    convSecondaryUnitCode?: string | null;
+    convPrimaryQty?: number | null;
+    convSecondaryQty?: number | null;
+  },
+): Promise<{
+  ok: boolean;
+  recipe_id?: string;
+  already_linked?: boolean;
+  error?: string;
+}> {
+  const { data, error } = await client.rpc("dashboard_product_recipe_match_link", {
+    p_company_id: params.companyId,
+    p_output_product_id: params.outputProductId,
+    p_ingredient_product_id: params.ingredientProductId,
+    p_input_quantity: params.inputQuantity,
+    p_input_unit_code: params.inputUnitCode,
+    p_upsert_conversion: params.upsertConversion ?? false,
+    p_conv_secondary_unit_code: params.convSecondaryUnitCode ?? null,
+    p_conv_primary_qty: params.convPrimaryQty ?? null,
+    p_conv_secondary_qty: params.convSecondaryQty ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  const row = data as {
+    ok?: boolean;
+    recipe_id?: string;
+    already_linked?: boolean;
+    error?: string;
+    message?: string;
+  };
+  if (!row?.ok) {
+    return {
+      ok: false,
+      error: row?.message ?? row?.error ?? "Não foi possível ligar o insumo.",
+    };
+  }
+  return {
+    ok: true,
+    recipe_id: row.recipe_id ? String(row.recipe_id) : undefined,
+    already_linked: row.already_linked === true,
+  };
+}
+
 export function recipeMatchCreateErrorMessage(code: string | undefined): string {
   switch (code) {
     case "ingredients_required":
       return "Adicione pelo menos um insumo à lista antes de criar a ficha.";
     case "recipe_already_exists":
-      return "Este prato já possui ficha técnica. Ajuste em Produtos → Receitas.";
+      return "Este prato já possui ficha técnica. Use «Adicionar à ficha» ou ajuste em Produtos → Receitas.";
     case "unit_conversion_failed":
       return "Não foi possível converter a unidade de um insumo. Revise as conversões.";
     case "duplicate_ingredient":
       return "A lista contém o mesmo insumo mais de uma vez.";
     case "same_product":
       return "O prato não pode ser insumo de si mesmo.";
+    case "product_not_found":
+      return "Produto não encontrado.";
+    case "forbidden":
+      return "Sem permissão para esta unidade.";
     default:
       return code ?? "Não foi possível criar a ficha.";
   }
 }
+
+function normalizeText(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Pontuação heurística para sugerir pares só-saída ↔ só-entrada (EAN/SKU/nome). */
+export function recipeMatchSuggestionScore(
+  a: ProductRecipeMatchRow,
+  b: ProductRecipeMatchRow,
+): number {
+  let score = 0;
+  const ae = (a.ean || a.barcode || "").trim();
+  const be = (b.ean || b.barcode || "").trim();
+  if (ae && be && ae === be) score += 100;
+  const as = (a.sku || "").trim().toLowerCase();
+  const bs = (b.sku || "").trim().toLowerCase();
+  if (as && bs && as === bs) score += 80;
+  const an = normalizeText(a.name);
+  const bn = normalizeText(b.name);
+  if (!an || !bn) return score;
+  if (an === bn) score += 60;
+  else if (an.includes(bn) || bn.includes(an)) score += 40;
+  else {
+    const at = new Set(an.split(/\s+/).filter((t) => t.length > 2));
+    for (const t of bn.split(/\s+/).filter((t) => t.length > 2)) {
+      if (at.has(t)) score += 8;
+    }
+  }
+  return score;
+}
+
+export const RECIPE_MATCH_SUGGESTION_THRESHOLD = 40;

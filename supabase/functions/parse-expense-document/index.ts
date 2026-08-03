@@ -2,6 +2,7 @@
 // @ts-nocheck Deno imports
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import { enrichExtractedWithTaxId, ensureSupplierFromExtracted } from "../_shared/expenseSupplierEnsure.ts";
 import {
   extractDocumentFromPdfBuffer,
@@ -136,14 +137,14 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "company_id é obrigatório." }, 400);
   }
 
-  const { data: member, error: memErr } = await supabase
-    .from("user_companies")
-    .select("company_id")
-    .eq("user_id", user.id)
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (memErr || !member) {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!serviceKey) {
+    return json({ ok: false, error: "Configuração do servidor incompleta." }, 500);
+  }
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  if (!(await userHasCompanyAccess(admin, user.id, companyId))) {
     return json({ ok: false, error: "Sem acesso a esta empresa." }, 403);
   }
 

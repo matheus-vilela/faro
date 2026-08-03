@@ -46,6 +46,8 @@ type ProductMergeDialogProps = {
   sourceProduct: Product;
   formatCurrency: (v: number) => string;
   onMerged: (winnerId: string) => void;
+  /** Pré-seleciona o outro produto (ex.: par sugerido no dashboard). */
+  initialPartnerId?: string | null;
 };
 
 function unitLabel(code: string) {
@@ -138,6 +140,7 @@ export function ProductMergeDialog({
   sourceProduct,
   formatCurrency,
   onMerged,
+  initialPartnerId = null,
 }: ProductMergeDialogProps) {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -157,6 +160,14 @@ export function ProductMergeDialog({
   const [conversionsLoading, setConversionsLoading] = useState(false);
   const [manualLoserQty, setManualLoserQty] = useState("1");
   const [manualWinnerQty, setManualWinnerQty] = useState("1");
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialPartnerId && initialPartnerId !== sourceProduct.id) {
+      setPartnerId(initialPartnerId);
+      setStep("confirm");
+    }
+  }, [open, initialPartnerId, sourceProduct.id]);
 
   useEffect(() => {
     if (!open || !companyId) return;

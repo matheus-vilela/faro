@@ -8,6 +8,7 @@
  * - Enfileira sync_company para empresas due (next_sync_at)
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 import {
   authorizeEpocPipeline,
   corsHeaders,
@@ -53,13 +54,7 @@ Deno.serve(async (req) => {
     if (!userId) {
       return json({ ok: false, error: "Sessão inválida." }, 401);
     }
-    const { data: membership } = await admin
-      .from("user_companies")
-      .select("company_id")
-      .eq("user_id", userId)
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!membership) {
+    if (!(await userHasCompanyAccess(admin, userId, companyId))) {
       return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
     }
 

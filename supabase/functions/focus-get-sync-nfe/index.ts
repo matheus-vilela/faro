@@ -31,6 +31,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
 
 const LOG = "[focus-get-sync-nfe]";
 
@@ -924,13 +925,7 @@ Deno.serve(async (req) => {
           401,
         );
       }
-      const { data: mem, error: memErr } = await userClient
-        .from("user_companies")
-        .select("company_id")
-        .eq("user_id", user.id)
-        .eq("company_id", companyIdManual)
-        .maybeSingle();
-      if (memErr || !mem) {
+      if (!(await userHasCompanyAccess(admin, user.id, companyIdManual))) {
         return json({ ok: false, error: "Sem acesso a esta unidade." }, 403);
       }
       const { data: oneRow, error: coErr } = await admin
