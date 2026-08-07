@@ -18,8 +18,8 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   dashboard: "Dashboard",
-  despesas: "Notas Fiscais",
-  recebimento: "Recebimento de mercadorias",
+  despesas: "Notas e recebimento",
+  recebimento: "Notas e recebimento",
   checklists: "Checklists",
   fornecedores: "Fornecedores",
   produtos: "Produtos e estoque",
@@ -30,6 +30,12 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   integracoes: "Integrações",
   configuracoes: "Configurações",
 };
+
+/** Permissões que liberam a tela unificada de notas + recebimento. */
+export const NOTAS_RECEBIMENTO_PERMISSIONS: PermissionKey[] = [
+  "despesas",
+  "recebimento",
+];
 
 export const DEFAULT_MEMBER_PERMISSIONS: PermissionKey[] = [...PERMISSION_KEYS];
 
@@ -61,6 +67,7 @@ export function hasAnyPermission(
 export function permissionKeyForPath(pathname: string): PermissionKey | null {
   const path = pathname.replace(/\/+$/, "") || "/app";
   if (path === "/app") return "dashboard";
+  if (path.startsWith("/app/notas-recebimento")) return "despesas";
   if (path.startsWith("/app/despesas")) return "despesas";
   if (path.startsWith("/app/recebimento")) return "recebimento";
   if (path.startsWith("/app/checklists")) return "checklists";

@@ -246,7 +246,7 @@ export function ConfiguracoesWhatsapp() {
               Despesas originadas no WhatsApp podem ficar{" "}
               <strong>aguardando aprovação do proprietário</strong> antes de
               integrar recebimento e estoque; acompanhe em{" "}
-              <Link to="/app/despesas" className={linkWa}>
+              <Link to="/app/notas-recebimento" className={linkWa}>
                 Notas Fiscais
               </Link>{" "}
               e no painel de alertas.

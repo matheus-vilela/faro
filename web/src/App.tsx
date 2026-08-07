@@ -40,8 +40,8 @@ import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
-import { Recebimento } from "@/pages/Recebimento";
 import { Servicos } from "@/pages/Servicos";
+import { NOTAS_RECEBIMENTO_PERMISSIONS } from "@/lib/permissions";
 import { CertificadoOnboardingPublic } from "@/pages/CertificadoOnboardingPublic";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
@@ -52,7 +52,20 @@ import { Register } from "@/pages/Register";
 import { TermosDeUso } from "@/pages/TermosDeUso";
 import { RedirectWhatsappExpenseDraftSlug } from "@/pages/RedirectWhatsappExpenseDraftSlug";
 import { ValidarDespesaWhatsapp } from "@/pages/ValidarDespesaWhatsapp";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
+
+function RedirectPreserveSearch({ to }: { to: string }) {
+  const location = useLocation();
+  return (
+    <Navigate to={`${to}${location.search}${location.hash}`} replace />
+  );
+}
 import { Toaster } from "sonner";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -103,7 +116,18 @@ function AuthenticatedLayout() {
           />
           <Route path="/app" element={<AppLayout />}>
           <Route index element={<PermissionRouteGuard permission="dashboard"><Dashboard /></PermissionRouteGuard>} />
-          <Route path="despesas" element={<PermissionRouteGuard permission="despesas"><Despesas /></PermissionRouteGuard>} />
+          <Route
+            path="notas-recebimento"
+            element={
+              <PermissionRouteGuard permissions={NOTAS_RECEBIMENTO_PERMISSIONS}>
+                <Despesas />
+              </PermissionRouteGuard>
+            }
+          />
+          <Route
+            path="despesas"
+            element={<RedirectPreserveSearch to="/app/notas-recebimento" />}
+          />
           <Route path="vendas" element={<PermissionRouteGuard permission="vendas_realizadas"><Receitas /></PermissionRouteGuard>} />
           <Route
             path="receitas"
@@ -140,7 +164,10 @@ function AuthenticatedLayout() {
           <Route path="fornecedores" element={<PermissionRouteGuard permission="fornecedores"><Fornecedores /></PermissionRouteGuard>} />
           <Route path="produtos" element={<PermissionRouteGuard permission="produtos"><Produtos /></PermissionRouteGuard>} />
           <Route path="servicos" element={<PermissionRouteGuard permission="produtos"><Servicos /></PermissionRouteGuard>} />
-          <Route path="recebimento" element={<PermissionRouteGuard permission="recebimento"><Recebimento /></PermissionRouteGuard>} />
+          <Route
+            path="recebimento"
+            element={<RedirectPreserveSearch to="/app/notas-recebimento" />}
+          />
           <Route
             path="importacoes"
             element={<Navigate to="/app" replace />}

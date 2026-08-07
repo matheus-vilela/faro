@@ -954,7 +954,7 @@ export function DashboardAlertsCard({
                                   {r.expense_id ? (
                                     <Button size="sm" variant="secondary" asChild>
                                       <Link
-                                        to={`/app/despesas?expense=${encodeURIComponent(r.expense_id)}`}
+                                        to={`/app/notas-recebimento?expense=${encodeURIComponent(r.expense_id)}`}
                                       >
                                         Abrir nota fiscal
                                       </Link>

@@ -40,7 +40,6 @@ import {
   BarChart3,
   Building2,
   ConciergeBell,
-  FileText,
   FlaskConical,
   LayoutDashboard,
   ListChecks,
@@ -89,17 +88,11 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
       label: "Operação",
       items: [
         {
-          title: "Notas Fiscais",
-          url: "/app/despesas",
-          icon: FileText,
-          permission: "despesas",
-        },
-
-        {
-          title: "Recebimento de mercadorias",
-          url: "/app/recebimento",
+          title: "Notas e recebimento",
+          url: "/app/notas-recebimento",
           icon: PackageCheck,
-          permission: "recebimento",
+          permission: "despesas",
+          permissions: ["despesas", "recebimento"],
         },
         {
           title: "Checklists",

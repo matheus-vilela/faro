@@ -2,21 +2,15 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
-import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
+import { getMonthRange, MonthSelector, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
-import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
+import { NotasRecebimentoListRow } from "@/components/recebimento/NotasRecebimentoListRow";
+import { RecebimentoReviewPanel } from "@/components/recebimento/RecebimentoReviewPanel";
+import { RecebimentoShareDialog } from "@/components/recebimento/RecebimentoShareDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +37,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
+import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
@@ -59,6 +53,7 @@ import {
 } from "@/lib/expenseDivergenceUi";
 import { maskCpfCnpj } from "@/lib/masks";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
+import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type {
@@ -75,16 +70,14 @@ import {
   type PaymentType,
 } from "@/types/expense";
 import type { Product } from "@/types/product";
-import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
   CheckCircle2,
-  ChevronRight,
   Copy,
   FileText,
   Loader2,
-  MessageCircle,
+  PackageCheck,
   Plus,
   Sparkles,
   Trash2,
@@ -93,6 +86,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+
+type RecebimentoListInfo = {
+  id: string;
+  status: "pending" | "received";
+  assigned_company_member_id?: string | null;
+  hasPendingReceipt: boolean;
+};
 
 function formatDocForDisplay(doc: string | null): string {
   if (!doc || !doc.replace(/\D/g, "")) return "";
@@ -181,12 +181,11 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 export function Despesas() {
-  const { currentCompany } = useCompany();
+  const { currentCompany, isCompanyOwner } = useCompany();
   const companyId = currentCompany?.id ?? "";
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightExpenseId = searchParams.get("expense");
-  const isGestor = useHasPermission("despesas");
 
   const now = new Date();
   const [period, setPeriod] = useState<MonthYear>({
@@ -200,6 +199,20 @@ export function Despesas() {
   const debouncedSearch = useDebounce(expensesSearch, 300);
   /** Somente despesas WhatsApp com status pendente (aguardando aprovação do proprietário). */
   const [onlyPendingApproval, setOnlyPendingApproval] = useState(false);
+  const [recebimentosByExpenseId, setRecebimentosByExpenseId] = useState<
+    Map<string, RecebimentoListInfo>
+  >(new Map());
+  const [reviewRecebimentoId, setReviewRecebimentoId] = useState<string | null>(
+    null,
+  );
+  const [shareRecebimentoId, setShareRecebimentoId] = useState<string | null>(
+    null,
+  );
+  const [shareInitialMemberId, setShareInitialMemberId] = useState<
+    string | null
+  >(null);
+  const [ensuringRecebimentoExpenseId, setEnsuringRecebimentoExpenseId] =
+    useState<string | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
@@ -415,9 +428,48 @@ export function Despesas() {
       .select("*")
       .eq("company_id", companyId)
       .eq("flow_type", "payable");
-    setExpenses((ex as Expense[]) ?? []);
+    const expenseList = (ex as Expense[]) ?? [];
+    setExpenses(expenseList);
     setExpensesCount(count ?? 0);
     setBoletos((bo as Boleto[]) ?? []);
+
+    const expenseIds = expenseList.map((e) => e.id);
+    if (expenseIds.length === 0) {
+      setRecebimentosByExpenseId(new Map());
+    } else {
+      const { data: recRows } = await supabase
+        .from("recebimentos")
+        .select(
+          `
+          id,
+          expense_id,
+          status,
+          assigned_company_member_id,
+          recebimento_item_status (status)
+        `,
+        )
+        .in("expense_id", expenseIds);
+      const map = new Map<string, RecebimentoListInfo>();
+      for (const r of recRows ?? []) {
+        const statuses =
+          (r.recebimento_item_status as Array<{ status: string }> | null) ?? [];
+        const isReceived = r.status === "received";
+        const hasPendingReceipt =
+          isReceived &&
+          statuses.some(
+            (s) => s.status === "not_received" || s.status === "partial",
+          );
+        map.set(r.expense_id as string, {
+          id: r.id as string,
+          status: r.status as "pending" | "received",
+          assigned_company_member_id:
+            (r.assigned_company_member_id as string | null) ?? null,
+          hasPendingReceipt,
+        });
+      }
+      setRecebimentosByExpenseId(map);
+    }
+
     setLoading(false);
   }, [
     companyId,
@@ -435,6 +487,52 @@ export function Despesas() {
   useEffect(() => {
     queueMicrotask(() => fetchData());
   }, [fetchData]);
+
+  const ensureRecebimentoForExpense = useCallback(
+    async (expenseId: string): Promise<string | null> => {
+      const existing = recebimentosByExpenseId.get(expenseId);
+      if (existing) return existing.id;
+      if (!companyId) return null;
+      setEnsuringRecebimentoExpenseId(expenseId);
+      const { data, error } = await supabase
+        .from("recebimentos")
+        .insert({ company_id: companyId, expense_id: expenseId })
+        .select("id")
+        .single();
+      setEnsuringRecebimentoExpenseId(null);
+      if (error || !data) {
+        toast.error(
+          error?.message ?? "Não foi possível criar o recebimento.",
+        );
+        return null;
+      }
+      setRecebimentosByExpenseId((prev) => {
+        const next = new Map(prev);
+        next.set(expenseId, {
+          id: data.id as string,
+          status: "pending",
+          assigned_company_member_id: null,
+          hasPendingReceipt: false,
+        });
+        return next;
+      });
+      return data.id as string;
+    },
+    [recebimentosByExpenseId, companyId],
+  );
+
+  const openReviewForExpense = async (expenseId: string) => {
+    const id = await ensureRecebimentoForExpense(expenseId);
+    if (id) setReviewRecebimentoId(id);
+  };
+
+  const openShareForExpense = async (expenseId: string) => {
+    const rec = recebimentosByExpenseId.get(expenseId);
+    const id = await ensureRecebimentoForExpense(expenseId);
+    if (!id) return;
+    setShareInitialMemberId(rec?.assigned_company_member_id ?? null);
+    setShareRecebimentoId(id);
+  };
 
   useEffect(() => {
     queueMicrotask(() => fetchSupportData());
@@ -852,15 +950,16 @@ export function Despesas() {
     }).format(v);
 
   return (
-    <PageShell className="space-y-8 pb-0 " narrow>
+    <PageShell className="flex min-h-0 flex-1 flex-col gap-4 pb-0">
       <PageHeader
-        title="Notas Fiscais"
+        title="Notas e recebimento"
         description={
-          isGestor
-            ? "Revisar notas fiscais registradas e vincular contas a pagar"
-            : "Registrar notas fiscais e vincular contas a pagar"
+          <span className="hidden sm:inline">
+            Notas, vínculos de produto e confirmação de mercadoria
+          </span>
         }
-        icon={FileText}
+        icon={PackageCheck}
+        className="shrink-0"
         action={
           <Button
             type="button"
@@ -873,15 +972,32 @@ export function Despesas() {
         }
       />
 
-      <ReferencePeriodCard
-        value={period}
-        onChange={setPeriod}
-        description={
-          debouncedSearch.trim()
-            ? "Com filtro de texto ativo, a busca considera todas as competências"
-            : "Lista filtrada pelo mês de competência ou pela data de importação da nota"
-        }
-      />
+      <div className="flex shrink-0 flex-col gap-3 rounded-xl border bg-card/60 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4 sm:px-4">
+        <MonthSelector
+          value={period}
+          onChange={setPeriod}
+          className="shrink-0 [&_button]:h-9 [&_button]:w-9 [&_span]:min-w-40 [&_span]:text-sm [&_span]:font-semibold sm:[&_span]:min-w-44"
+        />
+        <Input
+          placeholder="Filtrar por fornecedor ou nota..."
+          value={expensesSearch}
+          onChange={(e) => setExpensesSearch(e.target.value)}
+          className="h-9 min-w-0 flex-1 sm:max-w-xs"
+        />
+        <div className="flex items-center gap-2 shrink-0 sm:ml-auto">
+          <Switch
+            id="filter-pending-approval"
+            checked={onlyPendingApproval}
+            onCheckedChange={setOnlyPendingApproval}
+          />
+          <Label
+            htmlFor="filter-pending-approval"
+            className="text-sm font-normal cursor-pointer leading-snug"
+          >
+            Aguardando aprovação
+          </Label>
+        </div>
+      </div>
 
       <Sheet
         open={expenseSheetOpen}
@@ -1505,47 +1621,23 @@ export function Despesas() {
         />
       )}
 
-      {/* Listagem */}
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Todas as notas fiscais
-            </CardTitle>
-            <CardDescription>
-              {onlyPendingApproval
-                ? "Somente importações pelo WhatsApp pendentes de aprovação do proprietário."
-                : "Use o botão de boleto na linha para vincular ou ver o resumo"}
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4 flex flex-wrap gap-4 items-center justify-between">
-            <Input
-              placeholder="Filtrar por fornecedor ou nota..."
-              value={expensesSearch}
-              onChange={(e) => setExpensesSearch(e.target.value)}
-              className="max-w-sm"
-            />
-            <div className="flex items-center gap-2 shrink-0">
-              <Switch
-                id="filter-pending-approval"
-                checked={onlyPendingApproval}
-                onCheckedChange={setOnlyPendingApproval}
-              />
-              <Label
-                htmlFor="filter-pending-approval"
-                className="text-sm font-normal cursor-pointer leading-snug"
-              >
-                Aguardando aprovação
-              </Label>
-            </div>
-          </div>
+      {/* Listagem full-bleed */}
+      <div className="flex max-h-[calc(100dvh-11rem)] min-h-[min(28rem,calc(100dvh-13rem))] flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+        <div className="hidden shrink-0 border-b bg-muted/30 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.1fr)_6.5rem_7.5rem_auto] md:gap-3">
+          <span>Fornecedor / NF</span>
+          <span>Recebimento</span>
+          <span>Competência</span>
+          <span className="text-right">Total</span>
+          <span className="text-right pr-1">Ações</span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
+            <p className="px-4 py-8 text-sm text-muted-foreground">
+              Carregando...
+            </p>
           ) : expenses.length === 0 ? (
-            <p className="text-muted-foreground">
+            <p className="px-4 py-8 text-sm text-muted-foreground">
               {onlyPendingApproval
                 ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
                 : debouncedSearch.trim()
@@ -1553,11 +1645,12 @@ export function Despesas() {
                   : "Nenhuma nota fiscal neste mês (por competência ou data de importação)."}
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="divide-y">
               {expenses.map((exp) => {
                 const isHighlight = highlightExpenseId === exp.id;
                 const boleto = getBoletoForExpense(exp.id);
                 const linked = !!boleto;
+                const recInfo = recebimentosByExpenseId.get(exp.id);
                 const pendingOwnerApproval =
                   exp.expense_source === "whatsapp" && exp.status === "pending";
                 const sumItemsRow =
@@ -1572,7 +1665,8 @@ export function Despesas() {
                 const nfeVal = getNfeExpenseValueBreakdown({
                   documentTotal: documentTotalImport,
                   sumItems: sumItemsRow,
-                  financialReconciliationJson: exp.financial_reconciliation_json ?? null,
+                  financialReconciliationJson:
+                    exp.financial_reconciliation_json ?? null,
                 });
                 const valueRisk = nfeVal.needsAttention;
                 const unlinkedProducts =
@@ -1586,173 +1680,91 @@ export function Despesas() {
                   exp.supplier_name?.trim() ||
                   typeLabel ||
                   "Sem fornecedor";
+                const recebimentoBadge = !recInfo
+                  ? {
+                      label: "Sem recebimento",
+                      className: "border-muted-foreground/30",
+                    }
+                  : recInfo.status === "pending"
+                    ? {
+                        label: "Pendente",
+                        className:
+                          "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
+                      }
+                    : recInfo.hasPendingReceipt
+                      ? {
+                          label: "C/ pendências",
+                          className:
+                            "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
+                        }
+                      : {
+                          label: "Confirmado",
+                          className:
+                            "border-emerald-600/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100",
+                        };
+                const competenceLabel = exp.reference_date
+                  ? formatDate(`${exp.reference_date}T12:00:00`)
+                  : "—";
+                const secondaryParts = [
+                  exp.supplier_document
+                    ? formatDocForDisplay(exp.supplier_document)
+                    : null,
+                  boleto
+                    ? `Venc. ${formatDate(boleto.due_date)} · ${formatBoletoCategoryLabel(boleto, categoriesById)}`
+                    : "Sem boleto",
+                  compactLauncherFallback(exp),
+                ].filter(Boolean);
+
                 return (
-                  <div
+                  <NotasRecebimentoListRow
                     key={exp.id}
                     id={exp.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDetailExpenseId(exp.id)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && setDetailExpenseId(exp.id)
+                    displayTitle={displayTitle}
+                    invoiceNumber={exp.invoice_number}
+                    typeLabel={typeLabel}
+                    statusLabel={STATUS_LABELS[exp.status]}
+                    competenceLabel={competenceLabel}
+                    totalLabel={formatCurrency(expenseListDisplayTotal(exp))}
+                    secondaryTitle={secondaryParts.join(" · ")}
+                    boletoLinked={linked}
+                    isHighlight={isHighlight}
+                    pendingOwnerApproval={pendingOwnerApproval}
+                    valueRisk={valueRisk}
+                    valueRiskTitle={
+                      nfeVal.hasIcmsBreakdown
+                        ? "Há ICMSTot no registro — totais do XML são a referência."
+                        : "Total do documento difere da soma das linhas"
                     }
-                    className={cn(
-                      "group flex cursor-pointer flex-col gap-4 rounded-xl border bg-card p-4 transition-all sm:flex-row sm:items-stretch",
-                      "hover:border-border/90 hover:bg-muted/25 hover:shadow-sm",
-                      isHighlight && "border-primary/45 bg-primary/5 ring-2 ring-primary/15",
-                      linked
-                        ? "border-l-[3px] border-l-green-600/80 pl-[calc(1rem-3px)]"
-                        : "border-l-[3px] border-l-amber-500/50 pl-[calc(1rem-3px)]",
-                    )}
-                  >
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 space-y-1">
-                          <p className="truncate text-base font-semibold leading-snug tracking-tight">
-                            {displayTitle}
-                          </p>
-                          {exp.supplier_document && (
-                            <p className="text-sm text-muted-foreground">
-                              {formatDocForDisplay(exp.supplier_document)}
-                            </p>
-                          )}
-                        </div>
-                        <ChevronRight
-                          className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
-                          aria-hidden
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="text-[11px] font-normal">
-                          {typeLabel}
-                        </Badge>
-                        <Badge
-                          variant={
-                            exp.status === "approved"
-                              ? "default"
-                              : exp.status === "rejected"
-                                ? "destructive"
-                                : "secondary"
-                          }
-                          className="text-[11px]"
-                        >
-                          {STATUS_LABELS[exp.status]}
-                        </Badge>
-                        {pendingOwnerApproval && (
-                          <Badge
-                            variant="outline"
-                            className="gap-1 border-amber-600/30 bg-amber-500/10 text-[11px] text-amber-950 dark:text-amber-100"
-                            title="Importação pelo WhatsApp — aguardando aprovação do proprietário"
-                          >
-                            <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
-                            Pendente de aprovação
-                          </Badge>
-                        )}
-                        {valueRisk && (
-                          <Badge
-                            variant="outline"
-                            className="border-destructive/35 bg-destructive/10 text-[11px] text-destructive"
-                            title={
-                              nfeVal.hasIcmsBreakdown
-                                ? "Há ICMSTot no registro — totais do XML são a referência."
-                                : "Total do documento difere da soma das linhas"
-                            }
-                          >
-                            Ajuste: valores
-                          </Badge>
-                        )}
-                        {unlinkedProducts > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="border-violet-500/35 bg-violet-500/10 text-[11px] text-violet-900 dark:text-violet-100"
-                            title="Linhas sem produto vinculado ao estoque"
-                          >
-                            Revisar produto
-                            {unlinkedProducts > 1 ? ` (${unlinkedProducts})` : ""}
-                          </Badge>
-                        )}
-                      </div>
-
-                      <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
-                        <div className="min-w-0">
-                          <dt className="text-muted-foreground">Competência</dt>
-                          <dd className="mt-0.5 font-medium text-foreground">
-                            {exp.reference_date
-                              ? formatDate(`${exp.reference_date}T12:00:00`)
-                              : "—"}
-                          </dd>
-                        </div>
-                        <div className="min-w-0">
-                          <dt className="text-muted-foreground">Vencimento</dt>
-                          <dd className="mt-0.5 font-medium text-foreground">
-                            {boleto ? formatDate(boleto.due_date) : "—"}
-                          </dd>
-                        </div>
-                        <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-muted-foreground">Categoria</dt>
-                          <dd className="mt-0.5 font-medium text-foreground">
-                            {boleto
-                              ? formatBoletoCategoryLabel(boleto, categoriesById)
-                              : "—"}
-                          </dd>
-                        </div>
-                        <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-muted-foreground">Quem lançou</dt>
-                          <dd className="mt-0.5 font-medium text-foreground">
-                            <ExpenseLauncherInfo
-                              expenseId={exp.id}
-                              compact
-                              fallbackLine={compactLauncherFallback(exp)}
-                              className="inline"
-                            />
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-
-                    <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-border/60 pt-3 sm:w-[11.5rem] sm:flex-col sm:items-stretch sm:justify-between sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                      <div className="sm:text-right">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Total
-                        </p>
-                        <p className="text-lg font-semibold tabular-nums tracking-tight">
-                          {formatCurrency(expenseListDisplayTotal(exp))}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (linked) setBoletoResumo(boleto!);
-                          else openLinkDialog(exp.id);
-                        }}
-                        className={cn(
-                          "h-9 w-full px-3 text-xs font-medium sm:w-auto",
-                          linked
-                            ? "border-green-600/35 bg-green-500/10 text-green-800 hover:bg-green-500/15 dark:text-green-200"
-                            : "border-destructive/35 bg-destructive/5 text-destructive hover:bg-destructive/10",
-                        )}
-                      >
-                        {linked ? "Boleto vinculado" : "Sem boleto vinculado"}
-                      </Button>
-                    </div>
-                  </div>
+                    unlinkedProducts={unlinkedProducts}
+                    recebimento={recebimentoBadge}
+                    ensuringRecebimento={
+                      ensuringRecebimentoExpenseId === exp.id
+                    }
+                    showShareAction={isCompanyOwner}
+                    onOpenDetail={() => setDetailExpenseId(exp.id)}
+                    onOpenReview={() => void openReviewForExpense(exp.id)}
+                    onOpenShare={() => void openShareForExpense(exp.id)}
+                    onBoletoClick={() => {
+                      if (linked) setBoletoResumo(boleto!);
+                      else openLinkDialog(exp.id);
+                    }}
+                  />
                 );
               })}
             </div>
           )}
-          {!loading && (
+        </div>
+
+        {!loading && (
+          <div className="shrink-0 border-t px-2 py-2 sm:px-4">
             <Pagination
               page={expensesPage}
               totalCount={expensesCount}
               onPageChange={setExpensesPage}
             />
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent>
@@ -1974,10 +1986,33 @@ export function Despesas() {
         onClose={() => {
           setDetailExpenseId(null);
           if (highlightExpenseId) {
-            navigate("/app/despesas", { replace: true });
+            navigate("/app/notas-recebimento", { replace: true });
           }
         }}
         onRefresh={fetchData}
+      />
+
+      <RecebimentoReviewPanel
+        open={!!reviewRecebimentoId}
+        onOpenChange={(o) => {
+          if (!o) setReviewRecebimentoId(null);
+        }}
+        recebimentoId={reviewRecebimentoId}
+        companyId={companyId || null}
+        onChanged={() => void fetchData()}
+      />
+
+      <RecebimentoShareDialog
+        open={!!shareRecebimentoId}
+        onOpenChange={(o) => {
+          if (!o) {
+            setShareRecebimentoId(null);
+            setShareInitialMemberId(null);
+          }
+        }}
+        recebimentoId={shareRecebimentoId}
+        initialMemberId={shareInitialMemberId}
+        onShared={() => void fetchData()}
       />
     </PageShell>
   );

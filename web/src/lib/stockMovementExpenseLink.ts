@@ -6,7 +6,7 @@ export type StockMovementReferenceRow = {
 };
 
 export function stockMovementExpenseHref(expenseId: string): string {
-  return `/app/despesas?expense=${encodeURIComponent(expenseId)}`;
+  return `/app/notas-recebimento?expense=${encodeURIComponent(expenseId)}`;
 }
 
 export function isExpenseStockMovementReference(

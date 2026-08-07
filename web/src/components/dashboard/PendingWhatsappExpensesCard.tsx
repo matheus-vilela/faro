@@ -113,7 +113,7 @@ export function PendingWhatsappExpensesCard() {
               </div>
             </div>
             <Button variant="outline" size="sm" asChild className="shrink-0">
-              <Link to="/app/despesas">
+              <Link to="/app/notas-recebimento">
                 Ver notas fiscais
                 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>

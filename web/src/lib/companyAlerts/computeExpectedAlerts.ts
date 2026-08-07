@@ -86,7 +86,7 @@ export async function computeExpectedCompanyAlerts(
       severity: "warning",
       title: "Despesa sem boleto vinculado",
       message: `${label} — ${note}`,
-      link_path: `/app/despesas?expense=${row.id}`,
+      link_path: `/app/notas-recebimento?expense=${row.id}`,
       payload: {
         expense_id: row.id,
         display_name: row.display_name,
@@ -135,7 +135,7 @@ export async function computeExpectedCompanyAlerts(
         title: "Boleto vence em 3 dias",
         message: baseMsg,
         link_path: row.expense_id
-          ? `/app/despesas?expense=${row.expense_id}`
+          ? `/app/notas-recebimento?expense=${row.expense_id}`
           : "/app/contas-a-pagar",
         payload: {
           boleto_id: row.id,
@@ -153,7 +153,7 @@ export async function computeExpectedCompanyAlerts(
         title: "Boleto vence amanhã (D-1)",
         message: baseMsg,
         link_path: row.expense_id
-          ? `/app/despesas?expense=${row.expense_id}`
+          ? `/app/notas-recebimento?expense=${row.expense_id}`
           : "/app/contas-a-pagar",
         payload: {
           boleto_id: row.id,
@@ -270,7 +270,7 @@ export async function computeExpectedCompanyAlerts(
       ]
         .filter(Boolean)
         .join(" · "),
-      link_path: `/app/despesas?expense=${rb.expense_id}`,
+      link_path: `/app/notas-recebimento?expense=${rb.expense_id}`,
       payload: {
         recebimento_item_status_id: rec.id,
         recebimento_id: rec.recebimento_id,

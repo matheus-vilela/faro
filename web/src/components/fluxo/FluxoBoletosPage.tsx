@@ -1079,7 +1079,7 @@ export function FluxoBoletosPage({
           onOpenChange={(open) => {
             setBoletoSheetOpen(open);
             if (!open) setCreateBoletoDefaultDueDate(undefined);
-            if (!open && expenseIdFromUrl) navigate("/app/despesas");
+            if (!open && expenseIdFromUrl) navigate("/app/notas-recebimento");
           }}
           companyId={currentCompany.id}
           expenseId={expenseIdFromUrl}
@@ -1088,7 +1088,7 @@ export function FluxoBoletosPage({
           onSuccess={() => {
             refreshAll();
             void syncCompanyAlerts(currentCompany.id);
-            if (expenseIdFromUrl) navigate("/app/despesas");
+            if (expenseIdFromUrl) navigate("/app/notas-recebimento");
           }}
         />
       )}

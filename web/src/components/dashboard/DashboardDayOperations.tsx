@@ -713,7 +713,7 @@ export function DashboardDayOperations() {
           </div>
           <SheetFooter className="border-t">
             <Button asChild className="w-full sm:w-auto">
-              <Link to="/app/recebimento" onClick={() => setSheet(null)}>
+              <Link to="/app/notas-recebimento" onClick={() => setSheet(null)}>
                 Abrir recebimento
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>

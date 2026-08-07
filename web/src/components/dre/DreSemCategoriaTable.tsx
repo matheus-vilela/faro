@@ -46,7 +46,7 @@ function origemLabel(b: DreSemCategoriaBoleto): string {
 function actionLink(b: DreSemCategoriaBoleto): { to: string; label: string } | null {
   if (b.expense_id) {
     return {
-      to: `/app/despesas?expense=${b.expense_id}`,
+      to: `/app/notas-recebimento?expense=${b.expense_id}`,
       label: "Abrir nota fiscal",
     };
   }

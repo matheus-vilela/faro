@@ -29,9 +29,9 @@ const ITEMS: QuickItem[] = [
     icon: ListChecks,
   },
   {
-    to: "/app/recebimento",
-    label: "Recebimento de mercadorias",
-    description: "Mercadorias e NF",
+    to: "/app/notas-recebimento",
+    label: "Notas e recebimento",
+    description: "NF, vínculos e mercadoria",
     icon: PackageCheck,
   },
   {
