@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Select,
   SelectContent,
@@ -294,26 +295,24 @@ export function VendasRealizadasListTable({
         </div>
         <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
           <Label>Categoria</Label>
-          <Select
+          <SearchSelect
             value={categoryId}
             onValueChange={(v) => {
               setCategoryId(v);
               setPage(1);
             }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Categoria" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              <SelectItem value="services">Serviços (EPOC)</SelectItem>
-              {revenueCategories.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            options={revenueCategories.map((c) => ({
+              value: c.id,
+              label: c.name,
+            }))}
+            leadingOptions={[
+              { value: "all", label: "Todas" },
+              { value: "services", label: "Serviços (EPOC)" },
+            ]}
+            placeholder="Categoria"
+            searchPlaceholder="Buscar categoria…"
+            emptyMessage="Nenhuma categoria encontrada."
+          />
         </div>
         <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
           <Label>Ordenação</Label>

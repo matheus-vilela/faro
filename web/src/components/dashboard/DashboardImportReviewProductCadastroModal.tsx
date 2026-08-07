@@ -9,13 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { buildProductUnitSelectOptions, isSystemUnitCode } from "@/lib/companyUnits/productUnitOptions";
 import {
   buildNextConversionsAfterHubChange,
@@ -228,18 +222,14 @@ export function DashboardImportReviewProductCadastroModal({
             </div>
             <div className="grid gap-2">
               <Label>Unidade de estoque</Label>
-              <Select value={unit} onValueChange={setUnit}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Unidade" />
-                </SelectTrigger>
-                <SelectContent>
-                  {unitOptions.map((u) => (
-                    <SelectItem key={u.value} value={u.value}>
-                      {u.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={unit}
+                onValueChange={setUnit}
+                options={unitOptions}
+                placeholder="Unidade"
+                searchPlaceholder="Buscar unidade…"
+                emptyMessage="Nenhuma unidade encontrada."
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="dash-prod-sku">SKU (opcional)</Label>

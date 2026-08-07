@@ -19,6 +19,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+  supplierSearchOption,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -321,6 +326,19 @@ export function ExpenseDetailSheet({
     if (!detailExpense?.expense_items?.length) return 0;
     return detailExpense.expense_items.filter((it) => !it.product_id).length;
   }, [detailExpense?.expense_items]);
+
+  const supplierSelectOptions = useMemo(
+    () => suppliers.map(supplierSearchOption),
+    [suppliers],
+  );
+
+  const productSelectOptions = useMemo(
+    () =>
+      products
+        .filter((p) => p.is_active !== false)
+        .map(productSearchOption),
+    [products],
+  );
 
   const loadExpenseData = useCallback(async () => {
     if (!expenseId || !companyId) return;
@@ -939,7 +957,7 @@ export function ExpenseDetailSheet({
                   </div>
                   <div>
                     <Label>Fornecedor</Label>
-                    <Select
+                    <SearchSelect
                       value={editSupplierId}
                       onValueChange={(v) => {
                         setEditSupplierId(v);
@@ -949,19 +967,11 @@ export function ExpenseDetailSheet({
                           setEditSupplierDocument(s.document ?? "");
                         }
                       }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecione o fornecedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.name}
-                            {s.document ? ` — ${s.document}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={supplierSelectOptions}
+                      placeholder="Selecione o fornecedor"
+                      searchPlaceholder="Buscar fornecedor…"
+                      emptyMessage="Nenhum fornecedor encontrado."
+                    />
                     {!editSupplierId && (
                       <div className="mt-2 grid gap-2 sm:grid-cols-2">
                         <div>
@@ -1154,38 +1164,24 @@ export function ExpenseDetailSheet({
                             <Label className="text-xs">
                               Vincular ao produto (estoque)
                             </Label>
-                            <Select
+                            <SearchSelect
                               value={it.product_id ?? "__none__"}
                               onValueChange={(v) =>
                                 editUpdateItem(i, {
                                   product_id: v === "__none__" ? undefined : v,
                                 })
                               }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Não vincular" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">
-                                  Não vincular
-                                </SelectItem>
-                                {products
-                                  .filter((p) => p.is_active !== false)
-                                  .map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.name}
-                                      {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                                      {Number(
-                                        p.current_quantity,
-                                      ).toLocaleString("pt-BR")}{" "}
-                                      {p.unit}
-                                      {p.last_unit_value != null &&
-                                        p.last_unit_value > 0 &&
-                                        ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
+                              options={productSelectOptions}
+                              leadingOptions={[
+                                {
+                                  value: "__none__",
+                                  label: "Não vincular",
+                                },
+                              ]}
+                              placeholder="Não vincular"
+                              searchPlaceholder="Buscar produto…"
+                              emptyMessage="Nenhum produto encontrado."
+                            />
                             <p className="text-xs text-muted-foreground mt-1">
                               Ao vincular, o estoque será atualizado quando o
                               recebimento for confirmado
@@ -1812,26 +1808,15 @@ export function ExpenseDetailSheet({
                 </div>
                 <div>
                   <Label>Produto (estoque)</Label>
-                  <Select
+                  <SearchSelect
                     value={linkProductId}
                     onValueChange={setLinkProductId}
-                  >
-                    <SelectTrigger className="mt-2">
-                      <SelectValue placeholder="Selecione o produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {products
-                        .filter((p) => p.is_active !== false)
-                        .map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                            {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                            {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
-                            {p.unit}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                    options={productSelectOptions}
+                    placeholder="Selecione o produto"
+                    searchPlaceholder="Buscar produto…"
+                    emptyMessage="Nenhum produto encontrado."
+                    triggerClassName="mt-2"
+                  />
                 </div>
               </div>
               <SheetFooter>

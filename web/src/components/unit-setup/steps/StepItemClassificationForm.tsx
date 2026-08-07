@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Select,
   SelectContent,
@@ -116,37 +117,21 @@ function ProductStockUnitField({
 
   return (
     <div className={compact ? "space-y-1.5" : "space-y-2.5"}>
-      <Select
-        value={selectedValue}
+      <SearchSelect
+        id={`unit-${product.id}`}
+        value={selectedValue ?? ""}
         onValueChange={(v) => {
           if (v === selectedValue) return;
           onPersist(v);
         }}
         disabled={busyId === product.id}
-      >
-        <SelectTrigger
-          id={`unit-${product.id}`}
-          className="h-9 w-full min-w-0 text-left text-sm"
-          size="default"
-        >
-          <SelectValue placeholder="Selecione a unidade" />
-        </SelectTrigger>
-        <SelectContent
-          position="popper"
-          className="z-[200] max-h-[min(60vh,22rem)] max-w-[min(100vw-2rem,24rem)]"
-          sideOffset={4}
-        >
-          {unitOptions.map((o) => (
-            <SelectItem
-              key={`${product.id}-uopt-${o.value}`}
-              value={o.value}
-              textValue={o.label}
-            >
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        options={unitOptions}
+        placeholder="Selecione a unidade"
+        searchPlaceholder="Buscar unidade…"
+        emptyMessage="Nenhuma unidade encontrada."
+        triggerClassName="h-9 w-full min-w-0 text-left text-sm"
+        listMaxHeightClassName="max-h-[min(60vh,22rem)]"
+      />
       {!inCatalog && unitRaw && xmlUnit ? (
         <Button
           type="button"
@@ -1245,8 +1230,10 @@ export function StepItemClassificationForm({
                             Cadastre uma ficha de tipo entrada/desmonte com este produto como saída.
                           </p>
                         ) : (
-                          <Select
-                            value={config.linked_entry_breakdown_recipe_id ?? undefined}
+                          <SearchSelect
+                            value={
+                              config.linked_entry_breakdown_recipe_id ?? ""
+                            }
                             onValueChange={(rid) => {
                               void saveRow(product, {
                                 finalType: "RECEITA_FICHA",
@@ -1254,22 +1241,15 @@ export function StepItemClassificationForm({
                               });
                             }}
                             disabled={busyId === product.id}
-                          >
-                            <SelectTrigger className="h-9 w-full min-w-0 text-left text-sm" size="default">
-                              <SelectValue placeholder="Escolher ficha" />
-                            </SelectTrigger>
-                            <SelectContent
-                              position="popper"
-                              className="z-[200] max-w-[min(100vw-2rem,28rem)]"
-                              sideOffset={4}
-                            >
-                              {recipOpts.map((r) => (
-                                <SelectItem key={r.id} value={r.id}>
-                                  {r.name} (v{r.version})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            options={recipOpts.map((r) => ({
+                              value: r.id,
+                              label: `${r.name} (v${r.version})`,
+                            }))}
+                            placeholder="Escolher ficha"
+                            searchPlaceholder="Buscar ficha…"
+                            emptyMessage="Nenhuma ficha encontrada."
+                            triggerClassName="h-9 w-full min-w-0 text-left text-sm"
+                          />
                         )}
                       </div>
                     ) : null}

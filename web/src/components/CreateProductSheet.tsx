@@ -8,6 +8,7 @@ import { ProductCategoryTagsField } from '@/components/products/ProductCategoryT
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchSelect } from '@/components/ui/search-select'
 import {
   Sheet,
   SheetContent,
@@ -369,18 +370,15 @@ export function CreateProductSheet({
                   </div>
                   <div>
                     <Label>Unidade</Label>
-                    <Select value={unit} onValueChange={handleUnitChange}>
-                      <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {unitOptions.map((u) => (
-                          <SelectItem key={u.value} value={u.value}>
-                            {u.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchSelect
+                      value={unit}
+                      onValueChange={handleUnitChange}
+                      options={unitOptions}
+                      placeholder="Selecione a unidade"
+                      searchPlaceholder="Buscar unidade…"
+                      emptyMessage="Nenhuma unidade encontrada."
+                      triggerClassName={PRODUCT_SHEET_SELECT}
+                    />
                   </div>
                 </div>
               </div>

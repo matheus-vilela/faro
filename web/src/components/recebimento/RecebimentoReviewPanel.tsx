@@ -10,6 +10,10 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -117,6 +121,10 @@ export function RecebimentoReviewPanel({
 
   const productById = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+  const productSelectOptions = useMemo(
+    () => products.map(productSearchOption),
     [products],
   );
 
@@ -653,7 +661,7 @@ export function RecebimentoReviewPanel({
                     <div className="grid gap-4 lg:grid-cols-3">
                       <div className="space-y-2">
                         <Label>Produto vinculado</Label>
-                        <Select
+                        <SearchSelect
                           value={productId ?? "__none__"}
                           disabled={saving}
                           onValueChange={(v) => {
@@ -671,19 +679,15 @@ export function RecebimentoReviewPanel({
                               recipeId: it.resolved_entry_breakdown_recipe_id,
                             });
                           }}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Não vincular" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[min(50vh,320px)]">
-                            <SelectItem value="__none__">Não vincular</SelectItem>
-                            {products.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>
-                                {p.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={productSelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Não vincular" },
+                          ]}
+                          placeholder="Não vincular"
+                          searchPlaceholder="Buscar produto…"
+                          emptyMessage="Nenhum produto encontrado."
+                          listMaxHeightClassName="max-h-[min(50vh,320px)]"
+                        />
                       </div>
 
                       <div className="space-y-2">
@@ -718,7 +722,7 @@ export function RecebimentoReviewPanel({
                           </SelectContent>
                         </Select>
                         {it.import_stock_resolution === "EXPLODE_BY_RECIPE" && (
-                          <Select
+                          <SearchSelect
                             value={
                               it.resolved_entry_breakdown_recipe_id ??
                               "__none__"
@@ -732,21 +736,17 @@ export function RecebimentoReviewPanel({
                                 recipeId: v === "__none__" ? null : v,
                               });
                             }}
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Receita de entrada" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">
-                                Sem receita
-                              </SelectItem>
-                              {recipes.map((r) => (
-                                <SelectItem key={r.id} value={r.id}>
-                                  {r.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            options={recipes.map((r) => ({
+                              value: r.id,
+                              label: r.name,
+                            }))}
+                            leadingOptions={[
+                              { value: "__none__", label: "Sem receita" },
+                            ]}
+                            placeholder="Receita de entrada"
+                            searchPlaceholder="Buscar receita…"
+                            emptyMessage="Nenhuma receita encontrada."
+                          />
                         )}
                       </div>
 

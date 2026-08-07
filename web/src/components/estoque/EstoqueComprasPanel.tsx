@@ -23,6 +23,10 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  SearchSelect,
+  supplierSearchOption,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -873,24 +877,17 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
             <div className="space-y-4 p-6">
             <div className="space-y-2">
               <Label>Fornecedor (opcional)</Label>
-              <Select
+              <SearchSelect
                 value={supplierId || "__none__"}
                 onValueChange={(v) =>
                   setSupplierId(v === "__none__" ? "" : v)
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Nenhum</SelectItem>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={suppliers.map(supplierSearchOption)}
+                leadingOptions={[{ value: "__none__", label: "Nenhum" }]}
+                placeholder="Selecionar"
+                searchPlaceholder="Buscar fornecedor…"
+                emptyMessage="Nenhum fornecedor encontrado."
+              />
             </div>
             <div className="space-y-2">
               <Label>Previsão (opcional)</Label>

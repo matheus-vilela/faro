@@ -7,6 +7,10 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -282,25 +286,20 @@ export function RegisterManualStockMovementSheet({
               <div className="space-y-4 p-6">
                 <div className="space-y-2">
                   <Label>Produto</Label>
-                  <Select
+                  <SearchSelect
                     value={productId || "__none__"}
                     onValueChange={(v) =>
                       setProductId(v === "__none__" ? "" : v)
                     }
                     disabled={loadingProducts}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecionar produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Selecionar</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={products.map(productSearchOption)}
+                    leadingOptions={[
+                      { value: "__none__", label: "Selecionar" },
+                    ]}
+                    placeholder="Selecionar produto"
+                    searchPlaceholder="Buscar produto…"
+                    emptyMessage="Nenhum produto encontrado."
+                  />
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">

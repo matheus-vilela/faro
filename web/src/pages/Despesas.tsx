@@ -22,6 +22,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+  supplierSearchOption,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -293,6 +298,17 @@ export function Despesas() {
   );
   const productById = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
+    [products],
+  );
+  const supplierSelectOptions = useMemo(
+    () => suppliers.map(supplierSearchOption),
+    [suppliers],
+  );
+  const productSelectOptions = useMemo(
+    () =>
+      products
+        .filter((p) => p.is_active !== false)
+        .map(productSearchOption),
     [products],
   );
   const conversionsByProduct = useMemo(() => {
@@ -1305,7 +1321,7 @@ export function Despesas() {
 
                 <div>
                   <Label>Fornecedor</Label>
-                  <Select
+                  <SearchSelect
                     value={supplierId === "__create__" ? "" : supplierId}
                     onValueChange={(v) => {
                       if (v === "__create__") {
@@ -1319,26 +1335,18 @@ export function Despesas() {
                         setSupplierDocument(s.document ?? "");
                       }
                     }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Selecione o fornecedor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.name}
-                          {s.document ? ` — ${s.document}` : ""}
-                        </SelectItem>
-                      ))}
-                      <SelectItem
-                        value="__create__"
-                        className="text-primary font-medium"
-                      >
-                        <Plus className="h-4 w-4 inline mr-2" />
-                        Criar fornecedor
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={supplierSelectOptions}
+                    trailingOptions={[
+                      {
+                        value: "__create__",
+                        label: "Criar fornecedor",
+                        accent: true,
+                      },
+                    ]}
+                    placeholder="Selecione o fornecedor"
+                    searchPlaceholder="Buscar fornecedor…"
+                    emptyMessage="Nenhum fornecedor encontrado."
+                  />
                   {suppliers.length === 0 && !supplierId && (
                     <p className="text-sm text-muted-foreground mt-1">
                       Nenhum fornecedor cadastrado.{" "}
@@ -1481,7 +1489,7 @@ export function Despesas() {
                           <Label className="text-xs">
                             Vincular ao produto (estoque)
                           </Label>
-                          <Select
+                          <SearchSelect
                             value={it.product_id ?? "__none__"}
                             onValueChange={(v) =>
                               updateItem(
@@ -1499,31 +1507,17 @@ export function Despesas() {
                                 })(),
                               )
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Não vincular" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">
-                                Não vincular
-                              </SelectItem>
-                              {products
-                                .filter((p) => p.is_active !== false)
-                                .map((p) => (
-                                  <SelectItem key={p.id} value={p.id}>
-                                    {p.name}
-                                    {p.sku && ` (${p.sku})`} — Estoque:{" "}
-                                    {Number(p.current_quantity).toLocaleString(
-                                      "pt-BR",
-                                    )}{" "}
-                                    {p.unit}
-                                    {p.last_unit_value != null &&
-                                      p.last_unit_value > 0 &&
-                                      ` • Último: ${Number(p.last_unit_value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
+                            options={productSelectOptions}
+                            leadingOptions={[
+                              {
+                                value: "__none__",
+                                label: "Não vincular",
+                              },
+                            ]}
+                            placeholder="Não vincular"
+                            searchPlaceholder="Buscar produto…"
+                            emptyMessage="Nenhum produto encontrado."
+                          />
                           <p className="text-xs text-muted-foreground mt-1">
                             Ao vincular, o estoque será atualizado quando o
                             recebimento for confirmado

@@ -11,6 +11,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -422,19 +426,21 @@ export function ConfiguracoesImportacaoProdutos() {
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label>Produto no Faro</Label>
-              <Select value={newProductId} onValueChange={setNewProductId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o produto" />
-                </SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}{" "}
-                      <span className="text-muted-foreground">({p.unit})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={newProductId}
+                onValueChange={setNewProductId}
+                options={products.map((p) =>
+                  productSearchOption({
+                    id: p.id,
+                    name: p.name,
+                    unit: p.unit,
+                  }),
+                )}
+                placeholder="Selecione o produto"
+                searchPlaceholder="Buscar produto…"
+                emptyMessage="Nenhum produto encontrado."
+                listMaxHeightClassName="max-h-72"
+              />
             </div>
             <div className="space-y-2">
               <Label>Unidade destino (opcional)</Label>

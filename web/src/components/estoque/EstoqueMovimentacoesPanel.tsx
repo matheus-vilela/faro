@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Select,
   SelectContent,
@@ -444,24 +445,22 @@ export function EstoqueMovimentacoesPanel({
           </div>
           <div className="w-full min-w-[180px] max-w-xs space-y-1.5 sm:w-auto">
             <Label className="text-xs text-muted-foreground">Produto</Label>
-            <Select
+            <SearchSelect
               value={productFilterId || "__all__"}
               onValueChange={(v) =>
                 setProductFilterId(v === "__all__" ? "" : v)
               }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Todos os produtos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Todos os produtos</SelectItem>
-                {products.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={products.map((p) => ({
+                value: p.id,
+                label: p.name,
+              }))}
+              leadingOptions={[
+                { value: "__all__", label: "Todos os produtos" },
+              ]}
+              placeholder="Todos os produtos"
+              searchPlaceholder="Buscar produto…"
+              emptyMessage="Nenhum produto encontrado."
+            />
           </div>
           <div className="w-full min-w-[150px] max-w-[200px] space-y-1.5 sm:w-auto">
             <Label className="text-xs text-muted-foreground">Tipo</Label>

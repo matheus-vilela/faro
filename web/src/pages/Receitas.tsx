@@ -22,6 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Select,
   SelectContent,
@@ -519,6 +520,15 @@ export function Receitas() {
         ),
       );
   }, [receitaCategories, childrenMap, categoriesById]);
+
+  const categorySelectOptions = useMemo(
+    () =>
+      leafCategoryOptions.map((c) => ({
+        value: c.id,
+        label: categoryPathLabel(c.id, categoriesById),
+      })),
+    [leafCategoryOptions, categoriesById],
+  );
 
   const grossNum = parseFloat(grossInput.replace(",", ".")) || 0;
   const taxValNum = parseFloat(taxValue.replace(",", ".")) || 0;
@@ -1171,24 +1181,19 @@ export function Receitas() {
 
                     <div>
                       <Label>Categoria</Label>
-                      <Select
+                      <SearchSelect
                         value={categoryLeafId || "__none__"}
                         onValueChange={(v) =>
                           setCategoryLeafId(v === "__none__" ? "" : v)
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a categoria" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Selecione</SelectItem>
-                          {leafCategoryOptions.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {categoryPathLabel(c.id, categoriesById)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={categorySelectOptions}
+                        leadingOptions={[
+                          { value: "__none__", label: "Selecione" },
+                        ]}
+                        placeholder="Selecione a categoria"
+                        searchPlaceholder="Buscar categoria…"
+                        emptyMessage="Nenhuma categoria encontrada."
+                      />
                       {leafCategoryOptions.length === 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Cadastre categorias de receita em Configurações ›
@@ -1203,24 +1208,19 @@ export function Receitas() {
                   <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
                     <div>
                       <Label>Categoria da venda *</Label>
-                      <Select
+                      <SearchSelect
                         value={categoryLeafId || "__none__"}
                         onValueChange={(v) =>
                           setCategoryLeafId(v === "__none__" ? "" : v)
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a categoria da receita" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Selecione</SelectItem>
-                          {leafCategoryOptions.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {categoryPathLabel(c.id, categoriesById)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={categorySelectOptions}
+                        leadingOptions={[
+                          { value: "__none__", label: "Selecione" },
+                        ]}
+                        placeholder="Selecione a categoria da receita"
+                        searchPlaceholder="Buscar categoria…"
+                        emptyMessage="Nenhuma categoria encontrada."
+                      />
                       {leafCategoryOptions.length === 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Cadastre categorias de receita operacional em

@@ -9,6 +9,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -250,7 +254,7 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
         <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
           <div className="space-y-2 sm:col-span-2">
             <Label>Produto</Label>
-            <Select
+            <SearchSelect
               value={productId || "__"}
               onValueChange={(v) => {
                 const pid = v === "__" ? "" : v;
@@ -258,19 +262,12 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
                 const product = productById.get(pid);
                 setUnitCode(product?.unit ?? "");
               }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__">—</SelectItem>
-                {products.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={products.map(productSearchOption)}
+              leadingOptions={[{ value: "__", label: "—" }]}
+              placeholder="Selecionar"
+              searchPlaceholder="Buscar produto…"
+              emptyMessage="Nenhum produto encontrado."
+            />
           </div>
           <div className="space-y-2">
             <Label>Quantidade</Label>

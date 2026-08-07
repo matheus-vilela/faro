@@ -11,6 +11,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  productSearchOption,
+  SearchSelect,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -165,6 +169,36 @@ export function RevenueDetailSheet({
         ),
       );
   }, [receitaCategories, childrenMap, categoriesById]);
+
+  const categorySelectOptions = useMemo(
+    () =>
+      leafCategoryOptions.map((c) => ({
+        value: c.id,
+        label: categoryPathLabel(c.id, categoriesById),
+      })),
+    [leafCategoryOptions, categoriesById],
+  );
+
+  const productSelectOptions = useMemo(
+    () =>
+      products
+        .filter((p) => p.is_active !== false)
+        .map(productSearchOption),
+    [products],
+  );
+
+  const recipeSelectOptions = useMemo(
+    () =>
+      recipes
+        .filter((r) => r.active !== false)
+        .map((r) => ({
+          value: r.id,
+          label: r.name,
+          description:
+            r.batch_yield != null ? `Rendimento ${r.batch_yield}` : undefined,
+        })),
+    [recipes],
+  );
 
   const taxPresetByCategory = useMemo(() => {
     const m = new Map<
@@ -763,24 +797,19 @@ export function RevenueDetailSheet({
                       </div>
                       <div>
                         <Label>Categoria</Label>
-                        <Select
+                        <SearchSelect
                           value={categoryLeafId || "__none__"}
                           onValueChange={(v) =>
                             setCategoryLeafId(v === "__none__" ? "" : v)
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a categoria" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {leafCategoryOptions.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {categoryPathLabel(c.id, categoriesById)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={categorySelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Selecione" },
+                          ]}
+                          placeholder="Selecione a categoria"
+                          searchPlaceholder="Buscar categoria…"
+                          emptyMessage="Nenhuma categoria encontrada."
+                        />
                       </div>
                     </>
                   )}
@@ -789,7 +818,7 @@ export function RevenueDetailSheet({
                     <>
                       <div>
                         <Label>Produto</Label>
-                        <Select
+                        <SearchSelect
                           value={productId || "__none__"}
                           onValueChange={(v) => {
                             const id = v === "__none__" ? "" : v;
@@ -798,50 +827,30 @@ export function RevenueDetailSheet({
                             setSaleUnitCode(p?.unit ?? "");
                             setTitle(p ? `Venda — ${p.name}` : "");
                           }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione o produto" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {products
-                              .filter((p) => p.is_active !== false)
-                              .map((p) => (
-                                <SelectItem key={p.id} value={p.id}>
-                                  {p.name}
-                                  {p.sku ? ` (${p.sku})` : ""} — Est.:{" "}
-                                  {Number(p.current_quantity).toLocaleString(
-                                    "pt-BR",
-                                    {
-                                      maximumFractionDigits: 4,
-                                    },
-                                  )}{" "}
-                                  {p.unit}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
+                          options={productSelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Selecione" },
+                          ]}
+                          placeholder="Selecione o produto"
+                          searchPlaceholder="Buscar produto…"
+                          emptyMessage="Nenhum produto encontrado."
+                        />
                       </div>
                       <div>
                         <Label>Categoria da venda *</Label>
-                        <Select
+                        <SearchSelect
                           value={categoryLeafId || "__none__"}
                           onValueChange={(v) =>
                             setCategoryLeafId(v === "__none__" ? "" : v)
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a categoria da receita" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {leafCategoryOptions.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {categoryPathLabel(c.id, categoriesById)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={categorySelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Selecione" },
+                          ]}
+                          placeholder="Selecione a categoria da receita"
+                          searchPlaceholder="Buscar categoria…"
+                          emptyMessage="Nenhuma categoria encontrada."
+                        />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -947,7 +956,7 @@ export function RevenueDetailSheet({
                     <>
                       <div>
                         <Label>Receita (ficha)</Label>
-                        <Select
+                        <SearchSelect
                           value={recipeId || "__none__"}
                           onValueChange={(v) => {
                             const id = v === "__none__" ? "" : v;
@@ -955,45 +964,30 @@ export function RevenueDetailSheet({
                             const r = recipes.find((x) => x.id === id);
                             setTitle(r ? `Venda — ${r.name}` : "");
                           }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a receita" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {recipes
-                              .filter((r) => r.active !== false)
-                              .map((r) => (
-                                <SelectItem key={r.id} value={r.id}>
-                                  {r.name}
-                                  {r.batch_yield != null
-                                    ? ` · rend. ${r.batch_yield}`
-                                    : ""}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
+                          options={recipeSelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Selecione" },
+                          ]}
+                          placeholder="Selecione a receita"
+                          searchPlaceholder="Buscar ficha…"
+                          emptyMessage="Nenhuma receita encontrada."
+                        />
                       </div>
                       <div>
                         <Label>Categoria da venda *</Label>
-                        <Select
+                        <SearchSelect
                           value={categoryLeafId || "__none__"}
                           onValueChange={(v) =>
                             setCategoryLeafId(v === "__none__" ? "" : v)
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a categoria da receita" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Selecione</SelectItem>
-                            {leafCategoryOptions.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {categoryPathLabel(c.id, categoriesById)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={categorySelectOptions}
+                          leadingOptions={[
+                            { value: "__none__", label: "Selecione" },
+                          ]}
+                          placeholder="Selecione a categoria da receita"
+                          searchPlaceholder="Buscar categoria…"
+                          emptyMessage="Nenhuma categoria encontrada."
+                        />
                       </div>
                       <p className="text-sm rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-muted-foreground">
                         <span className="font-medium text-foreground">

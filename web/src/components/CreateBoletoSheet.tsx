@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  SearchSelect,
+  supplierSearchOption,
+} from "@/components/ui/search-select";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -41,7 +45,7 @@ import type {
   RecurrenceFrequency,
 } from "@/types/expenseSeries";
 import { FileText, Plus } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 /** Opções do select "Tipo de lançamento" (série + transferência). */
@@ -239,6 +243,10 @@ export function CreateBoletoSheet({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+  const supplierSelectOptions = useMemo(
+    () => suppliers.map(supplierSearchOption),
+    [suppliers],
+  );
 
   const [bankAccounts, setBankAccounts] = useState<CompanyBankAccount[]>([]);
   const [originBankAccountId, setOriginBankAccountId] = useState("");
@@ -861,29 +869,21 @@ export function CreateBoletoSheet({
             {requiresPaymentDetails && !expenseId && (
               <div>
                 <Label>Fornecedor</Label>
-                <Select
+                <SearchSelect
                   value={supplierId === "__create__" ? "" : supplierId}
                   onValueChange={handleSupplierChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Selecione o fornecedor (opcional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                        {s.document ? ` — ${s.document}` : ""}
-                      </SelectItem>
-                    ))}
-                    <SelectItem
-                      value="__create__"
-                      className="text-primary font-medium"
-                    >
-                      <Plus className="h-4 w-4 inline mr-2" />
-                      Criar fornecedor
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={supplierSelectOptions}
+                  trailingOptions={[
+                    {
+                      value: "__create__",
+                      label: "Criar fornecedor",
+                      accent: true,
+                    },
+                  ]}
+                  placeholder="Selecione o fornecedor (opcional)"
+                  searchPlaceholder="Buscar fornecedor…"
+                  emptyMessage="Nenhum fornecedor encontrado."
+                />
                 {suppliers.length === 0 && !supplierId && (
                   <p className="text-sm text-muted-foreground mt-1">
                     Nenhum fornecedor cadastrado.{" "}
