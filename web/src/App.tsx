@@ -28,6 +28,8 @@ import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoForne
 import { Dre } from "@/pages/Dre";
 import { Orcamento } from "@/pages/Orcamento";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
+import { MeuDesempenho } from "@/pages/MeuDesempenho";
+import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSlug";
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
@@ -228,12 +230,14 @@ function AppRoutes() {
       <Route path="/w/:token" element={<ValidarDespesaWhatsapp />} />
       <Route path="/k/:slug" element={<RedirectChecklistSlug />} />
       <Route path="/i/:slug" element={<RedirectInventorySlug />} />
+      <Route path="/d/:slug" element={<RedirectStaffPerformanceSlug />} />
       <Route path="/contagem-estoque/:token" element={<ContagemEstoquePublic />} />
       <Route
         path="/certificado-onboarding/:token"
         element={<CertificadoOnboardingPublic />}
       />
       <Route path="/checklist/:token" element={<ExecutarChecklist />} />
+      <Route path="/desempenho/:token" element={<MeuDesempenho />} />
       <Route
         path="/*"
         element={

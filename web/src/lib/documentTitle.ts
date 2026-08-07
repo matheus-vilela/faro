@@ -120,6 +120,9 @@ export function getDocumentTitle(pathname: string): string {
   if (path.startsWith("/checklist/")) {
     return tab("Checklist");
   }
+  if (path.startsWith("/desempenho/") || path.startsWith("/d/")) {
+    return tab("Meu desempenho");
+  }
   if (path.startsWith("/w/")) {
     return tab("Validar despesa");
   }

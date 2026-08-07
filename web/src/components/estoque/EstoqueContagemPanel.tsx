@@ -1,3 +1,4 @@
+import { EstoqueAprovacaoContagem } from "@/components/estoque/EstoqueAprovacaoContagem";
 import { EstoqueHistoricoContagem } from "@/components/estoque/EstoqueHistoricoContagem";
 import { Button } from "@/components/ui/button";
 import {
@@ -496,6 +497,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       if (se || !sess?.id || !sess?.token) {
         throw new Error(se?.message ?? "Falha ao criar sessão.");
       }
+
+      await supabase.rpc("seed_inventory_count_lines", {
+        p_session_id: sess.id,
+      });
 
       let slug: string | null = null;
       for (let i = 0; i < 15; i++) {
@@ -1326,6 +1331,12 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           )}
         </SheetContent>
       </Sheet>
+
+      <EstoqueAprovacaoContagem
+        companyId={companyId}
+        refreshTrigger={historyTick}
+        onChanged={() => setHistoryTick((t) => t + 1)}
+      />
 
       <EstoqueHistoricoContagem
         companyId={companyId}

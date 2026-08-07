@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
 import type { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { ensureShortSlug } from "../_shared/randomShortSlug.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 type SendWhatsappMessageFn = (
@@ -44,13 +45,6 @@ export function isNovaInventoryCommand(text: string): boolean {
   return parts[1] === "contagem";
 }
 
-function randomShortSlug(len = 8): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
-}
-
 function publicAppAbsoluteBase(): string {
   const raw = Deno.env.get("PUBLIC_APP_URL") ?? Deno.env.get("SITE_URL") ?? "";
   const u = raw.replace(/\/$/, "");
@@ -65,31 +59,15 @@ async function ensureInventoryShortSlug(
   sessionId: string,
   tokenUuid: string,
 ): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from("inventory_count_short_links")
-    .select("slug")
-    .eq("session_id", sessionId)
-    .maybeSingle();
-
-  const row = existing as { slug?: string } | null;
-  if (row?.slug && typeof row.slug === "string") return row.slug;
-
-  for (let attempt = 0; attempt < 15; attempt++) {
-    const slug = randomShortSlug(8);
-    const { error } = await supabase.from("inventory_count_short_links").insert({
-      company_id: companyId,
-      slug,
-      session_id: sessionId,
-      token: tokenUuid,
-    });
-    if (!error) return slug;
-    const code = (error as { code?: string }).code;
-    if (code !== "23505") {
-      console.error("[inventory-flow] ensureInventoryShortSlug:", error.message);
-      return null;
-    }
-  }
-  return null;
+  return ensureShortSlug({
+    supabase: supabase as Parameters<typeof ensureShortSlug>[0]["supabase"],
+    table: "inventory_count_short_links",
+    companyId,
+    fkColumn: "session_id",
+    fkValue: sessionId,
+    token: tokenUuid,
+    logPrefix: "[inventory-flow]",
+  });
 }
 
 type PendingSessionRow = {
@@ -132,7 +110,7 @@ async function fetchPendingAssignedOpenSessions(
     )
     .eq("company_id", companyId)
     .eq("assigned_company_member_id", memberId)
-    .eq("status", "open")
+    .in("status", ["open", "returned"])
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -327,6 +305,10 @@ export async function sendInventoryCountLink(
     return;
   }
 
+  await supabase.rpc("seed_inventory_count_lines", {
+    p_session_id: sess.id,
+  });
+
   const base = publicAppAbsoluteBase();
   if (!base) {
     await sendWhatsappMessage(
@@ -353,13 +335,13 @@ export async function sendInventoryCountLink(
     auth.senderNormalized,
     withFaroFlowFooter(
       [
-        "*Contagem de estoque*",
+        "*Contagem de estoque* 🍺",
         "",
-        "Abra o link, informe a quantidade contada de cada item e envie ao final.",
+        "Oi! Hora da contagem. Abra o link, conte item a item (sem ver o esperado) e envie para aprovação.",
         "",
         link,
         "",
-        "O link expira após o envio da contagem.",
+        "Se algo ficar fora da faixa, o Faro pede para conferir de novo — sem mostrar o número.",
       ].join("\n"),
     ),
     "inventory_link_enviado",

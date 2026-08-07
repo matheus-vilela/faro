@@ -11,8 +11,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
-import { ClipboardList, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  Loader2,
+  ScanBarcode,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 function PublicPageShell({ children }: { children: ReactNode }) {
@@ -37,28 +44,36 @@ function PublicPageShell({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-0 bg-size-[24px_24px] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)]"
         aria-hidden
       />
-      <div className="relative z-10 w-full max-w-2xl pt-10">{children}</div>
+      <div className="relative z-10 w-full max-w-md pt-10">{children}</div>
     </div>
   );
 }
 
 type ProductLine = {
   id: string;
+  line_id?: string;
   name: string;
   sku: string | null;
   unit: string;
-  current_quantity: number;
+  barcode?: string | null;
+  counted_qty?: number | null;
+  in_band?: boolean | null;
+  recount_required?: boolean;
+  sort_order?: number;
 };
 
 type LoadJson = {
   ok: boolean;
   error?: string;
+  status?: string;
   company_name?: string;
   group_name?: string;
-  listing_name?: string;
   assigned_to_name?: string;
+  validate_live?: boolean;
   products?: ProductLine[];
 };
+
+type BandSignal = "ok" | "out" | null;
 
 export function ContagemEstoquePublic() {
   const { token } = useParams<{ token: string }>();
@@ -66,12 +81,26 @@ export function ContagemEstoquePublic() {
   const [error, setError] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("");
   const [groupName, setGroupName] = useState("");
-  const [listingName, setListingName] = useState("");
   const [assignedToName, setAssignedToName] = useState("");
   const [products, setProducts] = useState<ProductLine[]>([]);
-  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [validateLive, setValidateLive] = useState(true);
+  const [sessionStatus, setSessionStatus] = useState("open");
+  const [index, setIndex] = useState(0);
+  const [qtyDraft, setQtyDraft] = useState("");
+  const [band, setBand] = useState<BandSignal>(null);
+  const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [barcodeQuery, setBarcodeQuery] = useState("");
+
+  const queue = useMemo(() => {
+    if (sessionStatus === "returned") {
+      return products.filter((p) => p.recount_required);
+    }
+    return products;
+  }, [products, sessionStatus]);
+
+  const current = queue[index] ?? null;
 
   const load = useCallback(async () => {
     if (!token) {
@@ -101,35 +130,111 @@ export function ContagemEstoquePublic() {
     const list = row.products ?? [];
     setCompanyName(row.company_name ?? "");
     setGroupName((row.group_name ?? "").trim());
-    setListingName((row.listing_name ?? "").trim());
     setAssignedToName((row.assigned_to_name ?? "").trim());
+    setValidateLive(row.validate_live !== false);
+    setSessionStatus(row.status ?? "open");
     setProducts(list);
-    const initial: Record<string, string> = {};
-    for (const p of list) {
-      initial[p.id] = String(p.current_quantity ?? 0);
-    }
-    setCounts(initial);
+    setBand(null);
+    setQtyDraft("");
+    setIndex(0);
   }, [token]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
 
-  const submitBlocked = products.length === 0;
+  useEffect(() => {
+    if (!current) return;
+    setQtyDraft(
+      current.counted_qty != null && current.counted_qty !== undefined
+        ? String(current.counted_qty)
+        : "",
+    );
+    setBand(
+      current.in_band === true ? "ok" : current.in_band === false ? "out" : null,
+    );
+  }, [current?.id]);
+
+  const confirmCurrent = async (): Promise<boolean> => {
+    if (!token || !current) return false;
+    const n = parseFloat(qtyDraft.replace(",", "."));
+    if (!Number.isFinite(n) || n < 0) {
+      setError("Informe uma quantidade válida.");
+      return false;
+    }
+    setSaving(true);
+    setError(null);
+    const { data: res, error: err } = await supabase.rpc(
+      "set_inventory_count_line_public",
+      {
+        p_token: token,
+        p_product_id: current.id,
+        p_counted_qty: n,
+      },
+    );
+    setSaving(false);
+    if (err) {
+      setError("Não foi possível salvar este item.");
+      return false;
+    }
+    const row = res as {
+      ok?: boolean;
+      error?: string;
+      in_band?: boolean | null;
+      recount_required?: boolean;
+    };
+    if (!row?.ok) {
+      setError(
+        row?.error === "not_returned_item"
+          ? "Este item não precisa de recontagem."
+          : "Não foi possível salvar este item.",
+      );
+      return false;
+    }
+
+    const inBand =
+      row.in_band === true ? "ok" : row.in_band === false ? "out" : null;
+    setBand(inBand);
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === current.id
+          ? {
+              ...p,
+              counted_qty: n,
+              in_band: row.in_band ?? null,
+              recount_required: Boolean(row.recount_required),
+            }
+          : p,
+      ),
+    );
+
+    if (validateLive && row.in_band === false) {
+      setError(null);
+      return false;
+    }
+    return true;
+  };
+
+  const goNext = async () => {
+    const ok = await confirmCurrent();
+    if (!ok) return;
+    if (index < queue.length - 1) {
+      setIndex((i) => i + 1);
+      setBand(null);
+    }
+  };
 
   const submit = async () => {
     if (!token) return;
-    if (submitBlocked && !done) return;
-    const lines = products.map((p) => ({
-      product_id: p.id,
-      counted_qty: parseFloat(counts[p.id] ?? "0") || 0,
-    }));
+    const ok = await confirmCurrent();
+    if (!ok && validateLive && band === "out") return;
+    if (!ok) return;
+
     setSubmitting(true);
     const { data: res, error: err } = await supabase.rpc(
-      "submit_inventory_count_public",
+      "submit_inventory_count_for_approval",
       {
         p_token: token,
-        p_lines: lines,
         p_inventory_count_group_id: null,
       },
     );
@@ -138,8 +243,18 @@ export function ContagemEstoquePublic() {
       setError("Não foi possível enviar. Tente novamente.");
       return;
     }
-    const row = res as { ok?: boolean; error?: string };
+    const row = res as { ok?: boolean; error?: string; count?: number };
     if (!row?.ok) {
+      if (row?.error === "out_of_band") {
+        setError(
+          `${row.count ?? 1} item(ns) fora da faixa — confira de novo antes de enviar.`,
+        );
+        return;
+      }
+      if (row?.error === "incomplete") {
+        setError("Ainda há itens sem quantidade.");
+        return;
+      }
       setError(
         row?.error === "already_submitted"
           ? "Esta contagem já foi enviada."
@@ -148,6 +263,24 @@ export function ContagemEstoquePublic() {
       return;
     }
     setDone(true);
+  };
+
+  const jumpBarcode = () => {
+    const q = barcodeQuery.trim();
+    if (!q) return;
+    const found = queue.findIndex(
+      (p) =>
+        (p.barcode && p.barcode === q) ||
+        (p.sku && p.sku.toLowerCase() === q.toLowerCase()) ||
+        p.name.toLowerCase().includes(q.toLowerCase()),
+    );
+    if (found < 0) {
+      setError("Item não encontrado nesta contagem.");
+      return;
+    }
+    setError(null);
+    setIndex(found);
+    setBarcodeQuery("");
   };
 
   if (loading) {
@@ -161,7 +294,7 @@ export function ContagemEstoquePublic() {
     );
   }
 
-  if (error && !done) {
+  if (error && !current && !done) {
     return (
       <PublicPageShell>
         <Card>
@@ -184,7 +317,8 @@ export function ContagemEstoquePublic() {
               Contagem enviada
             </CardTitle>
             <CardDescription>
-              O estoque foi atualizado com as quantidades informadas. Obrigado.
+              Enviada para aprovação do responsável. O estoque só muda depois da
+              conferência. Obrigado!
             </CardDescription>
           </CardHeader>
         </Card>
@@ -192,104 +326,166 @@ export function ContagemEstoquePublic() {
     );
   }
 
+  if (!current) {
+    return (
+      <PublicPageShell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Contagem de estoque</CardTitle>
+            <CardDescription>
+              {sessionStatus === "returned"
+                ? "Nenhum item pendente de recontagem."
+                : "Nenhum produto para contar."}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </PublicPageShell>
+    );
+  }
+
+  const isLast = index >= queue.length - 1;
+  const progressLabel = `${index + 1} de ${queue.length}`;
+
   return (
     <PublicPageShell>
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="space-y-2">
+          <CardTitle className="flex items-center gap-2 text-xl">
             <ClipboardList className="h-5 w-5" />
-            Contagem de estoque
+            Contagem
           </CardTitle>
           <CardDescription className="space-y-1">
             {companyName ? (
-              <p>
-                <span className="font-medium text-foreground">{companyName}</span>
-              </p>
+              <p className="font-medium text-foreground">{companyName}</p>
             ) : null}
-            {groupName ? (
-              <p className="text-sm">
-                <span className="text-muted-foreground">Grupo:</span>{" "}
-                <span className="font-medium text-foreground">{groupName}</span>
+            {groupName ? <p>Grupo: {groupName}</p> : null}
+            {assignedToName ? <p>Operador: {assignedToName}</p> : null}
+            {sessionStatus === "returned" ? (
+              <p className="text-amber-700 dark:text-amber-400">
+                Recontagem: confira só os itens devolvidos (sem ver o esperado).
               </p>
-            ) : null}
-            {listingName ? (
-              <p className="text-sm">
-                <span className="text-muted-foreground">Listagem:</span>{" "}
-                <span className="font-medium text-foreground">{listingName}</span>
-              </p>
-            ) : null}
-            {!listingName ? (
-              <p className="text-sm text-muted-foreground">
-                Esta sessão não tem listagem específica e exibirá os produtos
-                ativos da empresa.
-              </p>
-            ) : null}
-            {assignedToName ? (
-              <p className="text-sm">
-                <span className="text-muted-foreground">Operador designado:</span>{" "}
-                <span className="font-medium text-foreground">
-                  {assignedToName}
-                </span>
-              </p>
-            ) : null}
-            <p>
-              Informe a quantidade física de cada item. O sistema calculará os
-              ajustes em relação ao saldo atual.
-            </p>
+            ) : (
+              <p>Um item por vez. O número esperado fica oculto.</p>
+            )}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="max-h-[min(60vh,480px)] space-y-3 overflow-y-auto pr-1">
-            {products.map((p) => (
-              <div
-                key={p.id}
-                className="flex flex-col gap-1 rounded-lg border border-border/80 p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium leading-snug">{p.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Sistema: {Number(p.current_quantity).toLocaleString("pt-BR")}{" "}
-                    {p.unit}
-                    {p.sku ? ` · ${p.sku}` : ""}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Contado</span>
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    min="0"
-                    className="w-28 tabular-nums"
-                    value={counts[p.id] ?? ""}
-                    onChange={(e) =>
-                      setCounts((c) => ({ ...c, [p.id]: e.target.value }))
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">{p.unit}</span>
-                </div>
-              </div>
-            ))}
+        <CardContent className="space-y-5">
+          <div className="flex items-center gap-2">
+            <ScanBarcode className="h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Código de barras ou nome…"
+              value={barcodeQuery}
+              onChange={(e) => setBarcodeQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  jumpBarcode();
+                }
+              }}
+              className="flex-1"
+            />
+            <Button type="button" variant="secondary" onClick={jumpBarcode}>
+              Ir
+            </Button>
           </div>
-          {products.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Nenhum produto ativo para contar.
+
+          <div className="rounded-2xl border bg-muted/30 p-5 text-center">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {progressLabel}
             </p>
-          )}
-          <Button
-            type="button"
-            className="w-full"
-            disabled={submitting || submitBlocked}
-            onClick={() => void submit()}
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Enviando…
-              </>
+            <h2 className="mt-2 text-2xl font-bold leading-tight">
+              {current.name}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {current.unit}
+              {current.sku ? ` · ${current.sku}` : ""}
+            </p>
+
+            <label className="mt-6 block text-left text-xs font-semibold uppercase text-muted-foreground">
+              Quantidade contada
+            </label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              autoFocus
+              className="mt-2 h-16 text-center text-3xl font-bold tabular-nums"
+              value={qtyDraft}
+              onChange={(e) => {
+                setQtyDraft(e.target.value);
+                setBand(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void (isLast ? submit() : goNext());
+                }
+              }}
+            />
+
+            {validateLive && band === "ok" ? (
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Dentro do esperado
+              </div>
+            ) : null}
+            {validateLive && band === "out" ? (
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="h-4 w-4" />
+                Fora da faixa — confira de novo
+              </div>
+            ) : null}
+          </div>
+
+          {error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : null}
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              disabled={index === 0 || saving || submitting}
+              onClick={() => {
+                setIndex((i) => Math.max(0, i - 1));
+                setBand(null);
+                setError(null);
+              }}
+            >
+              Anterior
+            </Button>
+            {!isLast ? (
+              <Button
+                type="button"
+                className={cn("flex-1")}
+                disabled={saving || submitting}
+                onClick={() => void goNext()}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : band === "out" && validateLive ? (
+                  "Recontar"
+                ) : (
+                  "Próximo"
+                )}
+              </Button>
             ) : (
-              "Enviar contagem"
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={saving || submitting}
+                onClick={() => void submit()}
+              >
+                {submitting || saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Enviar p/ aprovação"
+                )}
+              </Button>
             )}
-          </Button>
+          </div>
         </CardContent>
       </Card>
     </PublicPageShell>
