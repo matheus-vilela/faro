@@ -1,3 +1,4 @@
+import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { PageHeader } from "@/components/PageHeader";
@@ -55,6 +56,7 @@ import {
   Check,
   Landmark,
   Loader2,
+  Plus,
   Upload,
   HelpCircle,
   Hourglass,
@@ -153,6 +155,7 @@ export function BankReconciliationPanel({
   const [createFromLine, setCreateFromLine] = useState<BankStatementLine | null>(
     null,
   );
+  const [createBankOpen, setCreateBankOpen] = useState(false);
   const [listPage, setListPage] = useState(1);
 
   const loadAccounts = useCallback(async () => {
@@ -170,6 +173,14 @@ export function BankReconciliationPanel({
     setBankAccounts(list);
     if (!accountId && list.length > 0) setAccountId(list[0].id);
   }, [companyId, accountId]);
+
+  const handleAccountChange = (value: string) => {
+    if (value === "__create__") {
+      setCreateBankOpen(true);
+      return;
+    }
+    setAccountId(value);
+  };
 
   useEffect(() => {
     void loadAccounts();
@@ -549,7 +560,10 @@ export function BankReconciliationPanel({
               <p className="shrink-0 text-sm font-semibold text-foreground">
                 Extrato do banco
               </p>
-              <Select value={accountId} onValueChange={setAccountId}>
+              <Select
+                value={accountId === "__create__" ? "" : accountId}
+                onValueChange={handleAccountChange}
+              >
                 <SelectTrigger className="h-8 min-w-0 flex-1 text-xs">
                   <SelectValue placeholder="Conta" />
                 </SelectTrigger>
@@ -559,6 +573,13 @@ export function BankReconciliationPanel({
                       {a.name} ({bankAccountTypeLabel(a.tipo)})
                     </SelectItem>
                   ))}
+                  <SelectItem
+                    value="__create__"
+                    className="text-primary font-medium"
+                  >
+                    <Plus className="mr-2 inline h-3.5 w-3.5" />
+                    Criar conta bancária
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -593,7 +614,18 @@ export function BankReconciliationPanel({
                 Conectar banco · em breve
               </Button>
             </div>
-            {fileLabel ? (
+            {bankAccounts.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Nenhuma conta ainda.{" "}
+                <button
+                  type="button"
+                  onClick={() => setCreateBankOpen(true)}
+                  className="text-primary underline"
+                >
+                  Criar conta bancária
+                </button>
+              </p>
+            ) : fileLabel ? (
               <p className="truncate text-[11px] text-muted-foreground">
                 Último: {fileLabel}
               </p>
@@ -818,6 +850,20 @@ export function BankReconciliationPanel({
               toast.error("Conta criada, mas falhou o vínculo com o extrato.");
             }
           })();
+        }}
+      />
+
+      <CreateBankAccountSheet
+        open={createBankOpen}
+        onOpenChange={setCreateBankOpen}
+        companyId={companyId}
+        onSuccess={(account) => {
+          setBankAccounts((prev) =>
+            [...prev.filter((a) => a.id !== account.id), account].sort((a, b) =>
+              a.name.localeCompare(b.name, "pt-BR"),
+            ),
+          );
+          setAccountId(account.id);
         }}
       />
     </>
