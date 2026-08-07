@@ -281,7 +281,12 @@ export function RecebimentoShareDialog({
                 inputMode="tel"
                 value={maskWhatsappBrInput(newPhoneDigits)}
                 onChange={(e) =>
-                  setNewPhoneDigits(applyWhatsappPhoneMaskChange(e.target.value))
+                  setNewPhoneDigits(
+                    applyWhatsappPhoneMaskChange(
+                      newPhoneDigits,
+                      e.target.value,
+                    ),
+                  )
                 }
               />
             </div>

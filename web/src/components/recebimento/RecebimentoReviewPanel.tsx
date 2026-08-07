@@ -190,7 +190,7 @@ export function RecebimentoReviewPanel({
         return;
       }
 
-      const exp = rec.expenses as {
+      const exp = rec.expenses as unknown as {
         id: string;
         company_id: string;
         supplier_name: string | null;

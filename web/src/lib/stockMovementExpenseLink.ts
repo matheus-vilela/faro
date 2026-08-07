@@ -12,7 +12,11 @@ export function stockMovementExpenseHref(expenseId: string): string {
 export function isExpenseStockMovementReference(
   referenceType: string | null,
 ): boolean {
-  return referenceType === "expense" || referenceType === "expense_item";
+  return (
+    referenceType === "expense" ||
+    referenceType === "expense_item" ||
+    referenceType === "import_breakdown"
+  );
 }
 
 /** Resolve `expense_id` para movimentações com origem em despesa. */
@@ -21,7 +25,11 @@ export async function resolveExpenseIdsForStockMovements<
 >(rows: T[]): Promise<(T & { expense_id: string | null })[]> {
   const itemIds: string[] = [];
   for (const r of rows) {
-    if (r.reference_type === "expense_item" && r.reference_id) {
+    if (
+      (r.reference_type === "expense_item" ||
+        r.reference_type === "import_breakdown") &&
+      r.reference_id
+    ) {
       itemIds.push(r.reference_id);
     }
   }
@@ -45,7 +53,11 @@ export async function resolveExpenseIdsForStockMovements<
     let expense_id: string | null = null;
     if (r.reference_type === "expense" && r.reference_id) {
       expense_id = r.reference_id;
-    } else if (r.reference_type === "expense_item" && r.reference_id) {
+    } else if (
+      (r.reference_type === "expense_item" ||
+        r.reference_type === "import_breakdown") &&
+      r.reference_id
+    ) {
       expense_id = expenseByItemId.get(r.reference_id) ?? null;
     }
     return { ...r, expense_id };

@@ -1,5 +1,6 @@
 import { ProductMergeMovementPair } from "@/components/estoque/ProductMergeMovementPair";
 import { RegisterManualStockMovementSheet } from "@/components/estoque/RegisterManualStockMovementSheet";
+import { StockMovementEditSheet } from "@/components/estoque/StockMovementEditSheet";
 import { StockMovementOriginCell } from "@/components/estoque/StockMovementOriginCell";
 import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
 import { ProductMergeMovementUndoButton } from "@/components/products/ProductMergeAuditSection";
@@ -29,6 +30,7 @@ import {
   type MovementClassificationFilter,
 } from "@/lib/stockMovementClassification";
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
+import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
 import {
   applyStockMovementDirectionFilter,
   type FilterableQuery,
@@ -36,30 +38,12 @@ import {
 } from "@/lib/stockMovementFilters";
 import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
-import {
-  stockMovementMergeUndoProps,
-  type StockMovementProductMergeMeta,
-} from "@/types/productMergeAudit";
-import { Loader2, Plus, SlidersHorizontal } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { stockMovementMergeUndoProps } from "@/types/productMergeAudit";
+import { ChevronRight, Loader2, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Row = {
-  id: string;
-  product_id: string;
-  quantity: number;
-  type: string;
-  reference_type: string | null;
-  reference_id: string | null;
-  created_at: string;
-  unit_cost: number | null;
-  metadata_json:
-    | (StockMovementProductMergeMeta & {
-        quantity_unit?: string;
-        classification?: string;
-        movement_kind?: string;
-      })
-    | null;
-  expense_id: string | null;
+type Row = StockMovementEditRow & {
   products: { name: string; unit: string } | null;
 };
 
@@ -163,6 +147,7 @@ export function EstoqueMovimentacoesPanel({
   const [classificationFilter, setClassificationFilter] =
     useState<MovementClassificationFilter>("all");
   const [registerSheetOpen, setRegisterSheetOpen] = useState(false);
+  const [selectedMovement, setSelectedMovement] = useState<Row | null>(null);
 
   const hasActiveFilters = useMemo(
     () =>
@@ -527,96 +512,124 @@ export function EstoqueMovimentacoesPanel({
               : "Nenhuma movimentação registrada ainda."}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-                  <th className="p-2 font-medium">Data</th>
-                  <th className="p-2 font-medium">Produto</th>
-                  <th className="p-2 font-medium">Tipo</th>
-                  <th className="p-2 font-medium">Classificação</th>
-                  <th className="p-2 font-medium">Qtd</th>
-                  <th className="p-2 font-medium">Custo un.</th>
-                  <th className="p-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const winnerName = r.products?.name ?? "—";
-                  const qtyUnit = movementQuantityUnit(r);
-                  const mergeUndo = stockMovementMergeUndoProps(r);
-                  const mergePair = stockMovementMergePairDisplay(
-                    r,
-                    winnerName,
-                  );
-                  return (
-                    <tr key={r.id} className="border-b border-border/60">
-                      <td className="p-2 whitespace-nowrap text-muted-foreground">
-                        {new Date(r.created_at).toLocaleString("pt-BR", {
-                          day: "2-digit",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="p-2">
-                        {mergePair ? (
-                          <ProductMergeMovementPair {...mergePair} />
-                        ) : (
-                          <span className="font-medium">{winnerName}</span>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Clique em uma movimentação para revisar ou corrigir.
+            </p>
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                    <th className="p-2 font-medium">Data</th>
+                    <th className="p-2 font-medium">Produto</th>
+                    <th className="p-2 font-medium">Tipo</th>
+                    <th className="p-2 font-medium">Classificação</th>
+                    <th className="p-2 font-medium">Qtd</th>
+                    <th className="p-2 font-medium">Custo un.</th>
+                    <th className="p-2 font-medium" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const winnerName = r.products?.name ?? "—";
+                    const qtyUnit = movementQuantityUnit(r);
+                    const mergeUndo = stockMovementMergeUndoProps(r);
+                    const mergePair = stockMovementMergePairDisplay(
+                      r,
+                      winnerName,
+                    );
+                    return (
+                      <tr
+                        key={r.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedMovement(r)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedMovement(r);
+                          }
+                        }}
+                        className={cn(
+                          "group cursor-pointer border-b border-border/60 transition-colors last:border-b-0",
+                          "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                          selectedMovement?.id === r.id && "bg-muted/50",
                         )}
-                      </td>
-                      <td className="p-2">
-                        <StockMovementTypeBadge row={r} />
-                      </td>
-                      <td className="p-2">
-                        {mergePair ? (
-                          <span className="text-muted-foreground">
-                            {movementClassificationDisplayLabel(r)}
-                          </span>
-                        ) : (
-                          <StockMovementOriginCell
-                            referenceType={r.reference_type}
-                            expenseId={r.expense_id}
-                            label={movementClassificationDisplayLabel(r)}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2 tabular-nums">
-                        {Number(r.quantity).toLocaleString("pt-BR")} {qtyUnit}
-                      </td>
-                      <td className="p-2 tabular-nums text-muted-foreground">
-                        {formatMoney(
-                          r.unit_cost != null ? Number(r.unit_cost) : null,
-                        )}
-                      </td>
-                      <td className="p-2 text-right">
-                        {mergeUndo.eventId ? (
-                          <ProductMergeMovementUndoButton
-                            companyId={companyId}
-                            eventId={mergeUndo.eventId}
-                            loserName={mergeUndo.loserName}
-                            undoneAt={mergeUndo.undoneAt}
-                            onUndone={() => {
-                              void load();
-                              onStockChanged?.();
-                            }}
-                          />
-                        ) : r.reference_type === "product_merge_undo" ||
-                          r.metadata_json?.undone_at ? (
-                          <Badge
-                            variant="outline"
-                            className="text-xs font-normal"
+                      >
+                        <td className="p-2 whitespace-nowrap text-muted-foreground">
+                          {new Date(r.created_at).toLocaleString("pt-BR", {
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="p-2">
+                          {mergePair ? (
+                            <ProductMergeMovementPair {...mergePair} />
+                          ) : (
+                            <span className="font-medium">{winnerName}</span>
+                          )}
+                        </td>
+                        <td className="p-2">
+                          <StockMovementTypeBadge row={r} />
+                        </td>
+                        <td className="p-2">
+                          {mergePair ? (
+                            <span className="text-muted-foreground">
+                              {movementClassificationDisplayLabel(r)}
+                            </span>
+                          ) : (
+                            <StockMovementOriginCell
+                              referenceType={r.reference_type}
+                              expenseId={r.expense_id ?? null}
+                              label={movementClassificationDisplayLabel(r)}
+                            />
+                          )}
+                        </td>
+                        <td className="p-2 tabular-nums">
+                          {Number(r.quantity).toLocaleString("pt-BR")} {qtyUnit}
+                        </td>
+                        <td className="p-2 tabular-nums text-muted-foreground">
+                          {formatMoney(
+                            r.unit_cost != null ? Number(r.unit_cost) : null,
+                          )}
+                        </td>
+                        <td className="p-2 text-right">
+                          <div
+                            className="flex items-center justify-end gap-1"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            Desfeita
-                          </Badge>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            {mergeUndo.eventId ? (
+                              <ProductMergeMovementUndoButton
+                                companyId={companyId}
+                                eventId={mergeUndo.eventId}
+                                loserName={mergeUndo.loserName}
+                                undoneAt={mergeUndo.undoneAt}
+                                onUndone={() => {
+                                  void load();
+                                  onStockChanged?.();
+                                }}
+                              />
+                            ) : r.reference_type === "product_merge_undo" ||
+                              r.metadata_json?.undone_at ? (
+                              <Badge
+                                variant="outline"
+                                className="text-xs font-normal"
+                              >
+                                Desfeita
+                              </Badge>
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100" />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </CardContent>
@@ -625,6 +638,18 @@ export function EstoqueMovimentacoesPanel({
         companyId={companyId}
         open={registerSheetOpen}
         onOpenChange={setRegisterSheetOpen}
+        onSaved={() => {
+          void load();
+          onStockChanged?.();
+        }}
+      />
+      <StockMovementEditSheet
+        companyId={companyId}
+        movement={selectedMovement}
+        open={selectedMovement != null}
+        onOpenChange={(next) => {
+          if (!next) setSelectedMovement(null);
+        }}
         onSaved={() => {
           void load();
           onStockChanged?.();

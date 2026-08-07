@@ -369,7 +369,7 @@ export function ProductMergeDialog({
           <DialogTitle>Unificar produtos</DialogTitle>
           <DialogDescription>
             {step === "pick"
-              ? "Escolha o outro cadastro que é o mesmo item. Na etapa seguinte você confirma qual fica no catálogo."
+              ? "Escolha o outro cadastro que é o mesmo item. Isso corrige vínculo e histórico de movimentações dos dois cadastros."
               : "Revise o resultado: estoque, histórico de movimentações e vínculos de notas vão para o produto que permanece."}
           </DialogDescription>
         </DialogHeader>
@@ -575,6 +575,9 @@ export function ProductMergeDialog({
 
             <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
               <li>Soma as quantidades em estoque (com conversão se necessário)</li>
+              <li>
+                Corrige vínculo e histórico de movimentações dos dois cadastros
+              </li>
               <li>Move entradas, saídas e vínculos em despesas / notas</li>
               <li>Guarda o nome removido para a próxima importação automática</li>
               <li>Preenche EAN, NCM e similares no cadastro final se estiverem vazios</li>
