@@ -1,4 +1,4 @@
-import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
+import { boletoCountsInCashFlow } from "@/lib/boletoFluxo";
 import { addDaysYmd } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
@@ -8,7 +8,13 @@ import { getCashFlowFetchRange } from "./computeCashFlowProjection";
 
 type PendingBoletoRow = Pick<
   Boleto,
-  "due_date" | "amount" | "flow_type" | "status" | "exclude_from_fluxo" | "description"
+  | "due_date"
+  | "amount"
+  | "flow_type"
+  | "status"
+  | "exclude_from_fluxo"
+  | "description"
+  | "entry_kind"
 >;
 
 async function countPendingOutsideHorizon(input: {
@@ -23,6 +29,7 @@ async function countPendingOutsideHorizon(input: {
     .eq("flow_type", input.flowType)
     .eq("status", "pending")
     .eq("exclude_from_fluxo", false)
+    .neq("entry_kind", "transfer")
     .gt("due_date", input.horizonEnd);
 
   if (error) throw error;
@@ -49,10 +56,13 @@ async function fetchOverduePending(input: {
       fetchAllInRange<PendingBoletoRow>(
         supabase
           .from("boletos")
-          .select("due_date, amount, flow_type, status, exclude_from_fluxo, description")
+          .select(
+            "due_date, amount, flow_type, status, exclude_from_fluxo, description, entry_kind",
+          )
           .eq("company_id", input.companyId)
           .eq("flow_type", "payable")
           .eq("status", "pending")
+          .neq("entry_kind", "transfer")
           .gte("due_date", lookbackStart)
           .lt("due_date", input.todayYmd)
           .order("due_date", { ascending: true }),
@@ -65,11 +75,14 @@ async function fetchOverduePending(input: {
       fetchAllInRange<PendingBoletoRow>(
         supabase
           .from("boletos")
-          .select("due_date, amount, flow_type, status, exclude_from_fluxo, description")
+          .select(
+            "due_date, amount, flow_type, status, exclude_from_fluxo, description, entry_kind",
+          )
           .eq("company_id", input.companyId)
           .eq("flow_type", "receivable")
           .eq("status", "pending")
           .eq("exclude_from_fluxo", false)
+          .neq("entry_kind", "transfer")
           .gte("due_date", lookbackStart)
           .lt("due_date", input.todayYmd)
           .order("due_date", { ascending: true }),
@@ -85,7 +98,7 @@ async function fetchOverduePending(input: {
   let receivablesAmount = 0;
 
   for (const row of rows) {
-    if (!boletoVisibleInFluxo(row)) continue;
+    if (!boletoCountsInCashFlow(row)) continue;
     const amount = Number(row.amount) || 0;
     if (amount <= 0) continue;
     count += 1;

@@ -1,4 +1,5 @@
 import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
+import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { localDateYmd } from "@/lib/boletoPayment";
 import {
   buildChildrenMap,
   isLeafCategory,
@@ -27,6 +29,10 @@ import {
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
+import {
+  bankAccountTypeLabel,
+  type CompanyBankAccount,
+} from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
 import type { Supplier } from "@/types/supplier";
@@ -37,6 +43,9 @@ import type {
 import { FileText, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+
+/** Opções do select "Tipo de lançamento" (série + transferência). */
+type LaunchTypeSelect = ExpenseSeriesType | "transfer";
 
 function pickDefaultCategoryId(list: CompanyCategory[]): string {
   const leaves = list.filter(isSelectableDespesaLeaf);
@@ -98,7 +107,11 @@ const ACCOUNT_TYPES = [
 ];
 
 function mapSupplierRow(
-  row: Supplier & { supplier_payment_info?: Supplier["payment_info"] | Supplier["payment_info"][] },
+  row: Supplier & {
+    supplier_payment_info?:
+      | Supplier["payment_info"]
+      | Supplier["payment_info"][];
+  },
 ): Supplier {
   const paymentInfo = Array.isArray(row.supplier_payment_info)
     ? row.supplier_payment_info[0]
@@ -198,6 +211,7 @@ export function CreateBoletoSheet({
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [companyCategoryId, setCompanyCategoryId] = useState("");
   const [description, setDescription] = useState("");
+  const [emissionDate, setEmissionDate] = useState(() => localDateYmd());
   const [dueDate, setDueDate] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -217,7 +231,7 @@ export function CreateBoletoSheet({
   const [account, setAccount] = useState("");
   const [accountType, setAccountType] = useState("conta_corrente");
 
-  const [seriesType, setSeriesType] = useState<ExpenseSeriesType>("single");
+  const [launchType, setLaunchType] = useState<LaunchTypeSelect>("single");
   const [recurrenceFrequency, setRecurrenceFrequency] =
     useState<RecurrenceFrequency>("monthly");
   const [installmentCount, setInstallmentCount] = useState("12");
@@ -226,12 +240,23 @@ export function CreateBoletoSheet({
   const [supplierId, setSupplierId] = useState("");
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
 
+  const [bankAccounts, setBankAccounts] = useState<CompanyBankAccount[]>([]);
+  const [originBankAccountId, setOriginBankAccountId] = useState("");
+  const [destBankAccountId, setDestBankAccountId] = useState("");
+  const [createBankOpen, setCreateBankOpen] = useState(false);
+  const [createBankTarget, setCreateBankTarget] = useState<"origin" | "dest">(
+    "origin",
+  );
+
   useEffect(() => {
     if (!open) return;
     if (!expenseId) {
       setAccountFlow(fixedAccountFlow ?? defaultAccountFlow);
     }
-    setSeriesType("single");
+    setLaunchType("single");
+    setEmissionDate(localDateYmd());
+    setOriginBankAccountId("");
+    setDestBankAccountId("");
     if (defaultDueDate?.trim()) {
       setDueDate(defaultDueDate.trim().slice(0, 10));
     } else {
@@ -256,8 +281,11 @@ export function CreateBoletoSheet({
   const effectiveFlow: BoletoFlowType = expenseId
     ? "payable"
     : (fixedAccountFlow ?? accountFlow);
-  const requiresPaymentDetails = effectiveFlow === "payable";
-  const categoryNatureza = effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
+  const isTransfer = launchType === "transfer";
+  const seriesType: ExpenseSeriesType = isTransfer ? "single" : launchType;
+  const requiresPaymentDetails = effectiveFlow === "payable" && !isTransfer;
+  const categoryNatureza =
+    effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
 
   const loadCategories = useCallback(
     async (opts?: { selectDefault?: boolean }) => {
@@ -315,7 +343,30 @@ export function CreateBoletoSheet({
     void loadSuppliers();
   }, [open, companyId, expenseId, effectiveFlow, loadSuppliers]);
 
-  const applySupplierSelection = (supplier: Supplier | undefined, id: string) => {
+  const loadBankAccounts = useCallback(async () => {
+    if (!companyId) return;
+    const { data, error } = await supabase
+      .from("company_bank_accounts")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true });
+    if (error) {
+      console.error(error);
+      setBankAccounts([]);
+      return;
+    }
+    setBankAccounts((data ?? []) as CompanyBankAccount[]);
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!open || !companyId || !isTransfer) return;
+    void loadBankAccounts();
+  }, [open, companyId, isTransfer, loadBankAccounts]);
+
+  const applySupplierSelection = (
+    supplier: Supplier | undefined,
+    id: string,
+  ) => {
     setSupplierId(id);
     if (!supplier) return;
     const suggested = suggestPaymentFromSupplier(supplier, {
@@ -345,10 +396,42 @@ export function CreateBoletoSheet({
     );
   };
 
-  const canSubmit =
+  const handleOriginBankChange = (value: string) => {
+    if (value === "__create__") {
+      setCreateBankTarget("origin");
+      setCreateBankOpen(true);
+      return;
+    }
+    setOriginBankAccountId(value);
+  };
+
+  const handleDestBankChange = (value: string) => {
+    if (value === "__create__") {
+      setCreateBankTarget("dest");
+      setCreateBankOpen(true);
+      return;
+    }
+    setDestBankAccountId(value);
+  };
+
+  const canSubmitTransfer =
+    isTransfer &&
+    description.trim() !== "" &&
+    emissionDate.trim() !== "" &&
+    dueDate.trim() !== "" &&
+    parseFloat(amount) > 0 &&
+    originBankAccountId !== "" &&
+    originBankAccountId !== "__create__" &&
+    destBankAccountId !== "" &&
+    destBankAccountId !== "__create__" &&
+    originBankAccountId !== destBankAccountId;
+
+  const canSubmitStandard =
+    !isTransfer &&
     companyCategoryId.trim() !== "" &&
     !categoriesLoading &&
     description.trim() !== "" &&
+    emissionDate.trim() !== "" &&
     dueDate.trim() !== "" &&
     parseFloat(amount) > 0 &&
     (!requiresPaymentDetails ||
@@ -359,10 +442,94 @@ export function CreateBoletoSheet({
         agency.trim() !== "" &&
         account.trim() !== ""));
 
+  const canSubmit = canSubmitTransfer || canSubmitStandard;
+
+  const resetFormAfterSuccess = () => {
+    setDescription("");
+    setEmissionDate(localDateYmd());
+    setDueDate("");
+    setAmount("");
+    setBarcode("");
+    setProvider("");
+    setPixKey("");
+    setBankName("");
+    setBankCode("");
+    setAgency("");
+    setAccount("");
+    setPaymentType("boleto");
+    setAccountFlow(fixedAccountFlow ?? "payable");
+    setCompanyCategoryId("");
+    setSupplierId("");
+    setLaunchType("single");
+    setOriginBankAccountId("");
+    setDestBankAccountId("");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!companyId || !canSubmit) return;
     setLoading(true);
+
+    if (isTransfer) {
+      if (originBankAccountId === destBankAccountId) {
+        setLoading(false);
+        toast.error("Conta origem e destino devem ser diferentes.");
+        return;
+      }
+      const transferGroupId = crypto.randomUUID();
+      const amountNum = parseFloat(amount);
+      const base = {
+        company_id: companyId,
+        company_category_id: null,
+        category: null,
+        description: description.trim(),
+        emission_date: emissionDate,
+        due_date: dueDate,
+        amount: amountNum,
+        status: "pending" as const,
+        entry_kind: "transfer" as const,
+        transfer_group_id: transferGroupId,
+        payment_type: "ted" as const,
+        expense_id: null,
+        supplier_id: null,
+      };
+      const { data, error } = await supabase
+        .from("boletos")
+        .insert([
+          {
+            ...base,
+            flow_type: "payable",
+            company_bank_account_id: originBankAccountId,
+          },
+          {
+            ...base,
+            flow_type: "receivable",
+            company_bank_account_id: destBankAccountId,
+          },
+        ])
+        .select();
+      setLoading(false);
+      if (error) {
+        console.error(error);
+        toast.error(
+          error.message ?? "Não foi possível cadastrar a transferência.",
+        );
+        return;
+      }
+      const payableBoleto =
+        ((data ?? []) as Boleto[]).find((b) => b.flow_type === "payable") ??
+        null;
+      if (!payableBoleto) {
+        toast.error("Transferência criada, mas a saída não foi retornada.");
+        return;
+      }
+      resetFormAfterSuccess();
+      onOpenChange(false);
+      toast.success("Transferência cadastrada com sucesso.");
+      void syncCompanyAlerts(companyId);
+      onSuccess?.(payableBoleto);
+      return;
+    }
 
     const {
       data: { user },
@@ -439,10 +606,12 @@ export function CreateBoletoSheet({
       company_category_id: companyCategoryId,
       category: null,
       description: description.trim(),
+      emission_date: emissionDate,
       due_date: dueDate,
       amount: parseFloat(amount),
       status: "pending",
       flow_type: effectiveFlow,
+      entry_kind: "standard",
     };
     if (linkedExpenseId) payload.expense_id = linkedExpenseId;
     if (resolvedSupplierId) payload.supplier_id = resolvedSupplierId;
@@ -491,20 +660,7 @@ export function CreateBoletoSheet({
       return;
     }
     const boleto = data as Boleto;
-    setDescription("");
-    setDueDate("");
-    setAmount("");
-    setBarcode("");
-    setProvider("");
-    setPixKey("");
-    setBankName("");
-    setBankCode("");
-    setAgency("");
-    setAccount("");
-    setPaymentType("boleto");
-    setAccountFlow(fixedAccountFlow ?? "payable");
-    setCompanyCategoryId("");
-    setSupplierId("");
+    resetFormAfterSuccess();
     onOpenChange(false);
     toast.success("Conta cadastrada com sucesso.");
     void syncCompanyAlerts(companyId);
@@ -519,16 +675,20 @@ export function CreateBoletoSheet({
             <FileText className="h-5 w-5" />
             {expenseId
               ? "Novo pagamento"
-              : effectiveFlow === "receivable"
-                ? "Nova conta a receber"
-                : "Nova conta a pagar"}
+              : isTransfer
+                ? "Nova transferência"
+                : effectiveFlow === "receivable"
+                  ? "Nova conta a receber"
+                  : "Nova conta a pagar"}
           </SheetTitle>
           <SheetDescription>
             {expenseId
               ? "Cadastre boleto, PIX ou TED para vincular à despesa"
-              : effectiveFlow === "receivable"
-                ? "Registre valores a receber (entrada no fluxo de caixa)"
-                : "Registre contas a pagar (saída no fluxo de caixa)"}
+              : isTransfer
+                ? "Movimenta valor entre contas bancárias (fora do fluxo e da DRE)"
+                : effectiveFlow === "receivable"
+                  ? "Registre valores a receber (entrada no fluxo de caixa)"
+                  : "Registre contas a pagar (saída no fluxo de caixa)"}
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
@@ -537,8 +697,8 @@ export function CreateBoletoSheet({
               <div className="space-y-3 rounded-lg border p-4">
                 <Label>Tipo de lançamento</Label>
                 <Select
-                  value={seriesType}
-                  onValueChange={(v) => setSeriesType(v as ExpenseSeriesType)}
+                  value={launchType}
+                  onValueChange={(v) => setLaunchType(v as LaunchTypeSelect)}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -547,9 +707,10 @@ export function CreateBoletoSheet({
                     <SelectItem value="single">Única</SelectItem>
                     <SelectItem value="recurring">Recorrente</SelectItem>
                     <SelectItem value="installment">Parcelada</SelectItem>
+                    <SelectItem value="transfer">Transferência</SelectItem>
                   </SelectContent>
                 </Select>
-                {seriesType === "recurring" && (
+                {!isTransfer && launchType === "recurring" && (
                   <div className="space-y-2">
                     <Label>Recorrência</Label>
                     <Select
@@ -572,11 +733,12 @@ export function CreateBoletoSheet({
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                    Define de quanto em quanto tempo esta despesa será repetida automaticamente.
+                      Define de quanto em quanto tempo esta despesa será
+                      repetida automaticamente.
                     </p>
                   </div>
                 )}
-                {seriesType === "installment" && (
+                {!isTransfer && launchType === "installment" && (
                   <div className="space-y-2">
                     <Label htmlFor="installment-count">Número de parcelas</Label>
                     <Input
@@ -589,6 +751,74 @@ export function CreateBoletoSheet({
                     />
                   </div>
                 )}
+                {isTransfer && (
+                  <p className="text-xs text-muted-foreground">
+                    Cria uma saída na conta origem e uma entrada na conta
+                    destino, sem categoria e sem impacto na DRE.
+                  </p>
+                )}
+              </div>
+            )}
+            {isTransfer && (
+              <div className="space-y-4 rounded-lg border p-4">
+                <div>
+                  <Label>Conta origem</Label>
+                  <Select
+                    value={
+                      originBankAccountId === "__create__"
+                        ? ""
+                        : originBankAccountId
+                    }
+                    onValueChange={handleOriginBankChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione a conta de saída" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name} ({bankAccountTypeLabel(a.tipo)})
+                        </SelectItem>
+                      ))}
+                      <SelectItem
+                        value="__create__"
+                        className="text-primary font-medium"
+                      >
+                        <Plus className="h-4 w-4 inline mr-2" />
+                        Criar conta bancária
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Conta destino</Label>
+                  <Select
+                    value={
+                      destBankAccountId === "__create__"
+                        ? ""
+                        : destBankAccountId
+                    }
+                    onValueChange={handleDestBankChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Selecione a conta de entrada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name} ({bankAccountTypeLabel(a.tipo)})
+                        </SelectItem>
+                      ))}
+                      <SelectItem
+                        value="__create__"
+                        className="text-primary font-medium"
+                      >
+                        <Plus className="h-4 w-4 inline mr-2" />
+                        Criar conta bancária
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
             {requiresPaymentDetails && (
@@ -611,21 +841,23 @@ export function CreateBoletoSheet({
                 </Select>
               </div>
             )}
-            <div>
-              <Label>Categoria</Label>
-              <BoletoCategoryPicker
-                companyId={companyId}
-                value={companyCategoryId}
-                onValueChange={setCompanyCategoryId}
-                categories={companyCategories}
-                loading={categoriesLoading}
-                categoryNatureza={categoryNatureza}
-                onReload={() => loadCategories({ selectDefault: false })}
-              />
-              <p className="text-xs text-muted-foreground mt-1.5">
-                Busque, escolha ou crie uma categoria sem sair desta tela.
-              </p>
-            </div>
+            {!isTransfer && (
+              <div>
+                <Label>Categoria</Label>
+                <BoletoCategoryPicker
+                  companyId={companyId}
+                  value={companyCategoryId}
+                  onValueChange={setCompanyCategoryId}
+                  categories={companyCategories}
+                  loading={categoriesLoading}
+                  categoryNatureza={categoryNatureza}
+                  onReload={() => loadCategories({ selectDefault: false })}
+                />
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Busque, escolha ou crie uma categoria sem sair desta tela.
+                </p>
+              </div>
+            )}
             {requiresPaymentDetails && !expenseId && (
               <div>
                 <Label>Fornecedor</Label>
@@ -673,10 +905,22 @@ export function CreateBoletoSheet({
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ex: Pagamento energia - Jan/2025"
+              placeholder={
+                isTransfer
+                  ? "Ex: Transferência para reserva"
+                  : "Ex: Pagamento energia - Jan/2025"
+              }
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Emissão</Label>
+              <Input
+                type="date"
+                value={emissionDate}
+                onChange={(e) => setEmissionDate(e.target.value)}
+              />
+            </div>
             <div>
               <Label>Vencimento</Label>
               <Input
@@ -685,17 +929,17 @@ export function CreateBoletoSheet({
                 onChange={(e) => setDueDate(e.target.value)}
               />
             </div>
-            <div>
-              <Label>Valor (R$)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0,00"
-              />
-            </div>
+          </div>
+          <div>
+            <Label>Valor (R$)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0,00"
+            />
           </div>
 
           {requiresPaymentDetails && paymentType === "boleto" && (
@@ -823,7 +1067,11 @@ export function CreateBoletoSheet({
 
           <SheetFooter>
             <Button type="submit" disabled={!canSubmit || loading}>
-              {loading ? "Cadastrando..." : "Cadastrar"}
+              {loading
+                ? "Cadastrando..."
+                : isTransfer
+                  ? "Cadastrar transferência"
+                  : "Cadastrar"}
             </Button>
           </SheetFooter>
         </form>
@@ -839,7 +1087,13 @@ export function CreateBoletoSheet({
             .eq("id", supplier.id)
             .single();
           const mapped = data
-            ? mapSupplierRow(data as Supplier & { supplier_payment_info?: Supplier["payment_info"] | Supplier["payment_info"][] })
+            ? mapSupplierRow(
+                data as Supplier & {
+                  supplier_payment_info?:
+                    | Supplier["payment_info"]
+                    | Supplier["payment_info"][];
+                },
+              )
             : supplier;
           setSuppliers((prev) =>
             [...prev.filter((s) => s.id !== mapped.id), mapped].sort((a, b) =>
@@ -847,6 +1101,23 @@ export function CreateBoletoSheet({
             ),
           );
           applySupplierSelection(mapped, mapped.id);
+        }}
+      />
+      <CreateBankAccountSheet
+        open={createBankOpen}
+        onOpenChange={setCreateBankOpen}
+        companyId={companyId}
+        onSuccess={(account) => {
+          setBankAccounts((prev) =>
+            [...prev.filter((a) => a.id !== account.id), account].sort((a, b) =>
+              a.name.localeCompare(b.name, "pt-BR"),
+            ),
+          );
+          if (createBankTarget === "origin") {
+            setOriginBankAccountId(account.id);
+          } else {
+            setDestBankAccountId(account.id);
+          }
         }}
       />
     </Sheet>

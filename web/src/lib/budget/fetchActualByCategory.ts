@@ -19,6 +19,7 @@ type BoletoRow = {
   paid_amount: number | null;
   company_category_id: string | null;
   flow_type: string | null;
+  entry_kind?: string | null;
 };
 
 /**
@@ -37,9 +38,10 @@ export async function fetchActualByCategory(
 
   let query = supabase
     .from("boletos")
-    .select("amount, paid_amount, company_category_id, flow_type")
+    .select("amount, paid_amount, company_category_id, flow_type, entry_kind")
     .eq("company_id", companyId)
-    .or("flow_type.eq.payable,flow_type.is.null");
+    .or("flow_type.eq.payable,flow_type.is.null")
+    .neq("entry_kind", "transfer");
 
   if (basis === "competencia") {
     query = query.gte("due_date", startYmd).lte("due_date", endYmd);

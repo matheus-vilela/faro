@@ -1,4 +1,4 @@
-import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
+import { boletoCountsInCashFlow } from "@/lib/boletoFluxo";
 import {
   boletoCounterpartyLabel,
   formatBoletoFluxoDescription,
@@ -16,7 +16,13 @@ import type { HorizonWeeks, RawCashFlowItem } from "./types";
 
 type PendingReceivableRow = Pick<
   Boleto,
-  "id" | "description" | "due_date" | "amount" | "status" | "exclude_from_fluxo"
+  | "id"
+  | "description"
+  | "due_date"
+  | "amount"
+  | "status"
+  | "exclude_from_fluxo"
+  | "entry_kind"
 >;
 
 type PaidBoletoRow = Pick<
@@ -29,6 +35,7 @@ type PaidBoletoRow = Pick<
   | "paid_at"
   | "status"
   | "exclude_from_fluxo"
+  | "entry_kind"
   | "flow_type"
   | "provider"
 > & {
@@ -77,12 +84,13 @@ async function fetchPaidBoletosInRange(
     supabase
       .from("boletos")
       .select(
-        "id, description, due_date, amount, paid_amount, paid_at, status, exclude_from_fluxo, flow_type, provider, supplier:suppliers(id, name)",
+        "id, description, due_date, amount, paid_amount, paid_at, status, exclude_from_fluxo, entry_kind, flow_type, provider, supplier:suppliers(id, name)",
       )
       .eq("company_id", companyId)
       .eq("flow_type", flowType)
       .eq("status", "paid")
       .eq("exclude_from_fluxo", false)
+      .neq("entry_kind", "transfer")
       .gte("paid_at", `${startYmd}T00:00:00`)
       .lte("paid_at", `${endYmd}T23:59:59.999`)
       .order("paid_at", { ascending: true }),
@@ -117,12 +125,13 @@ export async function fetchKnownCashFlowItems(input: {
             supabase
               .from("boletos")
               .select(
-                "id, description, due_date, amount, status, exclude_from_fluxo",
+                "id, description, due_date, amount, status, exclude_from_fluxo, entry_kind",
               )
               .eq("company_id", input.companyId)
               .eq("flow_type", "receivable")
               .eq("status", "pending")
               .eq("exclude_from_fluxo", false)
+              .neq("entry_kind", "transfer")
               .gte("due_date", startYmd)
               .lte("due_date", endYmd)
               .order("due_date", { ascending: true }),
@@ -142,7 +151,7 @@ export async function fetchKnownCashFlowItems(input: {
 
   for (const b of payablesPending) {
     if (!isPendingCashFlowBoleto(b)) continue;
-    if (!isProjectedBoleto(b) && !boletoVisibleInFluxo(b)) continue;
+    if (!isProjectedBoleto(b) && !boletoCountsInCashFlow(b)) continue;
 
     const labels = outflowLabels(b);
     items.push(
@@ -159,7 +168,7 @@ export async function fetchKnownCashFlowItems(input: {
   }
 
   for (const b of payablesPaid) {
-    if (!boletoVisibleInFluxo(b)) continue;
+    if (!boletoCountsInCashFlow(b)) continue;
     const labels = outflowLabels(b);
     items.push(
       toRawCashFlowItem({
@@ -175,7 +184,7 @@ export async function fetchKnownCashFlowItems(input: {
   }
 
   for (const b of receivablesPending) {
-    if (!boletoVisibleInFluxo(b)) continue;
+    if (!boletoCountsInCashFlow(b)) continue;
 
     items.push(
       toRawCashFlowItem({
@@ -189,7 +198,7 @@ export async function fetchKnownCashFlowItems(input: {
   }
 
   for (const b of receivablesPaid) {
-    if (!boletoVisibleInFluxo(b)) continue;
+    if (!boletoCountsInCashFlow(b)) continue;
     items.push(
       toRawCashFlowItem({
         id: String(b.id),

@@ -323,6 +323,7 @@ export async function materializeSeriesMonth(input: {
       expense_id: childExp.id,
       flow_type: "payable",
       description: input.description,
+      emission_date: b.emission_date ?? input.dueDate,
       due_date: input.dueDate,
       amount: input.amount,
       company_category_id: b.company_category_id,
@@ -339,6 +340,7 @@ export async function materializeSeriesMonth(input: {
       account_type: b.account_type,
       supplier_id: input.supplierId ?? b.supplier_id ?? null,
       status: "pending",
+      entry_kind: "standard",
     })
     .select("id")
     .single();

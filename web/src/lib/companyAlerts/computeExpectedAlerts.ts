@@ -102,6 +102,7 @@ export async function computeExpectedCompanyAlerts(
     .eq("company_id", companyId)
     .eq("flow_type", "payable")
     .eq("exclude_from_fluxo", false)
+    .neq("entry_kind", "transfer")
     .eq("status", "pending");
 
   const money = (n: number) =>

@@ -5,6 +5,9 @@ export type BoletoStatus = 'pending' | 'paid'
 /** Conta a pagar (saída) ou a receber (entrada) no fluxo de caixa. */
 export type BoletoFlowType = 'payable' | 'receivable'
 
+/** Conta normal ou transferência entre contas bancárias (fora DRE / simulação de caixa). */
+export type BoletoEntryKind = 'standard' | 'transfer'
+
 import type { ExpenseItemProductMergeMeta } from '@/types/productMergeAudit'
 
 export interface ExpenseItem {
@@ -94,7 +97,13 @@ export interface Boleto {
   expense_id: string | null
   /** Conta a pagar (padrão legado) ou a receber. */
   flow_type?: BoletoFlowType
+  /** standard (padrão) ou transfer (par origem/destino). */
+  entry_kind?: BoletoEntryKind
+  /** UUID compartilhado pelas duas pernas de uma transferência. */
+  transfer_group_id?: string | null
   description: string
+  /** Data de emissão do documento/lançamento (YYYY-MM-DD). */
+  emission_date?: string
   due_date: string
   amount: number
   /** Legado (enum fixo); preferir company_category_id. */
@@ -135,4 +144,10 @@ export function isBoletoPayable(b: {
   flow_type?: BoletoFlowType | string | null
 }): boolean {
   return b.flow_type !== 'receivable'
+}
+
+export function isBoletoTransfer(b: {
+  entry_kind?: BoletoEntryKind | string | null
+}): boolean {
+  return b.entry_kind === 'transfer'
 }

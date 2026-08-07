@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boletoCountsInCashFlow,
   boletoVisibleInFluxo,
   isRevenueTaxDeductionBoletoDescription,
 } from "./boletoFluxo";
@@ -34,5 +35,28 @@ describe("boletoFluxo", () => {
         description: "Qualquer",
       }),
     ).toBe(false);
+  });
+
+  it("mantém transferência visível na lista, mas fora da simulação de caixa", () => {
+    expect(
+      boletoVisibleInFluxo({
+        exclude_from_fluxo: false,
+        description: "Transferência reserva",
+      }),
+    ).toBe(true);
+    expect(
+      boletoCountsInCashFlow({
+        exclude_from_fluxo: false,
+        description: "Transferência reserva",
+        entry_kind: "transfer",
+      }),
+    ).toBe(false);
+    expect(
+      boletoCountsInCashFlow({
+        exclude_from_fluxo: false,
+        description: "Energia",
+        entry_kind: "standard",
+      }),
+    ).toBe(true);
   });
 });

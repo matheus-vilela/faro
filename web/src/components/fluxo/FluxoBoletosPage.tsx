@@ -83,7 +83,7 @@ import { cn } from "@/lib/utils";
 import type { CompanyBankAccount } from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
-import { isBoletoPayable } from "@/types/expense";
+import { isBoletoPayable, isBoletoTransfer } from "@/types/expense";
 import type {
   ExpenseSeriesMaster,
   FluxoBoletoRow,
@@ -442,7 +442,9 @@ export function FluxoBoletosPage({
         endYmd,
       );
       const visible = merged.filter(
-        (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
+        (b) =>
+          (isProjectedBoleto(b) || boletoVisibleInFluxo(b)) &&
+          !isBoletoTransfer(b),
       );
       setPayableTotals(computePayableTotals(visible, period, todayYmd));
     } catch (e) {
@@ -639,16 +641,47 @@ export function FluxoBoletosPage({
       return;
     }
     setMarkingPaid(true);
+    const updatedAt = new Date().toISOString();
+    const paidAt = localDateYmd();
     const { data, error } = await supabase
       .from("boletos")
       .update({
         status: "paid",
-        updated_at: new Date().toISOString(),
+        paid_at: paidAt,
+        updated_at: updatedAt,
       })
       .eq("id", boletoResumo.id)
       .eq("company_id", companyId)
       .select()
       .single();
+
+    if (
+      !error &&
+      data &&
+      isBoletoTransfer(boletoResumo) &&
+      boletoResumo.transfer_group_id
+    ) {
+      const { error: pairErr } = await supabase
+        .from("boletos")
+        .update({
+          status: "paid",
+          paid_at: paidAt,
+          paid_amount: Number(boletoResumo.amount) || 0,
+          updated_at: updatedAt,
+        })
+        .eq("company_id", companyId)
+        .eq("transfer_group_id", boletoResumo.transfer_group_id)
+        .eq("entry_kind", "transfer")
+        .neq("id", boletoResumo.id)
+        .eq("status", "pending");
+      if (pairErr) {
+        console.error(pairErr);
+        toast.error(
+          "Recebimento registrado, mas a contraparte da transferência não foi quitada.",
+        );
+      }
+    }
+
     setMarkingPaid(false);
     if (error) {
       toast.error(error.message ?? "Não foi possível atualizar o status.");
@@ -805,6 +838,11 @@ export function FluxoBoletosPage({
                 Virtual
               </Badge>
             )}
+            {isBoletoTransfer(b) && (
+              <Badge variant="outline" className="text-[10px]">
+                Transferência
+              </Badge>
+            )}
             {!projected &&
               b.series_master_expense_id &&
               b.expense_id !== b.series_master_expense_id && (
@@ -814,13 +852,15 @@ export function FluxoBoletosPage({
               )}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {payable && (
+            {payable && !isBoletoTransfer(b) && (
               <span className="inline-block text-xs font-medium text-muted-foreground rounded-md bg-muted px-2 py-0.5">
                 {PAYMENT_TYPE_LABELS[b.payment_type ?? "boleto"]}
               </span>
             )}
             <span className="inline-block text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
-              {boletoCategoryLabel(b)}
+              {isBoletoTransfer(b)
+                ? "Transferência"
+                : boletoCategoryLabel(b)}
             </span>
           </div>
           {fluxoBoletoSupplierLabel(b) ? (
@@ -1464,6 +1504,9 @@ export function FluxoBoletosPage({
                         {STATUS_LABELS[boletoResumo.status]}
                       </Badge>
                     )}
+                    {isBoletoTransfer(boletoResumo) && (
+                      <Badge variant="outline">Transferência</Badge>
+                    )}
                     {fluxoBoletoSupplierLabel(boletoResumo) && (
                       <span className="text-sm text-muted-foreground">
                         {fluxoBoletoSupplierLabel(boletoResumo)}
@@ -1476,7 +1519,9 @@ export function FluxoBoletosPage({
                     )}
                   </div>
                   <Badge variant="outline" className="mt-2">
-                    {boletoCategoryLabel(boletoResumo)}
+                    {isBoletoTransfer(boletoResumo)
+                      ? "Transferência"
+                      : boletoCategoryLabel(boletoResumo)}
                   </Badge>
                   {flowType === "payable" &&
                     boletoPendingMerchandiseReceipt(boletoResumo) && (

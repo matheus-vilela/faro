@@ -14,7 +14,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto } from "@/types/expense";
-import { isBoletoPayable } from "@/types/expense";
+import { isBoletoPayable, isBoletoTransfer } from "@/types/expense";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /** Boleto do período DRE com campos para listagem de sem categoria. */
@@ -30,6 +30,7 @@ export type DreSemCategoriaBoleto = Pick<
   | "revenue_entry_id"
   | "expense_id"
   | "category"
+  | "entry_kind"
 >;
 
 export interface UseDreReportState {
@@ -103,9 +104,10 @@ export function useDreReport(
       supabase
         .from("boletos")
         .select(
-          "id, description, amount, due_date, flow_type, company_category_id, status, revenue_entry_id, expense_id, category",
+          "id, description, amount, due_date, flow_type, company_category_id, status, revenue_entry_id, expense_id, category, entry_kind",
         )
         .eq("company_id", companyId)
+        .neq("entry_kind", "transfer")
         .gte("due_date", startDate)
         .lte("due_date", endDate)
         .order("due_date", { ascending: true })
@@ -165,6 +167,7 @@ export function useDreReport(
 
   const boletosForDreAggregation = useMemo(() => {
     return boletosInPeriod.filter((b) => {
+      if (isBoletoTransfer(b)) return false;
       if (!b.revenue_entry_id || !isBoletoPayable(b)) return true;
       const cat = b.company_category_id
         ? categoriesById.get(b.company_category_id)
@@ -174,7 +177,9 @@ export function useDreReport(
   }, [boletosInPeriod, categoriesById]);
 
   const boletosSemCategoria = useMemo(() => {
-    return boletosInPeriod.filter((b) => !b.company_category_id);
+    return boletosInPeriod.filter(
+      (b) => !isBoletoTransfer(b) && !b.company_category_id,
+    );
   }, [boletosInPeriod]);
 
   const categoryTotals = useMemo(() => {

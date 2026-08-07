@@ -29,6 +29,7 @@ import { isProjectedBoleto } from "@/lib/expenseSeriesProjection";
 import { supabase } from "@/lib/supabase";
 import { bankAccountTypeLabel, type CompanyBankAccount } from "@/types/bankAccount";
 import type { Boleto } from "@/types/expense";
+import { isBoletoTransfer } from "@/types/expense";
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -100,7 +101,7 @@ export function PayBoletoDialog({
     if (!open || !boleto) return;
     setPaymentDate(localDateYmd());
     setCompetenceMonth(monthInputFromYmd(boleto.due_date));
-    setBankAccountId("");
+    setBankAccountId(boleto.company_bank_account_id ?? "");
     setInterest("0");
     setDiscount("0");
     void loadBankAccounts();
@@ -140,32 +141,75 @@ export function PayBoletoDialog({
     }
 
     setSubmitting(true);
+    const paidAt = paymentDate.trim().slice(0, 10);
+    const updatedAt = new Date().toISOString();
+    const primaryUpdate = {
+      status: "paid" as const,
+      paid_at: paidAt,
+      competence_date: competenceDate,
+      company_bank_account_id: bankAccountId,
+      interest_amount: interestNum,
+      discount_amount: discountNum,
+      paid_amount: finalAmount,
+      updated_at: updatedAt,
+    };
+
     const { data, error } = await supabase
       .from("boletos")
-      .update({
-        status: "paid",
-        paid_at: paymentDate.trim().slice(0, 10),
-        competence_date: competenceDate,
-        company_bank_account_id: bankAccountId,
-        interest_amount: interestNum,
-        discount_amount: discountNum,
-        paid_amount: finalAmount,
-        updated_at: new Date().toISOString(),
-      })
+      .update(primaryUpdate)
       .eq("id", boleto.id)
       .eq("company_id", companyId)
       .select()
       .single();
-    setSubmitting(false);
 
     if (error) {
+      setSubmitting(false);
       toast.error(error.message ?? "Não foi possível registrar o pagamento.");
       return;
     }
 
+    if (
+      isBoletoTransfer(boleto) &&
+      boleto.transfer_group_id &&
+      data
+    ) {
+      const counterpartUpdate = {
+        status: "paid" as const,
+        paid_at: paidAt,
+        competence_date: competenceDate,
+        interest_amount: 0,
+        discount_amount: 0,
+        paid_amount: Number(boleto.amount) || finalAmount,
+        updated_at: updatedAt,
+      };
+      const { error: pairErr } = await supabase
+        .from("boletos")
+        .update(counterpartUpdate)
+        .eq("company_id", companyId)
+        .eq("transfer_group_id", boleto.transfer_group_id)
+        .eq("entry_kind", "transfer")
+        .neq("id", boleto.id)
+        .eq("status", "pending");
+      if (pairErr) {
+        console.error(pairErr);
+        toast.error(
+          "Pagamento registrado, mas a contraparte da transferência não foi quitada.",
+        );
+        setSubmitting(false);
+        onOpenChange(false);
+        onSuccess(data as Boleto);
+        return;
+      }
+    }
+
+    setSubmitting(false);
     onOpenChange(false);
     onSuccess(data as Boleto);
-    toast.success("Pagamento registrado com sucesso.");
+    toast.success(
+      isBoletoTransfer(boleto)
+        ? "Transferência quitada com sucesso."
+        : "Pagamento registrado com sucesso.",
+    );
   };
 
   return (
@@ -184,9 +228,15 @@ export function PayBoletoDialog({
           onEscapeKeyDown={(e) => submitting && e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>Registrar pagamento</DialogTitle>
+            <DialogTitle>
+              {boleto && isBoletoTransfer(boleto)
+                ? "Quitar transferência"
+                : "Registrar pagamento"}
+            </DialogTitle>
             <DialogDescription>
-              Informe os dados do pagamento desta conta a pagar.
+              {boleto && isBoletoTransfer(boleto)
+                ? "Ao confirmar, a saída e a entrada da transferência serão quitadas."
+                : "Informe os dados do pagamento desta conta a pagar."}
             </DialogDescription>
           </DialogHeader>
 

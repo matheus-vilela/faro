@@ -1,4 +1,4 @@
-import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
+import { boletoCountsInCashFlow } from "@/lib/boletoFluxo";
 import { addDaysYmd } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
@@ -7,12 +7,23 @@ import type { OpeningBalanceHint } from "./types";
 
 type PaidBoletoRow = Pick<
   Boleto,
-  "flow_type" | "amount" | "paid_amount" | "paid_at" | "exclude_from_fluxo" | "description"
+  | "flow_type"
+  | "amount"
+  | "paid_amount"
+  | "paid_at"
+  | "exclude_from_fluxo"
+  | "description"
+  | "entry_kind"
 >;
 
 type PendingOverdueRow = Pick<
   Boleto,
-  "flow_type" | "amount" | "due_date" | "exclude_from_fluxo" | "description"
+  | "flow_type"
+  | "amount"
+  | "due_date"
+  | "exclude_from_fluxo"
+  | "description"
+  | "entry_kind"
 >;
 
 function paidAmount(b: PaidBoletoRow): number {
@@ -29,16 +40,19 @@ async function sumPaidSince(input: {
   const rows = await fetchAllInRange<PaidBoletoRow>(
     supabase
       .from("boletos")
-      .select("flow_type, amount, paid_amount, paid_at, exclude_from_fluxo, description")
+      .select(
+        "flow_type, amount, paid_amount, paid_at, exclude_from_fluxo, description, entry_kind",
+      )
       .eq("company_id", input.companyId)
       .eq("flow_type", input.flowType)
       .eq("status", "paid")
+      .neq("entry_kind", "transfer")
       .gte("paid_at", `${input.sinceYmd}T00:00:00`)
       .order("paid_at", { ascending: true }),
   );
 
   return rows.reduce((sum, row) => {
-    if (!boletoVisibleInFluxo(row)) return sum;
+    if (!boletoCountsInCashFlow(row)) return sum;
     return sum + paidAmount(row);
   }, 0);
 }
@@ -52,18 +66,21 @@ async function sumOverduePending(input: {
   const rows = await fetchAllInRange<PendingOverdueRow>(
     supabase
       .from("boletos")
-      .select("flow_type, amount, due_date, exclude_from_fluxo, description")
+      .select(
+        "flow_type, amount, due_date, exclude_from_fluxo, description, entry_kind",
+      )
       .eq("company_id", input.companyId)
       .eq("flow_type", input.flowType)
       .eq("status", "pending")
       .eq("exclude_from_fluxo", false)
+      .neq("entry_kind", "transfer")
       .gte("due_date", lookbackStart)
       .lt("due_date", input.todayYmd)
       .order("due_date", { ascending: true }),
   );
 
   return rows.reduce((sum, row) => {
-    if (!boletoVisibleInFluxo(row)) return sum;
+    if (!boletoCountsInCashFlow(row)) return sum;
     const amount = Number(row.amount) || 0;
     return sum + amount;
   }, 0);
