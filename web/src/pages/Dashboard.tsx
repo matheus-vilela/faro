@@ -1,17 +1,15 @@
 import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
-import { DashboardImportReviewHub } from "@/components/dashboard/DashboardImportReviewHub";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
 import { DashboardPurchasesSection } from "@/components/dashboard/DashboardPurchasesSection";
 import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
+import { useCompany } from "@/contexts/CompanyContext";
 import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
 import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
 import { LayoutDashboard } from "lucide-react";
-import { useCallback, useState } from "react";
 
 function formatLongDate(d: Date): string {
   return d.toLocaleDateString("pt-BR", {
@@ -25,13 +23,7 @@ function formatLongDate(d: Date): string {
 export function Dashboard() {
   const { currentCompany, isCompanyOwner } = useCompany();
   const companyId = currentCompany?.id;
-  const canSeeAlerts = useHasPermission("alertas");
   const isOwner = isCompanyOwner;
-  const [importReviewSeq, setImportReviewSeq] = useState(0);
-
-  const bumpImportReviewPipeline = useCallback(() => {
-    setImportReviewSeq((n) => n + 1);
-  }, []);
 
   const headerDescription = (
     <span className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
@@ -98,14 +90,6 @@ export function Dashboard() {
 
       <div className="grid gap-6">
         {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
-
-        {canSeeAlerts && companyId ? (
-          <DashboardImportReviewHub
-            companyId={companyId}
-            refreshSignal={importReviewSeq}
-            onPipelineChange={bumpImportReviewPipeline}
-          />
-        ) : null}
       </div>
     </PageShell>
   );

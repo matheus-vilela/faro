@@ -6,6 +6,7 @@ import { EstoqueEtiquetasPanel } from "@/components/estoque/EstoqueEtiquetasPane
 import { EstoqueMovimentacoesPanel } from "@/components/estoque/EstoqueMovimentacoesPanel";
 import { EstoquePerdasPanel } from "@/components/estoque/EstoquePerdasPanel";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
+import { EstoqueFichasPendentesPanel } from "@/components/estoque/EstoqueFichasPendentesPanel";
 import { EstoqueVincularComprasPanel } from "@/components/estoque/EstoqueVincularComprasPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -586,6 +587,7 @@ export function Produtos() {
     | "vinculos"
     | "etiquetas"
     | "perdas"
+    | "fichas"
     | "receitas";
 
   const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
@@ -1623,6 +1625,8 @@ export function Produtos() {
       setEstoqueTab("contagem");
     } else if (aba === "vinculos") {
       setEstoqueTab("vinculos");
+    } else if (aba === "fichas") {
+      setEstoqueTab("fichas");
     }
   }, [searchParams]);
 
@@ -2297,6 +2301,7 @@ export function Produtos() {
               ["vinculos", "Vincular compras", UtensilsCrossed],
               ["etiquetas", "Etiquetas", Tag],
               ["perdas", "Perdas", Trash2],
+              ["fichas", "Fichas pendentes", ChefHat],
               ["receitas", "Ficha Técnica", ChefHat],
             ] as const
           ).map(([id, label, Icon]) => (
@@ -3453,6 +3458,9 @@ export function Produtos() {
       )}
       {currentCompany?.id && estoqueTab === "perdas" && (
         <EstoquePerdasPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "fichas" && (
+        <EstoqueFichasPendentesPanel companyId={currentCompany.id} />
       )}
       {currentCompany?.id && estoqueTab === "receitas" && (
         <EstoqueReceitasPanel

@@ -1,5 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { useCompany } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
+import {
+  fetchDashboardImportReviewEpocRecipesNoIngredients,
+  fetchDashboardImportReviewPendingRevenueLink,
+} from "@/lib/dashboardImportReview";
 import { fetchPurchaseWithoutUtilCount } from "@/lib/onboardingProductRecipeMatch";
 import {
   computePurchasesDashboardCounts,
@@ -14,6 +18,7 @@ import type { Product } from "@/types/product";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight,
+  ChefHat,
   CircleDollarSign,
   Clock,
   Loader2,
@@ -147,6 +152,7 @@ function PurchasesPulseTile({
 export function DashboardPurchasesSection() {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
+  const canSeeAlerts = useHasPermission("alertas");
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState<PurchasesDashboardCounts>({
     criticalStock: 0,
@@ -155,6 +161,7 @@ export function DashboardPurchasesSection() {
     stalePrice: 0,
   });
   const [withoutUtilCount, setWithoutUtilCount] = useState(0);
+  const [fichasPendentesCount, setFichasPendentesCount] = useState(0);
 
   const loadCounts = useCallback(async () => {
     if (!companyId) {
@@ -165,12 +172,13 @@ export function DashboardPurchasesSection() {
         stalePrice: 0,
       });
       setWithoutUtilCount(0);
+      setFichasPendentesCount(0);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const [rows, withoutUtil] = await Promise.all([
+      const [rows, withoutUtil, step1, step2] = await Promise.all([
         fetchAllInRange<
           Pick<
             Product,
@@ -192,6 +200,15 @@ export function DashboardPurchasesSection() {
             .or("is_active.is.null,is_active.eq.true"),
         ),
         fetchPurchaseWithoutUtilCount(supabase, companyId),
+        canSeeAlerts
+          ? fetchDashboardImportReviewEpocRecipesNoIngredients(
+              supabase,
+              companyId,
+            )
+          : Promise.resolve({ rows: [], error: null }),
+        canSeeAlerts
+          ? fetchDashboardImportReviewPendingRevenueLink(supabase, companyId)
+          : Promise.resolve({ rows: [], error: null }),
       ]);
       setCounts(computePurchasesDashboardCounts(rows));
       if (withoutUtil.error) {
@@ -200,6 +217,10 @@ export function DashboardPurchasesSection() {
       } else {
         setWithoutUtilCount(withoutUtil.count);
       }
+      const fichas =
+        (step1.error ? 0 : step1.rows.length) +
+        (step2.error ? 0 : step2.rows.length);
+      setFichasPendentesCount(fichas);
     } catch (e) {
       console.error(e);
       setCounts({
@@ -209,9 +230,10 @@ export function DashboardPurchasesSection() {
         stalePrice: 0,
       });
       setWithoutUtilCount(0);
+      setFichasPendentesCount(0);
     }
     setLoading(false);
-  }, [companyId]);
+  }, [canSeeAlerts, companyId]);
 
   useEffect(() => {
     queueMicrotask(() => void loadCounts());
@@ -257,6 +279,17 @@ export function DashboardPurchasesSection() {
             loading={false}
             href="/app/produtos?aba=vinculos"
             linkLabel="Vincular"
+          />
+        ) : null}
+        {!loading && canSeeAlerts && fichasPendentesCount > 0 ? (
+          <PurchasesPulseTile
+            icon={ChefHat}
+            label="Fichas pendentes"
+            count={fichasPendentesCount}
+            hint="Candidatos a ficha técnica ou vendas a ligar"
+            loading={false}
+            href="/app/produtos?aba=fichas"
+            linkLabel="Revisar"
           />
         ) : null}
       </div>
