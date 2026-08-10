@@ -555,8 +555,12 @@ export function DashboardDayOperations({
         open={sheet === "payables"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
-          <SheetHeader>
+        <SheetContent
+          side="right"
+          maximizable
+          className="flex w-full flex-col sm:max-w-lg"
+        >
+          <SheetHeader className="pr-12">
             <SheetTitle>Contas a pagar</SheetTitle>
             <SheetDescription>
               Boletos pendentes com vencimento hoje e amanhã.

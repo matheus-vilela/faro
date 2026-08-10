@@ -228,6 +228,7 @@ export function RegisterManualStockMovementSheet({
       }}
     >
       <SheetContent
+        maximizable
         className={cn(
           "flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl",
           isBatch ? "sm:max-w-6xl lg:max-w-7xl" : "sm:max-w-lg lg:max-w-xl",
@@ -238,7 +239,7 @@ export function RegisterManualStockMovementSheet({
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
               <PackagePlus className="h-6 w-6 text-primary" />
             </div>
-            <div className="min-w-0 flex-1 space-y-1 pr-6">
+            <div className="min-w-0 flex-1 space-y-1 pr-16">
               <SheetTitle className="text-xl font-semibold sm:text-2xl">
                 Registrar movimentação
               </SheetTitle>

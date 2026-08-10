@@ -1255,8 +1255,11 @@ export function FluxoBoletosPage({
             }
           }}
         >
-          <SheetContent className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+          <SheetContent
+            maximizable
+            className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          >
+            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-20 text-left">
               <SheetTitle className="capitalize">
                 Lançamentos neste dia
               </SheetTitle>

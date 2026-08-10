@@ -308,12 +308,13 @@ export function DesenvolvimentoFornecedoresGlobais() {
       >
         <SheetContent
           side="right"
+          maximizable
           className="flex w-full flex-col sm:max-w-5xl overflow-y-auto"
         >
           {selectedSupplier ? (
             <>
               <SheetHeader>
-                <SheetTitle className="pr-8">
+                <SheetTitle className="pr-16">
                   {selectedSupplier.name}
                 </SheetTitle>
                 <SheetDescription className="font-mono text-xs">

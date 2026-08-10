@@ -126,12 +126,13 @@ export function RevenueDaySalesSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={modal}>
       <SheetContent
+        maximizable
         className={cn(
           "z-50 flex w-full flex-col gap-0 overflow-hidden p-0",
           viewMode === "table" ? "sm:max-w-4xl" : "sm:max-w-lg",
         )}
       >
-        <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+        <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-20 text-left">
           <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
           <SheetDescription className="capitalize">
             {payload?.title ?? "—"}

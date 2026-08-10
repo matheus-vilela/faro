@@ -681,8 +681,12 @@ export function DashboardAlertsCard({
                     </span>
                   </button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
-                  <SheetHeader className="border-b px-4 py-3">
+                <SheetContent
+                  side="right"
+                  maximizable
+                  className="w-full p-0 sm:max-w-2xl"
+                >
+                  <SheetHeader className="border-b px-4 py-3 pr-20">
                     <SheetTitle>Central de pendências</SheetTitle>
                     <SheetDescription>
                       Confira vínculos entre a NF e o catálogo. Também abre em{" "}

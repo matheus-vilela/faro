@@ -125,8 +125,8 @@ export function ProductImportSheet({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent className="flex flex-col gap-0 overflow-y-auto sm:max-w-2xl">
-        <SheetHeader>
+      <SheetContent maximizable className="flex flex-col gap-0 overflow-y-auto sm:max-w-2xl">
+        <SheetHeader className="pr-16">
           <SheetTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />
             Importar produtos

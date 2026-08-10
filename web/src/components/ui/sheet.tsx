@@ -1,5 +1,5 @@
 import * as React from "react"
-import { XIcon } from "lucide-react"
+import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
@@ -42,25 +42,34 @@ function SheetOverlay({
   )
 }
 
+const sheetControlButtonClassName =
+  "rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none"
+
 function SheetContent({
   className,
   overlayClassName,
   children,
   side = "right",
   showCloseButton = true,
+  maximizable = false,
+  onOpenAutoFocus,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
   overlayClassName?: string
+  maximizable?: boolean
 }) {
+  const [maximized, setMaximized] = React.useState(false)
+
   return (
     <SheetPortal>
       <SheetOverlay className={overlayClassName} />
       <SheetPrimitive.Content
         data-slot="sheet-content"
+        data-maximized={maximized ? "true" : undefined}
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500 px-4",
+          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition-[max-width,width] ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500 px-4",
           side === "right" &&
             "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-lg",
           side === "left" &&
@@ -69,16 +78,47 @@ function SheetContent({
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-          className
+          className,
+          maximizable &&
+            maximized &&
+            (side === "right" || side === "left") &&
+            "w-full sm:!max-w-[min(100vw-1rem,90rem)]"
         )}
+        onOpenAutoFocus={(event) => {
+          setMaximized(false)
+          onOpenAutoFocus?.(event)
+        }}
         {...props}
       >
         {children}
-        {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
-            <XIcon className="size-4" />
-            <span className="sr-only">Close</span>
-          </SheetPrimitive.Close>
+        {(maximizable || showCloseButton) && (
+          <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+            {maximizable && (side === "right" || side === "left") && (
+              <button
+                type="button"
+                className={sheetControlButtonClassName}
+                aria-label={maximized ? "Minimizar" : "Maximizar"}
+                onClick={() => setMaximized((prev) => !prev)}
+              >
+                {maximized ? (
+                  <Minimize2Icon className="size-4" />
+                ) : (
+                  <Maximize2Icon className="size-4" />
+                )}
+              </button>
+            )}
+            {showCloseButton && (
+              <SheetPrimitive.Close
+                className={cn(
+                  sheetControlButtonClassName,
+                  "data-[state=open]:bg-secondary"
+                )}
+              >
+                <XIcon className="size-4" />
+                <span className="sr-only">Close</span>
+              </SheetPrimitive.Close>
+            )}
+          </div>
         )}
       </SheetPrimitive.Content>
     </SheetPortal>

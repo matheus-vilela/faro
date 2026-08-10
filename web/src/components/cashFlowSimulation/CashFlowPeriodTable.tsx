@@ -337,10 +337,13 @@ function DayDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="z-[60] flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+      <SheetContent
+        maximizable
+        className="z-[60] flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
+      >
         {day ? (
           <>
-            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
+            <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-20 text-left">
               <SheetTitle className="pr-2 capitalize leading-snug">
                 {formatWeekdayLong(day.ymd)}
               </SheetTitle>

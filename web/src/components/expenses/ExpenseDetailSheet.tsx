@@ -843,6 +843,7 @@ export function ExpenseDetailSheet({
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
+          maximizable
           className={cn("overflow-y-auto sm:max-w-xl", elevated && "z-[70]")}
           overlayClassName={elevated ? "z-[70]" : undefined}
         >
@@ -852,7 +853,7 @@ export function ExpenseDetailSheet({
           {!loading && detailExpense && (
             <>
               <SheetHeader>
-                <div className="flex items-center justify-between pr-8">
+                <div className="flex items-center justify-between pr-16">
                   <SheetTitle>
                     {detailEditMode ? "Editar nota fiscal" : "Dados da nota fiscal"}
                   </SheetTitle>
