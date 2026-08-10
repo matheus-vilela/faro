@@ -152,7 +152,12 @@ function recebimentoTitle(r: RecebimentoDashboardRow): string {
   );
 }
 
-export function DashboardDayOperations() {
+export function DashboardDayOperations({
+  hidePayables = false,
+}: {
+  /** Quando true, omite o card de contas (Home já tem fila + vencimentos). */
+  hidePayables?: boolean;
+} = {}) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
 
@@ -440,11 +445,19 @@ export function DashboardDayOperations() {
           <h2 className="text-sm font-semibold tracking-tight">
             Operação do dia
           </h2>
-          <p className="text-xs text-muted-foreground">Resumo de hoje</p>
+          <p className="text-xs text-muted-foreground">
+            Checklists, contagem e recebimento
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-3 sm:grid-cols-2",
+          hidePayables ? "xl:grid-cols-3" : "xl:grid-cols-4",
+        )}
+      >
+        {!hidePayables ? (
         <DayOpCard
           icon={TrendingDown}
           title="Contas a pagar"
@@ -470,6 +483,7 @@ export function DashboardDayOperations() {
           ]}
           onOpen={() => setSheet("payables")}
         />
+        ) : null}
         <DayOpCard
           icon={ListChecks}
           title="Checklists"
@@ -536,6 +550,7 @@ export function DashboardDayOperations() {
         />
       </div>
 
+      {!hidePayables ? (
       <Sheet
         open={sheet === "payables"}
         onOpenChange={(o) => !o && setSheet(null)}
@@ -571,6 +586,7 @@ export function DashboardDayOperations() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+      ) : null}
 
       <Sheet
         open={sheet === "checklists"}

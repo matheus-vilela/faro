@@ -1,14 +1,29 @@
 import { DashboardDayOperations } from "@/components/dashboard/DashboardDayOperations";
 import { DashboardEpocDailySyncAlertCard } from "@/components/dashboard/DashboardEpocDailySyncAlertCard";
 import { DashboardFocusNfeRecebidasSyncCard } from "@/components/dashboard/DashboardFocusNfeRecebidasSyncCard";
+import { DashboardHomeInsightBand } from "@/components/dashboard/DashboardHomeInsightBand";
+import { DashboardHomeKpiRow } from "@/components/dashboard/DashboardHomeKpiRow";
+import { DashboardHomeSalesSnapshot } from "@/components/dashboard/DashboardHomeSalesSnapshot";
 import { DashboardIntegrationCsvRevenueCard } from "@/components/dashboard/DashboardIntegrationCsvRevenueCard";
-import { DashboardPurchasesSection } from "@/components/dashboard/DashboardPurchasesSection";
-import { PendingWhatsappExpensesCard } from "@/components/dashboard/PendingWhatsappExpensesCard";
+import { DashboardNeedsYouQueue } from "@/components/dashboard/DashboardNeedsYouQueue";
+import { DashboardUpcomingPayables } from "@/components/dashboard/DashboardUpcomingPayables";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDashboardHomeData } from "@/hooks/useDashboardHomeData";
+import {
+  useDashboardHomePeriod,
+  type DashboardHomePeriod,
+} from "@/hooks/useDashboardHomePeriod";
+import {
+  firstNameFromUser,
+  greetingForHour,
+} from "@/lib/dashboardHomeActions";
 import { isOnboardingFiscalDashboardCardVisible } from "@/lib/onboardingFiscalDashboard";
 import { isOnboardingPdvDashboardCardVisible } from "@/lib/onboardingPdvDefaults";
+import { cn } from "@/lib/utils";
 import { LayoutDashboard } from "lucide-react";
 
 function formatLongDate(d: Date): string {
@@ -20,16 +35,56 @@ function formatLongDate(d: Date): string {
   });
 }
 
+function PeriodToggle({
+  period,
+  options,
+  onChange,
+}: {
+  period: DashboardHomePeriod;
+  options: { value: DashboardHomePeriod; label: string }[];
+  onChange: (p: DashboardHomePeriod) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-lg border border-border/80 bg-muted/40 p-0.5">
+      {options.map((opt) => {
+        const active = period === opt.value;
+        return (
+          <Button
+            key={opt.value}
+            type="button"
+            size="sm"
+            variant="ghost"
+            className={cn(
+              "h-8 rounded-md px-3 text-xs font-medium sm:px-4",
+              active
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => onChange(opt.value)}
+          >
+            {opt.label}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Dashboard() {
-  const { currentCompany, isCompanyOwner } = useCompany();
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const companyId = currentCompany?.id;
-  const isOwner = isCompanyOwner;
+  const { period, setPeriod, options } = useDashboardHomePeriod("last7");
+  const home = useDashboardHomeData(period);
+
+  const firstName = firstNameFromUser(user);
+  const greeting = greetingForHour();
 
   const headerDescription = (
     <span className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
       <span>
         {currentCompany
-          ? `Empresa: ${currentCompany.name}`
+          ? currentCompany.name
           : "Visão geral da operação"}
       </span>
       <span className="hidden text-muted-foreground sm:inline">·</span>
@@ -40,11 +95,18 @@ export function Dashboard() {
   );
 
   return (
-    <PageShell className="space-y-8">
+    <PageShell className="space-y-6 sm:space-y-8">
       <PageHeader
-        title="Início"
+        title="Visão geral"
         description={headerDescription}
         icon={LayoutDashboard}
+        action={
+          <PeriodToggle
+            period={period}
+            options={options}
+            onChange={setPeriod}
+          />
+        }
       />
 
       {currentCompany &&
@@ -60,37 +122,48 @@ export function Dashboard() {
       {companyId ? (
         <DashboardEpocDailySyncAlertCard companyId={companyId} />
       ) : null}
-      {/* {companyId ? (
-        <DashboardEpocPartialSyncCard companyId={companyId} />
-      ) : null} */}
-      {/* {currentCompany ? <SetupProgressCard /> : null} */}
 
-      {companyId ? <DashboardDayOperations /> : null}
-
-      {companyId ? <DashboardPurchasesSection /> : null}
-
-      {/* <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 lg:items-start lg:gap-6 xl:gap-8">
-        <section aria-label="Acesso rápido" className="min-w-0">
-          <DashboardQuickLinks role={currentRole} />
-        </section>
-        <section aria-label="Resumo do dia e alertas" className="min-w-0">
-          <DashboardOperationalPulse
-            role={currentRole}
-            loadingBoletos={loadingBoletos}
-            todayCount={todayBoletos.length}
-            todayTotal={todayTotal}
-            tomorrowCount={tomorrowBoletos.length}
-            tomorrowTotal={tomorrowTotal}
-            loadingAlerts={loadingAlerts}
-            totalAlerts={totalAlerts}
-            formatCurrency={formatCurrency}
+      {companyId ? (
+        <>
+          <DashboardHomeInsightBand
+            greeting={greeting}
+            firstName={firstName}
+            text={home.insight}
           />
-        </section>
-      </div> */}
 
-      <div className="grid gap-6">
-        {isOwner && currentCompany ? <PendingWhatsappExpensesCard /> : null}
-      </div>
+          <DashboardHomeKpiRow
+            loading={home.loading}
+            faturamento={home.sales?.kpis.net.current ?? 0}
+            faturamentoDeltaPct={home.sales?.kpis.net.pctChange ?? null}
+            compareLabel={home.sales?.ranges.compareLabel ?? "vs período anterior"}
+            marginPct={home.marginPct}
+            cmvPct={home.cmvPct}
+            dueIn7Amount={home.dueIn7Amount}
+            dueIn7Count={home.dueIn7Count}
+            lucroMes={home.lucroMes}
+          />
+
+          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] lg:items-start">
+            <DashboardNeedsYouQueue
+              items={home.actions}
+              loading={home.actionsLoading}
+              onChanged={() => void home.reloadActions()}
+            />
+            <DashboardUpcomingPayables
+              rows={home.upcoming}
+              loading={home.loading}
+            />
+          </div>
+
+          <DashboardHomeSalesSnapshot
+            sales={home.sales}
+            loading={home.loading}
+            periodWord={home.periodWord}
+          />
+
+          <DashboardDayOperations hidePayables />
+        </>
+      ) : null}
     </PageShell>
   );
 }
