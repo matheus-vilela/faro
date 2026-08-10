@@ -6,6 +6,7 @@ import { EstoqueEtiquetasPanel } from "@/components/estoque/EstoqueEtiquetasPane
 import { EstoqueMovimentacoesPanel } from "@/components/estoque/EstoqueMovimentacoesPanel";
 import { EstoquePerdasPanel } from "@/components/estoque/EstoquePerdasPanel";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
+import { EstoqueVincularComprasPanel } from "@/components/estoque/EstoqueVincularComprasPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -155,6 +156,7 @@ import {
   Tag,
   Trash2,
   Truck,
+  UtensilsCrossed,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -581,6 +583,7 @@ export function Produtos() {
     | "cmv"
     | "contagem"
     | "compras"
+    | "vinculos"
     | "etiquetas"
     | "perdas"
     | "receitas";
@@ -1618,6 +1621,8 @@ export function Produtos() {
       setEstoqueTab("receitas");
     } else if (aba === "contagem") {
       setEstoqueTab("contagem");
+    } else if (aba === "vinculos") {
+      setEstoqueTab("vinculos");
     }
   }, [searchParams]);
 
@@ -2289,6 +2294,7 @@ export function Produtos() {
               ["cmv", "CMV", Coins],
               ["contagem", "Contagem", ClipboardList],
               ["compras", "Compras", ShoppingCart],
+              ["vinculos", "Vincular compras", UtensilsCrossed],
               ["etiquetas", "Etiquetas", Tag],
               ["perdas", "Perdas", Trash2],
               ["receitas", "Ficha Técnica", ChefHat],
@@ -3438,6 +3444,9 @@ export function Produtos() {
       )}
       {currentCompany?.id && estoqueTab === "compras" && (
         <EstoqueComprasPanel companyId={currentCompany.id} />
+      )}
+      {currentCompany?.id && estoqueTab === "vinculos" && (
+        <EstoqueVincularComprasPanel companyId={currentCompany.id} />
       )}
       {currentCompany?.id && estoqueTab === "etiquetas" && (
         <EstoqueEtiquetasPanel companyId={currentCompany.id} />

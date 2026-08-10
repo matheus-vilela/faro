@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/contexts/CompanyContext";
+import { fetchPurchaseWithoutUtilCount } from "@/lib/onboardingProductRecipeMatch";
 import {
   computePurchasesDashboardCounts,
   purchasesMetricProductsHref,
@@ -18,6 +19,7 @@ import {
   Loader2,
   Package,
   TriangleAlert,
+  UtensilsCrossed,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -68,6 +70,7 @@ function PurchasesPulseTile({
   hint,
   loading,
   href,
+  linkLabel = "Produtos",
 }: {
   icon: LucideIcon;
   label: string;
@@ -75,6 +78,7 @@ function PurchasesPulseTile({
   hint: string;
   loading: boolean;
   href: string;
+  linkLabel?: string;
 }) {
   const hasItems = count > 0;
   const tone = hasItems ? "amber" : "muted";
@@ -127,7 +131,7 @@ function PurchasesPulseTile({
             asChild
           >
             <Link to={href}>
-              Produtos
+              {linkLabel}
               <ArrowRight className="ml-1 h-3 w-3" />
             </Link>
           </Button>
@@ -150,6 +154,7 @@ export function DashboardPurchasesSection() {
     withoutMinStock: 0,
     stalePrice: 0,
   });
+  const [withoutUtilCount, setWithoutUtilCount] = useState(0);
 
   const loadCounts = useCallback(async () => {
     if (!companyId) {
@@ -159,32 +164,42 @@ export function DashboardPurchasesSection() {
         withoutMinStock: 0,
         stalePrice: 0,
       });
+      setWithoutUtilCount(0);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const rows = await fetchAllInRange<
-        Pick<
-          Product,
-          | "min_quantity"
-          | "current_quantity"
-          | "last_unit_value"
-          | "last_unit_value_stock"
-          | "average_cost"
-          | "updated_at"
-        >
-      >(
-        supabase
-          .from("products")
-          .select(
-            "min_quantity, current_quantity, last_unit_value, last_unit_value_stock, average_cost, updated_at",
-          )
-          .eq("company_id", companyId)
-          .eq("listed_in_product_catalog", true)
-          .or("is_active.is.null,is_active.eq.true"),
-      );
+      const [rows, withoutUtil] = await Promise.all([
+        fetchAllInRange<
+          Pick<
+            Product,
+            | "min_quantity"
+            | "current_quantity"
+            | "last_unit_value"
+            | "last_unit_value_stock"
+            | "average_cost"
+            | "updated_at"
+          >
+        >(
+          supabase
+            .from("products")
+            .select(
+              "min_quantity, current_quantity, last_unit_value, last_unit_value_stock, average_cost, updated_at",
+            )
+            .eq("company_id", companyId)
+            .eq("listed_in_product_catalog", true)
+            .or("is_active.is.null,is_active.eq.true"),
+        ),
+        fetchPurchaseWithoutUtilCount(supabase, companyId),
+      ]);
       setCounts(computePurchasesDashboardCounts(rows));
+      if (withoutUtil.error) {
+        console.error(withoutUtil.error);
+        setWithoutUtilCount(0);
+      } else {
+        setWithoutUtilCount(withoutUtil.count);
+      }
     } catch (e) {
       console.error(e);
       setCounts({
@@ -193,6 +208,7 @@ export function DashboardPurchasesSection() {
         withoutMinStock: 0,
         stalePrice: 0,
       });
+      setWithoutUtilCount(0);
     }
     setLoading(false);
   }, [companyId]);
@@ -232,6 +248,17 @@ export function DashboardPurchasesSection() {
             href={purchasesMetricProductsHref(card.metric)}
           />
         ))}
+        {!loading && withoutUtilCount > 0 ? (
+          <PurchasesPulseTile
+            icon={UtensilsCrossed}
+            label="Sem vínculo"
+            count={withoutUtilCount}
+            hint="Compra só entrada sem ficha/utilização"
+            loading={false}
+            href="/app/produtos?aba=vinculos"
+            linkLabel="Vincular"
+          />
+        ) : null}
       </div>
     </section>
   );

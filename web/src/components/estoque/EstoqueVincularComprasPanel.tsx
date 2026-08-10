@@ -23,9 +23,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  DashboardRecipeMatchIngredientConfig,
+  EstoqueRecipeMatchIngredientConfig,
   type IngredientLinkConfig,
-} from "@/components/dashboard/DashboardRecipeMatchIngredientConfig";
+} from "@/components/estoque/EstoqueRecipeMatchIngredientConfig";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { dashboardImportReviewSetResolution } from "@/lib/dashboardImportReview";
@@ -393,7 +393,7 @@ function LinkPickPopover({
   );
 }
 
-export function DashboardProductRecipeMatchPanel({
+export function EstoqueVincularComprasPanel({
   companyId,
   refreshSignal = 0,
   onLinked,
@@ -409,6 +409,7 @@ export function DashboardProductRecipeMatchPanel({
   const [purchases, setPurchases] = useState<PurchaseMatchRow[]>([]);
   const [soldOnly, setSoldOnly] = useState<ProductRecipeMatchRow[]>([]);
   const [purchasesTotal, setPurchasesTotal] = useState(0);
+  const [purchasesWithoutUtilTotal, setPurchasesWithoutUtilTotal] = useState(0);
   const [soldTotal, setSoldTotal] = useState(0);
   const [recipes, setRecipes] = useState<RecipePickRow[]>([]);
   const [filter, setFilter] = useState("");
@@ -477,12 +478,14 @@ export function DashboardProductRecipeMatchPanel({
       setPurchases([]);
       setSoldOnly([]);
       setPurchasesTotal(0);
+      setPurchasesWithoutUtilTotal(0);
       setSoldTotal(0);
       return;
     }
     setPurchases(lists.purchases);
     setSoldOnly(lists.soldOnly);
     setPurchasesTotal(lists.purchasesTotal);
+    setPurchasesWithoutUtilTotal(lists.purchasesWithoutUtilTotal);
     setSoldTotal(lists.soldTotal);
     if (!recipeRes.error) setRecipes(recipeRes.rows);
     setPendingByPurchase({});
@@ -510,6 +513,7 @@ export function DashboardProductRecipeMatchPanel({
       return [...prev, ...extra];
     });
     setPurchasesTotal(lists.purchasesTotal);
+    setPurchasesWithoutUtilTotal(lists.purchasesWithoutUtilTotal);
   }, [
     companyId,
     loadingMorePurchases,
@@ -554,10 +558,7 @@ export function DashboardProductRecipeMatchPanel({
     );
   }, [purchases, filter]);
 
-  const withoutUtilCount = useMemo(
-    () => purchases.filter((p) => p.utilizations.length === 0).length,
-    [purchases],
-  );
+  const withoutUtilCount = purchasesWithoutUtilTotal;
 
   const getPending = (purchaseId: string): PendingLinks =>
     pendingByPurchase[purchaseId] ?? EMPTY_PENDING;
@@ -889,7 +890,27 @@ export function DashboardProductRecipeMatchPanel({
   };
 
   if (!loading && !error && purchasesTotal === 0 && soldTotal === 0) {
-    return null;
+    return (
+      <Card className="border-dashed">
+        <CardHeader>
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <UtensilsCrossed className="h-5 w-5" aria-hidden />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="text-lg leading-snug">
+                Vincular compras
+              </CardTitle>
+              <CardDescription className="text-pretty">
+                Nenhuma compra ou produto vendido para vincular no momento.
+                Quando houver entradas na nota ou itens só no PDV, eles
+                aparecerão aqui.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    );
   }
 
   return (
@@ -925,7 +946,7 @@ export function DashboardProductRecipeMatchPanel({
                 </span>
                 {withoutUtilCount > 0 ? (
                   <span className="rounded-full border border-amber-500/35 bg-amber-500/10 px-2.5 py-0.5 font-medium text-amber-950 dark:text-amber-100">
-                    {withoutUtilCount} sem utilização (carregados)
+                    {withoutUtilCount} sem utilização
                   </span>
                 ) : null}
               </div>
@@ -1209,7 +1230,7 @@ export function DashboardProductRecipeMatchPanel({
                                     !expanded && "hidden",
                                   )}
                                 >
-                                  <DashboardRecipeMatchIngredientConfig
+                                  <EstoqueRecipeMatchIngredientConfig
                                     key={key}
                                     companyId={companyId}
                                     ingredient={purchase}

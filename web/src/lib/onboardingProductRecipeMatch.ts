@@ -114,6 +114,7 @@ export async function fetchProductRecipeMatchLists(
   purchases: PurchaseMatchRow[];
   soldOnly: ProductRecipeMatchRow[];
   purchasesTotal: number;
+  purchasesWithoutUtilTotal: number;
   soldTotal: number;
   error: string | null;
 }> {
@@ -134,6 +135,7 @@ export async function fetchProductRecipeMatchLists(
       purchases: [],
       soldOnly: [],
       purchasesTotal: 0,
+      purchasesWithoutUtilTotal: 0,
       soldTotal: 0,
       error: error.message,
     };
@@ -142,6 +144,7 @@ export async function fetchProductRecipeMatchLists(
     purchases?: unknown;
     sold_only?: unknown;
     purchases_total?: unknown;
+    purchases_without_util_total?: unknown;
     sold_total?: unknown;
     /** Legado (pré-utilizações) — ignorado se `purchases` existir. */
     exit_only?: unknown;
@@ -167,15 +170,39 @@ export async function fetchProductRecipeMatchLists(
     .filter((x): x is ProductRecipeMatchRow => x != null);
 
   const purchasesTotal = Number(payload?.purchases_total ?? purchases.length);
+  const purchasesWithoutUtilTotal = Number(
+    payload?.purchases_without_util_total ??
+      purchases.filter((p) => p.utilizations.length === 0).length,
+  );
   const soldTotal = Number(payload?.sold_total ?? soldOnly.length);
 
   return {
     purchases,
     soldOnly,
     purchasesTotal: Number.isFinite(purchasesTotal) ? purchasesTotal : 0,
+    purchasesWithoutUtilTotal: Number.isFinite(purchasesWithoutUtilTotal)
+      ? purchasesWithoutUtilTotal
+      : 0,
     soldTotal: Number.isFinite(soldTotal) ? soldTotal : 0,
     error: null,
   };
+}
+
+/** Contagem leve de compras só-entrada sem utilização (ficha). */
+export async function fetchPurchaseWithoutUtilCount(
+  client: SupabaseClient,
+  companyId: string,
+): Promise<{ count: number; error: string | null }> {
+  const lists = await fetchProductRecipeMatchLists(client, companyId, {
+    purchaseLimit: 0,
+    purchaseOffset: 0,
+    soldLimit: 0,
+    soldOffset: 0,
+  });
+  if (lists.error) {
+    return { count: 0, error: lists.error };
+  }
+  return { count: lists.purchasesWithoutUtilTotal, error: null };
 }
 
 export const RECIPE_MATCH_PURCHASE_PAGE_SIZE = 40;

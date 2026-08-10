@@ -46,7 +46,7 @@ function toCodeRows(drafts: ProductUnitConversionDraft[]): UnitConversionCodeRow
   }));
 }
 
-export function DashboardRecipeMatchIngredientConfig({
+export function EstoqueRecipeMatchIngredientConfig({
   companyId,
   ingredient,
   onChange,
