@@ -11,12 +11,9 @@ import {
   type NfeUnitPricePreviewResult,
 } from "@/components/desenvolvimento/NfeUnitPriceBreakdownCard";
 import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFaturamentoExportCard";
-import { EpocFaturamentoInterpretCard } from "@/components/desenvolvimento/EpocFaturamentoInterpretCard";
 import { EpocSyncDayCard } from "@/components/desenvolvimento/EpocSyncDayCard";
 import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
-import { EpocVendaProdutosInterpretCard } from "@/components/desenvolvimento/EpocVendaProdutosInterpretCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
-import { EpocVendaServicosInterpretCard } from "@/components/desenvolvimento/EpocVendaServicosInterpretCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -92,9 +89,7 @@ export function Desenvolvimento() {
     .slice(0, 14);
   const hasFocus = hasFocusNfeEmpresaId(currentCompany?.focusnfe ?? null);
 
-  const [mainTab, setMainTab] = useState<
-    "geral" | "epoc" | "syncNfs" | "preview"
-  >("geral");
+  const [mainTab, setMainTab] = useState<"geral" | "epoc" | "fiscal">("geral");
 
   const [getSyncVersao, setGetSyncVersao] = useState("");
   const [getSyncOnboarding, setGetSyncOnboarding] = useState(true);
@@ -345,27 +340,15 @@ export function Desenvolvimento() {
         </button>
         <button
           type="button"
-          onClick={() => setMainTab("syncNfs")}
+          onClick={() => setMainTab("fiscal")}
           className={cn(
             "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-            mainTab === "syncNfs"
+            mainTab === "fiscal"
               ? "border-primary text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
-          Sync NFs
-        </button>
-        <button
-          type="button"
-          onClick={() => setMainTab("preview")}
-          className={cn(
-            "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-            mainTab === "preview"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          Pré-visualizar XML (NF-e)
+          Fiscal
         </button>
       </div>
 
@@ -377,19 +360,45 @@ export function Desenvolvimento() {
       ) : null}
 
       {mainTab === "epoc" ? (
-        <div className="space-y-6">
+        <div className="space-y-8">
           <EpocSyncDayCard />
-          <EpocVendaProdutosExportCard />
-          <EpocVendaProdutosInterpretCard />
-          <EpocFaturamentoExportCard />
-          <EpocVendaServicosExportCard />
-          <EpocVendaServicosInterpretCard />
-          <EpocFaturamentoInterpretCard />
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Vendas</h2>
+              <p className="text-muted-foreground text-sm">
+                Cada fluxo gera o CSV no portal e interpreta o resultado. Se o
+                arquivo já existir, use só Escolher CSV.
+              </p>
+            </div>
+            <div className="space-y-6">
+              <EpocVendaProdutosExportCard />
+              <EpocVendaServicosExportCard />
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Faturamento</h2>
+              <p className="text-muted-foreground text-sm">
+                Gera o CSV no portal e interpreta o resultado. Se o arquivo já
+                existir, use só Escolher CSV.
+              </p>
+            </div>
+            <EpocFaturamentoExportCard />
+          </section>
         </div>
       ) : null}
 
-      {mainTab === "syncNfs" ? (
-        <div className="space-y-6">
+      {mainTab === "fiscal" ? (
+        <div className="space-y-8">
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Sync NFs</h2>
+              <p className="text-muted-foreground text-sm">
+                Listagem resumida na Focus para a unidade selecionada.
+              </p>
+            </div>
           <Card className="w-full min-w-0">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -556,10 +565,15 @@ export function Desenvolvimento() {
               ) : null}
             </CardContent>
           </Card>
-        </div>
-      ) : null}
+          </section>
 
-      {mainTab === "preview" ? (
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Pré-visualizar XML</h2>
+              <p className="text-muted-foreground text-sm">
+                Analisa um XML de NF-e sem gravar no banco.
+              </p>
+            </div>
         <Card className="w-full min-w-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -641,6 +655,8 @@ export function Desenvolvimento() {
             ) : null}
           </CardContent>
         </Card>
+          </section>
+        </div>
       ) : null}
     </PageShell>
   );

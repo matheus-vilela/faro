@@ -1,3 +1,7 @@
+import {
+  EpocFaturamentoInterpretResult,
+  runEpocFaturamentoInterpret,
+} from "@/components/desenvolvimento/EpocFaturamentoInterpretCard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,22 +13,52 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCompany } from "@/contexts/CompanyContext";
+import type { EpocFaturamentoInterpretPreview } from "@/lib/epocFaturamentoInterpret";
 import {
   downloadTextAsFile,
   exportEpocFaturamentoCsv,
   yesterdayIsoSaoPaulo,
 } from "@/services/epocFaturamentoExportService";
-import { FileSpreadsheet, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
+
+type Phase = "idle" | "exporting" | "interpreting";
 
 export function EpocFaturamentoExportCard() {
   const { currentCompany } = useCompany();
   const yesterday = yesterdayIsoSaoPaulo();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [dataDe, setDataDe] = useState(yesterday);
   const [dataAte, setDataAte] = useState(yesterday);
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [lastSummary, setLastSummary] = useState<string | null>(null);
+  const [preview, setPreview] = useState<EpocFaturamentoInterpretPreview | null>(
+    null,
+  );
+
+  const busy = phase !== "idle";
+
+  const interpretCsv = async (text: string, fileName: string) => {
+    setPhase("interpreting");
+    try {
+      const result = runEpocFaturamentoInterpret(text, fileName);
+      setPreview(result);
+      if (!result.ok) {
+        toast.error(result.error ?? "Falha ao interpretar CSV.");
+        return;
+      }
+      toast.success(
+        `tabela_3: ${result.tabela3.length} · tabela_5: ${result.tabela5.length} · tabela_6: ${result.tabela6.length}`,
+      );
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Não foi possível interpretar o CSV.";
+      toast.error(msg);
+    } finally {
+      setPhase("idle");
+    }
+  };
 
   const runExport = async () => {
     if (!currentCompany) {
@@ -40,8 +74,9 @@ export function EpocFaturamentoExportCard() {
       return;
     }
 
-    setLoading(true);
+    setPhase("exporting");
     setLastSummary(null);
+    setPreview(null);
     try {
       const result = await exportEpocFaturamentoCsv({
         companyId: currentCompany.id,
@@ -51,19 +86,32 @@ export function EpocFaturamentoExportCard() {
       if (!result.ok) {
         toast.error(result.error);
         setLastSummary(result.error);
+        setPhase("idle");
         return;
       }
       downloadTextAsFile(result.csv, result.file_name);
-      const summary = `${result.total_rows} linha(s) · ${result.dias_com_dados} dia(s) com dados · ${result.file_name}`;
-      setLastSummary(summary);
-      toast.success("CSV de faturamento gerado e baixado.");
+      setLastSummary(
+        `${result.total_rows} linha(s) · ${result.dias_com_dados} dia(s) · ${result.file_name}`,
+      );
+      toast.success("CSV gerado e baixado. A interpretar…");
+      await interpretCsv(result.csv, result.file_name);
     } catch (e) {
       const msg =
         e instanceof Error ? e.message : "Erro ao exportar faturamento EPOC.";
       toast.error(msg);
       setLastSummary(msg);
+      setPhase("idle");
+    }
+  };
+
+  const onPickFile = async (file: File | null) => {
+    if (!file) return;
+    setLastSummary(`Arquivo local · ${file.name}`);
+    setPreview(null);
+    try {
+      await interpretCsv(await file.text(), file.name);
     } finally {
-      setLoading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -72,56 +120,90 @@ export function EpocFaturamentoExportCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <FileSpreadsheet className="size-4" />
-          EPOC — export faturamento
+          Faturamento
         </CardTitle>
         <CardDescription>
-          Chama o portal (`mod_rel_faturamento`), extrai `#spanImprimir` e gera
-          um CSV consolidado com coluna <code>secao</code> para validação
-          manual. Usa as credenciais EPOC da unidade selecionada.
+          Gera o CSV no portal e interpreta em seguida. Se já tiver o arquivo,
+          use <strong>Escolher CSV</strong>.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="epoc-fat-data-de">Data de</Label>
-            <Input
-              id="epoc-fat-data-de"
-              type="date"
-              value={dataDe}
-              onChange={(e) => setDataDe(e.target.value)}
-              disabled={loading}
-            />
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="grid gap-3 sm:grid-cols-2 lg:max-w-md lg:flex-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="epoc-fat-data-de">Data de</Label>
+              <Input
+                id="epoc-fat-data-de"
+                type="date"
+                value={dataDe}
+                onChange={(e) => setDataDe(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="epoc-fat-data-ate">Data até</Label>
+              <Input
+                id="epoc-fat-data-ate"
+                type="date"
+                value={dataAte}
+                onChange={(e) => setDataAte(e.target.value)}
+                disabled={busy}
+              />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="epoc-fat-data-ate">Data até</Label>
-            <Input
-              id="epoc-fat-data-ate"
-              type="date"
-              value={dataAte}
-              onChange={(e) => setDataAte(e.target.value)}
-              disabled={loading}
-            />
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            className="sr-only"
+            disabled={busy}
+            onChange={(e) => void onPickFile(e.target.files?.[0] ?? null)}
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={() => void runExport()}
+              disabled={busy || !currentCompany}
+            >
+              {phase === "exporting" ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Consultando portal…
+                </>
+              ) : phase === "interpreting" ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Interpretando…
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="size-4" />
+                  Gerar e baixar CSV
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload className="size-4" />
+              Escolher CSV
+            </Button>
           </div>
         </div>
-        <Button
-          type="button"
-          onClick={() => void runExport()}
-          disabled={loading || !currentCompany}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              Consultando portal…
-            </>
-          ) : (
-            <>
-              <FileSpreadsheet className="size-4" />
-              Gerar e baixar CSV
-            </>
-          )}
-        </Button>
+
         {lastSummary ? (
           <p className="text-muted-foreground text-sm">{lastSummary}</p>
+        ) : null}
+
+        {preview ? (
+          <div className="border-t pt-4">
+            <EpocFaturamentoInterpretResult preview={preview} />
+          </div>
         ) : null}
       </CardContent>
     </Card>

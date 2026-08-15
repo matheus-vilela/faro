@@ -1,13 +1,3 @@
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   previewEpocFaturamentoInterpret,
   type EpocFaturamentoInterpretPreview,
@@ -16,9 +6,6 @@ import {
   type Tabela6Interpretacao,
 } from "@/lib/epocFaturamentoInterpret";
 import { cn } from "@/lib/utils";
-import { FileSearch, Loader2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
-import { toast } from "sonner";
 
 function TotaisTable({ title, data }: { title: string; data: Tabela3Totais }) {
   const cells: { label: string; value: string }[] = [
@@ -254,201 +241,126 @@ function Tabela6Block({ block }: { block: Tabela6Interpretacao }) {
   );
 }
 
-export function EpocFaturamentoInterpretCard() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<EpocFaturamentoInterpretPreview | null>(
-    null,
-  );
+export function runEpocFaturamentoInterpret(
+  text: string,
+  fileName: string,
+): EpocFaturamentoInterpretPreview {
+  return previewEpocFaturamentoInterpret(text, fileName);
+}
 
-  const onFile = async (file: File | null) => {
-    if (!file) return;
-    setLoading(true);
-    setPreview(null);
-    try {
-      const text = await file.text();
-      const result = previewEpocFaturamentoInterpret(text, file.name);
-      setPreview(result);
-      if (!result.ok) {
-        toast.error(result.error ?? "Falha ao interpretar CSV.");
-        return;
-      }
-      toast.success(
-        `tabela_3: ${result.tabela3.length} · tabela_5: ${result.tabela5.length} · tabela_6: ${result.tabela6.length}`,
-      );
-    } catch (e) {
-      const msg =
-        e instanceof Error ? e.message : "Não foi possível ler o arquivo.";
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  };
-
+export function EpocFaturamentoInterpretResult({
+  preview,
+}: {
+  preview: EpocFaturamentoInterpretPreview;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <FileSearch className="size-4" />
-          EPOC — interpretar faturamento (CSV)
-        </CardTitle>
-        <CardDescription>
-          Envie o CSV do export para validar <strong>tabela_3</strong>,{" "}
-          <strong>tabela_5</strong> e <strong>tabela_6</strong> (Totais /
-          Fiscal / Formas de Pagamento). Rótulos não mapeados na tabela_6
-          aparecem em aviso.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="epoc-fat-interpret-file">Arquivo CSV</Label>
-          <Input
-            ref={inputRef}
-            id="epoc-fat-interpret-file"
-            type="file"
-            accept=".csv,text/csv,text/plain"
-            disabled={loading}
-            onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
-          />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={loading}
-          onClick={() => inputRef.current?.click()}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              Lendo…
-            </>
-          ) : (
-            <>
-              <Upload className="size-4" />
-              Escolher CSV
-            </>
-          )}
-        </Button>
-
-        {preview ? (
-          <div className="space-y-6 border-t pt-4">
-            <div className="text-muted-foreground space-y-1 text-sm">
-              <p>
-                Arquivo:{" "}
-                <span className="text-foreground">{preview.fileName}</span>
-                {" · "}
-                {preview.totalLinhas} linha(s) · secções:{" "}
-                {preview.secoes.join(", ") || "—"}
-              </p>
-              {!preview.ok && preview.error ? (
-                <p className="text-destructive">{preview.error}</p>
-              ) : null}
-            </div>
-
-            {preview.tabela3.map((block) => (
-              <div
-                key={`t3-${block.dataConsulta}-${block.secao}`}
-                className="space-y-4 rounded-md border p-4"
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">
-                    {block.tituloSecao ?? block.secao}{" "}
-                    <span className="text-muted-foreground font-normal">
-                      ({block.secao} · {block.dataConsulta} ·{" "}
-                      {block.totalLinhasSecao} linhas)
-                    </span>
-                  </p>
-                  {block.avisos.length > 0 ? (
-                    <ul className="list-disc space-y-0.5 pl-5 text-sm text-amber-700 dark:text-amber-400">
-                      {block.avisos.map((a) => (
-                        <li key={a}>{a}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Rótulos nas linhas esperadas (5 / 7 / 14).
-                    </p>
-                  )}
-                </div>
-
-                <div className={cn("grid gap-4", "lg:grid-cols-3")}>
-                  {block.totalMasc ? (
-                    <TotaisTable title="TOTAL MASC:" data={block.totalMasc} />
-                  ) : (
-                    <p className="text-destructive text-sm">
-                      TOTAL MASC: ausente
-                    </p>
-                  )}
-                  {block.totalFem ? (
-                    <TotaisTable title="TOTAL FEM:" data={block.totalFem} />
-                  ) : (
-                    <p className="text-destructive text-sm">
-                      TOTAL FEM: ausente
-                    </p>
-                  )}
-                  {block.totalGeral ? (
-                    <TotaisTable title="Total Geral:" data={block.totalGeral} />
-                  ) : (
-                    <p className="text-destructive text-sm">
-                      Total Geral: ausente
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {preview.tabela5.map((block) => (
-              <div
-                key={`t5-${block.dataConsulta}-${block.secao}`}
-                className="space-y-4 rounded-md border p-4"
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">
-                    {block.tituloSecao ?? block.secao}{" "}
-                    <span className="text-muted-foreground font-normal">
-                      ({block.secao} · {block.dataConsulta} ·{" "}
-                      {block.totalLinhasSecao} linhas)
-                    </span>
-                  </p>
-                  {block.avisos.length > 0 ? (
-                    <ul className="list-disc space-y-0.5 pl-5 text-sm text-amber-700 dark:text-amber-400">
-                      {block.avisos.map((a) => (
-                        <li key={a}>{a}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Produtos na linha 3; blocos Produtos e Serviços completos.
-                    </p>
-                  )}
-                </div>
-
-                <div className={cn("grid gap-4", "lg:grid-cols-2")}>
-                  {block.produtos ? (
-                    <GrupoTabela5 title="Produtos" data={block.produtos} />
-                  ) : (
-                    <p className="text-destructive text-sm">
-                      Bloco Produtos ausente
-                    </p>
-                  )}
-                  {block.servicos ? (
-                    <GrupoTabela5 title="Serviços" data={block.servicos} />
-                  ) : (
-                    <p className="text-destructive text-sm">
-                      Bloco Serviços ausente
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {preview.tabela6.map((block) => (
-              <Tabela6Block key={`t6-${block.dataConsulta}-${block.secao}`} block={block} />
-            ))}
-          </div>
+    <div className="space-y-6">
+      <div className="text-muted-foreground space-y-1 text-sm">
+        <p>
+          Arquivo:{" "}
+          <span className="text-foreground">{preview.fileName}</span>
+          {" · "}
+          {preview.totalLinhas} linha(s) · secções:{" "}
+          {preview.secoes.join(", ") || "—"}
+        </p>
+        {!preview.ok && preview.error ? (
+          <p className="text-destructive">{preview.error}</p>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+
+      {preview.tabela3.map((block) => (
+        <div
+          key={`t3-${block.dataConsulta}-${block.secao}`}
+          className="space-y-4 rounded-md border p-4"
+        >
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              {block.tituloSecao ?? block.secao}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({block.secao} · {block.dataConsulta} ·{" "}
+                {block.totalLinhasSecao} linhas)
+              </span>
+            </p>
+            {block.avisos.length > 0 ? (
+              <ul className="list-disc space-y-0.5 pl-5 text-sm text-amber-700 dark:text-amber-400">
+                {block.avisos.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                Rótulos nas linhas esperadas (5 / 7 / 14).
+              </p>
+            )}
+          </div>
+
+          <div className={cn("grid gap-4", "lg:grid-cols-3")}>
+            {block.totalMasc ? (
+              <TotaisTable title="TOTAL MASC:" data={block.totalMasc} />
+            ) : (
+              <p className="text-destructive text-sm">TOTAL MASC: ausente</p>
+            )}
+            {block.totalFem ? (
+              <TotaisTable title="TOTAL FEM:" data={block.totalFem} />
+            ) : (
+              <p className="text-destructive text-sm">TOTAL FEM: ausente</p>
+            )}
+            {block.totalGeral ? (
+              <TotaisTable title="Total Geral:" data={block.totalGeral} />
+            ) : (
+              <p className="text-destructive text-sm">Total Geral: ausente</p>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {preview.tabela5.map((block) => (
+        <div
+          key={`t5-${block.dataConsulta}-${block.secao}`}
+          className="space-y-4 rounded-md border p-4"
+        >
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              {block.tituloSecao ?? block.secao}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({block.secao} · {block.dataConsulta} ·{" "}
+                {block.totalLinhasSecao} linhas)
+              </span>
+            </p>
+            {block.avisos.length > 0 ? (
+              <ul className="list-disc space-y-0.5 pl-5 text-sm text-amber-700 dark:text-amber-400">
+                {block.avisos.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                Produtos na linha 3; blocos Produtos e Serviços completos.
+              </p>
+            )}
+          </div>
+
+          <div className={cn("grid gap-4", "lg:grid-cols-2")}>
+            {block.produtos ? (
+              <GrupoTabela5 title="Produtos" data={block.produtos} />
+            ) : (
+              <p className="text-destructive text-sm">Bloco Produtos ausente</p>
+            )}
+            {block.servicos ? (
+              <GrupoTabela5 title="Serviços" data={block.servicos} />
+            ) : (
+              <p className="text-destructive text-sm">Bloco Serviços ausente</p>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {preview.tabela6.map((block) => (
+        <Tabela6Block
+          key={`t6-${block.dataConsulta}-${block.secao}`}
+          block={block}
+        />
+      ))}
+    </div>
   );
 }
