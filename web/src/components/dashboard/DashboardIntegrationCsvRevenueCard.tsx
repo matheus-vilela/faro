@@ -278,9 +278,9 @@ export function DashboardIntegrationCsvRevenueCard({
   };
 
   return (
-    <Card className="border-2 border-sky-500/45 bg-linear-to-r from-sky-500/15 via-cyan-500/12 to-emerald-500/10 shadow-md">
-      <CardContent className="p-4 sm:p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <Card className="h-full border-2 border-sky-500/45 bg-linear-to-r from-sky-500/15 via-cyan-500/12 to-emerald-500/10 shadow-md">
+      <CardContent className="p-4 sm:p-5 justify-between flex h-full flex-col ">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between h-full">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-500/30 text-sky-950 ring-1 ring-sky-700/20 dark:text-sky-100">
               {renderIcon()}
@@ -350,7 +350,7 @@ export function DashboardIntegrationCsvRevenueCard({
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
-              <Link to="/app/integracoes">
+              <Link to="/app/configuracoes/integracoes">
                 Integrações EPOC
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>

@@ -79,6 +79,14 @@ export function Dashboard() {
 
   const firstName = firstNameFromUser(user);
   const greeting = greetingForHour();
+  const showFiscalOnboarding = Boolean(
+    currentCompany &&
+      isOnboardingFiscalDashboardCardVisible(currentCompany.onboarding_fiscal),
+  );
+  const showEpocOnboarding = Boolean(
+    currentCompany &&
+      isOnboardingPdvDashboardCardVisible(currentCompany.onboarding_pdv),
+  );
 
   const headerDescription = (
     <span className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
@@ -109,15 +117,22 @@ export function Dashboard() {
         }
       />
 
-      {currentCompany &&
-      isOnboardingFiscalDashboardCardVisible(
-        currentCompany.onboarding_fiscal,
-      ) ? (
-        <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
-      ) : null}
-      {currentCompany &&
-      isOnboardingPdvDashboardCardVisible(currentCompany.onboarding_pdv) ? (
-        <DashboardIntegrationCsvRevenueCard company={currentCompany} />
+      {currentCompany && (showFiscalOnboarding || showEpocOnboarding) ? (
+        <div
+          className={cn(
+            "grid gap-4",
+            showFiscalOnboarding &&
+              showEpocOnboarding &&
+              "md:grid-cols-2 md:items-stretch",
+          )}
+        >
+          {showFiscalOnboarding ? (
+            <DashboardFocusNfeRecebidasSyncCard company={currentCompany} />
+          ) : null}
+          {showEpocOnboarding ? (
+            <DashboardIntegrationCsvRevenueCard company={currentCompany} />
+          ) : null}
+        </div>
       ) : null}
       {companyId ? (
         <DashboardEpocDailySyncAlertCard companyId={companyId} />

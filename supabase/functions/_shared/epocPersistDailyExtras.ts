@@ -16,7 +16,11 @@ import {
   parsePtBrNumber,
   splitPaymentMethodLabel,
 } from "./epocPtBrNumber.ts";
-import { extractVendaServicosRowsFromAcoesHtml } from "./epocVendaServicosCsv.ts";
+import {
+  COL_VL_BRUTO,
+  extractVendaServicosRowsFromAcoesHtml,
+  findVlBrutoColumnIndex,
+} from "./epocVendaServicosCsv.ts";
 
 export type DayExtrasKind = "services" | "faturamento";
 
@@ -27,6 +31,66 @@ export type DayExtrasPersistResult = {
 };
 
 export { splitPaymentMethodLabel };
+
+export type AggregatedServiceSale = {
+  code: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  grossValue: number;
+  discount: number;
+  surcharge: number;
+  allocation: number;
+  lineCount: number;
+};
+
+/**
+ * Várias linhas do mesmo código no mesmo dia (EPOC) viram um único
+ * lançamento diário — o unique de `service_daily_sales` é por serviço+data.
+ */
+export function aggregateVendaServicosItemRows(
+  itemRows: string[][],
+  opts: { vlBrutoIndex: number },
+): AggregatedServiceSale[] {
+  const vlBrutoRowIdx = 2 + opts.vlBrutoIndex;
+  const byCode = new Map<string, AggregatedServiceSale>();
+  for (const r of itemRows) {
+    const code = (r[2] ?? "").trim();
+    const name = (r[3] ?? "").trim();
+    if (!code || !name) continue;
+
+    const quantity = parsePtBrNumber(r[4] ?? "") ?? 0;
+    const unitPrice = parsePtBrNumber(r[5] ?? "") ?? 0;
+    const grossValue = parsePtBrNumber(r[vlBrutoRowIdx] ?? "") ?? 0;
+    const discount = parsePtBrNumber(r[7] ?? "") ?? 0;
+    const surcharge = parsePtBrNumber(r[8] ?? "") ?? 0;
+    const allocation = parsePtBrNumber(r[10] ?? "") ?? 0;
+
+    const prev = byCode.get(code);
+    if (!prev) {
+      byCode.set(code, {
+        code,
+        name,
+        quantity,
+        unitPrice,
+        grossValue,
+        discount,
+        surcharge,
+        allocation,
+        lineCount: 1,
+      });
+      continue;
+    }
+    prev.quantity += quantity;
+    prev.grossValue += grossValue;
+    prev.discount += discount;
+    prev.surcharge += surcharge;
+    prev.allocation += allocation;
+    prev.lineCount += 1;
+    prev.unitPrice = prev.quantity > 0 ? prev.grossValue / prev.quantity : unitPrice;
+  }
+  return [...byCode.values()];
+}
 
 function faturamentoRowsToCsvRows(
   dataConsulta: string,
@@ -112,28 +176,25 @@ export async function persistServicesFromAcoesHtml(
     return { ok: true, itens: 0 };
   }
 
+  const headerRow = extracted.rows.find((r) => r[1] === "itens_cabecalho");
+  const tableHeader = headerRow?.slice(2) ?? [];
+  const vlBrutoIndex = findVlBrutoColumnIndex(tableHeader);
+  if (vlBrutoIndex < 0) {
+    return {
+      ok: false,
+      error: `Coluna "${COL_VL_BRUTO}" não encontrada no relatório de serviços.`,
+    };
+  }
+
   const itemRows = extracted.rows.filter((r) => r[1] === "itens");
+  const aggregated = aggregateVendaServicosItemRows(itemRows, { vlBrutoIndex });
   let saved = 0;
-  for (const r of itemRows) {
-    const code = (r[2] ?? "").trim();
-    const name = (r[3] ?? "").trim();
-    if (!code || !name) continue;
-
-    // Linha CSV: [data, secao, col_1…]. Índices r[2]=col_1 …
-    // col_9 = total da venda do serviço no dia (não usar col_8).
-    const quantity = parsePtBrNumber(r[4] ?? "") ?? 0; // col_3
-    const unitPrice = parsePtBrNumber(r[5] ?? "") ?? 0; // col_4
-    const grossValue = parsePtBrNumber(r[6] ?? "") ?? 0; // col_5
-    const discount = parsePtBrNumber(r[7] ?? "") ?? 0; // col_6
-    const surcharge = parsePtBrNumber(r[8] ?? "") ?? 0; // col_7
-    // r[9] = col_8 (valor intermédio / rateio) — não é o total a exibir.
-    const allocation = parsePtBrNumber(r[10] ?? "") ?? 0; // col_9
-
+  for (const sale of aggregated) {
     const { data: existing, error: findErr } = await admin
       .from("services")
       .select("id, name")
       .eq("company_id", companyId)
-      .eq("code", code)
+      .eq("code", sale.code)
       .maybeSingle();
     if (findErr) {
       return { ok: false, error: findErr.message };
@@ -145,8 +206,8 @@ export async function persistServicesFromAcoesHtml(
         .from("services")
         .insert({
           company_id: companyId,
-          code,
-          name,
+          code: sale.code,
+          name: sale.name,
           is_active: true,
         })
         .select("id")
@@ -155,10 +216,10 @@ export async function persistServicesFromAcoesHtml(
         return { ok: false, error: insErr?.message ?? "Falha ao criar serviço" };
       }
       serviceId = created.id as string;
-    } else if (existing && existing.name !== name) {
+    } else if (existing && existing.name !== sale.name) {
       await admin
         .from("services")
-        .update({ name, updated_at: new Date().toISOString() })
+        .update({ name: sale.name, updated_at: new Date().toISOString() })
         .eq("id", serviceId);
     }
 
@@ -167,12 +228,12 @@ export async function persistServicesFromAcoesHtml(
         company_id: companyId,
         service_id: serviceId,
         sale_date: saleDate,
-        quantity,
-        unit_price: unitPrice,
-        gross_value: grossValue,
-        discount,
-        surcharge,
-        allocation,
+        quantity: sale.quantity,
+        unit_price: sale.unitPrice,
+        gross_value: sale.grossValue,
+        discount: sale.discount,
+        surcharge: sale.surcharge,
+        allocation: sale.allocation,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "company_id,service_id,sale_date" },

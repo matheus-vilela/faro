@@ -35,6 +35,12 @@ export function getDocumentTitle(pathname: string): string {
   if (path.startsWith("/app/configuracoes/whatsapp")) {
     return tab("WhatsApp");
   }
+  if (path.startsWith("/app/configuracoes/integracoes")) {
+    return tab("Integrações");
+  }
+  if (path.startsWith("/app/configuracoes/adquirentes")) {
+    return tab("Adquirentes");
+  }
   if (path.startsWith("/app/configuracoes/formas-de-pagamento")) {
     return tab("Formas de pagamento");
   }
@@ -75,7 +81,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/alertas", label: "Alertas" },
     { prefix: "/app/integracoes", label: "Integrações" },
     { prefix: "/app/desenvolvimento/fornecedores", label: "Fornecedores globais" },
-    { prefix: "/app/desenvolvimento", label: "Desenvolvimento" },
+    { prefix: "/app/desenvolvimento", label: "Administrador" },
     { prefix: "/app/orcamento", label: "Orçamento" },
     { prefix: "/app/dre", label: "DRE / Resultado" },
   ];

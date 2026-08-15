@@ -25,18 +25,26 @@
  * Após sync OK, persiste `nfes_recebidas_ultima_versao` e `nfes_recebidas_ultima_sync_at` no JSON `focusnfe`.
  *
  * Env: `SUPABASE_*`, `FOCUS_NFE_TOKEN`, `FOCUS_NFE_API_BASE` (opcional), `FOCUS_GET_SYNC_MAX_COMPANIES_PER_RUN` (default 1),
- * `FOCUS_GET_SYNC_MAX_PAGES` (default 80). O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
- * Para cada nota gravada, faz download do XML em **blocos paralelos de 10** (`GET .../{chave}.xml`);
+ * `FOCUS_GET_SYNC_MAX_PAGES` (default 80), `FOCUS_AUTO_MAX_PER_MINUTE` (default 80, máx. 80).
+ * O tamanho da página de resultados é o definido pela API Focus (sem `limite` na query).
+ * Para cada nota gravada, faz download do XML em **blocos paralelos de 4** (`GET .../{chave}.xml`);
  * entre blocos aplica `FOCUS_NFE_XML_THROTTLE_MS` (default 450 ms).
+ * Lista e XML automáticos entram no teto global de 80 req/min (`focus_api_auto_acquire`);
+ * as outras 20 do limite Focus (100/min) ficam para fluxos manuais pontuais.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { userHasCompanyAccess } from "../_shared/companyAccess.ts";
+import {
+  FOCUS_AUTO_RATE_LIMITED,
+  acquireFocusAutoCall,
+  peekFocusAutoCall,
+} from "../_shared/focusApiAutoRateLimit.ts";
 
 const LOG = "[focus-get-sync-nfe]";
 
 /** Downloads de XML em paralelo por lote; throttle só entre lotes. */
-const XML_DOWNLOAD_PARALLEL = 10;
+const XML_DOWNLOAD_PARALLEL = 4;
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -131,9 +139,22 @@ async function fetchNfeRecebidaXmlWithRetry(
   xmlUrl: string,
   focusToken: string,
   chaveNfe44: string,
-): Promise<{ ok: true; buf: Uint8Array } | { ok: false; status: number }> {
+): Promise<
+  | { ok: true; buf: Uint8Array }
+  | { ok: false; status: number; rateLimited?: boolean; waitMs?: number }
+> {
   const maxAttempts = 10;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const slot = await acquireFocusAutoCall({ source: "legacy_xml" });
+    if (!slot.allowed) {
+      return {
+        ok: false,
+        status: 429,
+        rateLimited: true,
+        waitMs: slot.waitMs,
+      };
+    }
+
     let xmlRes: Response;
     try {
       xmlRes = await fetch(xmlUrl, {
@@ -538,6 +559,42 @@ async function touchNfesRecebidasUltimaSyncAt(
     .eq("id", companyId);
   if (error) return { error: error.message };
   return { sync_at: syncAt };
+}
+
+/** Devolve o rodízio ao valor anterior quando o run para no teto de 80/min. */
+async function restoreNfesRecebidasUltimaSyncAt(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  previous: unknown,
+): Promise<void> {
+  const { data: row, error: readErr } = await admin
+    .from("companies")
+    .select("focusnfe")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (readErr) {
+    console.warn(LOG, "restore_sync_at_read", companyId, readErr.message);
+    return;
+  }
+  const current =
+    row?.focusnfe &&
+    typeof row.focusnfe === "object" &&
+    !Array.isArray(row.focusnfe)
+      ? { ...(row.focusnfe as Record<string, unknown>) }
+      : {};
+  if (previous == null || previous === "") {
+    delete current.nfes_recebidas_ultima_sync_at;
+  } else {
+    current.nfes_recebidas_ultima_sync_at = previous;
+  }
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("companies")
+    .update({ focusnfe: current, updated_at: now })
+    .eq("id", companyId);
+  if (error) {
+    console.warn(LOG, "restore_sync_at", companyId, error.message);
+  }
 }
 
 async function persistFocusNfeSyncCursor(
@@ -1082,6 +1139,24 @@ Deno.serve(async (req) => {
         .slice(0, 14);
       const obRaw = row.onboarding_fiscal;
 
+      const peek = await peekFocusAutoCall({ admin });
+      if (!peek.allowed) {
+        logPhase("empresa_adiada_rate_limit", {
+          exec_id: execId,
+          company_id: companyId,
+          used: peek.used,
+          limit: peek.limit,
+          wait_ms: peek.waitMs,
+        });
+        detail.push({
+          company_id: companyId,
+          skipped: FOCUS_AUTO_RATE_LIMITED,
+          wait_ms: peek.waitMs,
+        });
+        continue;
+      }
+
+      const previousSyncAt = focusnfe.nfes_recebidas_ultima_sync_at ?? null;
       const reserveSyncAt = await touchNfesRecebidasUltimaSyncAt(
         admin,
         companyId,
@@ -1165,6 +1240,8 @@ Deno.serve(async (req) => {
       let hadSuccessfulListFetch = false;
       /** Listagem encerrou por regra Focus (sem mais páginas neste ciclo). */
       let listagemConcluida = false;
+      let rateLimitedStop = false;
+      let rateLimitedWaitMs = 0;
       let versaoFinal = versao;
 
       logPhase("empresa_inicio", {
@@ -1220,6 +1297,36 @@ Deno.serve(async (req) => {
       }
 
       for (let page = 0; page < maxPages; page++) {
+        const listSlot = await acquireFocusAutoCall({
+          admin,
+          source: "legacy_list",
+        });
+        if (!listSlot.allowed) {
+          rateLimitedStop = true;
+          rateLimitedWaitMs = listSlot.waitMs;
+          companySyncOk = false;
+          logPhase("focus_lista_rate_limit", {
+            exec_id: execId,
+            company_id: companyId,
+            pagina: page + 1,
+            versao_query: versao,
+            used: listSlot.used,
+            limit: listSlot.limit,
+            wait_ms: listSlot.waitMs,
+          });
+          detail.push({
+            company_id: companyId,
+            cnpj: cnpjDigits,
+            ok: false,
+            deferred: true,
+            error: FOCUS_AUTO_RATE_LIMITED,
+            wait_ms: listSlot.waitMs,
+            quantasBuscasForamExecutadas: quantasBuscas,
+            notasEncontradas,
+          });
+          break;
+        }
+
         const listUrl = `${apiBase}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpjDigits)}&versao=${versao}`;
 
         const tHttp0 = performance.now();
@@ -1421,7 +1528,13 @@ Deno.serve(async (req) => {
                   );
                 }
               }
-              return { cab, chave, xmlContent };
+              return {
+                cab,
+                chave,
+                xmlContent,
+                rateLimited: !got.ok && got.rateLimited === true,
+                waitMs: !got.ok && got.rateLimited ? got.waitMs ?? 0 : 0,
+              };
             }),
           );
 
@@ -1507,7 +1620,38 @@ Deno.serve(async (req) => {
               }
             }
           }
+
+          const limited = chunkWithXml.filter((x) => x.rateLimited);
+          if (limited.length > 0) {
+            rateLimitedStop = true;
+            rateLimitedWaitMs = Math.max(
+              rateLimitedWaitMs,
+              ...limited.map((x) => x.waitMs),
+            );
+            companySyncOk = false;
+            logPhase("focus_xml_rate_limit", {
+              exec_id: execId,
+              company_id: companyId,
+              pagina: page + 1,
+              versao_query: versao,
+              xmls_adiados: limited.length,
+              wait_ms: rateLimitedWaitMs,
+            });
+            detail.push({
+              company_id: companyId,
+              cnpj: cnpjDigits,
+              ok: false,
+              deferred: true,
+              error: FOCUS_AUTO_RATE_LIMITED,
+              wait_ms: rateLimitedWaitMs,
+              quantasBuscasForamExecutadas: quantasBuscas,
+              notasEncontradas,
+            });
+            break;
+          }
         }
+
+        if (rateLimitedStop) break;
 
         // x-total-count == 0 → não há mais notas a consultar (regra Focus / pedido de produto).
         if (xTotalCount === 0) {
@@ -1640,6 +1784,7 @@ Deno.serve(async (req) => {
         onboarding_flow: companyOnboardingFlow,
         onboarding_fiscal: summarizeOnboardingFiscal(obFresh),
         listagem_concluida: listagemConcluida,
+        rate_limited: rateLimitedStop,
         staging_exec_id: stagingExecId,
         versao_final: versaoFinal,
         ...temposDeProcessamento,
@@ -1671,6 +1816,20 @@ Deno.serve(async (req) => {
           company_sync_ok: companySyncOk,
           had_successful_list_fetch: hadSuccessfulListFetch,
           buscas_focus: quantasBuscas,
+        });
+      }
+
+      if (rateLimitedStop && !listagemConcluida) {
+        await restoreNfesRecebidasUltimaSyncAt(
+          admin,
+          companyId,
+          previousSyncAt,
+        );
+        logPhase("rodizio_sync_at_restaurado", {
+          exec_id: execId,
+          company_id: companyId,
+          motivo: FOCUS_AUTO_RATE_LIMITED,
+          wait_ms: rateLimitedWaitMs,
         });
       }
 

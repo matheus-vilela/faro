@@ -28,6 +28,7 @@ import {
 } from "@/lib/formatMoneyPtBr";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { nestedRelation } from "@/types/acquirer";
 import { ArrowDownAZ, ArrowUpAZ, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
@@ -50,7 +51,11 @@ type PaymentLine = {
   id: string;
   operation_count: number | null;
   amount: number;
-  payment_methods: { sku: string; name: string } | null;
+  payment_methods: {
+    sku: string;
+    name: string;
+    acquirers?: { name: string } | { name: string }[] | null;
+  } | null;
 };
 
 type Tabela5GrupoView = {
@@ -153,7 +158,11 @@ function SortableTh({
   );
 }
 
-export function FaturamentoEpoc() {
+export function FaturamentoEpoc({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
 
@@ -231,7 +240,9 @@ export function FaturamentoEpoc() {
     setDetailLoading(true);
     const { data, error } = await supabase
       .from("epoc_faturamento_daily_payment_methods")
-      .select("id, operation_count, amount, payment_methods ( sku, name )")
+      .select(
+        "id, operation_count, amount, payment_methods ( sku, name, acquirers ( name ) )",
+      )
       .eq("company_id", companyId)
       .eq("faturamento_daily_id", row.id)
       .order("amount", { ascending: false });
@@ -250,14 +261,8 @@ export function FaturamentoEpoc() {
 
   const hasFilters = !!(dateFrom || dateTo || minTotal || maxTotal);
 
-  return (
-    <PageShell className="space-y-6">
-      <PageHeader
-        title="Faturamento"
-        description="Resumo diário do relatório de faturamento EPOC (Total Geral, produtos/serviços, fiscal e formas de pagamento)."
-        icon={Receipt}
-      />
-
+  const body = (
+    <>
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="fat-from">De</Label>
@@ -358,6 +363,9 @@ export function FaturamentoEpoc() {
         ) : null}
         <Button type="button" variant="outline" size="sm" asChild>
           <Link to="/app/configuracoes/formas-de-pagamento">Formas de pagamento</Link>
+        </Button>
+        <Button type="button" variant="outline" size="sm" asChild>
+          <Link to="/app/configuracoes/adquirentes">Adquirentes</Link>
         </Button>
       </div>
 
@@ -605,6 +613,7 @@ export function FaturamentoEpoc() {
                       <thead>
                         <tr className="bg-muted/40 border-b">
                           <th className="px-2 py-1.5 font-medium">Forma</th>
+                          <th className="px-2 py-1.5 font-medium">Adquirente</th>
                           <th className="px-2 py-1.5 font-medium">Op.</th>
                           <th className="px-2 py-1.5 font-medium">Valor</th>
                         </tr>
@@ -619,6 +628,10 @@ export function FaturamentoEpoc() {
                               <span className="text-muted-foreground font-mono text-xs">
                                 {p.payment_methods?.sku ?? ""}
                               </span>
+                            </td>
+                            <td className="px-2 py-1.5 text-muted-foreground">
+                              {nestedRelation(p.payment_methods?.acquirers)?.name ??
+                                "—"}
                             </td>
                             <td className="px-2 py-1.5 font-mono tabular-nums">
                               {formatNumberPtBr(
@@ -650,6 +663,21 @@ export function FaturamentoEpoc() {
           ) : null}
         </SheetContent>
       </Sheet>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="space-y-6">{body}</div>;
+  }
+
+  return (
+    <PageShell className="space-y-6">
+      <PageHeader
+        title="Faturamento"
+        description="Resumo diário do relatório de faturamento EPOC (Total Geral, produtos/serviços, fiscal e formas de pagamento)."
+        icon={Receipt}
+      />
+      {body}
     </PageShell>
   );
 }

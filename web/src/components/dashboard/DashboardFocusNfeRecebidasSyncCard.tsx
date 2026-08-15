@@ -9,6 +9,7 @@ import {
   isOnboardingFiscalSefazUnavailable,
   onboardingFiscalSefazRetryAt,
 } from "@/lib/onboardingFiscalDashboard";
+import { cn } from "@/lib/utils";
 import { confirmOnboardingFiscalInterpretPhase } from "@/services/companyOnboardingFlagsService";
 import {
   AlertTriangle,
@@ -266,8 +267,8 @@ export function DashboardFocusNfeRecebidasSyncCard({
         : percent;
 
   return (
-    <Card className={theme.card}>
-      <CardContent className="p-4 sm:p-5">
+    <Card className={cn("h-full", theme.card)}>
+      <CardContent className="p-4 sm:p-5 justify-between flex flex-col ">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <div className={theme.iconBox}>{renderIcon()}</div>
@@ -320,7 +321,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
-              <Link to="/app/integracoes">
+              <Link to="/app/configuracoes/integracoes">
                 Integração Fiscal
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>

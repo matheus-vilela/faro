@@ -1,6 +1,48 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import type { NfeJobRow, NfeSyncStateRow } from "./types.ts";
 
+/** Interpretação não chama a Focus — prioridade acima de fetch/download. */
+export const PROCESS_NFE_PRIORITY = 200;
+
+export async function enqueueProcessNfe(
+  admin: SupabaseClient,
+  input: { companyId: string; documentId: string; chave?: string },
+): Promise<{ id: string | null; error?: string }> {
+  return enqueueJob(admin, {
+    type: "process_nfe",
+    companyId: input.companyId,
+    payload: {
+      document_id: input.documentId,
+      ...(input.chave ? { chave: input.chave } : {}),
+    },
+    priority: PROCESS_NFE_PRIORITY,
+  });
+}
+
+export async function enqueuePendingInterpretations(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<number> {
+  const { data: docs, error } = await admin
+    .from("nfe_documents")
+    .select("id, chave")
+    .eq("company_id", companyId)
+    .eq("fetch_status", "downloaded")
+    .eq("process_status", "pending")
+    .limit(300);
+  if (error || !docs?.length) return 0;
+  let n = 0;
+  for (const d of docs) {
+    const enq = await enqueueProcessNfe(admin, {
+      companyId,
+      documentId: String(d.id),
+      chave: d.chave != null ? String(d.chave) : undefined,
+    });
+    if (enq.id) n += 1;
+  }
+  return n;
+}
+
 export async function enqueueJob(
   admin: SupabaseClient,
   input: {

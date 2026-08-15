@@ -132,6 +132,8 @@ export type ResumoPaymentRow = {
   share: number;
   /** Se false, não entra no KPI de vendas líquidas / relatórios de receita. */
   includeInNetSales: boolean;
+  /** Nome da adquirente associada à forma, se houver. */
+  acquirerName: string | null;
 };
 
 /** Linha diária de forma de pagamento vinda do faturamento EPOC. */
@@ -143,6 +145,7 @@ export type EpocPaymentLineInput = {
     sku: string;
     name: string;
     include_in_net_sales?: boolean | null;
+    acquirer_name?: string | null;
   } | null;
 };
 
@@ -460,7 +463,7 @@ export function buildNetSalesSourceBreakdown(input: {
   fatDays: EpocFaturamentoDayInput[];
   epocPayments: EpocPaymentLineInput[];
   revenueEntries: RevenueEntry[];
-  /** Soma de service_daily_sales (allocation ou gross) no período. */
+  /** Soma de service_daily_sales (gross_value / Vl.Bruto) no período. */
   serviceDailySalesTotal: number;
   kpiNet: number;
   kpiGross: number;
@@ -731,6 +734,7 @@ function finalizePaymentRows(
       shortLabel: string;
       amount: number;
       includeInNetSales: boolean;
+      acquirerName: string | null;
     }
   >,
 ): ResumoPaymentRow[] {
@@ -744,6 +748,7 @@ function finalizePaymentRows(
       amount: row.amount,
       share: total > 0 ? row.amount / total : 0,
       includeInNetSales: row.includeInNetSales,
+      acquirerName: row.acquirerName,
     }));
 }
 
@@ -756,6 +761,7 @@ function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
       shortLabel: string;
       amount: number;
       includeInNetSales: boolean;
+      acquirerName: string | null;
     }
   >();
 
@@ -774,6 +780,7 @@ function buildPayments(entries: RevenueEntry[]): ResumoPaymentRow[] {
         shortLabel,
         amount,
         includeInNetSales: true,
+        acquirerName: null,
       });
     }
   }
@@ -803,12 +810,15 @@ export function buildPaymentsFromEpoc(
       shortLabel: string;
       amount: number;
       includeInNetSales: boolean;
+      acquirerName: string | null;
     }
   >();
 
   for (const line of lines) {
     const sku = line.payment_methods?.sku?.trim() ?? "";
     const name = line.payment_methods?.name?.trim() ?? "";
+    const acquirerName =
+      line.payment_methods?.acquirer_name?.trim() || null;
     const key = line.payment_method_id || (sku ? `sku:${sku}` : "unknown");
     const label = name || sku || "Forma sem nome";
     const shortLabel = shortPaymentLabel(label, sku);
@@ -824,8 +834,18 @@ export function buildPaymentsFromEpoc(
         prev.label = name;
         prev.shortLabel = shortPaymentLabel(name, sku);
       }
+      if (!prev.acquirerName && acquirerName) {
+        prev.acquirerName = acquirerName;
+      }
     } else {
-      map.set(key, { key, label, shortLabel, amount, includeInNetSales });
+      map.set(key, {
+        key,
+        label,
+        shortLabel,
+        amount,
+        includeInNetSales,
+        acquirerName,
+      });
     }
   }
 

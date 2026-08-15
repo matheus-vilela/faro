@@ -28,14 +28,21 @@ import {
 import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import {
+  nestedRelation,
+  type CompanyAcquirer,
+} from "@/types/acquirer";
+import {
   BANK_ACCOUNT_TYPE_OPTIONS,
   bankAccountTypeLabel,
   type BankAccountType,
   type CompanyBankAccount,
 } from "@/types/bankAccount";
 import { Landmark, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+
+const NO_ACQUIRER = "__none__";
 
 function mapSupabaseError(message: string): string {
   if (message.includes("company_bank_accounts_company_name_unique")) {
@@ -55,6 +62,8 @@ export function ConfiguracoesContasBancarias() {
   const [editing, setEditing] = useState<CompanyBankAccount | null>(null);
   const [name, setName] = useState("");
   const [tipo, setTipo] = useState<BankAccountType>("corrente");
+  const [acquirerId, setAcquirerId] = useState<string | null>(null);
+  const [acquirers, setAcquirers] = useState<CompanyAcquirer[]>([]);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -67,7 +76,7 @@ export function ConfiguracoesContasBancarias() {
     setLoading(true);
     const { data, error } = await supabase
       .from("company_bank_accounts")
-      .select("*")
+      .select("*, acquirers ( id, name )")
       .eq("company_id", companyId)
       .order("name", { ascending: true });
     setLoading(false);
@@ -76,17 +85,51 @@ export function ConfiguracoesContasBancarias() {
       setRows([]);
       return;
     }
-    setRows((data ?? []) as CompanyBankAccount[]);
+    setRows(
+      (
+        (data ?? []) as Array<
+          CompanyBankAccount & {
+            acquirers?: { id: string; name: string } | { id: string; name: string }[] | null;
+          }
+        >
+      ).map((row) => {
+        const acquirer = nestedRelation(row.acquirers);
+        return {
+          ...row,
+          acquirer_id: row.acquirer_id ?? acquirer?.id ?? null,
+          acquirer_name: acquirer?.name ?? null,
+        };
+      }),
+    );
+  }, [companyId]);
+
+  const loadAcquirers = useCallback(async () => {
+    if (!companyId) {
+      setAcquirers([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("acquirers")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true });
+    if (error) return;
+    setAcquirers((data ?? []) as CompanyAcquirer[]);
   }, [companyId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    void loadAcquirers();
+  }, [loadAcquirers]);
+
   const openCreate = () => {
     setEditing(null);
     setName("");
     setTipo("corrente");
+    setAcquirerId(null);
     setSheetOpen(true);
   };
 
@@ -94,6 +137,7 @@ export function ConfiguracoesContasBancarias() {
     setEditing(row);
     setName(row.name);
     setTipo(row.tipo);
+    setAcquirerId(row.acquirer_id ?? null);
     setSheetOpen(true);
   };
 
@@ -109,7 +153,7 @@ export function ConfiguracoesContasBancarias() {
     if (editing) {
       const { error } = await supabase
         .from("company_bank_accounts")
-        .update({ name: trimmedName, tipo })
+        .update({ name: trimmedName, tipo, acquirer_id: acquirerId })
         .eq("id", editing.id)
         .eq("company_id", companyId);
       setSaving(false);
@@ -123,6 +167,7 @@ export function ConfiguracoesContasBancarias() {
         company_id: companyId,
         name: trimmedName,
         tipo,
+        acquirer_id: acquirerId,
       });
       setSaving(false);
       if (error) {
@@ -172,8 +217,8 @@ export function ConfiguracoesContasBancarias() {
             <div className="space-y-1">
               <CardTitle className="text-base">Contas cadastradas</CardTitle>
               <CardDescription>
-                Cada conta tem um nome de identificação e um tipo (corrente,
-                poupança ou outro).
+                Cada conta tem um nome, um tipo e, se quiser, a adquirente
+                cujos recebíveis caem nela.
               </CardDescription>
             </div>
             <Button
@@ -197,22 +242,26 @@ export function ConfiguracoesContasBancarias() {
           ) : (
             <div className="rounded-lg border bg-card overflow-x-auto">
               <div
-                className="grid min-w-[min(100%,32rem)] grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
+                className="grid min-w-[min(100%,36rem)] grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,8rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
                 role="row"
               >
                 <span>Nome</span>
                 <span>Tipo</span>
+                <span>Adquirente</span>
                 <span className="hidden text-center md:block">Ações</span>
               </div>
               <ul className="divide-y">
                 {rows.map((row) => (
                   <li
                     key={row.id}
-                    className="flex min-w-[min(100%,32rem)] flex-col gap-2 px-4 py-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
+                    className="flex min-w-[min(100%,36rem)] flex-col gap-2 px-4 py-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,8rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
                   >
                     <span className="font-medium">{row.name}</span>
                     <span className="text-muted-foreground text-sm">
                       {bankAccountTypeLabel(row.tipo)}
+                    </span>
+                    <span className="text-muted-foreground text-sm">
+                      {row.acquirer_name ?? "—"}
                     </span>
                     <div className="flex justify-end gap-1 md:justify-center">
                       <Button
@@ -257,7 +306,8 @@ export function ConfiguracoesContasBancarias() {
               {editing ? "Editar conta bancária" : "Nova conta bancária"}
             </SheetTitle>
             <SheetDescription>
-              Informe o nome e o tipo da conta.
+              Informe o nome, o tipo e, se os recebíveis de uma adquirente
+              caírem nesta conta, associe-a.
             </SheetDescription>
           </SheetHeader>
 
@@ -290,6 +340,43 @@ export function ConfiguracoesContasBancarias() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Adquirente</Label>
+              <Select
+                value={acquirerId ?? NO_ACQUIRER}
+                onValueChange={(v) =>
+                  setAcquirerId(v === NO_ACQUIRER ? null : v)
+                }
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Nenhuma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ACQUIRER}>Nenhuma</SelectItem>
+                  {acquirers
+                    .filter((a) => a.is_active || a.id === acquirerId)
+                    .map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                        {!a.is_active ? " (inativa)" : ""}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {acquirers.filter((a) => a.is_active).length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Cadastre em{" "}
+                  <Link
+                    to="/app/configuracoes/adquirentes"
+                    className="underline-offset-4 hover:underline"
+                  >
+                    Adquirentes
+                  </Link>
+                  .
+                </p>
+              ) : null}
             </div>
           </div>
 

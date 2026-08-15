@@ -39,6 +39,11 @@ export function workerJobsPerTick(): number {
   return intFromEnv("NFE_WORKER_JOBS_PER_TICK", 8, 1, 50);
 }
 
+/** Teto dos GETs automáticos Focus (lista/XML). Máx. 80; 20 ficam para manuais. */
+export function focusAutoMaxPerMinute(): number {
+  return intFromEnv("FOCUS_AUTO_MAX_PER_MINUTE", 80, 10, 80);
+}
+
 export function workerBudgetMs(): number {
   return intFromEnv("NFE_WORKER_BUDGET_MS", 70_000, 10_000, 140_000);
 }

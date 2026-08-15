@@ -38,6 +38,7 @@ import {
   type EpocPaymentLineInput,
   type ResumoDashboard,
 } from "@/lib/vendasRealizadasResumo";
+import { nestedRelation } from "@/types/acquirer";
 import type { CompanyCategory } from "@/types/category";
 import type { CompanyAlertRow } from "@/types/companyAlert";
 import type { BoletoStatus } from "@/types/expense";
@@ -64,11 +65,13 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
             sku: string;
             name: string;
             include_in_net_sales?: boolean | null;
+            acquirers?: { name: string } | { name: string }[] | null;
           }
         | {
             sku: string;
             name: string;
             include_in_net_sales?: boolean | null;
+            acquirers?: { name: string } | { name: string }[] | null;
           }[]
         | null;
     };
@@ -84,6 +87,7 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
             sku: pm.sku,
             name: pm.name,
             include_in_net_sales: pm.include_in_net_sales !== false,
+            acquirer_name: nestedRelation(pm.acquirers)?.name?.trim() || null,
           }
         : null,
     };
@@ -190,7 +194,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           supabase
             .from("epoc_faturamento_daily_payment_methods")
             .select(
-              "faturamento_date, amount, payment_method_id, payment_methods ( sku, name, include_in_net_sales )",
+              "faturamento_date, amount, payment_method_id, payment_methods ( sku, name, include_in_net_sales, acquirers ( name ) )",
             )
             .eq("company_id", companyId)
             .gte("faturamento_date", ranges.fetchStart)

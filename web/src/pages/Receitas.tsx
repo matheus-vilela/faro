@@ -1043,10 +1043,15 @@ export function Receitas() {
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" asChild>
-              <Link to="/app/faturamento">Ver faturamento</Link>
+              <Link to="/app/vendas-realizadas?tab=faturamento">
+                Ver faturamento
+              </Link>
             </Button>
             <Button type="button" variant="ghost" size="sm" asChild>
               <Link to="/app/configuracoes/formas-de-pagamento">Formas de pagamento</Link>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" asChild>
+              <Link to="/app/configuracoes/adquirentes">Adquirentes</Link>
             </Button>
           </div>
         </CardContent>

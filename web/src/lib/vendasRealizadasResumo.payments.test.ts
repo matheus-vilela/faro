@@ -45,6 +45,37 @@ describe("buildPaymentsFromEpoc", () => {
     });
     expect(byKey["pm-pix"]).not.toHaveProperty("count");
     expect(byKey["pm-pix"]).not.toHaveProperty("ticket");
+    expect(byKey["pm-pix"].acquirerName).toBeNull();
+  });
+
+  it("propaga o nome da adquirente associada à forma", () => {
+    const rows = buildPaymentsFromEpoc([
+      {
+        faturamento_date: "2026-07-01",
+        amount: 80,
+        payment_method_id: "pm-cred",
+        payment_methods: {
+          sku: "CRED",
+          name: "Cartão de crédito",
+          acquirer_name: "Stone",
+        },
+      },
+      {
+        faturamento_date: "2026-07-02",
+        amount: 20,
+        payment_method_id: "pm-cred",
+        payment_methods: {
+          sku: "CRED",
+          name: "Cartão de crédito",
+          acquirer_name: "Stone",
+        },
+      },
+    ]);
+    expect(rows[0]).toMatchObject({
+      label: "Cartão de crédito",
+      amount: 100,
+      acquirerName: "Stone",
+    });
   });
 
   it("marca formas com include_in_net_sales=false", () => {

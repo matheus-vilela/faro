@@ -21,6 +21,7 @@ import {
   type ResumoPeriodFilter,
   type ResumoRankingMode,
 } from "@/lib/vendasRealizadasResumo";
+import { nestedRelation } from "@/types/acquirer";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 import {
@@ -65,11 +66,13 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
             sku: string;
             name: string;
             include_in_net_sales?: boolean | null;
+            acquirers?: { name: string } | { name: string }[] | null;
           }
         | {
             sku: string;
             name: string;
             include_in_net_sales?: boolean | null;
+            acquirers?: { name: string } | { name: string }[] | null;
           }[]
         | null;
     };
@@ -85,6 +88,7 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
             sku: pm.sku,
             name: pm.name,
             include_in_net_sales: pm.include_in_net_sales !== false,
+            acquirer_name: nestedRelation(pm.acquirers)?.name?.trim() || null,
           }
         : null,
     };
@@ -340,6 +344,11 @@ function PaymentParticipationDonut({
               />
               <span className="min-w-0 flex-1 truncate font-medium">
                 {row.shortLabel}
+                {row.acquirerName ? (
+                  <span className="block truncate text-xs font-normal text-muted-foreground">
+                    {row.acquirerName}
+                  </span>
+                ) : null}
               </span>
               <span className="tabular-nums text-muted-foreground">
                 {formatSharePct(row.share)}
@@ -350,6 +359,18 @@ function PaymentParticipationDonut({
       </CardContent>
     </Card>
   );
+}
+
+function groupPaymentsByAcquirer(rows: ResumoPaymentRow[]) {
+  const map = new Map<string, { label: string; amount: number }>();
+  for (const r of rows) {
+    const key = r.acquirerName?.trim() || "__none__";
+    const label = r.acquirerName?.trim() || "Sem adquirente";
+    const prev = map.get(key);
+    if (prev) prev.amount += r.amount;
+    else map.set(key, { label, amount: r.amount });
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
 }
 
 function PaymentMethodsPanel({
@@ -378,8 +399,8 @@ function PaymentMethodsPanel({
         <CardContent className="space-y-1 py-12 text-center text-sm text-muted-foreground">
           <p>Nenhuma forma de pagamento neste período.</p>
           <p className="text-xs">
-            Os dados vêm do faturamento EPOC. Sincronize o PDV ou confira a tela
-            de Faturamento.
+            Os dados vêm do faturamento EPOC. Sincronize o PDV ou abra a aba
+            Faturamento.
           </p>
         </CardContent>
       </Card>
@@ -414,10 +435,11 @@ function PaymentMethodsPanel({
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto pt-0">
-          <table className="w-full min-w-[28rem] border-collapse text-sm">
+          <table className="w-full min-w-[34rem] border-collapse text-sm">
             <thead>
               <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <th className="pb-2 pr-3 font-semibold">Forma de pagamento</th>
+                <th className="pb-2 pr-3 font-semibold">Adquirente</th>
                 <th className="pb-2 pr-3 text-right font-semibold">Valor</th>
                 <th className="pb-2 font-semibold">% do total</th>
               </tr>
@@ -460,6 +482,9 @@ function PaymentMethodsPanel({
                         </span>
                       ) : null}
                     </td>
+                    <td className="py-3 pr-3 text-muted-foreground">
+                      {row.acquirerName ?? "—"}
+                    </td>
                     <td className="py-3 pr-3 text-right tabular-nums font-medium">
                       {formatBrl(row.amount)}
                     </td>
@@ -488,6 +513,26 @@ function PaymentMethodsPanel({
               })}
             </tbody>
           </table>
+          {rows.some((r) => r.acquirerName) ? (
+            <div className="mt-4 space-y-2 border-t border-border/70 pt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Por adquirente
+              </p>
+              <ul className="space-y-1.5 text-sm">
+                {groupPaymentsByAcquirer(rows).map((item) => (
+                  <li
+                    key={item.label}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="text-muted-foreground">{item.label}</span>
+                    <span className="tabular-nums font-medium">
+                      {formatBrl(item.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -601,7 +646,7 @@ export function VendasRealizadasResumo() {
             supabase
               .from("epoc_faturamento_daily_payment_methods")
               .select(
-                "faturamento_date, amount, payment_method_id, payment_methods ( sku, name, include_in_net_sales )",
+                "faturamento_date, amount, payment_method_id, payment_methods ( sku, name, include_in_net_sales, acquirers ( name ) )",
               )
               .eq("company_id", companyId)
               .gte("faturamento_date", fetchStart)

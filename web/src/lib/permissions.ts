@@ -91,6 +91,7 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   if (path.startsWith("/app/dre")) return "dre";
   if (path.startsWith("/app/alertas")) return "alertas";
   if (path.startsWith("/app/integracoes")) return "integracoes";
+  if (path.startsWith("/app/configuracoes/integracoes")) return "integracoes";
   if (path.startsWith("/app/configuracoes/acessos")) return null;
   if (path.startsWith("/app/configuracoes")) return "configuracoes";
   if (path.startsWith("/app/desenvolvimento")) return null;

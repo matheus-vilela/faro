@@ -1,3 +1,8 @@
+import {
+  FOCUS_AUTO_RATE_LIMITED,
+  acquireFocusAutoCall,
+} from "../focusApiAutoRateLimit.ts";
+
 export function focusBasicAuthHeader(token: string): string {
   const pair = `${token.trim()}:`;
   let binary = "";
@@ -66,6 +71,16 @@ export async function fetchNfesRecebidasPage(input: {
   cnpjDigits: string;
   versao: number;
 }): Promise<FocusListPageResult> {
+  const slot = await acquireFocusAutoCall({ source: "nfe_list" });
+  if (!slot.allowed) {
+    return {
+      ok: false,
+      status: 429,
+      error: FOCUS_AUTO_RATE_LIMITED,
+      retryAfterMs: slot.waitMs,
+    };
+  }
+
   const listUrl =
     `${input.apiBase}/v2/nfes_recebidas?cnpj=${
       encodeURIComponent(input.cnpjDigits)
@@ -158,6 +173,16 @@ export async function fetchNfeRecebidaXml(input: {
   const maxAttempts = input.maxAttempts ?? 6;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const slot = await acquireFocusAutoCall({ source: "nfe_xml" });
+    if (!slot.allowed) {
+      return {
+        ok: false,
+        status: 429,
+        error: FOCUS_AUTO_RATE_LIMITED,
+        retryAfterMs: slot.waitMs,
+      };
+    }
+
     let xmlRes: Response;
     try {
       xmlRes = await fetch(xmlUrl, {

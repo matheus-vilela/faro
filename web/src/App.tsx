@@ -34,7 +34,7 @@ import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
 import { CmvMargens } from "@/pages/CmvMargens";
-import { FaturamentoEpoc } from "@/pages/FaturamentoEpoc";
+import { ConfiguracoesAdquirentes } from "@/pages/ConfiguracoesAdquirentes";
 import { FormasPagamento } from "@/pages/FormasPagamento";
 import { Fornecedores } from "@/pages/Fornecedores";
 import { Integracoes } from "@/pages/Integracoes";
@@ -141,7 +141,10 @@ function AuthenticatedLayout() {
           />
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
-          <Route path="faturamento" element={<PermissionRouteGuard permission="vendas_realizadas"><FaturamentoEpoc /></PermissionRouteGuard>} />
+          <Route
+            path="faturamento"
+            element={<Navigate to="/app/vendas-realizadas?tab=faturamento" replace />}
+          />
           <Route
             path="formas-de-pagamento"
             element={
@@ -176,7 +179,10 @@ function AuthenticatedLayout() {
           />
           <Route path="checklists" element={<PermissionRouteGuard permission="checklists"><Checklists /></PermissionRouteGuard>} />
           <Route path="alertas" element={<PermissionRouteGuard permission="alertas"><Alertas /></PermissionRouteGuard>} />
-          <Route path="integracoes" element={<PermissionRouteGuard permission="integracoes"><Integracoes /></PermissionRouteGuard>} />
+          <Route
+            path="integracoes"
+            element={<Navigate to="/app/configuracoes/integracoes" replace />}
+          />
           <Route
             path="desenvolvimento"
             element={
@@ -195,8 +201,18 @@ function AuthenticatedLayout() {
           />
           <Route path="orcamento" element={<PermissionRouteGuard permission="dre"><Orcamento /></PermissionRouteGuard>} />
           <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
-          <Route path="configuracoes" element={<PermissionRouteGuard permission="configuracoes"><ConfiguracoesLayout /></PermissionRouteGuard>}>
+          <Route path="configuracoes" element={<PermissionRouteGuard permissions={["configuracoes", "integracoes"]}><ConfiguracoesLayout /></PermissionRouteGuard>}>
             <Route index element={<Navigate to="usuarios" replace />} />
+            <Route
+              path="unidade"
+              element={<Navigate to="/app/configuracoes/usuarios" replace />}
+            />
+            <Route
+              path="financeiro"
+              element={
+                <Navigate to="/app/configuracoes/contas-bancarias" replace />
+              }
+            />
             <Route path="usuarios" element={<ConfiguracoesUsuarios />} />
             <Route
               path="acessos"
@@ -216,6 +232,8 @@ function AuthenticatedLayout() {
               element={<ConfiguracoesImpostosReceita />}
             />
             <Route path="whatsapp" element={<ConfiguracoesWhatsapp />} />
+            <Route path="integracoes" element={<Integracoes />} />
+            <Route path="adquirentes" element={<ConfiguracoesAdquirentes />} />
             <Route path="formas-de-pagamento" element={<FormasPagamento />} />
             <Route
               path="semana-contabil"

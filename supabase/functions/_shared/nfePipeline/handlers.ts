@@ -4,6 +4,8 @@ import {
   cnpj14,
   companyHasOpenJobs,
   enqueueJob,
+  enqueuePendingInterpretations,
+  enqueueProcessNfe,
   loadCompanyFocus,
   loadSyncState,
   patchOnboardingCaptureCompleted,
@@ -16,6 +18,7 @@ import {
   onboardingEmptyPollMinutes,
   steadyIntervalMinutes,
 } from "./env.ts";
+import { FOCUS_AUTO_RATE_LIMITED } from "../focusApiAutoRateLimit.ts";
 import {
   fetchNfeRecebidaXml,
   fetchNfesRecebidasPage,
@@ -162,6 +165,14 @@ async function handleFetchPage(
   });
 
   if (!page.ok) {
+    if (page.error === FOCUS_AUTO_RATE_LIMITED) {
+      return {
+        ok: false,
+        error: page.error,
+        retryAfterMs: page.retryAfterMs ?? 15_000,
+        softRequeue: true,
+      };
+    }
     if (state.mode === "onboarding" && (page.network || (page.status != null && page.status >= 500) || page.status === 429)) {
       await patchOnboardingSefazUnavailable(admin, companyId, page.error);
     }
@@ -218,7 +229,7 @@ async function handleFetchPage(
 
     const { data: existing } = await admin
       .from("nfe_documents")
-      .select("id, fetch_status")
+      .select("id, fetch_status, process_status")
       .eq("company_id", companyId)
       .eq("chave", chave)
       .maybeSingle();
@@ -235,6 +246,21 @@ async function handleFetchPage(
           cycle_id: state.cycle_id,
           updated_at: nowIso(),
         }).eq("id", existing.id);
+        if (elegivel) {
+          listed += 1;
+          if (
+            existing.process_status !== "done" &&
+            existing.process_status !== "skipped"
+          ) {
+            await enqueueProcessNfe(admin, {
+              companyId,
+              documentId: String(existing.id),
+              chave,
+            });
+          }
+        } else {
+          ignored += 1;
+        }
       } else {
         await admin.from("nfe_documents").update(row).eq("id", existing.id);
         if (elegivel) downloadKeys.push(chave);
@@ -358,13 +384,20 @@ async function handleDownloadXml(
 
   const { data: doc, error: docErr } = await admin
     .from("nfe_documents")
-    .select("id, fetch_status")
+    .select("id, fetch_status, process_status")
     .eq("company_id", companyId)
     .eq("chave", chave)
     .maybeSingle();
   if (docErr) return { ok: false, error: docErr.message };
   if (!doc) return { ok: false, error: "documento não encontrado", fatal: true };
   if (doc.fetch_status === "downloaded") {
+    if (doc.process_status !== "done" && doc.process_status !== "skipped") {
+      await enqueueProcessNfe(admin, {
+        companyId,
+        documentId: String(doc.id),
+        chave,
+      });
+    }
     return { ok: true, detail: { skipped: "already_downloaded" } };
   }
 
@@ -381,6 +414,19 @@ async function handleDownloadXml(
   });
 
   if (!got.ok) {
+    if (got.error === FOCUS_AUTO_RATE_LIMITED) {
+      await admin.from("nfe_documents").update({
+        fetch_status: "listed",
+        last_error: null,
+        updated_at: nowIso(),
+      }).eq("id", doc.id);
+      return {
+        ok: false,
+        error: got.error,
+        retryAfterMs: got.retryAfterMs ?? 15_000,
+        softRequeue: true,
+      };
+    }
     await admin.from("nfe_documents").update({
       fetch_status: "failed",
       attempts: (job.attempts ?? 1),
@@ -437,11 +483,10 @@ async function handleDownloadXml(
     }).eq("company_id", companyId);
   }
 
-  await enqueueJob(admin, {
-    type: "process_nfe",
+  await enqueueProcessNfe(admin, {
     companyId,
-    payload: { document_id: doc.id, chave },
-    priority: state?.priority ?? 0,
+    documentId: String(doc.id),
+    chave,
   });
 
   // Garante close_cycle quando listagem/downloads da rodada estiverem quietos.
@@ -630,6 +675,16 @@ async function handleCloseCycle(
   const companyId = job.company_id;
   const state = await loadSyncState(admin, companyId);
   if (!state) return { ok: false, error: "nfe_sync_state ausente", fatal: true };
+
+  const backfilled = await enqueuePendingInterpretations(admin, companyId);
+  if (backfilled > 0) {
+    return {
+      ok: false,
+      softRequeue: true,
+      error: `enfileirou ${backfilled} interpretação(ões) pendente(s)`,
+      retryAfterMs: 5_000,
+    };
+  }
 
   // Ainda há trabalho aberto? Reagenda close.
   const { count: pendingFetch } = await admin

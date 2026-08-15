@@ -5,10 +5,16 @@ import { PageShell } from "@/components/PageShell";
 import { VendasRealizadasResumo } from "@/components/revenue/VendasRealizadasResumo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CalendarDays, LayoutDashboard, TrendingUp } from "lucide-react";
-import { useState } from "react";
+import { FaturamentoEpoc } from "@/pages/FaturamentoEpoc";
+import { CalendarDays, LayoutDashboard, Receipt, TrendingUp } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
-type VendasTab = "resumo" | "calendario";
+type VendasTab = "resumo" | "calendario" | "faturamento";
+
+function parseVendasTab(raw: string | null): VendasTab {
+  if (raw === "calendario" || raw === "faturamento") return raw;
+  return "resumo";
+}
 
 function VendasRealizadasTabToggle({
   value,
@@ -24,6 +30,7 @@ function VendasRealizadasTabToggle({
   }[] = [
     { value: "resumo", label: "Resumo", icon: LayoutDashboard },
     { value: "calendario", label: "Calendário", icon: CalendarDays },
+    { value: "faturamento", label: "Faturamento", icon: Receipt },
   ];
 
   return (
@@ -62,7 +69,11 @@ function VendasRealizadasTabToggle({
 
 /** Vendas realizadas no fluxo financeiro (entradas / contas a receber). */
 export function VendasRealizadasFluxo() {
-  const [tab, setTab] = useState<VendasTab>("resumo");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseVendasTab(searchParams.get("tab"));
+  const setTab = (next: VendasTab) => {
+    setSearchParams(next === "resumo" ? {} : { tab: next }, { replace: true });
+  };
   const tabToggle = <VendasRealizadasTabToggle value={tab} onChange={setTab} />;
 
   if (tab === "calendario") {
@@ -78,11 +89,19 @@ export function VendasRealizadasFluxo() {
     <PageShell className="space-y-6">
       <PageHeader
         title="Vendas realizadas"
-        description="Panorama das vendas do período e comparação com o intervalo anterior."
+        description={
+          tab === "faturamento"
+            ? "Resumo diário do relatório de faturamento EPOC (Total Geral, produtos/serviços, fiscal e formas de pagamento)."
+            : "Panorama das vendas do período e comparação com o intervalo anterior."
+        }
         icon={TrendingUp}
       />
       {tabToggle}
-      <VendasRealizadasResumo />
+      {tab === "faturamento" ? (
+        <FaturamentoEpoc embedded />
+      ) : (
+        <VendasRealizadasResumo />
+      )}
     </PageShell>
   );
 }

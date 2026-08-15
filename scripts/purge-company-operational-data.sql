@@ -14,6 +14,8 @@
 --   3. Opcional: v_batch_size (padrão 2000), v_pause_ms entre lotes
 --   4. Rode o script inteiro
 --
+-- Também zera companies.onboarding_fiscal e o cursor Focus
+-- (nfes_recebidas_ultima_versao / _sync_at). Credenciais Focus preservadas.
 -- Storage: buckets (nfe-xml, anexos) podem ficar órfãos — limpe à parte se quiser.
 -- =============================================================================
 
@@ -62,6 +64,7 @@ DECLARE
     'service_daily_sales',
     'services',
     'payment_methods',
+    'acquirers',
     'epoc_jobs',
     'epoc_sync_day_status',
     'epoc_sync_state',
@@ -242,12 +245,22 @@ BEGIN
             - 'nfes_recebidas_ultima_versao'
           )
         END,
+        onboarding_fiscal = jsonb_build_object(
+          'sync', true,
+          'max_nfes_sync', 0,
+          'nfes_sync', 0,
+          'nfes_ignored', 0,
+          'completed', false,
+          'capture_completed', false,
+          'sefaz_unavailable', false,
+          'interpret_confirmed', false
+        ),
         updated_at = now()
       WHERE c.id = r_company.id;
 
-      RAISE NOTICE '  [cfg] histórico integrações limpo; credenciais preservadas';
+      RAISE NOTICE '  [cfg] histórico integrações + onboarding_fiscal zerados; credenciais preservadas';
     ELSE
-      RAISE NOTICE '  [dry] limparia histórico settings/focusnfe cursors';
+      RAISE NOTICE '  [dry] limparia histórico settings/focusnfe cursors e onboarding_fiscal';
     END IF;
   END LOOP;
 

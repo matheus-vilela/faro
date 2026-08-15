@@ -115,6 +115,7 @@ Deno.serve(async (req) => {
         deferred: true,
         error: result.error,
       });
+      // Teto Focus só adia lista/XML; interpretação continua no mesmo tick.
     } else {
       failed += 1;
       if (result.fatal) {

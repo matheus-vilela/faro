@@ -15,12 +15,11 @@ export type ServiceDailySaleCalendarRow = {
   } | null;
 };
 
-/** Valor a exibir: total da venda (col_9 → allocation) quando houver; senão bruto. */
+/** Líquido da venda de serviço = total bruto (Vl.Bruto). Taxa é sempre 0 por ora. */
 export function serviceDailySaleDisplayAmount(
   row: Pick<ServiceDailySaleCalendarRow, "gross_value" | "allocation">,
 ): number {
-  const total = Number(row.allocation) || 0;
-  if (total !== 0) return total;
+  void row.allocation;
   return Number(row.gross_value) || 0;
 }
 

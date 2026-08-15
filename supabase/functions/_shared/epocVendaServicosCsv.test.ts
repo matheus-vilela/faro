@@ -5,6 +5,7 @@ import {
 import {
   buildVendaServicosConsolidatedCsv,
   extractVendaServicosRowsFromAcoesHtml,
+  findVlBrutoColumnIndex,
 } from "./epocVendaServicosCsv.ts";
 
 const SAMPLE = `
@@ -12,12 +13,12 @@ const SAMPLE = `
   <table id="tblExport">
     <thead>
       <tr>
-        <th>Código</th><th>Serviço</th><th>Quant.</th><th>Total(R$)</th>
+        <th>Código</th><th>Serviço</th><th>Quant.</th><th>Total(R$)</th><th>Vl.Bruto(R$)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>257</td><td>GORJETA CONCEDIDA</td><td>56</td><td>2.223,77</td>
+        <td>257</td><td>GORJETA CONCEDIDA</td><td>56</td><td>2.223,77</td><td>2.225,17</td>
       </tr>
     </tbody>
   </table>
@@ -48,4 +49,15 @@ Deno.test("extractVendaServicosRowsFromAcoesHtml: itens + resumo", () => {
   assertStringIncludes(built.csv, "data_consulta;secao;col_1");
   assertStringIncludes(built.csv, "itens;257;GORJETA CONCEDIDA");
   assertEquals(built.totalItens, 1);
+  const header = day.rows.find((r) => r[1] === "itens_cabecalho")?.slice(2) ?? [];
+  assertEquals(findVlBrutoColumnIndex(header), 4);
+});
+
+Deno.test("findVlBrutoColumnIndex", () => {
+  assertEquals(
+    findVlBrutoColumnIndex(["Código", "Total(R$)", "Vl.Bruto(R$)"]),
+    2,
+  );
+  assertEquals(findVlBrutoColumnIndex(["Código", "Vl. Bruto (R$)"]), 1);
+  assertEquals(findVlBrutoColumnIndex(["Código", "Total(R$)"]), -1);
 });

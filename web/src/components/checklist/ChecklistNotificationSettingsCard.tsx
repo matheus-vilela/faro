@@ -89,27 +89,29 @@ export function ChecklistNotificationSettingsCard({
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
           <>
-            {(
-              [
-                ["enabled", "Ativar avisos"],
-                ["notify_on_late", "Atraso no prazo"],
-                ["notify_on_critical", "Item crítico"],
-                ["notify_on_divergence", "Divergência de contagem"],
-              ] as const
-            ).map(([key, label]) => (
-              <div
-                key={key}
-                className="flex items-center justify-between gap-3"
-              >
-                <Label>{label}</Label>
-                <Switch
-                  checked={Boolean(settings[key])}
-                  onCheckedChange={(v) =>
-                    setSettings((s) => ({ ...s, [key]: v }))
-                  }
-                />
-              </div>
-            ))}
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-3">
+              {(
+                [
+                  ["enabled", "Ativar avisos"],
+                  ["notify_on_late", "Atraso no prazo"],
+                  ["notify_on_critical", "Item crítico"],
+                  ["notify_on_divergence", "Divergência de contagem"],
+                ] as const
+              ).map(([key, label]) => (
+                <div
+                  key={key}
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5"
+                >
+                  <Label className="leading-snug">{label}</Label>
+                  <Switch
+                    checked={Boolean(settings[key])}
+                    onCheckedChange={(v) =>
+                      setSettings((s) => ({ ...s, [key]: v }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
             <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
             </Button>

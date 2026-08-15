@@ -16,6 +16,7 @@ import { EpocSyncDayCard } from "@/components/desenvolvimento/EpocSyncDayCard";
 import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
 import { EpocVendaProdutosInterpretCard } from "@/components/desenvolvimento/EpocVendaProdutosInterpretCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
+import { EpocVendaServicosInterpretCard } from "@/components/desenvolvimento/EpocVendaServicosInterpretCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -312,7 +313,7 @@ export function Desenvolvimento() {
   return (
     <PageShell className="space-y-8">
       <PageHeader
-        title="Desenvolvimento"
+        title="Administrador"
         description="Ferramentas internas para a unidade selecionada no menu."
         icon={FlaskConical}
       />
@@ -382,6 +383,7 @@ export function Desenvolvimento() {
           <EpocVendaProdutosInterpretCard />
           <EpocFaturamentoExportCard />
           <EpocVendaServicosExportCard />
+          <EpocVendaServicosInterpretCard />
           <EpocFaturamentoInterpretCard />
         </div>
       ) : null}

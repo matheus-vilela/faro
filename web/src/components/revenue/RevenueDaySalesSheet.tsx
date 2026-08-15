@@ -23,13 +23,18 @@ import {
   type DaySaleListItem,
 } from "@/components/revenue/RevenueDaySaleListCard";
 import type { RevenueCalendarDayListPayload } from "@/components/revenue/RevenueEntriesCalendar";
+import {
+  readSheetInfoView,
+  writeSheetInfoView,
+  type SheetInfoView,
+} from "@/lib/sheetUiPrefs";
 import { cn } from "@/lib/utils";
 import { ArrowDownAZ, ArrowUpAZ, LayoutGrid, List, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type KindFilter = "all" | DaySaleKind;
 type SortKey = "name" | "quantity" | "unitPrice" | "gross" | "tax" | "net";
-type ViewMode = "cards" | "table";
+type ViewMode = SheetInfoView;
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "name", label: "Nome" },
@@ -74,7 +79,7 @@ export function RevenueDaySalesSheet({
   /** Quando outro sheet está por cima, use false para não fechar este ao interagir. */
   modal?: boolean;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>(readSheetInfoView);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("net");
@@ -82,12 +87,17 @@ export function RevenueDaySalesSheet({
 
   useEffect(() => {
     if (!open) return;
-    setViewMode("cards");
+    setViewMode(readSheetInfoView());
     setKindFilter("all");
     setSearch("");
     setSortKey("net");
     setSortAsc(false);
   }, [open, payload?.dateKey]);
+
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    writeSheetInfoView(mode);
+  };
 
   const allItems = useMemo(() => {
     if (!payload) return [] as DaySaleListItem[];
@@ -161,6 +171,41 @@ export function RevenueDaySalesSheet({
             </div>
           </div>
 
+          <div
+            className="inline-flex w-full rounded-full bg-muted p-1 sm:w-auto"
+            role="tablist"
+            aria-label="Tipo de venda"
+          >
+            {(
+              [
+                { value: "all", label: "Todos", count: allItems.length },
+                { value: "product", label: "Produtos", count: productCount },
+                { value: "service", label: "Serviços", count: serviceCount },
+              ] as const
+            ).map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                role="tab"
+                aria-selected={kindFilter === opt.value}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-8 flex-1 rounded-full px-3 shadow-none sm:flex-none",
+                  kindFilter === opt.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground",
+                )}
+                onClick={() => setKindFilter(opt.value)}
+              >
+                {opt.label}
+                <span className="tabular-nums text-muted-foreground">
+                  {opt.count}
+                </span>
+              </Button>
+            ))}
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[10rem] flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -171,25 +216,6 @@ export function RevenueDaySalesSheet({
                 className="h-9 pl-8"
               />
             </div>
-            <Select
-              value={kindFilter}
-              onValueChange={(v) => setKindFilter(v as KindFilter)}
-            >
-              <SelectTrigger className="h-9 w-[9.5rem]">
-                <SelectValue placeholder="Tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">
-                  Todos ({allItems.length})
-                </SelectItem>
-                <SelectItem value="product">
-                  Produtos ({productCount})
-                </SelectItem>
-                <SelectItem value="service">
-                  Serviços ({serviceCount})
-                </SelectItem>
-              </SelectContent>
-            </Select>
             <Select
               value={sortKey}
               onValueChange={(v) => setSortKey(v as SortKey)}
@@ -236,7 +262,7 @@ export function RevenueDaySalesSheet({
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground",
                 )}
-                onClick={() => setViewMode("cards")}
+                onClick={() => changeViewMode("cards")}
               >
                 <LayoutGrid className="size-3.5" />
                 Cards
@@ -253,7 +279,7 @@ export function RevenueDaySalesSheet({
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground",
                 )}
-                onClick={() => setViewMode("table")}
+                onClick={() => changeViewMode("table")}
               >
                 <List className="size-3.5" />
                 Tabela

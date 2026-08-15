@@ -13,6 +13,28 @@ import {
 
 export const MODULO_REL_VENDA_SERVICOS = "mod_rel_venda_servicos";
 export const EPOC_ID_TBL_EXPORT = "tblExport";
+export const COL_VL_BRUTO = "Vl.Bruto(R$)";
+
+function normalizeHeaderLabel(h: string): string {
+  return normalizeCellText(h)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, "");
+}
+
+/** Índice da coluna `Vl.Bruto(R$)` no cabeçalho da #tblExport (0-based). */
+export function findVlBrutoColumnIndex(headers: string[]): number {
+  const want = normalizeHeaderLabel(COL_VL_BRUTO);
+  for (let i = 0; i < headers.length; i++) {
+    if (normalizeHeaderLabel(headers[i] ?? "") === want) return i;
+  }
+  for (let i = 0; i < headers.length; i++) {
+    const h = normalizeHeaderLabel(headers[i] ?? "").replace(/\./g, "");
+    if (h.includes("vlbruto")) return i;
+  }
+  return -1;
+}
 
 export type VendaServicosDayExtract = {
   dataConsulta: string;

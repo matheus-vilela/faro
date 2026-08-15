@@ -22,10 +22,6 @@ export type DaySaleListItem = {
   revenueEntryId?: string;
 };
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
 export function daySaleFromRevenueEntry(entry: RevenueEntry): DaySaleListItem {
   const quantity = Number(entry.quantity) || 0;
   const gross = Number(entry.gross_amount) || 0;
@@ -52,20 +48,16 @@ export function daySaleFromRevenueEntry(entry: RevenueEntry): DaySaleListItem {
 export function daySaleFromService(
   sale: ServiceDailySaleCalendarRow,
 ): DaySaleListItem {
-  const gross = Number(sale.gross_value) || 0;
-  const net = serviceDailySaleDisplayAmount(sale);
-  const discount = Number(sale.discount) || 0;
-  const tax =
-    discount > 0 ? discount : round2(Math.max(0, gross - net));
+  const gross = serviceDailySaleDisplayAmount(sale);
   return {
     id: sale.id,
     kind: "service",
     name: serviceDailySaleTitle(sale),
     quantity: Number(sale.quantity) || 0,
     unitPrice: Number(sale.unit_price) || 0,
-    gross: gross > 0 ? gross : net,
-    tax,
-    net,
+    gross,
+    tax: 0,
+    net: gross,
   };
 }
 

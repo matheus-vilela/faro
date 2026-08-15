@@ -5,6 +5,8 @@ export interface CompanyBankAccount {
   company_id: string;
   name: string;
   tipo: BankAccountType;
+  acquirer_id?: string | null;
+  acquirer_name?: string | null;
   created_at: string;
   updated_at: string;
 }

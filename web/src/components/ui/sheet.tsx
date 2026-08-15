@@ -2,6 +2,7 @@ import * as React from "react"
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
+import { readSheetMaximized, writeSheetMaximized } from "@/lib/sheetUiPrefs"
 import { cn } from "@/lib/utils"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
@@ -60,7 +61,12 @@ function SheetContent({
   overlayClassName?: string
   maximizable?: boolean
 }) {
-  const [maximized, setMaximized] = React.useState(false)
+  const [maximized, setMaximized] = React.useState(readSheetMaximized)
+
+  const setMaximizedAndPersist = React.useCallback((next: boolean) => {
+    setMaximized(next)
+    writeSheetMaximized(next)
+  }, [])
 
   return (
     <SheetPortal>
@@ -85,7 +91,7 @@ function SheetContent({
             "w-full sm:!max-w-[min(100vw-1rem,90rem)]"
         )}
         onOpenAutoFocus={(event) => {
-          setMaximized(false)
+          setMaximized(readSheetMaximized())
           onOpenAutoFocus?.(event)
         }}
         {...props}
@@ -98,7 +104,7 @@ function SheetContent({
                 type="button"
                 className={sheetControlButtonClassName}
                 aria-label={maximized ? "Minimizar" : "Maximizar"}
-                onClick={() => setMaximized((prev) => !prev)}
+                onClick={() => setMaximizedAndPersist(!maximized)}
               >
                 {maximized ? (
                   <Minimize2Icon className="size-4" />

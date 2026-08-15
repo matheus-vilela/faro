@@ -48,9 +48,8 @@ import {
   Package,
   PackageCheck,
   Percent,
-  Plug,
-  Receipt,
   Settings2,
+  Shield,
   Sun,
   Target,
   TrendingDown,
@@ -143,12 +142,6 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           permissions: ["contas_a_pagar", "vendas_realizadas"],
         },
         {
-          title: "Faturamento",
-          url: "/app/faturamento",
-          icon: Receipt,
-          permission: "vendas_realizadas",
-        },
-        {
           title: "CMV & Margens",
           url: "/app/cmv-margens",
           icon: Percent,
@@ -186,7 +179,19 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
     //   ],
     // },
     {
-      label: "Desenvolvimento",
+      label: "Sistema",
+      items: [
+        {
+          title: "Configurações",
+          url: "/app/configuracoes",
+          icon: Settings2,
+          permission: "configuracoes",
+          permissions: ["configuracoes", "integracoes"],
+        },
+      ],
+    },
+    {
+      label: "Administrador",
       adminOnly: true,
       items: [
         {
@@ -201,23 +206,6 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           url: "/app/desenvolvimento/fornecedores",
           icon: Truck,
           permission: "dashboard",
-        },
-      ],
-    },
-    {
-      label: "Sistema",
-      items: [
-        {
-          title: "Integrações",
-          url: "/app/integracoes",
-          icon: Plug,
-          permission: "integracoes",
-        },
-        {
-          title: "Configurações",
-          url: "/app/configuracoes",
-          icon: Settings2,
-          permission: "configuracoes",
         },
       ],
     },
@@ -276,6 +264,7 @@ function AppLayoutContent() {
   )
     .map((section) => ({
       label: section.label,
+      adminOnly: section.adminOnly,
       items: section.items.filter((item) => {
         if (section.adminOnly && isAdmin) return true;
         if (isCompanyOwner) return true;
@@ -434,8 +423,24 @@ function AppLayoutContent() {
         )}
         <SidebarContent>
           {navSections.map((section) => (
-            <SidebarGroup key={section.label}>
-              <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+            <SidebarGroup
+              key={section.label}
+              className={cn(
+                section.adminOnly &&
+                  "mt-auto border-t border-amber-500/35 bg-amber-500/8 pt-2 dark:border-amber-400/30 dark:bg-amber-500/10",
+              )}
+            >
+              <SidebarGroupLabel
+                className={cn(
+                  section.adminOnly &&
+                    "gap-1.5 font-semibold text-amber-800 dark:text-amber-300",
+                )}
+              >
+                {section.adminOnly ? (
+                  <Shield className="size-3.5 shrink-0" aria-hidden />
+                ) : null}
+                {section.label}
+              </SidebarGroupLabel>
               <SidebarGroupContent className="mt-0">
                 <SidebarMenu>
                   {section.items.map((item) => {

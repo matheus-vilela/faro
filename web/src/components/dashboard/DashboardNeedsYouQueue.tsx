@@ -12,6 +12,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
+const ACTION_BTN_CLASS = "w-28 shrink-0 justify-center px-2";
+
 export function DashboardNeedsYouQueue({
   items,
   loading,
@@ -105,7 +107,12 @@ export function DashboardNeedsYouQueue({
                   <div className="flex shrink-0 items-center gap-1.5">
                     {item.secondary ? (
                       item.secondary.href ? (
-                        <Button variant="outline" size="sm" asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className={ACTION_BTN_CLASS}
+                          asChild
+                        >
                           <Link to={item.secondary.href}>
                             {item.secondary.label}
                           </Link>
@@ -114,6 +121,7 @@ export function DashboardNeedsYouQueue({
                         <Button
                           variant="outline"
                           size="sm"
+                          className={ACTION_BTN_CLASS}
                           onClick={() => {
                             if (
                               item.secondary?.action === "open_whatsapp" &&
@@ -128,12 +136,13 @@ export function DashboardNeedsYouQueue({
                       )
                     ) : null}
                     {item.primary.href ? (
-                      <Button size="sm" asChild>
+                      <Button size="sm" className={ACTION_BTN_CLASS} asChild>
                         <Link to={item.primary.href}>{item.primary.label}</Link>
                       </Button>
                     ) : (
                       <Button
                         size="sm"
+                        className={ACTION_BTN_CLASS}
                         disabled={
                           approvingId != null &&
                           approvingId === item.primary.expenseId

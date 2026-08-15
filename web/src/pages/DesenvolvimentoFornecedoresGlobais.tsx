@@ -224,7 +224,7 @@ export function DesenvolvimentoFornecedoresGlobais() {
           <Button variant="outline" size="sm" className="gap-2" asChild>
             <Link to="/app/desenvolvimento">
               <ArrowLeft className="h-4 w-4" />
-              Desenvolvimento
+              Administrador
             </Link>
           </Button>
         }
