@@ -1,8 +1,8 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -185,74 +185,146 @@ export function Servicos() {
   };
 
   return (
-    <PageShell className="space-y-6">
+    <PageShell className="flex min-h-0 flex-1 flex-col gap-4 pb-0">
       <PageHeader
         title="Serviços"
-        description="Catálogo de serviços do PDV (sem estoque). Vendas diárias vêm da sincronização EPOC."
+        description={
+          <span className="hidden sm:inline">
+            Catálogo de serviços do PDV (sem estoque). Vendas diárias vêm da
+            sincronização EPOC.
+          </span>
+        }
         icon={ConciergeBell}
+        className="shrink-0"
         action={
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
+          <Button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="h-10 w-full shrink-0 sm:w-auto"
+          >
+            <Plus className="h-4 w-4 mr-2" />
             Novo serviço
           </Button>
         }
       />
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex shrink-0 flex-col gap-3 rounded-xl border bg-card/60 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4 sm:px-4">
         <Input
-          placeholder="Buscar por nome ou código…"
+          placeholder="Filtrar por nome ou código..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
+          className="h-9 min-w-0 flex-1 sm:max-w-xs"
         />
       </div>
 
-      <Card>
-        <CardContent className="divide-y p-0">
+      <div className="flex max-h-[calc(100dvh-11rem)] min-h-[min(28rem,calc(100dvh-13rem))] flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+        <div className="hidden shrink-0 border-b bg-muted/30 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_6.5rem] md:gap-3">
+          <span>Serviço</span>
+          <span>Código</span>
+          <span className="text-right pr-1">Status</span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
-            <p className="text-muted-foreground p-4 text-sm">A carregar…</p>
+            <p className="px-4 py-8 text-sm text-muted-foreground">
+              Carregando...
+            </p>
           ) : rows.length === 0 ? (
-            <p className="text-muted-foreground p-4 text-sm">
-              Nenhum serviço cadastrado.
+            <p className="px-4 py-8 text-sm text-muted-foreground">
+              {debouncedSearch.trim()
+                ? "Nenhum serviço encontrado para este filtro."
+                : "Nenhum serviço cadastrado."}
             </p>
           ) : (
-            rows.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => void openDetail(row)}
-                className={cn(
-                  "hover:bg-muted/40 flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors",
-                )}
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{row.name}</p>
-                  <p className="text-muted-foreground font-mono text-xs">
-                    {row.code}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-xs",
-                    row.is_active
-                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {row.is_active ? "Ativo" : "Inativo"}
-                </span>
-              </button>
-            ))
-          )}
-        </CardContent>
-      </Card>
+            <div className="divide-y">
+              {rows.map((row) => {
+                const statusBadge = row.is_active
+                  ? {
+                      label: "Ativo",
+                      className:
+                        "border-emerald-600/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100",
+                    }
+                  : {
+                      label: "Inativo",
+                      className: "border-muted-foreground/30",
+                    };
+                return (
+                  <div
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => void openDetail(row)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void openDetail(row);
+                      }
+                    }}
+                    className={cn(
+                      "group relative border-l-[3px] bg-card outline-none transition-colors",
+                      "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      row.is_active
+                        ? "border-l-emerald-600/80"
+                        : "border-l-muted-foreground/35",
+                    )}
+                  >
+                    <div className="hidden md:grid md:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_6.5rem] md:items-center md:gap-3 md:px-4 md:py-2.5">
+                      <p className="min-w-0 truncate text-sm font-semibold leading-tight tracking-tight">
+                        {row.name}
+                      </p>
+                      <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                        {row.code}
+                      </p>
+                      <div className="flex justify-end pr-1">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] font-normal",
+                            statusBadge.className,
+                          )}
+                        >
+                          {statusBadge.label}
+                        </Badge>
+                      </div>
+                    </div>
 
-      <Pagination
-        page={page}
-        pageSize={PAGE_SIZE}
-        totalCount={count}
-        onPageChange={setPage}
-      />
+                    <div className="flex items-start justify-between gap-3 px-3 py-3 md:hidden">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold leading-snug">
+                          {row.name}
+                        </p>
+                        <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                          {row.code}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 text-[10px] font-normal",
+                          statusBadge.className,
+                        )}
+                      >
+                        {statusBadge.label}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {!loading && (
+          <div className="shrink-0 border-t px-2 py-2 sm:px-4">
+            <Pagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              totalCount={count}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
+      </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
         <SheetContent className="flex flex-col gap-4 sm:max-w-md">

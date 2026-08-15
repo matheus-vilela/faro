@@ -2,7 +2,11 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
-import { getMonthRange, MonthSelector, type MonthYear } from "@/components/MonthSelector";
+import {
+  getMonthRange,
+  MonthSelector,
+  type MonthYear,
+} from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -306,9 +310,7 @@ export function Despesas() {
   );
   const productSelectOptions = useMemo(
     () =>
-      products
-        .filter((p) => p.is_active !== false)
-        .map(productSearchOption),
+      products.filter((p) => p.is_active !== false).map(productSearchOption),
     [products],
   );
   const conversionsByProduct = useMemo(() => {
@@ -370,24 +372,25 @@ export function Despesas() {
 
   const fetchSupportData = useCallback(async () => {
     if (!companyId) return;
-    const [{ data: catRows }, { data: sup }, { data: prod }] = await Promise.all([
-      supabase
-        .from("company_categories")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase
-        .from("suppliers")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("name"),
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", companyId)
-        .order("name"),
-    ]);
+    const [{ data: catRows }, { data: sup }, { data: prod }] =
+      await Promise.all([
+        supabase
+          .from("company_categories")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase
+          .from("suppliers")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("name"),
+      ]);
     const productsList = (prod as Product[]) ?? [];
     setCompanyCategories((catRows as CompanyCategory[]) ?? []);
     setSuppliers((sup as Supplier[]) ?? []);
@@ -517,9 +520,7 @@ export function Despesas() {
         .single();
       setEnsuringRecebimentoExpenseId(null);
       if (error || !data) {
-        toast.error(
-          error?.message ?? "Não foi possível criar o recebimento.",
-        );
+        toast.error(error?.message ?? "Não foi possível criar o recebimento.");
         return null;
       }
       setRecebimentosByExpenseId((prev) => {
@@ -1622,7 +1623,7 @@ export function Despesas() {
           <span>Recebimento</span>
           <span>Competência</span>
           <span className="text-right">Total</span>
-          <span className="text-right pr-1">Ações</span>
+          <span className="text-right pr-1 min-w-28">Ações</span>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">

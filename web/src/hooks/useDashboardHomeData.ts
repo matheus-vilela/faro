@@ -40,7 +40,7 @@ import {
 } from "@/lib/vendasRealizadasResumo";
 import type { CompanyCategory } from "@/types/category";
 import type { CompanyAlertRow } from "@/types/companyAlert";
-import type { Expense } from "@/types/expense";
+import type { BoletoStatus } from "@/types/expense";
 import { isBoletoPayable, isBoletoTransfer } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { RevenueEntry } from "@/types/revenue";
@@ -91,7 +91,7 @@ function normalizeEpocPaymentRows(rows: unknown[]): EpocPaymentLineInput[] {
 }
 
 function expenseAmount(
-  items: Pick<Expense, "expense_items">["expense_items"],
+  items: Array<{ quantity?: number | null; unit_value?: number | null }> | null | undefined,
 ): number {
   if (!Array.isArray(items)) return 0;
   return items.reduce((sum, it) => {
@@ -341,8 +341,8 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         description: string | null;
         due_date: string;
         amount: number;
-        status: string;
-        is_projected?: boolean | null;
+        status: BoletoStatus;
+        is_projected?: boolean;
       }>;
       const totals = computePayableTotals(boletos, monthPeriod, todayYmd);
       setDueIn7Amount(totals.dueInNext7Days.amount);
@@ -517,10 +517,14 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         (step2.error ? 0 : step2.rows.length);
 
       const whatsappPending: WhatsappPendingExpense[] = (
-        (whatsappRes.data ?? []) as Pick<
-          Expense,
-          "id" | "supplier_name" | "expense_items"
-        >[]
+        (whatsappRes.data ?? []) as Array<{
+          id: string;
+          supplier_name: string | null;
+          expense_items: Array<{
+            quantity?: number | null;
+            unit_value?: number | null;
+          }> | null;
+        }>
       ).map((e) => ({
         id: e.id,
         supplier_name: e.supplier_name,

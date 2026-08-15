@@ -3,7 +3,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +27,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
@@ -36,7 +40,6 @@ import { cn } from "@/lib/utils";
 import type { Supplier } from "@/types/supplier";
 import {
   Check,
-  ChevronRight,
   Copy,
   CreditCard,
   Link2,
@@ -108,6 +111,177 @@ function aggregateSupplierPurchaseProducts(
     (a, b) =>
       b.purchaseCount - a.purchaseCount ||
       a.name.localeCompare(b.name, "pt-BR"),
+  );
+}
+
+function hasSupplierPaymentInfo(s: Supplier) {
+  return Boolean(
+    s.payment_info && (s.payment_info.bank_name || s.payment_info.pix_key),
+  );
+}
+
+function FornecedorListRow({
+  supplier,
+  onOpenDetail,
+  onOpenPayment,
+  onOpenLink,
+}: {
+  supplier: Supplier;
+  onOpenDetail: () => void;
+  onOpenPayment: () => void;
+  onOpenLink: () => void;
+}) {
+  const hasPay = hasSupplierPaymentInfo(supplier);
+  const documentLabel = supplier.document?.trim()
+    ? maskCpfCnpj(supplier.document)
+    : "Sem CPF/CNPJ";
+  const contactParts = [
+    supplier.email?.trim() || null,
+    supplier.phone?.trim() ? maskPhone(supplier.phone) : null,
+  ].filter(Boolean);
+  const contactLabel =
+    contactParts.length > 0 ? contactParts.join(" · ") : "Sem contato";
+  const sellerName = supplier.sales_contact_name?.trim() || null;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenDetail}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenDetail();
+        }
+      }}
+      className={cn(
+        "group relative border-l-[3px] bg-card outline-none transition-colors",
+        "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        hasPay ? "border-l-emerald-600/80" : "border-l-amber-500/55",
+      )}
+    >
+      <div className="hidden md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto] md:items-center md:gap-3 md:px-4 md:py-2.5">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold leading-tight tracking-tight">
+            {supplier.name}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {documentLabel}
+          </p>
+        </div>
+        <p className="min-w-0 truncate text-xs text-muted-foreground">
+          {contactLabel}
+        </p>
+        <p
+          className={cn(
+            "min-w-0 truncate text-sm",
+            sellerName ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {sellerName ?? "—"}
+        </p>
+        <div
+          className="flex items-center justify-end gap-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={
+                  hasPay
+                    ? "Editar conta de pagamento"
+                    : "Inserir conta de pagamento"
+                }
+                className={cn(
+                  "h-8 w-8",
+                  hasPay
+                    ? "text-emerald-700 hover:text-emerald-800 dark:text-emerald-300"
+                    : "text-destructive hover:text-destructive",
+                )}
+                onClick={onOpenPayment}
+              >
+                <CreditCard className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {hasPay
+                ? "Editar conta de pagamento"
+                : "Inserir conta de pagamento"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Gerar link para o fornecedor atualizar"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={onOpenLink}
+              >
+                <Link2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Gerar link para o fornecedor atualizar
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2.5 px-3 py-3 md:hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold leading-snug">
+              {supplier.name}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {documentLabel}
+              <span className="text-muted-foreground/50"> · </span>
+              {contactLabel}
+            </p>
+            {sellerName ? (
+              <p className="mt-0.5 truncate text-xs text-foreground">
+                Vendedor: {sellerName}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div
+          className="flex items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(
+              "h-8 flex-1 text-xs",
+              hasPay
+                ? "border-emerald-600/35 text-emerald-800 dark:text-emerald-200"
+                : "border-destructive/35 text-destructive",
+            )}
+            onClick={onOpenPayment}
+          >
+            <CreditCard className="mr-1.5 h-3.5 w-3.5" />
+            Pagamento
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 flex-1 text-xs"
+            onClick={onOpenLink}
+          >
+            <Link2 className="mr-1.5 h-3.5 w-3.5" />
+            Link
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -305,9 +479,6 @@ export function Fornecedores() {
     }
   };
 
-  const hasPaymentInfo = (s: Supplier) =>
-    s.payment_info && (s.payment_info.bank_name || s.payment_info.pix_key);
-
   const fetchSupplierPurchaseProducts = useCallback(
     async (supplierId: string) => {
       if (!currentCompany?.id) return;
@@ -405,11 +576,16 @@ export function Fornecedores() {
   };
 
   return (
-    <PageShell className="space-y-8" narrow>
+    <PageShell className="flex min-h-0 flex-1 flex-col gap-4 pb-0">
       <PageHeader
         title="Fornecedores"
-        description="Cadastre fornecedores e gerencie as informações de pagamento"
+        description={
+          <span className="hidden sm:inline">
+            Cadastre fornecedores e gerencie as informações de pagamento
+          </span>
+        }
         icon={Truck}
+        className="shrink-0"
         action={
           <Button
             type="button"
@@ -431,129 +607,59 @@ export function Fornecedores() {
         />
       )}
 
-      <Card>
-        <CardContent>
-          <div className="mb-4 flex flex-wrap gap-3 items-center">
-            <Input
-              placeholder="Filtrar por nome, documento, e-mail, vendedor ou gerente..."
-              value={suppliersSearch}
-              onChange={(e) => setSuppliersSearch(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
+      <div className="flex shrink-0 flex-col gap-3 rounded-xl border bg-card/60 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4 sm:px-4">
+        <Input
+          placeholder="Filtrar por nome, documento, e-mail, vendedor ou gerente..."
+          value={suppliersSearch}
+          onChange={(e) => setSuppliersSearch(e.target.value)}
+          className="h-9 min-w-0 flex-1 sm:max-w-xs"
+        />
+      </div>
+
+      <div className="flex max-h-[calc(100dvh-11rem)] min-h-[min(28rem,calc(100dvh-13rem))] flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+        <div className="hidden shrink-0 border-b bg-muted/30 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto] md:gap-3">
+          <span>Fornecedor</span>
+          <span>Contato</span>
+          <span>Vendedor</span>
+          <span className="text-right pr-1">Ações</span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
-            <p className="text-muted-foreground">Carregando...</p>
+            <p className="px-4 py-8 text-sm text-muted-foreground">
+              Carregando...
+            </p>
           ) : suppliers.length === 0 ? (
-            <p className="text-muted-foreground">
-              Nenhum fornecedor cadastrado
+            <p className="px-4 py-8 text-sm text-muted-foreground">
+              {debouncedSearch.trim()
+                ? "Nenhum fornecedor encontrado para este filtro."
+                : "Nenhum fornecedor cadastrado."}
             </p>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-border bg-card">
-              {suppliers.map((s) => {
-                const hasPay = hasPaymentInfo(s);
-                const metaParts: string[] = [];
-                if (s.document?.trim()) {
-                  metaParts.push(maskCpfCnpj(s.document));
-                }
-                if (s.email?.trim()) {
-                  metaParts.push(s.email.trim());
-                }
-                if (s.phone?.trim()) {
-                  metaParts.push(maskPhone(s.phone));
-                }
-                return (
-                  <div
-                    key={s.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openDetail(s)}
-                    onKeyDown={(e) => e.key === "Enter" && openDetail(s)}
-                    className={cn(
-                      "flex w-full items-center gap-3 border-b border-border px-3 py-3.5 text-left transition-colors last:border-b-0 sm:gap-4 sm:px-4",
-                      "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50 text-muted-foreground",
-                        // hasPay &&
-                        //   "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-400",
-                      )}
-                      aria-hidden
-                    >
-                      <Truck className="h-5 w-5" strokeWidth={1.75} />
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <span className="font-medium leading-snug text-foreground">
-                        {s.name}
-                      </span>
-                      {metaParts.length > 0 ? (
-                        <p className="text-xs text-muted-foreground wrap-anywhere">
-                          {metaParts.join(" · ")}
-                        </p>
-                      ) : (
-                        <p className="text-xs italic text-muted-foreground/90">
-                          Sem CPF/CNPJ, e-mail ou telefone
-                        </p>
-                      )}
-                    </div>
-
-                    <div
-                      className="flex shrink-0 items-center gap-1 sm:gap-1.5"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 rounded-lg"
-                        onClick={() => openPaymentDialog(s)}
-                        title={
-                          hasPay
-                            ? "Editar conta de pagamento"
-                            : "Inserir conta de pagamento"
-                        }
-                      >
-                        <CreditCard
-                          className={cn(
-                            "h-4 w-4",
-                            hasPay
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : "text-red-600 dark:text-red-500",
-                          )}
-                        />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 rounded-lg"
-                        onClick={() => openLinkDialog(s)}
-                        title="Gerar link para o fornecedor atualizar"
-                      >
-                        <Link2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    <ChevronRight
-                      className="hidden h-4 w-4 shrink-0 text-muted-foreground/70 sm:block sm:h-5 sm:w-5"
-                      aria-hidden
-                    />
-                  </div>
-                );
-              })}
+            <div className="divide-y">
+              {suppliers.map((s) => (
+                <FornecedorListRow
+                  key={s.id}
+                  supplier={s}
+                  onOpenDetail={() => openDetail(s)}
+                  onOpenPayment={() => openPaymentDialog(s)}
+                  onOpenLink={() => void openLinkDialog(s)}
+                />
+              ))}
             </div>
           )}
-          {!loading && (
+        </div>
+
+        {!loading && (
+          <div className="shrink-0 border-t px-2 py-2 sm:px-4">
             <Pagination
               page={suppliersPage}
               totalCount={suppliersCount}
               onPageChange={setSuppliersPage}
             />
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
 
       {/* Sheet inserir/editar conta */}
       <Sheet open={paymentSheetOpen} onOpenChange={setPaymentSheetOpen}>
