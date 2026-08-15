@@ -3,7 +3,7 @@ import {
   previewEpocProdutoVendasInterpret,
 } from "@/lib/epocProdutoVendasInterpret";
 
-const CSV = `data_consumo;Produto;Quant.;Total recebido(R$)
+const CSV = `data_consumo;Produto;Quant.;Total Bruto(R$)
 30/07/2026;Agua com gas;2;20,00
 30/07/2026;Novo Item;1;15,50
 29/07/2026;Agua com gas;1;10,00
@@ -35,7 +35,7 @@ describe("previewEpocProdutoVendasInterpret", () => {
 
   it("falha sem coluna data_consumo", () => {
     const preview = previewEpocProdutoVendasInterpret(
-      "Produto;Quant.;Total recebido(R$)\nA;1;1,00\n",
+      "Produto;Quant.;Total Bruto(R$)\nA;1;1,00\n",
       "bad.csv",
       { products: [], recipes: [] },
     );

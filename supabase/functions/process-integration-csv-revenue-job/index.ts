@@ -1,12 +1,12 @@
 /**
  * Processa `integration_csv_revenue_import_jobs` em **várias invocações** (cursor
  * `csv_resume_row_index` + continuação via fila pgmq `csv_revenue_import_continue`),
- * até percorrer todo o CSV: coluna "Total recebido(R$)" + `data_consumo`.
+ * até percorrer todo o CSV: coluna "Total Bruto(R$)" + `data_consumo`.
  * Lançamento: **venda de produto** (`entry_mode: product_sale`).
  * Produto: coluna **Codigo** → `products.sku` (acha ou cria com unit=un).
  * Categoria de catálogo: coluna **Grupo** → `company_product_categories` (acha ou cria).
  * Fluxo de produto: apenas por Codigo + Grupo (sem match por nome).
- * Quantidade na coluna Quant.; gross_amount = "Total recebido(R$)"; pricing_mode: total.
+ * Quantidade na coluna Quant.; gross_amount = "Total Bruto(R$)"; pricing_mode: total.
  * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR (sem IA).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
@@ -49,7 +49,7 @@ const corsHeaders: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
+const COL_TOTAL_BRUTO = "Total Bruto(R$)";
 /** Cabeçalhos aceites para o nome do produto (só rótulo do lançamento). */
 const COL_PRODUTO_ALIASES = [
   "Produto",
@@ -712,11 +712,14 @@ async function runCsvRevenueImportForJob(
     }
 
     const normHeaders = headers.map(normalizeHeaderLabel);
-    const targetNorm = normalizeHeaderLabel(COL_TOTAL_RECEBIDO);
-    const totalCol = normHeaders.indexOf(targetNorm);
+    const targetNorm = normalizeHeaderLabel(COL_TOTAL_BRUTO);
+    let totalCol = normHeaders.indexOf(targetNorm);
+    if (totalCol < 0) {
+      totalCol = normHeaders.findIndex((h) => h.includes("totalbruto"));
+    }
     if (totalCol < 0) {
       return await fail(
-        `Coluna "${COL_TOTAL_RECEBIDO}" não encontrada no CSV (cabeçalhos: ${headers.slice(0, 12).join("; ")}…).`,
+        `Coluna "${COL_TOTAL_BRUTO}" não encontrada no CSV (cabeçalhos: ${headers.slice(0, 12).join("; ")}…).`,
       );
     }
 
@@ -968,7 +971,7 @@ async function runCsvRevenueImportForJob(
           quantity_raw: "",
           total_received_raw: totalCell,
           reason: "gross_amount_invalid",
-          details: `Valor invalido em "${COL_TOTAL_RECEBIDO}"`,
+          details: `Valor invalido em "${COL_TOTAL_BRUTO}"`,
           action: "linha ignorada",
         });
         idx += 1;

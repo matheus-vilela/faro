@@ -119,7 +119,7 @@ export function EpocVendaProdutosInterpretCard() {
         <CardDescription>
           Envie o CSV do export de produtos para ver, por dia e por item, o que
           seria <strong>criado</strong> ou <strong>associado</strong> ao
-          cadastro (match exato por nome), com quantidade e Total recebido. Cada
+          cadastro (match exato por nome), com quantidade e Total Bruto. Cada
           linha válida geraria um lançamento de receita novo; o match só decide
           o produto/ficha.
         </CardDescription>
@@ -178,7 +178,7 @@ export function EpocVendaProdutosInterpretCard() {
                     hint={`${preview.totals.skippedLines} ignorada(s)`}
                   />
                   <SummaryTile
-                    label="Total recebido"
+                    label="Total bruto"
                     value={formatBrl(preview.totals.totalRecebido)}
                     hint={`${formatQty(preview.totals.quantity)} un · ${preview.totals.days} dia(s)`}
                   />

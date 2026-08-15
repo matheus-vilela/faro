@@ -104,7 +104,7 @@ export type ProdutoVendasInterpretPreview = {
   sampleLines: ProdutoVendaLine[];
 };
 
-const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
+const COL_TOTAL_BRUTO = "Total Bruto(R$)";
 const COL_PRODUTO_ALIASES = [
   "Produto",
   "Nome do produto",
@@ -382,7 +382,11 @@ export function previewEpocProdutoVendasInterpret(
 
   const normHeaders = headers.map(normalizeHeaderLabel);
   const dataCol = normHeaders.indexOf(normalizeHeaderLabel("data_consumo"));
-  const totalCol = normHeaders.indexOf(normalizeHeaderLabel(COL_TOTAL_RECEBIDO));
+  const wantTotal = normalizeHeaderLabel(COL_TOTAL_BRUTO);
+  let totalCol = normHeaders.indexOf(wantTotal);
+  if (totalCol < 0) {
+    totalCol = normHeaders.findIndex((h) => h.includes("totalbruto"));
+  }
   const quantCol = resolveQuantColumnIndex(normHeaders);
   const produtoCol = resolveProductColumnIndex(normHeaders);
 
@@ -408,7 +412,7 @@ export function previewEpocProdutoVendasInterpret(
   if (totalCol < 0) {
     return {
       ok: false,
-      error: `Coluna "${COL_TOTAL_RECEBIDO}" não encontrada no CSV.`,
+      error: `Coluna "${COL_TOTAL_BRUTO}" não encontrada no CSV.`,
       fileName,
       headers,
       columns: {
@@ -712,7 +716,7 @@ export function catalogActionLabel(action: ProdutoVendaCatalogAction): string {
 export function skipReasonLabel(reason: ProdutoVendaSkipReason): string {
   switch (reason) {
     case "total_invalido":
-      return "Total recebido inválido";
+      return "Total bruto inválido";
     case "data_invalida":
       return "Data inválida";
     case "quantidade_invalida":

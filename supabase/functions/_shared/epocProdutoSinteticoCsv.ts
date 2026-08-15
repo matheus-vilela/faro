@@ -1,6 +1,6 @@
 /**
  * Relatório EPOC `mod_rel_produto_sintetico`: extrai `#tblExport` → CSV
- * (mesmo critério do sync de produtos: linhas com "Total recebido(R$)" preenchido).
+ * (mesmo critério do sync de produtos: linhas com "Total Bruto(R$)" preenchido).
  */
 import {
   extractElementOuterHtmlById,
@@ -12,11 +12,11 @@ import {
 
 export const MODULO_REL_PRODUTO_SINTETICO = "mod_rel_produto_sintetico";
 export const EPOC_ID_TBL_EXPORT = "tblExport";
-export const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
+export const COL_TOTAL_BRUTO = "Total Bruto(R$)";
 
 export type ProdutoSinteticoDayExtract = {
   dataConsulta: string;
-  /** Linhas incluídas no CSV (após filtro Total recebido, se a coluna existir). */
+  /** Linhas incluídas no CSV (após filtro Total Bruto, se a coluna existir). */
   rowCount: number;
   /** Linhas brutas da tabela (sem filtro). */
   rawRowCount: number;
@@ -35,15 +35,19 @@ function normalizeHeaderLabel(h: string): string {
     .replace(/\s+/g, "");
 }
 
-export function findTotalRecebidoColumnIndex(headers: string[]): number {
+export function findTotalBrutoColumnIndex(headers: string[]): number {
+  const want = normalizeHeaderLabel(COL_TOTAL_BRUTO);
+  for (let i = 0; i < headers.length; i++) {
+    if (normalizeHeaderLabel(headers[i] ?? "") === want) return i;
+  }
   for (let i = 0; i < headers.length; i++) {
     const h = normalizeHeaderLabel(headers[i] ?? "");
-    if (h.includes("totalrecebido")) return i;
+    if (h.includes("totalbruto")) return i;
   }
   return -1;
 }
 
-function isTotalRecebidoCellFilled(raw: string): boolean {
+function isTotalBrutoCellFilled(raw: string): boolean {
   const t = raw
     .replace(/\u00a0/g, " ")
     .replace(/[\u200b-\u200d\ufeff]/g, "")
@@ -84,7 +88,7 @@ function extractHeaderAndBody(tableHtml: string): {
 
 /**
  * Extrai itens de `#tblExport` do relatório produto sintético.
- * Mantém só linhas com "Total recebido(R$)" preenchido (quando a coluna existe).
+ * Mantém só linhas com "Total Bruto(R$)" preenchido (quando a coluna existe).
  */
 export function extractProdutoSinteticoRowsFromAcoesHtml(
   rawAcoesText: string,
@@ -128,7 +132,7 @@ export function extractProdutoSinteticoRowsFromAcoesHtml(
     };
   }
 
-  const totalIdx = findTotalRecebidoColumnIndex(parsed.header);
+  const totalIdx = findTotalBrutoColumnIndex(parsed.header);
   const targetLen = parsed.header.length;
   const rows: string[][] = [];
   for (const cols of parsed.rows) {
@@ -136,7 +140,7 @@ export function extractProdutoSinteticoRowsFromAcoesHtml(
     while (ajustada.length < targetLen) ajustada.push("");
     if (totalIdx >= 0) {
       const totalCell = ajustada[totalIdx] ?? "";
-      if (!isTotalRecebidoCellFilled(totalCell)) continue;
+      if (!isTotalBrutoCellFilled(totalCell)) continue;
     }
     rows.push([dataConsulta, ...ajustada]);
   }
@@ -163,7 +167,7 @@ export function extractProdutoSinteticoRowsFromAcoesHtml(
       maxCols: parsed.header.length,
       message:
         totalIdx >= 0
-          ? `tblExport com ${parsed.rows.length} linha(s), nenhuma com Total recebido preenchido.`
+          ? `tblExport com ${parsed.rows.length} linha(s), nenhuma com Total Bruto preenchido.`
           : "tblExport sem linhas utilizáveis.",
     };
   }

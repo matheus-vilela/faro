@@ -144,7 +144,7 @@ export function buildEpocSyncFlowDiagnostic(
     const dias = input.diasComTabela ?? 0;
     const msg =
       dias > 0
-        ? "Portal devolveu tabela, mas nenhuma linha passou no filtro «Total recebido(R$)»."
+        ? "Portal devolveu tabela, mas nenhuma linha passou no filtro «Total Bruto(R$)»."
         : "CSV exportado sem linhas de dados.";
     return buildDiagnostic(
       {
@@ -171,7 +171,7 @@ export function buildEpocSyncFlowDiagnostic(
     const linhas = input.linhasDados ?? 0;
     const msg =
       dias > 0 && linhas === 0
-        ? "Portal devolveu tabela, mas nenhuma linha passou no filtro «Total recebido(R$)»."
+        ? "Portal devolveu tabela, mas nenhuma linha passou no filtro «Total Bruto(R$)»."
         : "CSV consolidado ficou vazio ou não foi guardado no Storage.";
     return buildDiagnostic(
       {

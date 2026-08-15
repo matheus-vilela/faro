@@ -79,7 +79,7 @@ export function EpocVendaProdutosExportCard() {
         <CardDescription>
           Chama o portal (<code>mod_rel_produto_sintetico</code>), extrai{" "}
           <code>#tblExport</code> e gera CSV no mesmo formato do sync de
-          produtos (coluna <code>data_consumo</code> + linhas com Total recebido
+          produtos (coluna <code>data_consumo</code> + linhas com Total Bruto
           preenchido). Usa as credenciais EPOC da unidade selecionada.
         </CardDescription>
       </CardHeader>

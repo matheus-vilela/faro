@@ -2,22 +2,22 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   buildProdutoSinteticoConsolidatedCsv,
   extractProdutoSinteticoRowsFromAcoesHtml,
-  findTotalRecebidoColumnIndex,
+  findTotalBrutoColumnIndex,
 } from "./epocProdutoSinteticoCsv.ts";
 
-Deno.test("findTotalRecebidoColumnIndex", () => {
+Deno.test("findTotalBrutoColumnIndex", () => {
   assertEquals(
-    findTotalRecebidoColumnIndex(["Produto", "Total recebido(R$)", "Qtde"]),
+    findTotalBrutoColumnIndex(["Produto", "Total Bruto(R$)", "Qtde"]),
     1,
   );
-  assertEquals(findTotalRecebidoColumnIndex(["Produto", "Qtde"]), -1);
+  assertEquals(findTotalBrutoColumnIndex(["Produto", "Qtde"]), -1);
 });
 
-Deno.test("extractProdutoSinteticoRowsFromAcoesHtml: filtra Total recebido", () => {
+Deno.test("extractProdutoSinteticoRowsFromAcoesHtml: filtra Total Bruto", () => {
   const html = `
     <div id="ConteudoTela">
       <table id="tblExport">
-        <tr><th>Produto</th><th>Total recebido(R$)</th></tr>
+        <tr><th>Produto</th><th>Total Bruto(R$)</th></tr>
         <tr><td>A</td><td>10,00</td></tr>
         <tr><td>B</td><td></td></tr>
         <tr><td>C</td><td>5,50</td></tr>
@@ -38,7 +38,7 @@ Deno.test("buildProdutoSinteticoConsolidatedCsv", () => {
       dataConsulta: "30/07/2026",
       rowCount: 1,
       rawRowCount: 1,
-      header: ["Produto", "Total recebido(R$)"],
+      header: ["Produto", "Total Bruto(R$)"],
       maxCols: 2,
       rows: [["30/07/2026", "A", "10,00"]],
     },

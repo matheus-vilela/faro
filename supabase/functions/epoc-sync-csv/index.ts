@@ -10,7 +10,7 @@
  * concluir — evita idle timeout ~150s. No fim faz merge, enfileira import e dispara
  * serviços/faturamento async.
  *
- * O CSV consolidado inclui apenas linhas de dados com a coluna "Total recebido(R$)"
+ * O CSV consolidado inclui apenas linhas de dados com a coluna "Total Bruto(R$)"
  * preenchida (célula não vazia após trim), quando essa coluna existir no cabeçalho.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
@@ -72,7 +72,7 @@ const EPOC_ID_CONTEUDO_TELA = "ConteudoTela";
 const EPOC_ID_TBL_EXPORT = "tblExport";
 
 /** Alinhado ao import `process-integration-csv-revenue-job`; CSV final sem linhas com esta coluna vazia. */
-const COL_TOTAL_RECEBIDO = "Total recebido(R$)";
+const COL_TOTAL_BRUTO = "Total Bruto(R$)";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
@@ -569,20 +569,20 @@ function normalizeHeaderLabel(s: string): string {
     .replace(/\s+/g, "");
 }
 
-function findTotalRecebidoColumnIndex(headers: string[]): number {
-  const want = normalizeHeaderLabel(COL_TOTAL_RECEBIDO);
+function findTotalBrutoColumnIndex(headers: string[]): number {
+  const want = normalizeHeaderLabel(COL_TOTAL_BRUTO);
   for (let i = 0; i < headers.length; i++) {
     if (normalizeHeaderLabel(headers[i] ?? "") === want) return i;
   }
   for (let i = 0; i < headers.length; i++) {
     const h = normalizeHeaderLabel(headers[i] ?? "");
-    if (h.includes("totalrecebido")) return i;
+    if (h.includes("totalbruto")) return i;
   }
   return -1;
 }
 
 /** Valor “preenchido” para o CSV: não vazio após trim (NBSP / zero-width removidos). */
-function isTotalRecebidoCellFilled(raw: string): boolean {
+function isTotalBrutoCellFilled(raw: string): boolean {
   const t = raw
     .replace(/\u00a0/g, " ")
     .replace(/[\u200b-\u200d\ufeff]/g, "")
@@ -1701,9 +1701,9 @@ Deno.serve(async (req) => {
 
   const headerBase: string[] = [...priorHeaderBase];
   const linhasCsvFinal: string[][] = [];
-  /** Índice em `headerBase` da coluna total recebido (-1 se o cabeçalho não trouxer a coluna). */
-  let totalRecebidoColIndex =
-    headerBase.length > 0 ? findTotalRecebidoColumnIndex(headerBase) : -1;
+  /** Índice em `headerBase` da coluna total bruto (-1 se o cabeçalho não trouxer a coluna). */
+  let totalBrutoColIndex =
+    headerBase.length > 0 ? findTotalBrutoColumnIndex(headerBase) : -1;
   let totalDiasComTabela = accumulatedDiasComTabela;
   let totalLinhasDados = accumulatedLinhasDados;
   /** Erro textual do próprio portal (ex.: «sem eventos com esse filtro»), por dia consultado. */
@@ -1858,16 +1858,16 @@ Deno.serve(async (req) => {
       }
       if (headerBase.length === 0) {
         headerBase.push(...result.parsed.header);
-        totalRecebidoColIndex = findTotalRecebidoColumnIndex(headerBase);
+        totalBrutoColIndex = findTotalBrutoColumnIndex(headerBase);
       }
       const targetLen = headerBase.length;
       let linhasDia = 0;
       for (const row of result.parsed.rows) {
         const ajustada = row.slice(0, targetLen);
         while (ajustada.length < targetLen) ajustada.push("");
-        if (totalRecebidoColIndex >= 0) {
-          const totalCell = ajustada[totalRecebidoColIndex] ?? "";
-          if (!isTotalRecebidoCellFilled(totalCell)) continue;
+        if (totalBrutoColIndex >= 0) {
+          const totalCell = ajustada[totalBrutoColIndex] ?? "";
+          if (!isTotalBrutoCellFilled(totalCell)) continue;
         }
         linhasCsvFinal.push([result.dia, ...ajustada]);
         linhasDia++;
@@ -1883,7 +1883,7 @@ Deno.serve(async (req) => {
           detalhes: {
             dia: result.dia,
             header_cols: result.parsed.header.length,
-            filtro_coluna_total_recebido: totalRecebidoColIndex >= 0,
+            filtro_coluna_total_bruto: totalBrutoColIndex >= 0,
           },
         },
       );
@@ -2335,7 +2335,7 @@ Deno.serve(async (req) => {
           dias_com_tabela: totalDiasComTabela,
           linhas_dados: totalLinhasDados,
           linhas_csv_total: csvGenerated.split(/\r?\n/).filter(Boolean).length,
-          filtro_total_recebido_coluna_encontrada: totalRecebidoColIndex >= 0,
+          filtro_total_bruto_coluna_encontrada: totalBrutoColIndex >= 0,
           product_sync_run_id: productSyncRunId,
           partes_csv: partPaths.length,
           previa: previewText(csvGenerated, 800),
