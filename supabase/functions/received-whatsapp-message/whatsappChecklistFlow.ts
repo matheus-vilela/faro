@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck Deno imports
 import type { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { ensureShortSlug } from "../_shared/randomShortSlug.ts";
 import {
   formatChecklistMenuLine,
   includeInWhatsappMenu,
@@ -215,13 +216,6 @@ async function createChecklistRun(
   return { token: run.token as string, runId: run.id as string };
 }
 
-function randomShortSlug(len = 8): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
-}
-
 /** Cria ou reutiliza slug em `checklist_run_short_links` (service role). */
 async function ensureChecklistRunShortSlug(
   supabase: ReturnType<typeof createClient>,
@@ -229,36 +223,15 @@ async function ensureChecklistRunShortSlug(
   runId: string,
   tokenUuid: string,
 ): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from("checklist_run_short_links")
-    .select("slug")
-    .eq("run_id", runId)
-    .maybeSingle();
-
-  const row = existing as { slug?: string } | null;
-  if (row?.slug && typeof row.slug === "string") {
-    return row.slug;
-  }
-
-  for (let attempt = 0; attempt < 15; attempt++) {
-    const slug = randomShortSlug(8);
-    const { error } = await supabase.from("checklist_run_short_links").insert({
-      company_id: companyId,
-      slug,
-      run_id: runId,
-      token: tokenUuid,
-    });
-    if (!error) return slug;
-    const code = (error as { code?: string }).code;
-    if (code !== "23505") {
-      console.error(
-        "[checklist-flow] ensureChecklistRunShortSlug:",
-        error.message,
-      );
-      return null;
-    }
-  }
-  return null;
+  return ensureShortSlug({
+    supabase: supabase as Parameters<typeof ensureShortSlug>[0]["supabase"],
+    table: "checklist_run_short_links",
+    companyId,
+    fkColumn: "run_id",
+    fkValue: runId,
+    token: tokenUuid,
+    logPrefix: "[checklist-flow]",
+  });
 }
 
 async function fetchChecklistMetaForProgress(

@@ -9,10 +9,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/contexts/ThemeContext";
+import type { ChecklistItemType } from "@/lib/checklistOperationalTypes";
 import { supabase } from "@/lib/supabase";
-import { ListChecks } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ListChecks, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 function PublicPageShell({ children }: { children: ReactNode }) {
@@ -37,10 +40,6 @@ function PublicPageShell({ children }: { children: ReactNode }) {
         className="pointer-events-none absolute inset-0 bg-size-[24px_24px] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)]"
         aria-hidden
       />
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,var(--background)_75%)]"
-        aria-hidden
-      />
       <div className="relative z-10 w-full max-w-lg">{children}</div>
     </div>
   );
@@ -50,16 +49,47 @@ type ChecklistItemRow = {
   id: string;
   title: string;
   sort_order: number;
+  item_type?: ChecklistItemType;
+  config?: Record<string, unknown>;
+  requires_evidence?: boolean;
+};
+
+type ChecklistMeta = {
+  title: string;
+  description: string | null;
+  enforce_item_order?: boolean;
+  require_geofence?: boolean;
+  geofence_radius_m?: number;
 };
 
 type LoadResult = {
   ok: boolean;
   run?: { status: string; submitted_at: string | null };
-  checklist?: { title: string; description: string | null };
+  checklist?: ChecklistMeta;
   items?: ChecklistItemRow[];
   item_completed?: Record<string, string | null>;
   error?: string;
 };
+
+async function readGeo(): Promise<{
+  lat: number;
+  lng: number;
+  accuracy: number;
+} | null> {
+  if (!navigator.geolocation) return null;
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  });
+}
 
 export function ExecutarChecklist() {
   const { token } = useParams<{ token: string }>();
@@ -67,8 +97,18 @@ export function ExecutarChecklist() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<LoadResult | null>(null);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [index, setIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+
+  const items = useMemo(
+    () =>
+      [...(data?.items ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    [data?.items],
+  );
+  const current = items[index] ?? null;
+  const enforceOrder = Boolean(data?.checklist?.enforce_item_order);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -89,11 +129,9 @@ export function ExecutarChecklist() {
     const row = res as LoadResult;
     if (!row?.ok) {
       setError(
-        row?.error === "inactive"
-          ? "Checklist indisponível."
-          : row?.error === "already_submitted"
-            ? "Este link já foi utilizado ou o checklist já foi enviado."
-            : "Link inválido ou expirado.",
+        row?.error === "already_submitted"
+          ? "Este link já foi utilizado ou o checklist já foi enviado."
+          : "Link inválido ou expirado.",
       );
       setData(null);
       return;
@@ -102,73 +140,115 @@ export function ExecutarChecklist() {
     const ic = row.item_completed ?? {};
     const next: Record<string, boolean> = {};
     for (const it of row.items ?? []) {
-      const v = ic[it.id];
-      next[it.id] = v != null && v !== "";
+      next[it.id] = Boolean(ic[it.id]);
     }
     setChecked(next);
-    if (row.run?.status === "submitted") {
+    if (row.run?.status === "submitted" || row.run?.status === "approved") {
       setDone(true);
     }
   }, [token]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
-  const toggleItem = async (itemId: string, next: boolean) => {
-    if (!token || data?.run?.status === "submitted") return;
-    setChecked((prev) => ({ ...prev, [itemId]: next }));
+  const saveItem = async (
+    item: ChecklistItemRow,
+    completed: boolean,
+    value?: string,
+  ) => {
+    if (!token) return false;
+    const payload: Record<string, unknown> = {};
+    const t = item.item_type ?? "check";
+    if (t === "numeric" || t === "rating") payload.number = Number(value ?? 0);
+    if (t === "note" || t === "barcode") payload.text = value ?? "";
+    if (t === "signature") payload.signed = completed;
+
     const { data: res, error: err } = await supabase.rpc(
       "set_checklist_run_item_public",
       {
         p_token: token,
-        p_checklist_item_id: itemId,
-        p_completed: next,
+        p_checklist_item_id: item.id,
+        p_completed: completed,
+        p_value: payload,
+        p_evidence_paths: [],
       },
     );
     if (err) {
-      setChecked((prev) => ({ ...prev, [itemId]: !next }));
-      return;
+      setError("Não foi possível salvar o item.");
+      return false;
     }
-    const r = res as { ok?: boolean; error?: string };
-    if (!r?.ok) {
-      setChecked((prev) => ({ ...prev, [itemId]: !next }));
+    const row = res as { ok?: boolean; error?: string };
+    if (!row?.ok) {
+      if (row?.error === "order_violation") {
+        setError("Conclua o item anterior primeiro.");
+      } else if (row?.error === "evidence_required") {
+        setError("Este item exige evidência (foto/assinatura).");
+      } else {
+        setError("Não foi possível salvar o item.");
+      }
+      return false;
     }
+    setChecked((prev) => ({ ...prev, [item.id]: completed }));
+    setError(null);
+    return true;
   };
 
   const submit = async () => {
-    if (!token) return;
+    if (!token || !data) return;
     setSubmitting(true);
+    setError(null);
+
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let accuracy: number | null = null;
+    if (data.checklist?.require_geofence) {
+      const geo = await readGeo();
+      if (!geo) {
+        setSubmitting(false);
+        setError("Ative a localização para enviar este checklist.");
+        return;
+      }
+      lat = geo.lat;
+      lng = geo.lng;
+      accuracy = geo.accuracy;
+    }
+
     const { data: res, error: err } = await supabase.rpc(
       "submit_checklist_run_public",
-      { p_token: token },
+      {
+        p_token: token,
+        p_lat: lat,
+        p_lng: lng,
+        p_accuracy_m: accuracy,
+      },
     );
     setSubmitting(false);
     if (err) {
-      setError("Não foi possível enviar");
+      setError("Falha ao enviar.");
       return;
     }
-    const r = res as { ok?: boolean; error?: string; missing?: number };
-    if (!r?.ok) {
-      if (r?.error === "incomplete") {
-        setError(
-          `Marque todos os itens antes de enviar.${r.missing != null ? ` Faltam ${r.missing}.` : ""}`,
-        );
-        return;
-      }
-      setError("Não foi possível concluir.");
+    const row = res as { ok?: boolean; error?: string };
+    if (!row?.ok) {
+      const map: Record<string, string> = {
+        incomplete: "Ainda há itens sem concluir.",
+        outside_window: "Fora da janela/horário permitido.",
+        outside_geofence: "Você está fora da área permitida.",
+        geolocation_required: "Localização obrigatória.",
+        geolocation_inaccurate: "GPS impreciso — tente novamente perto do local.",
+      };
+      setError(map[row?.error ?? ""] ?? "Não foi possível enviar.");
       return;
     }
     setDone(true);
-    setError(null);
   };
 
   if (loading) {
     return (
       <PublicPageShell>
-        <p className="text-center text-sm text-muted-foreground">
-          Carregando checklist…
-        </p>
+        <div className="flex items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" /> Carregando…
+        </div>
       </PublicPageShell>
     );
   }
@@ -178,10 +258,7 @@ export function ExecutarChecklist() {
       <PublicPageShell>
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <ListChecks className="h-5 w-5" />
-              Checklist
-            </CardTitle>
+            <CardTitle>Checklist</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
         </Card>
@@ -189,64 +266,143 @@ export function ExecutarChecklist() {
     );
   }
 
-  const items = data?.items ?? [];
-  const title = data?.checklist?.title ?? "Checklist";
-  const desc = data?.checklist?.description?.trim();
+  if (done) {
+    return (
+      <PublicPageShell>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5" /> Checklist enviado
+            </CardTitle>
+            <CardDescription>
+              Obrigado! O gestor vai conferir as respostas.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </PublicPageShell>
+    );
+  }
+
   const allChecked =
     items.length > 0 && items.every((it) => checked[it.id] === true);
-  const submitted = data?.run?.status === "submitted" || done;
+  const type = current?.item_type ?? "check";
 
   return (
     <PublicPageShell>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl">
-            <ListChecks className="h-6 w-6 shrink-0" />
-            {title}
+            <ListChecks className="h-5 w-5" />
+            {data?.checklist?.title ?? "Checklist"}
           </CardTitle>
-          {desc ? (
-            <CardDescription className="text-pretty">{desc}</CardDescription>
+          {data?.checklist?.description ? (
+            <CardDescription>{data.checklist.description}</CardDescription>
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
+          {current ? (
+            <div className="space-y-3 rounded-xl border p-4">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">
+                Item {index + 1} de {items.length}
+              </p>
+              <p className="text-lg font-bold">{current.title}</p>
+
+              {type === "check" || type === "photo" || type === "signature" ? (
+                <label className="flex items-center gap-3 text-sm">
+                  <Checkbox
+                    checked={Boolean(checked[current.id])}
+                    onCheckedChange={(v) =>
+                      void saveItem(current, v === true)
+                    }
+                    disabled={
+                      enforceOrder &&
+                      index > 0 &&
+                      !checked[items[index - 1]!.id]
+                    }
+                  />
+                  {type === "signature"
+                    ? "Confirmo com minha assinatura/ciência"
+                    : type === "photo"
+                      ? "Marcar como feito (anexe foto depois no app completo)"
+                      : "Feito"}
+                </label>
+              ) : null}
+
+              {(type === "numeric" || type === "rating") && (
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder={type === "rating" ? "Nota 1–5" : "Valor"}
+                  value={values[current.id] ?? ""}
+                  onChange={(e) =>
+                    setValues((v) => ({ ...v, [current.id]: e.target.value }))
+                  }
+                  onBlur={() =>
+                    void saveItem(
+                      current,
+                      (values[current.id] ?? "").trim() !== "",
+                      values[current.id],
+                    )
+                  }
+                />
+              )}
+
+              {(type === "note" || type === "barcode") && (
+                <Textarea
+                  placeholder={
+                    type === "barcode" ? "Código lido / digitado" : "Anotação"
+                  }
+                  value={values[current.id] ?? ""}
+                  onChange={(e) =>
+                    setValues((v) => ({ ...v, [current.id]: e.target.value }))
+                  }
+                  onBlur={() =>
+                    void saveItem(
+                      current,
+                      (values[current.id] ?? "").trim() !== "",
+                      values[current.id],
+                    )
+                  }
+                />
+              )}
+            </div>
+          ) : null}
+
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          {submitted ? (
-            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-              Checklist enviado com sucesso. Obrigado.
-            </p>
-          ) : (
-            <>
-              <ul className="space-y-3">
-                {items.map((it) => (
-                  <li
-                    key={it.id}
-                    className="flex items-start gap-3 rounded-lg border border-border/80 bg-muted/20 p-3"
-                  >
-                    <Checkbox
-                      checked={checked[it.id] === true}
-                      onCheckedChange={(v) =>
-                        void toggleItem(it.id, v === true)
-                      }
-                      className="mt-0.5"
-                    />
-                    <label
-                      htmlFor={it.id}
-                      className="cursor-pointer text-sm leading-snug"
-                    >
-                      {it.title}
-                    </label>
-                  </li>
-                ))}
-              </ul>
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              disabled={index === 0}
+              onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            >
+              Anterior
+            </Button>
+            {index < items.length - 1 ? (
               <Button
-                className="w-full"
+                type="button"
+                className="flex-1"
+                onClick={() => setIndex((i) => i + 1)}
+              >
+                Próximo
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className="flex-1"
                 disabled={!allChecked || submitting}
                 onClick={() => void submit()}
               >
-                {submitting ? "Enviando…" : "Enviar checklist"}
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Enviar"
+                )}
               </Button>
-            </>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
     </PublicPageShell>

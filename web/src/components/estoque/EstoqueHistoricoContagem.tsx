@@ -117,7 +117,14 @@ export function EstoqueHistoricoContagem({
       `,
       )
       .eq("company_id", companyId)
-      .in("status", ["open", "submitted"])
+      .in("status", [
+        "open",
+        "pending_approval",
+        "returned",
+        "approved",
+        "committed",
+        "submitted",
+      ])
       .limit(120);
 
     setLoading(false);
@@ -136,13 +143,45 @@ export function EstoqueHistoricoContagem({
   const { pending, concluded } = useMemo(() => {
     const raw = rows ?? [];
     const open = raw
-      .filter((r) => r.status === "open")
+      .filter((r) => r.status === "open" || r.status === "returned")
       .sort(sortOpen);
     const sub = raw
-      .filter((r) => r.status === "submitted")
+      .filter((r) =>
+        ["pending_approval", "approved", "committed", "submitted"].includes(
+          r.status,
+        ),
+      )
       .sort(sortSubmitted);
     return { pending: open, concluded: sub };
   }, [rows]);
+
+  const statusBadge = (status: string, variant: "open" | "submitted") => {
+    if (variant === "open") {
+      if (status === "returned") {
+        return (
+          <span className="rounded-md bg-orange-500/15 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200">
+            Recontagem
+          </span>
+        );
+      }
+      return (
+        <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200">
+          Pendente
+        </span>
+      );
+    }
+    const labels: Record<string, string> = {
+      pending_approval: "Aguardando aprovação",
+      approved: "Aprovada",
+      committed: "Estoques ajustados",
+      submitted: "Concluída",
+    };
+    return (
+      <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        {labels[status] ?? status}
+      </span>
+    );
+  };
 
   const renderRow = (r: SessionRow, variant: "open" | "submitted") => {
     const origin = r.company_member_id
@@ -165,15 +204,7 @@ export function EstoqueHistoricoContagem({
           {dateLabel}
         </td>
         <td className="p-2">
-          {variant === "open" ? (
-            <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200">
-              Pendente
-            </span>
-          ) : (
-            <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              Concluída
-            </span>
-          )}
+          {statusBadge(r.status, variant)}
         </td>
         <td className="p-2 text-muted-foreground">{groupName}</td>
         <td className="p-2 text-muted-foreground">{listingName}</td>

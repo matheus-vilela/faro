@@ -16,6 +16,10 @@ import {
   isNovaInventoryCommand,
   sendInventoryCountLink,
 } from "./whatsappInventoryFlow.ts";
+import {
+  handleTaskKeyword,
+  matchTaskKeyword,
+} from "./whatsappTaskKeywordsFlow.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
 
 /**
@@ -1289,6 +1293,27 @@ async function handleRecebimentoTextFlow(
     flowLog("processamento_fim", {
       flowId,
       branch: "inventory_link_nova_contagem",
+      handled: true,
+    });
+    return true;
+  }
+
+  const taskKw = matchTaskKeyword(text);
+  if (taskKw) {
+    await handleTaskKeyword({
+      supabase,
+      auth: {
+        companyId: auth.companyId,
+        senderNormalized: auth.senderNormalized,
+        companyMemberId,
+      },
+      keyword: taskKw,
+      sendWhatsappMessage,
+      flowId,
+    });
+    flowLog("processamento_fim", {
+      flowId,
+      branch: `task_keyword_${taskKw}`,
       handled: true,
     });
     return true;

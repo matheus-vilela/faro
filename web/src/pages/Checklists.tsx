@@ -1,5 +1,8 @@
+import { ChecklistConferenceSection } from "@/components/checklist/ChecklistConferenceSection";
 import { ChecklistHistorySection } from "@/components/checklist/ChecklistHistorySection";
+import { ChecklistNotificationSettingsCard } from "@/components/checklist/ChecklistNotificationSettingsCard";
 import { ChecklistPerformanceSection } from "@/components/checklist/ChecklistPerformanceSection";
+import { ChecklistRankingSection } from "@/components/checklist/ChecklistRankingSection";
 import type {
   ChecklistAssignmentStatRow,
   ChecklistPerformancePeriod,
@@ -44,13 +47,16 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyMember } from "@/types/companyMember";
 import {
+  ClipboardCheck,
   History,
   LayoutGrid,
   ListChecks,
   Loader2,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
+  Trophy,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -101,9 +107,13 @@ export function Checklists() {
   const [loadingStats, setLoadingStats] = useState(false);
   const [performancePeriod, setPerformancePeriod] =
     useState<ChecklistPerformancePeriod>("both");
-  const [checklistsTab, setChecklistsTab] = useState<"overview" | "historico">(
-    "overview",
-  );
+  const [checklistsTab, setChecklistsTab] = useState<
+    "overview" | "historico" | "conferencia" | "ranking"
+  >("overview");
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiHint, setAiHint] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<ChecklistRow | null>(null);
@@ -284,6 +294,9 @@ export function Checklists() {
     setMonthlyExecutions("1");
     setItemLines("");
     setMemberIds(new Set());
+    setAiPrompt("");
+    setAiHint("");
+    setShowPreview(false);
     setSheetOpen(true);
   };
 
@@ -327,6 +340,85 @@ export function Checklists() {
       else n.add(id);
       return n;
     });
+  };
+
+  const generateAiDraft = async () => {
+    const p = aiPrompt.trim();
+    if (!p) {
+      toast.error("Descreva o checklist (ex.: abertura do bar).");
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "generate-checklist-draft",
+        { body: { prompt: p } },
+      );
+      if (error) throw error;
+      const row = data as {
+        ok?: boolean;
+        title?: string;
+        description?: string;
+        items?: { title: string }[];
+        next_suggestion?: string;
+      };
+      if (!row?.ok) throw new Error("fail");
+      if (row.title) setTitle(row.title);
+      if (row.description) setDescription(row.description);
+      if (row.items?.length) {
+        setItemLines(row.items.map((i) => i.title).join("\n"));
+      }
+      setAiHint(row.next_suggestion ?? "");
+      setShowPreview(true);
+      toast.success("Rascunho montado pelo Faro.");
+    } catch {
+      toast.error("Não foi possível gerar com IA.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const applyTemplate = async (slug: string) => {
+    const { data, error } = await supabase
+      .from("checklist_templates")
+      .select("title, description, items")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (error || !data) {
+      toast.error("Template indisponível.");
+      return;
+    }
+    setTitle((data.title as string) ?? "");
+    setDescription((data.description as string) ?? "");
+    const items = (data.items as { title?: string }[]) ?? [];
+    setItemLines(items.map((i) => i.title ?? "").filter(Boolean).join("\n"));
+    setShowPreview(true);
+    toast.success("Template aplicado — revise e salve.");
+  };
+
+  const startRunForMember = async (checklistId: string, memberId: string) => {
+    const { data, error } = await supabase.rpc(
+      "create_checklist_run_for_member",
+      {
+        p_checklist_id: checklistId,
+        p_company_member_id: memberId,
+      },
+    );
+    if (error || !(data as { ok?: boolean })?.ok) {
+      toast.error("Falha ao gerar link.");
+      return;
+    }
+    const row = data as { slug?: string; token?: string };
+    const base = window.location.origin.replace(/\/$/, "");
+    const url = row.slug
+      ? `${base}/k/${row.slug}`
+      : `${base}/checklist/${row.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copiado.");
+    } catch {
+      toast.message(url);
+    }
   };
 
   const save = async () => {
@@ -534,6 +626,32 @@ export function Checklists() {
           <History className="h-4 w-4 shrink-0" />
           Histórico
         </button>
+        <button
+          type="button"
+          onClick={() => setChecklistsTab("conferencia")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            checklistsTab === "conferencia"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <ClipboardCheck className="h-4 w-4 shrink-0" />
+          Conferência
+        </button>
+        <button
+          type="button"
+          onClick={() => setChecklistsTab("ranking")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            checklistsTab === "ranking"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Trophy className="h-4 w-4 shrink-0" />
+          Ranking
+        </button>
       </div>
 
       <div className="space-y-8 pt-6">
@@ -545,6 +663,10 @@ export function Checklists() {
               period={performancePeriod}
               onPeriodChange={setPerformancePeriod}
             />
+
+            {companyId ? (
+              <ChecklistNotificationSettingsCard companyId={companyId} />
+            ) : null}
 
             <Card>
               <CardHeader>
@@ -576,6 +698,18 @@ export function Checklists() {
                           </p>
                         </div>
                         <div className="flex gap-1">
+                          {members[0] ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                void startRunForMember(r.id, members[0]!.id)
+                              }
+                            >
+                              Gerar link
+                            </Button>
+                          ) : null}
                           <Button
                             type="button"
                             variant="ghost"
@@ -602,13 +736,17 @@ export function Checklists() {
               </CardContent>
             </Card>
           </>
-        ) : (
+        ) : checklistsTab === "historico" ? (
           <ChecklistHistorySection
             companyId={companyId}
             checklists={rows.map((r) => ({ id: r.id, title: r.title }))}
             members={members}
           />
-        )}
+        ) : checklistsTab === "conferencia" && companyId ? (
+          <ChecklistConferenceSection companyId={companyId} />
+        ) : checklistsTab === "ranking" && companyId ? (
+          <ChecklistRankingSection companyId={companyId} />
+        ) : null}
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -623,6 +761,77 @@ export function Checklists() {
             </SheetDescription>
           </SheetHeader>
           <div className="flex flex-1 flex-col gap-4 px-4 pb-2">
+            {!editing ? (
+              <div className="space-y-2 rounded-xl border border-dashed p-3">
+                <Label className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-orange-500" />
+                  Criar com o Faro (IA)
+                </Label>
+                <Textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder='Ex.: "Monta um checklist de abertura do bar"'
+                  rows={2}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={aiBusy}
+                    onClick={() => void generateAiDraft()}
+                  >
+                    {aiBusy ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="mr-2 h-4 w-4" />
+                    )}
+                    Enviar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void applyTemplate("abertura-bar")}
+                  >
+                    Template abertura
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void applyTemplate("fechamento-bar")}
+                  >
+                    Template fechamento
+                  </Button>
+                </div>
+                {aiHint ? (
+                  <p className="text-xs text-muted-foreground">{aiHint}</p>
+                ) : null}
+                <div className="flex items-center gap-2 text-xs">
+                  <Switch
+                    checked={showPreview}
+                    onCheckedChange={setShowPreview}
+                    id="cl-preview"
+                  />
+                  <Label htmlFor="cl-preview">Prévia PWA</Label>
+                </div>
+                {showPreview && itemLines.trim() ? (
+                  <div className="rounded-2xl border bg-muted/30 p-3">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">
+                      Como o funcionário vê
+                    </p>
+                    <p className="mt-1 font-bold">{title || "Sem título"}</p>
+                    <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm">
+                      {splitItemLines(itemLines)
+                        .slice(0, 8)
+                        .map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="cl-title">Título</Label>
               <Input
