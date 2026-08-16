@@ -26,17 +26,18 @@ import {
   Target,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import { toast } from "sonner";
 
-export function Orcamento() {
+export function OrcamentoPanel({
+  period,
+  onPeriodChange,
+}: {
+  period: MonthYear;
+  onPeriodChange: (value: MonthYear) => void;
+}) {
   const { currentCompany } = useCompany();
-  const now = new Date();
-  const [period, setPeriod] = useState<MonthYear>({
-    month: now.getMonth() + 1,
-    year: now.getFullYear(),
-  });
 
   const {
     loading,
@@ -127,16 +128,10 @@ export function Orcamento() {
     semCategoriaCount === 0;
 
   return (
-    <PageShell>
-      <PageHeader
-        title="Orçamento vs Realizado"
-        description="Metas de custo/despesa por categoria — o realizado usa contas a pagar (e CMV de vendas na competência)."
-        icon={Target}
-      />
-
+    <div className="space-y-6">
       <ReferencePeriodCard
         value={period}
-        onChange={setPeriod}
+        onChange={onPeriodChange}
         title="Período de referência"
         description={`Comparativo de ${periodLabel.toLowerCase()}`}
       />
@@ -182,10 +177,10 @@ export function Orcamento() {
                 <p>
                   Não entram no realizado do orçamento. Classifique em{" "}
                   <Link
-                    to="/app/dre"
+                    to="/app/dre?view=sem-categoria"
                     className="font-medium text-orange-800 underline underline-offset-2 dark:text-orange-200"
                   >
-                    DRE / Resultado → Sem categoria
+                    Resultado → Sem categoria
                   </Link>
                   .
                 </p>
@@ -287,6 +282,25 @@ export function Orcamento() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export function Orcamento() {
+  const now = new Date();
+  const [period, setPeriod] = useState<MonthYear>({
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  });
+
+  return (
+    <PageShell>
+      <PageHeader
+        title="Orçamento vs Realizado"
+        description="Metas de custo/despesa por categoria — o realizado usa contas a pagar (e CMV de vendas na competência)."
+        icon={Target}
+      />
+      <OrcamentoPanel period={period} onPeriodChange={setPeriod} />
     </PageShell>
   );
 }

@@ -5,14 +5,17 @@ import { PageShell } from "@/components/PageShell";
 import { VendasRealizadasResumo } from "@/components/revenue/VendasRealizadasResumo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CmvMargens } from "@/pages/CmvMargens";
 import { FaturamentoEpoc } from "@/pages/FaturamentoEpoc";
-import { CalendarDays, LayoutDashboard, Receipt, TrendingUp } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Percent, Receipt, TrendingUp } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-type VendasTab = "resumo" | "calendario" | "faturamento";
+type VendasTab = "resumo" | "calendario" | "faturamento" | "margens";
 
 function parseVendasTab(raw: string | null): VendasTab {
-  if (raw === "calendario" || raw === "faturamento") return raw;
+  if (raw === "calendario" || raw === "faturamento" || raw === "margens") {
+    return raw;
+  }
   return "resumo";
 }
 
@@ -31,6 +34,7 @@ function VendasRealizadasTabToggle({
     { value: "resumo", label: "Resumo", icon: LayoutDashboard },
     { value: "calendario", label: "Calendário", icon: CalendarDays },
     { value: "faturamento", label: "Faturamento", icon: Receipt },
+    { value: "margens", label: "Margens", icon: Percent },
   ];
 
   return (
@@ -92,13 +96,17 @@ export function VendasRealizadasFluxo() {
         description={
           tab === "faturamento"
             ? "Resumo diário do relatório de faturamento EPOC (Total Geral, produtos/serviços, fiscal e formas de pagamento)."
-            : "Panorama das vendas do período e comparação com o intervalo anterior."
+            : tab === "margens"
+              ? "Custo, markup e margem por produto — e lacunas de CMV."
+              : "Panorama das vendas do período e comparação com o intervalo anterior."
         }
         icon={TrendingUp}
       />
       {tabToggle}
       {tab === "faturamento" ? (
         <FaturamentoEpoc embedded />
+      ) : tab === "margens" ? (
+        <CmvMargens embedded />
       ) : (
         <VendasRealizadasResumo />
       )}

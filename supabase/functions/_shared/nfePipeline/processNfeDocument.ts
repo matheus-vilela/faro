@@ -11,6 +11,7 @@ import {
   resolveProductsForInterpretLog,
 } from "../stagingNfeInterpretPostProcess.ts";
 import { enqueueJob, loadSyncState } from "./db.ts";
+import { recordConsultaHistory } from "./consultaHistory.ts";
 import { NFE_XML_BUCKET } from "./env.ts";
 import type { JobResult } from "./types.ts";
 
@@ -24,7 +25,7 @@ export async function processNfeDocumentById(
   const { data: doc, error: docErr } = await admin
     .from("nfe_documents")
     .select(
-      "id, company_id, chave, fetch_status, process_status, xml_storage_bucket, xml_storage_path",
+      "id, company_id, chave, cycle_id, fetch_status, process_status, xml_storage_bucket, xml_storage_path",
     )
     .eq("id", documentId)
     .eq("company_id", companyId)
@@ -33,7 +34,16 @@ export async function processNfeDocumentById(
   if (docErr) return { ok: false, error: docErr.message, retryAfterMs: 15_000 };
   if (!doc) return { ok: false, error: "nfe_document não encontrado", fatal: true };
 
+  const cycleId =
+    typeof doc.cycle_id === "string" ? doc.cycle_id.trim() : "";
+  const refreshHistory = async (onboarding: boolean) => {
+    if (!cycleId) return;
+    await recordConsultaHistory(admin, companyId, cycleId, onboarding);
+  };
+
   if (doc.process_status === "done") {
+    const syncState = await loadSyncState(admin, companyId);
+    await refreshHistory(syncState?.mode === "onboarding");
     return { ok: true, detail: { skipped: "already_done" } };
   }
   if (doc.fetch_status !== "downloaded") {
@@ -61,6 +71,8 @@ export async function processNfeDocumentById(
     .download(path);
   if (dlErr || !file) {
     await markProcessFailed(admin, documentId, dlErr?.message ?? "download storage falhou");
+    const syncState = await loadSyncState(admin, companyId);
+    await refreshHistory(syncState?.mode === "onboarding");
     return {
       ok: false,
       error: dlErr?.message ?? "download storage falhou",
@@ -70,6 +82,7 @@ export async function processNfeDocumentById(
 
   const xmlText = await file.text();
   const chave = String(doc.chave ?? "").replace(/\D/g, "");
+
   const interpret = interpretStagingNfeXmlForLog(chave, xmlText);
   if (!interpret.parse_ok) {
     await markProcessFailed(
@@ -77,6 +90,8 @@ export async function processNfeDocumentById(
       documentId,
       interpret.parse_erro ?? "parse_xml_falhou",
     );
+    const syncState = await loadSyncState(admin, companyId);
+    await refreshHistory(syncState?.mode === "onboarding");
     return {
       ok: false,
       error: interpret.parse_erro ?? "parse_xml_falhou",
@@ -97,6 +112,7 @@ export async function processNfeDocumentById(
     );
     if (catErr) {
       await markProcessFailed(admin, documentId, catErr);
+      await refreshHistory(isOnboarding);
       return { ok: false, error: catErr, retryAfterMs: 30_000 };
     }
 
@@ -147,6 +163,8 @@ export async function processNfeDocumentById(
       });
     }
 
+    await refreshHistory(isOnboarding);
+
     console.log(LOG, JSON.stringify({
       fase: "process_nfe_ok",
       company_id: companyId,
@@ -171,6 +189,8 @@ export async function processNfeDocumentById(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await markProcessFailed(admin, documentId, msg);
+    const syncState = await loadSyncState(admin, companyId);
+    await refreshHistory(syncState?.mode === "onboarding");
     return { ok: false, error: msg, retryAfterMs: 30_000 };
   }
 }

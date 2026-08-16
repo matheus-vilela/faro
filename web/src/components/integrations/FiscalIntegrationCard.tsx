@@ -3,8 +3,8 @@ import {
   useFiscalIntegrationStatus,
 } from "@/components/integrations/FiscalCertificateConfigSection";
 import { FiscalFlowDiagnosticPanel } from "@/components/integrations/FiscalFlowDiagnosticPanel";
+import { IntegrationProviderCard } from "@/components/integrations/IntegrationProviderCard";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -28,7 +28,6 @@ import {
 } from "@/lib/companySyncLocks";
 import { inferNfeFlowDiagnosticFromHistory } from "@/lib/nfeFlowDiagnostic";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 import {
   listFocusNfeConsultaHistory,
   purgeNfeConsultaHistory,
@@ -38,7 +37,6 @@ import { invokeNfePipelineForCompany } from "@/services/nfePipelineService";
 import type { CompanySetupMap } from "@/types/companySetup";
 import {
   AlertTriangle,
-  ChevronRight,
   Clock3,
   FileKey,
   Loader2,
@@ -224,70 +222,38 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
   };
 
   return (
-    <>
-      <Card
-        className={cn(
-          "overflow-hidden transition-shadow hover:shadow-md",
+    <div className="h-full min-w-0">
+      <IntegrationProviderCard
+        title="Fiscal"
+        description="Certificado A1 e consulta de NF-e recebidas na SEFAZ NFe."
+        status={
+          active ? "active" : hasEmpresaFocus && !certAtivo ? "warning" : "inactive"
+        }
+        statusLabel={
           active
-            ? "border-emerald-500/35 ring-1 ring-emerald-500/20"
-            : "border-border/80",
-        )}
-      >
-        <div className="flex min-h-22 items-stretch">
-          <button
-            type="button"
-            onClick={() => setSheetOpen(true)}
-            className={cn(
-              "flex min-w-0 flex-1 items-center gap-4 p-5 text-left transition-colors",
-              "hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-            )}
-          >
-            <div
-              className={cn(
-                "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border",
-                active
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
-                  : "border-border bg-muted/50 text-muted-foreground",
-              )}
-            >
-              <FileKey className="h-6 w-6" aria-hidden />
+            ? "Ativo"
+            : hasEmpresaFocus && !certAtivo
+              ? "Sem certificado"
+              : "Inativo"
+        }
+        meta={
+          lastSyncAt
+            ? `Última consulta: ${formatDateTimeBr(lastSyncAt)}`
+            : "Ainda sem consulta na SEFAZ"
+        }
+        actionLabel={active ? "Gerenciar" : "Configurar"}
+        onOpen={() => setSheetOpen(true)}
+        brand={
+          <div className="flex h-full items-center justify-center bg-sky-950">
+            <div className="flex items-center gap-3 text-sky-50">
+              <FileKey className="h-8 w-8" aria-hidden />
+              <span className="text-xl font-semibold tracking-tight">
+                NF-e
+              </span>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-base font-semibold tracking-tight text-foreground">
-                Fiscal
-              </p>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                Certificado A1 e consulta de NF-e recebidas na SEFAZ NFe.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              {active ? (
-                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]"
-                    aria-hidden
-                  />
-                  Ativo
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span
-                    className="h-2 w-2 rounded-full bg-muted-foreground/50"
-                    aria-hidden
-                  />
-                  {hasEmpresaFocus && !certAtivo
-                    ? "Sem certificado"
-                    : "Inativo"}
-                </span>
-              )}
-              <ChevronRight
-                className="h-5 w-5 text-muted-foreground"
-                aria-hidden
-              />
-            </div>
-          </button>
-        </div>
-      </Card>
+          </div>
+        }
+      />
 
       <Sheet
         open={sheetOpen}
@@ -480,7 +446,8 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
                             {item.onboarding ? " · onboarding" : ""}
                           </p>
                           <p className="mt-2 text-sm text-foreground">
-                            {item.summary?.trim() ||
+                            {flowDiagnostic.summary?.trim() ||
+                              item.summary?.trim() ||
                               (item.nfes_encontradas === 0
                                 ? "Nenhuma NF-e nova na consulta."
                                 : `${item.nfes_encontradas} NF-e(s) encontrada(s).`)}
@@ -579,6 +546,6 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

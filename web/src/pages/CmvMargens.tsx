@@ -207,7 +207,11 @@ function KpiCard({
   );
 }
 
-export function CmvMargens() {
+export function CmvMargens({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
 
@@ -416,16 +420,9 @@ export function CmvMargens() {
     </div>
   );
 
-  return (
-    <PageShell>
-      <PageHeader
-        title="CMV & Margens"
-        description="Custo, markup e margem por produto — e lacunas de CMV"
-        icon={Percent}
-        action={tabToggle}
-      />
-
+  const body = (
       <div className="space-y-4">
+        {embedded ? tabToggle : null}
         <div
           className="flex flex-wrap gap-2"
           role="group"
@@ -473,6 +470,21 @@ export function CmvMargens() {
           />
         )}
       </div>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <PageShell>
+      <PageHeader
+        title="CMV & Margens"
+        description="Custo, markup e margem por produto — e lacunas de CMV"
+        icon={Percent}
+        action={tabToggle}
+      />
+      {body}
     </PageShell>
   );
 }

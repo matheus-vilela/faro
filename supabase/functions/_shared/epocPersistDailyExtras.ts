@@ -2,9 +2,7 @@
  * Persiste serviços + faturamento diários a partir do HTML do portal EPOC.
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import {
-  extractFaturamentoRowsFromAcoesHtml,
-} from "./epocFaturamentoCsv.ts";
+import { extractFaturamentoRowsFromAcoesHtml } from "./epocFaturamentoCsv.ts";
 import {
   interpretTabela3FromRows,
   interpretTabela5FromRows,
@@ -87,7 +85,8 @@ export function aggregateVendaServicosItemRows(
     prev.surcharge += surcharge;
     prev.allocation += allocation;
     prev.lineCount += 1;
-    prev.unitPrice = prev.quantity > 0 ? prev.grossValue / prev.quantity : unitPrice;
+    prev.unitPrice =
+      prev.quantity > 0 ? prev.grossValue / prev.quantity : unitPrice;
   }
   return [...byCode.values()];
 }
@@ -213,7 +212,10 @@ export async function persistServicesFromAcoesHtml(
         .select("id")
         .single();
       if (insErr || !created) {
-        return { ok: false, error: insErr?.message ?? "Falha ao criar serviço" };
+        return {
+          ok: false,
+          error: insErr?.message ?? "Falha ao criar serviço",
+        };
       }
       serviceId = created.id as string;
     } else if (existing && existing.name !== sale.name) {
@@ -303,8 +305,12 @@ export async function persistFaturamentoFromAcoesHtml(
         company_id: companyId,
         faturamento_date: faturamentoDate,
         quantity: parsePtBrNumber(geral.quantidade),
-        produtos: parsePtBrNumber(geral.produtos),
-        servicos: parsePtBrNumber(geral.servicos),
+        produtos:
+          (parsePtBrNumber(geral.produtos) ?? 0) +
+          (parsePtBrNumber(geral.totCons) ?? 0),
+        servicos:
+          (parsePtBrNumber(geral.servicos) ?? 0) +
+          (parsePtBrNumber(geral.totEnt) ?? 0),
         taxas: parsePtBrNumber(geral.taxas),
         total: parsePtBrNumber(geral.total),
         ticket_medio: parsePtBrNumber(geral.media),
@@ -318,7 +324,10 @@ export async function persistFaturamentoFromAcoesHtml(
     .single();
 
   if (fatErr || !fatRow) {
-    return { ok: false, error: fatErr?.message ?? "Falha ao gravar faturamento" };
+    return {
+      ok: false,
+      error: fatErr?.message ?? "Falha ao gravar faturamento",
+    };
   }
 
   const faturamentoDailyId = fatRow.id as string;
@@ -428,14 +437,10 @@ export function buildPartialSyncSummary(gaps: {
 }): string | null {
   const parts: string[] = [];
   if (gaps.services.length > 0) {
-    parts.push(
-      `serviços em falta em ${gaps.services.length} dia(s)`,
-    );
+    parts.push(`serviços em falta em ${gaps.services.length} dia(s)`);
   }
   if (gaps.faturamento.length > 0) {
-    parts.push(
-      `faturamento em falta em ${gaps.faturamento.length} dia(s)`,
-    );
+    parts.push(`faturamento em falta em ${gaps.faturamento.length} dia(s)`);
   }
   if (parts.length === 0) return null;
   return `Sync parcial: conseguiu produtos, mas faltam ${parts.join(" e ")}.`;

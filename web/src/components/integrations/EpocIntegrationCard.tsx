@@ -1,5 +1,10 @@
+import epocLogo from "@/assets/empresas/epoc.webp";
+import { EpocFlowDiagnosticPanel } from "@/components/integrations/EpocFlowDiagnosticPanel";
+import {
+  IntegrationProviderCard,
+  IntegrationProviderCardSkeleton,
+} from "@/components/integrations/IntegrationProviderCard";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,14 +31,13 @@ import {
   inferEpocFlowDiagnosticFromLegacy,
   type EpocFlowDiagnostic,
 } from "@/lib/epocFlowDiagnostic";
+import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
+import { triggerEpocPipelineInBackground } from "@/services/epocPipelineService";
 import {
   invokeEpocCsvSync,
   releaseStalePdvSyncLockIfIdle,
 } from "@/services/epocSyncCsvService";
-import { triggerEpocPipelineInBackground } from "@/services/epocPipelineService";
-import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
 import {
   mergeEpocSettingsForUpsert,
   parseEpocSettings,
@@ -42,7 +46,6 @@ import {
   type EpocIntegrationSettings,
 } from "@/types/companyIntegration";
 import {
-  ChevronRight,
   Clock3,
   Download,
   Loader2,
@@ -53,7 +56,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { EpocFlowDiagnosticPanel } from "@/components/integrations/EpocFlowDiagnosticPanel";
 
 /** Fila após CSV gerado → importação de receitas. */
 type EpocImportJobHistoryRow = {
@@ -830,79 +832,29 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   };
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex justify-center py-14">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
+    return <IntegrationProviderCardSkeleton />;
   }
 
   return (
-    <>
-      <Card
-        className={cn(
-          "overflow-hidden transition-shadow hover:shadow-md",
+    <div className="h-full min-w-0">
+      <IntegrationProviderCard
+        title="EPOC"
+        description="Por enquanto, importa só vendas realizadas. Sincronização automática uma vez ao dia."
+        status={enabled ? "active" : "inactive"}
+        statusLabel={enabled ? "Ativo" : "Inativo"}
+        meta={
           enabled
-            ? "border-emerald-500/35 ring-1 ring-emerald-500/20"
-            : "border-border/80",
-        )}
-      >
-        <div className="flex min-h-22 items-stretch">
-          <button
-            type="button"
-            onClick={() => setSheetOpen(true)}
-            className={cn(
-              "flex min-w-0 flex-1 items-center gap-4 p-5 text-left transition-colors",
-              "hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-            )}
-          >
-            <div
-              className={cn(
-                "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-sm font-bold tracking-tight",
-                enabled
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400"
-                  : "border-border bg-muted/50 text-muted-foreground",
-              )}
-            >
-              E
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-base font-semibold tracking-tight text-foreground">
-                EPOC
-              </p>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                Por enquanto, importa só vendas realizadas. Sincronização
-                automática uma vez ao dia.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              {enabled ? (
-                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]"
-                    aria-hidden
-                  />
-                  Ativo
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span
-                    className="h-2 w-2 rounded-full bg-muted-foreground/50"
-                    aria-hidden
-                  />
-                  Inativo
-                </span>
-              )}
-              <ChevronRight
-                className="h-5 w-5 text-muted-foreground"
-                aria-hidden
-              />
-            </div>
-          </button>
-        </div>
-      </Card>
+            ? "Sincronização automática diária"
+            : "Portal ainda não conectado"
+        }
+        actionLabel={enabled ? "Gerenciar" : "Configurar"}
+        onOpen={() => setSheetOpen(true)}
+        brand={
+          <div className="flex h-full items-center justify-center bg-black">
+            <img src={epocLogo} alt="" className="h-10 w-auto object-contain" />
+          </div>
+        }
+      />
 
       <Sheet
         open={sheetOpen}
@@ -1045,7 +997,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   </div> */}
                 </div>
 
-                <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
+                {/* <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
                   <p className="text-sm font-medium">Importação EPOC</p>
                   <p className="text-xs text-muted-foreground">
                     O import automático de receitas usa as categorias
@@ -1080,26 +1032,9 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                       compact
                     />
                   ) : null}
+                </div> */}
 
-                  <div className="grid gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full"
-                      onClick={() => void handleDownloadLastCsv()}
-                      disabled={!lastEpocCsvStoragePath || downloadingLastCsv}
-                    >
-                      {downloadingLastCsv ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="mr-2 h-4 w-4" />
-                      )}
-                      Baixar último CSV
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                {/* <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
                   <p className="text-sm font-medium text-destructive">
                     Receitas importadas do EPOC
                   </p>
@@ -1116,7 +1051,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     <Trash2 className="mr-2 h-4 w-4" />
                     Apagar receitas importadas do EPOC
                   </Button>
-                </div>
+                </div> */}
               </>
             ) : (
               <div className="space-y-3">
@@ -1179,19 +1114,20 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                         const linkedJob = linkedJobId
                           ? importJobsById.get(linkedJobId)
                           : undefined;
-                        const flowDiagnostic = inferEpocFlowDiagnosticFromLegacy({
-                          kind: "sync_run",
-                          outcome: item.outcome,
-                          summary: item.summary,
-                          metadata: item.metadata,
-                          linkedImportJob: linkedJob
-                            ? {
-                                status: linkedJob.status,
-                                errorMessage: linkedJob.error_message,
-                                metadata: linkedJob.metadata,
-                              }
-                            : null,
-                        });
+                        const flowDiagnostic =
+                          inferEpocFlowDiagnosticFromLegacy({
+                            kind: "sync_run",
+                            outcome: item.outcome,
+                            summary: item.summary,
+                            metadata: item.metadata,
+                            linkedImportJob: linkedJob
+                              ? {
+                                  status: linkedJob.status,
+                                  errorMessage: linkedJob.error_message,
+                                  metadata: linkedJob.metadata,
+                                }
+                              : null,
+                          });
                         return (
                           <div
                             key={`run-${item.id}`}
@@ -1538,6 +1474,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

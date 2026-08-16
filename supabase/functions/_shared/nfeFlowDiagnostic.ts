@@ -244,12 +244,12 @@ export function buildNfeCycleFlowDiagnostic(
         xml_download: downloadPhase,
         xml_interpret: phase(
           "xml_interpret",
-          "warn",
+          "pending",
           `${processed}/${downloaded} nota(s) interpretadas.`,
         ),
       },
       null,
-      `Ciclo encerrado com ${processed}/${downloaded} nota(s) interpretadas.`,
+      `A interpretar ${processed}/${downloaded} nota(s).`,
     );
   }
 

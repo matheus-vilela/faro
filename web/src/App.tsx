@@ -26,14 +26,12 @@ import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
 import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoFornecedoresGlobais";
 import { Dre } from "@/pages/Dre";
-import { Orcamento } from "@/pages/Orcamento";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { MeuDesempenho } from "@/pages/MeuDesempenho";
 import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSlug";
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
-import { CmvMargens } from "@/pages/CmvMargens";
 import { ConfiguracoesAdquirentes } from "@/pages/ConfiguracoesAdquirentes";
 import { FormasPagamento } from "@/pages/FormasPagamento";
 import { Fornecedores } from "@/pages/Fornecedores";
@@ -151,7 +149,10 @@ function AuthenticatedLayout() {
               <Navigate to="/app/configuracoes/formas-de-pagamento" replace />
             }
           />
-          <Route path="cmv-margens" element={<PermissionRouteGuard permission="vendas_realizadas"><CmvMargens /></PermissionRouteGuard>} />
+          <Route
+            path="cmv-margens"
+            element={<Navigate to="/app/vendas-realizadas?tab=margens" replace />}
+          />
           <Route
             path="fluxo-de-caixa"
             element={
@@ -199,7 +200,10 @@ function AuthenticatedLayout() {
               </AdminRoute>
             }
           />
-          <Route path="orcamento" element={<PermissionRouteGuard permission="dre"><Orcamento /></PermissionRouteGuard>} />
+          <Route
+            path="orcamento"
+            element={<Navigate to="/app/dre?tab=orcamento" replace />}
+          />
           <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
           <Route path="configuracoes" element={<PermissionRouteGuard permissions={["configuracoes", "integracoes"]}><ConfiguracoesLayout /></PermissionRouteGuard>}>
             <Route index element={<Navigate to="usuarios" replace />} />

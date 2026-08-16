@@ -63,6 +63,18 @@ describe("buildNfeCycleFlowDiagnostic", () => {
     expect(d.blocked_at).toBe("xml_interpret");
     expect(d.phases.xml_interpret.status).toBe("fail");
   });
+
+  it("marca interpretação em curso enquanto faltar notas", () => {
+    const d = buildNfeCycleFlowDiagnostic({
+      listed: 28,
+      downloaded: 28,
+      processed: 0,
+      processFailed: 0,
+    });
+    expect(d.phases.xml_download.status).toBe("ok");
+    expect(d.phases.xml_interpret.status).toBe("pending");
+    expect(d.phases.xml_interpret.message).toBe("0/28 nota(s) interpretadas.");
+  });
 });
 
 describe("inferNfeFlowDiagnosticFromHistory", () => {
@@ -78,5 +90,25 @@ describe("inferNfeFlowDiagnosticFromHistory", () => {
       flowDiagnostic: frozen,
     });
     expect(d.phases.xml_interpret.status).toBe("ok");
+  });
+
+  it("reconstrói diagnóstico quando o snapshot ficou atrás dos contadores", () => {
+    const stale = buildNfeCycleFlowDiagnostic({
+      listed: 28,
+      downloaded: 28,
+      processed: 0,
+      processFailed: 0,
+    });
+    expect(stale.phases.xml_interpret.status).toBe("pending");
+    const d = inferNfeFlowDiagnosticFromHistory({
+      nfesEncontradas: 28,
+      flowDiagnostic: stale,
+      listedCount: 28,
+      downloadedCount: 28,
+      processedCount: 28,
+      failedCount: 0,
+    });
+    expect(d.phases.xml_interpret.status).toBe("ok");
+    expect(d.phases.xml_interpret.message).toBe("28 nota(s) interpretada(s).");
   });
 });

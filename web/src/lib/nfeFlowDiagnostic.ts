@@ -36,12 +36,6 @@ export function inferNfeFlowDiagnosticFromHistory(input: {
   failedCount?: number | null;
   ignoredCount?: number | null;
 }): NfeFlowDiagnostic {
-  const metaFlow = input.flowDiagnostic;
-  if (metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)) {
-    const d = metaFlow as NfeFlowDiagnostic;
-    if (d.phases && d.summary) return d;
-  }
-
   const listed =
     input.listedCount != null
       ? Number(input.listedCount) || 0
@@ -53,6 +47,17 @@ export function inferNfeFlowDiagnosticFromHistory(input: {
   const failed = Number(input.failedCount ?? 0) || 0;
   const ignored = Number(input.ignoredCount ?? 0) || 0;
   let processed = Number(input.processedCount ?? 0) || 0;
+
+  const metaFlow = input.flowDiagnostic;
+  const hasCounters =
+    input.processedCount != null || input.downloadedCount != null;
+  if (metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)) {
+    const d = metaFlow as NfeFlowDiagnostic;
+    const searchFailed = d.phases?.nfe_search?.status === "fail";
+    // Snapshot de busca falha prevalece; nos demais casos os contadores
+    // atualizados vencem um flow_diagnostic gravado cedo (ex.: 0/N).
+    if (d.phases && d.summary && (searchFailed || !hasCounters)) return d;
+  }
   // Histórico legado sem contadores de interpretação: assume sucesso se baixou e não falhou.
   if (
     input.processedCount == null &&

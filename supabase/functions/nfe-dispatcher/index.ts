@@ -15,7 +15,10 @@ import {
   json,
   parseJsonBody,
 } from "../_shared/nfePipeline/auth.ts";
-import { enqueueSyncCompanyWithQueuedHistory } from "../_shared/nfePipeline/consultaHistory.ts";
+import {
+  enqueueSyncCompanyWithQueuedHistory,
+  reconcileStaleConsultaHistories,
+} from "../_shared/nfePipeline/consultaHistory.ts";
 import { dispatcherCompaniesPerTick } from "../_shared/nfePipeline/env.ts";
 
 const LOG = "[nfe-dispatcher]";
@@ -181,6 +184,17 @@ Deno.serve(async (req) => {
     }
   }
 
+  let reconciled = 0;
+  try {
+    reconciled = await reconcileStaleConsultaHistories(admin);
+  } catch (e) {
+    console.warn(
+      LOG,
+      "consulta_history_reconcile",
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+
   // Cron / dispatcher geral
   const { data: bfCount, error: bfErr } = await admin.rpc(
     "nfe_sync_backfill_missing_states",
@@ -236,6 +250,7 @@ Deno.serve(async (req) => {
     fase: "dispatch",
     mode,
     backfilled,
+    reconciled,
     due: rows.length,
     enqueued,
   }));
@@ -244,6 +259,7 @@ Deno.serve(async (req) => {
     ok: true,
     mode,
     backfilled,
+    reconciled,
     due: rows.length,
     enqueued,
     detail: details,

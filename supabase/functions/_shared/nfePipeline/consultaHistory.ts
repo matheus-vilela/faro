@@ -3,6 +3,7 @@
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
+  buildNfeCycleFlowDiagnostic,
   buildNfeQueuedFlowDiagnostic,
   type NfeFlowDiagnostic,
 } from "../nfeFlowDiagnostic.ts";
@@ -129,6 +130,181 @@ export async function enqueueSyncCompanyWithQueuedHistory(
   }
 
   return { jobId: enq.id, cycleId: effectiveCycleId };
+}
+
+/**
+ * Recalcula e grava o diagnóstico do ciclo a partir dos nfe_documents
+ * com este cycle_id (exec_id do histórico).
+ */
+export async function recordConsultaHistory(
+  admin: SupabaseClient,
+  companyId: string,
+  cycleId: string | null,
+  onboarding: boolean,
+  opts?: {
+    searchFailed?: boolean;
+    searchError?: string | null;
+    flowDiagnostic?: NfeFlowDiagnostic | null;
+  },
+): Promise<void> {
+  if (!cycleId) return;
+
+  try {
+    const base = () =>
+      admin
+        .from("nfe_documents")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("cycle_id", cycleId);
+
+    const [
+      listedRes,
+      ignoredRes,
+      downloadedRes,
+      downloadFailedRes,
+      processedRes,
+      processFailedRes,
+    ] = await Promise.all([
+      base().neq("fetch_status", "ignored"),
+      base().eq("fetch_status", "ignored"),
+      base()
+        .eq("fetch_status", "downloaded")
+        .not("xml_storage_path", "is", null),
+      base().eq("fetch_status", "failed"),
+      base().eq("fetch_status", "downloaded").eq("process_status", "done"),
+      base().eq("fetch_status", "downloaded").eq("process_status", "failed"),
+    ]);
+
+    for (const res of [
+      listedRes,
+      ignoredRes,
+      downloadedRes,
+      downloadFailedRes,
+      processedRes,
+      processFailedRes,
+    ]) {
+      if (res.error) {
+        console.warn(LOG, "consulta_history_count", companyId, res.error.message);
+      }
+    }
+
+    const listed = listedRes.count ?? 0;
+    const ignored = ignoredRes.count ?? 0;
+    const downloaded = downloadedRes.count ?? 0;
+    const downloadFailed = downloadFailedRes.count ?? 0;
+    const processed = processedRes.count ?? 0;
+    const processFailed = processFailedRes.count ?? 0;
+
+    const flowDiagnostic =
+      opts?.flowDiagnostic ??
+      buildNfeCycleFlowDiagnostic({
+        searchFailed:
+          Boolean(opts?.searchFailed) && listed === 0 && ignored === 0,
+        searchError: opts?.searchError,
+        listed,
+        downloaded,
+        downloadFailed,
+        processed,
+        processFailed,
+        ignored,
+      });
+
+    const { error: insErr } = await admin.from("nfe_consulta_history").upsert(
+      {
+        company_id: companyId,
+        exec_id: cycleId,
+        nfes_encontradas: listed,
+        staging_xml_total: downloaded,
+        onboarding,
+        summary: flowDiagnostic.summary,
+        flow_diagnostic: flowDiagnostic,
+        listed_count: listed,
+        downloaded_count: downloaded,
+        processed_count: processed,
+        failed_count: processFailed + downloadFailed,
+        ignored_count: ignored,
+      },
+      { onConflict: "company_id,exec_id" },
+    );
+
+    if (insErr) {
+      console.warn(LOG, "consulta_history_insert", companyId, insErr.message);
+      return;
+    }
+
+    console.log(LOG, JSON.stringify({
+      fase: "consulta_history",
+      company_id: companyId,
+      exec_id: cycleId,
+      nfes_encontradas: listed,
+      staging_xml_total: downloaded,
+      processed,
+      process_failed: processFailed,
+      download_failed: downloadFailed,
+      ignored,
+      onboarding,
+      flow_blocked_at: flowDiagnostic.blocked_at,
+    }));
+  } catch (e) {
+    console.warn(
+      LOG,
+      "consulta_history_exception",
+      companyId,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+}
+
+/**
+ * Recalcula históricos recentes em que o snapshot ficou atrás dos
+ * nfe_documents (ex.: close_cycle gravou 0/N e zerou o cycle_id).
+ */
+export async function reconcileStaleConsultaHistories(
+  admin: SupabaseClient,
+  limit = 20,
+): Promise<number> {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: rows, error } = await admin
+    .from("nfe_consulta_history")
+    .select(
+      "company_id, exec_id, onboarding, downloaded_count, processed_count",
+    )
+    .gte("consulta_at", since)
+    .order("consulta_at", { ascending: false })
+    .limit(200);
+  if (error) {
+    console.warn(LOG, "consulta_history_reconcile_list", error.message);
+    return 0;
+  }
+
+  let n = 0;
+  for (const row of rows ?? []) {
+    const down = Number(row.downloaded_count ?? 0) || 0;
+    const proc = Number(row.processed_count ?? 0) || 0;
+    if (down <= 0 || proc >= down) continue;
+
+    const companyId = String(row.company_id ?? "");
+    const cycleId = String(row.exec_id ?? "").trim();
+    if (!companyId || !cycleId) continue;
+
+    const { count: liveDown } = await admin
+      .from("nfe_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("cycle_id", cycleId)
+      .eq("fetch_status", "downloaded");
+    if ((liveDown ?? 0) === 0) continue;
+
+    await recordConsultaHistory(
+      admin,
+      companyId,
+      cycleId,
+      Boolean(row.onboarding),
+    );
+    n += 1;
+    if (n >= limit) break;
+  }
+  return n;
 }
 
 export type { NfeFlowDiagnostic };

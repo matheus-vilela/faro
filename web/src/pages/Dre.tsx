@@ -49,6 +49,7 @@ import type { DreTreeNode } from "@/lib/dre/dreTree";
 import { buildDreTreeForBucket } from "@/lib/dre/dreTree";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { cn } from "@/lib/utils";
+import { OrcamentoPanel } from "@/pages/Orcamento";
 import {
   AlertTriangle,
   BarChart3,
@@ -61,20 +62,36 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
+type DrePageTab = "resultado" | "orcamento";
 type DreMainView = "resumo" | "cascata" | "contador" | "sem-categoria";
+
+function parseDrePageTab(raw: string | null): DrePageTab {
+  return raw === "orcamento" ? "orcamento" : "resultado";
+}
+
+function parseDreMainView(raw: string | null): DreMainView {
+  if (raw === "cascata" || raw === "contador" || raw === "sem-categoria") {
+    return raw;
+  }
+  return "resumo";
+}
 
 export function Dre() {
   const { user } = useAuth();
   const { currentCompany } = useCompany();
+  const [searchParams, setSearchParams] = useSearchParams();
   const now = new Date();
   const [period, setPeriod] = useState<MonthYear>({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
   const [checklistOpen, setChecklistOpen] = useState(false);
-  const [mainView, setMainView] = useState<DreMainView>("resumo");
+  const pageTab = parseDrePageTab(searchParams.get("tab"));
+  const [mainView, setMainView] = useState<DreMainView>(() =>
+    parseDreMainView(searchParams.get("view")),
+  );
   const [history, setHistory] = useState<DreHistoryPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
@@ -171,6 +188,19 @@ export function Dre() {
     return projectMonthEndLucro(computed.lucroLiquido, period);
   }, [computed, period]);
 
+  useEffect(() => {
+    const raw = searchParams.get("view");
+    if (raw) setMainView(parseDreMainView(raw));
+  }, [searchParams]);
+
+  const setPageTab = (next: DrePageTab) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (next === "resultado") nextParams.delete("tab");
+    else nextParams.set("tab", next);
+    if (next === "orcamento") nextParams.delete("view");
+    setSearchParams(nextParams, { replace: true });
+  };
+
   const showUnclassifiedBanner =
     !loading &&
     (categoryTotals.semCategoriaCount > 0 ||
@@ -180,18 +210,55 @@ export function Dre() {
   return (
     <PageShell>
       <PageHeader
-        title="DRE / Resultado"
-        description="Quanto sobrou no período — por vencimento dos lançamentos (competência)."
-        icon={BarChart3}
-        action={
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link to="/app/orcamento">
-              <Target className="mr-2 h-4 w-4" />
-              Orçamento
-            </Link>
-          </Button>
+        title="Resultado"
+        description={
+          pageTab === "orcamento"
+            ? "Metas de custo/despesa por categoria — o realizado usa contas a pagar (e CMV de vendas na competência)."
+            : "Quanto sobrou no período — por vencimento dos lançamentos (competência)."
         }
+        icon={BarChart3}
       />
+
+      <div
+        className="mb-6 inline-flex max-w-full flex-wrap rounded-full bg-muted p-1"
+        role="tablist"
+        aria-label="Visão de resultado"
+      >
+        {(
+          [
+            { value: "resultado" as const, label: "Resultado", icon: BarChart3 },
+            { value: "orcamento" as const, label: "Orçamento", icon: Target },
+          ] as const
+        ).map((opt) => {
+          const active = pageTab === opt.value;
+          const Icon = opt.icon;
+          return (
+            <Button
+              key={opt.value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              variant="ghost"
+              size="sm"
+              onClick={() => setPageTab(opt.value)}
+              className={cn(
+                "h-8 rounded-full px-3 text-sm font-medium shadow-none",
+                active
+                  ? "bg-ring text-foreground shadow-sm hover:!bg-ring/80"
+                  : "text-muted-foreground hover:bg-ring hover:text-foreground",
+              )}
+            >
+              <Icon className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {opt.label}
+            </Button>
+          );
+        })}
+      </div>
+
+      {pageTab === "orcamento" ? (
+        <OrcamentoPanel period={period} onPeriodChange={setPeriod} />
+      ) : (
+        <>
 
       <Accordion type="single" collapsible className="mb-4">
         <AccordionItem value="como-conta" className="border-border/60">
@@ -513,6 +580,8 @@ export function Dre() {
           </CardContent>
         </Card>
       ) : null}
+        </>
+      )}
     </PageShell>
   );
 }

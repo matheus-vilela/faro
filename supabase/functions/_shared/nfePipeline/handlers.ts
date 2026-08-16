@@ -27,10 +27,9 @@ import {
 import { processNfeDocumentById } from "./processNfeDocument.ts";
 import type { JobResult, NfeJobRow } from "./types.ts";
 import {
-  buildNfeCycleFlowDiagnostic,
-  type NfeFlowDiagnostic,
-} from "../nfeFlowDiagnostic.ts";
-import { upsertQueuedNfeConsultaHistory } from "./consultaHistory.ts";
+  recordConsultaHistory,
+  upsertQueuedNfeConsultaHistory,
+} from "./consultaHistory.ts";
 
 const LOG = "[nfe-pipeline]";
 
@@ -384,7 +383,7 @@ async function handleDownloadXml(
 
   const { data: doc, error: docErr } = await admin
     .from("nfe_documents")
-    .select("id, fetch_status, process_status")
+    .select("id, fetch_status, process_status, cycle_id")
     .eq("company_id", companyId)
     .eq("chave", chave)
     .maybeSingle();
@@ -483,6 +482,19 @@ async function handleDownloadXml(
     }).eq("company_id", companyId);
   }
 
+  const cycleId =
+    (typeof doc.cycle_id === "string" && doc.cycle_id.trim()) ||
+    (typeof state?.cycle_id === "string" && state.cycle_id.trim()) ||
+    "";
+  if (cycleId) {
+    await recordConsultaHistory(
+      admin,
+      companyId,
+      cycleId,
+      state?.mode === "onboarding",
+    );
+  }
+
   await enqueueProcessNfe(admin, {
     companyId,
     documentId: String(doc.id),
@@ -545,127 +557,6 @@ async function handleProcessNfe(
     return processNfeDocumentById(admin, job.company_id, String(doc.id));
   }
   return processNfeDocumentById(admin, job.company_id, documentId);
-}
-
-async function recordConsultaHistory(
-  admin: SupabaseClient,
-  companyId: string,
-  cycleId: string | null,
-  onboarding: boolean,
-  opts?: {
-    searchFailed?: boolean;
-    searchError?: string | null;
-    flowDiagnostic?: NfeFlowDiagnostic | null;
-  },
-): Promise<void> {
-  if (!cycleId) return;
-
-  try {
-    const base = () =>
-      admin
-        .from("nfe_documents")
-        .select("id", { count: "exact", head: true })
-        .eq("company_id", companyId)
-        .eq("cycle_id", cycleId);
-
-    const [
-      listedRes,
-      ignoredRes,
-      downloadedRes,
-      downloadFailedRes,
-      processedRes,
-      processFailedRes,
-    ] = await Promise.all([
-      base().neq("fetch_status", "ignored"),
-      base().eq("fetch_status", "ignored"),
-      base()
-        .eq("fetch_status", "downloaded")
-        .not("xml_storage_path", "is", null),
-      base().eq("fetch_status", "failed"),
-      base().eq("fetch_status", "downloaded").eq("process_status", "done"),
-      base().eq("fetch_status", "downloaded").eq("process_status", "failed"),
-    ]);
-
-    for (const res of [
-      listedRes,
-      ignoredRes,
-      downloadedRes,
-      downloadFailedRes,
-      processedRes,
-      processFailedRes,
-    ]) {
-      if (res.error) {
-        console.warn(LOG, "consulta_history_count", companyId, res.error.message);
-      }
-    }
-
-    const listed = listedRes.count ?? 0;
-    const ignored = ignoredRes.count ?? 0;
-    const downloaded = downloadedRes.count ?? 0;
-    const downloadFailed = downloadFailedRes.count ?? 0;
-    const processed = processedRes.count ?? 0;
-    const processFailed = processFailedRes.count ?? 0;
-
-    const flowDiagnostic =
-      opts?.flowDiagnostic ??
-      buildNfeCycleFlowDiagnostic({
-        // Só marca falha de busca se o ciclo não listou nada (falha mid-paginação usa agregados).
-        searchFailed:
-          Boolean(opts?.searchFailed) && listed === 0 && ignored === 0,
-        searchError: opts?.searchError,
-        listed,
-        downloaded,
-        downloadFailed,
-        processed,
-        processFailed,
-        ignored,
-      });
-
-    // Sem consulta_at: preserva o horário do enqueue; DEFAULT now() só em insert novo.
-    const { error: insErr } = await admin.from("nfe_consulta_history").upsert(
-      {
-        company_id: companyId,
-        exec_id: cycleId,
-        nfes_encontradas: listed,
-        staging_xml_total: downloaded,
-        onboarding,
-        summary: flowDiagnostic.summary,
-        flow_diagnostic: flowDiagnostic,
-        listed_count: listed,
-        downloaded_count: downloaded,
-        processed_count: processed,
-        failed_count: processFailed + downloadFailed,
-        ignored_count: ignored,
-      },
-      { onConflict: "company_id,exec_id" },
-    );
-
-    if (insErr) {
-      console.warn(LOG, "consulta_history_insert", companyId, insErr.message);
-      return;
-    }
-
-    console.log(LOG, JSON.stringify({
-      fase: "consulta_history",
-      company_id: companyId,
-      exec_id: cycleId,
-      nfes_encontradas: listed,
-      staging_xml_total: downloaded,
-      processed,
-      process_failed: processFailed,
-      download_failed: downloadFailed,
-      ignored,
-      onboarding,
-      flow_blocked_at: flowDiagnostic.blocked_at,
-    }));
-  } catch (e) {
-    console.warn(
-      LOG,
-      "consulta_history_exception",
-      companyId,
-      e instanceof Error ? e.message : String(e),
-    );
-  }
 }
 
 async function handleCloseCycle(
@@ -747,6 +638,54 @@ async function handleCloseCycle(
   const processFailedN = processFailed ?? 0;
   const ignoredN = ignored ?? 0;
   const failedN = failed ?? 0;
+
+  let cycleId =
+    typeof state.cycle_id === "string" && state.cycle_id.trim()
+      ? state.cycle_id.trim()
+      : "";
+  if (!cycleId) {
+    const { data: cycleRow } = await admin
+      .from("nfe_documents")
+      .select("cycle_id")
+      .eq("company_id", companyId)
+      .not("cycle_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    cycleId =
+      typeof cycleRow?.cycle_id === "string" ? cycleRow.cycle_id.trim() : "";
+  }
+
+  if (cycleId) {
+    const cycleDocs = () =>
+      admin
+        .from("nfe_documents")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("cycle_id", cycleId);
+    const { count: cycleDownloaded } = await cycleDocs().eq(
+      "fetch_status",
+      "downloaded",
+    );
+    const { count: cycleProcessed } = await cycleDocs()
+      .eq("fetch_status", "downloaded")
+      .eq("process_status", "done");
+    const { count: cycleProcessFailed } = await cycleDocs()
+      .eq("fetch_status", "downloaded")
+      .eq("process_status", "failed");
+    const cycleDown = cycleDownloaded ?? 0;
+    const cycleDone = cycleProcessed ?? 0;
+    const cycleFail = cycleProcessFailed ?? 0;
+    if (cycleDown >= 1 && cycleDone + cycleFail < cycleDown) {
+      return {
+        ok: false,
+        softRequeue: true,
+        error: `aguardando process_nfe (${cycleDone}/${cycleDown})`,
+        retryAfterMs: 60_000,
+      };
+    }
+  }
+
   const cursor =
     state.pending_cursor_versao != null
       ? Number(state.pending_cursor_versao)
@@ -764,7 +703,7 @@ async function handleCloseCycle(
     await recordConsultaHistory(
       admin,
       companyId,
-      state.cycle_id,
+      cycleId || null,
       state.mode === "onboarding",
     );
     await admin.from("nfe_sync_state").update({
@@ -812,13 +751,6 @@ async function handleCloseCycle(
       if (patch.error) {
         return { ok: false, error: patch.error, retryAfterMs: 15_000 };
       }
-    } else if (downloadedN >= 1 && processedN < downloadedN) {
-      return {
-        ok: false,
-        softRequeue: true,
-        error: `aguardando process_nfe (${processedN}/${downloadedN})`,
-        retryAfterMs: 60_000,
-      };
     } else {
       emptyPoll += 1;
       nextSyncAt = addMinutesIso(onboardingEmptyPollMinutes());
@@ -849,7 +781,7 @@ async function handleCloseCycle(
   await recordConsultaHistory(
     admin,
     companyId,
-    state.cycle_id,
+    cycleId || null,
     state.mode === "onboarding",
   );
 

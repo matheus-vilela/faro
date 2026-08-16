@@ -30,8 +30,8 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { nestedRelation } from "@/types/acquirer";
 import { ArrowDownAZ, ArrowUpAZ, Receipt } from "lucide-react";
-import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 type FaturamentoRow = {
@@ -158,11 +158,7 @@ function SortableTh({
   );
 }
 
-export function FaturamentoEpoc({
-  embedded = false,
-}: {
-  embedded?: boolean;
-}) {
+export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
 
@@ -216,6 +212,7 @@ export function FaturamentoEpoc({
     if (Number.isFinite(minN)) q = q.gte("total", minN);
     if (Number.isFinite(maxN)) q = q.lte("total", maxN);
     const { data, error, count: c } = await q;
+    console.log("LOAD => ", data);
     setLoading(false);
     if (error) {
       toast.error(error.message);
@@ -232,6 +229,10 @@ export function FaturamentoEpoc({
   useEffect(() => {
     setPage(1);
   }, [dateFrom, dateTo, minTotal, maxTotal]);
+
+  useEffect(() => {
+    console.log(rows);
+  }, [rows]);
 
   const openDetail = async (row: FaturamentoRow) => {
     setDetail(row);
@@ -362,7 +363,9 @@ export function FaturamentoEpoc({
           </Button>
         ) : null}
         <Button type="button" variant="outline" size="sm" asChild>
-          <Link to="/app/configuracoes/formas-de-pagamento">Formas de pagamento</Link>
+          <Link to="/app/configuracoes/formas-de-pagamento">
+            Formas de pagamento
+          </Link>
         </Button>
         <Button type="button" variant="outline" size="sm" asChild>
           <Link to="/app/configuracoes/adquirentes">Adquirentes</Link>
@@ -524,7 +527,9 @@ export function FaturamentoEpoc({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground text-xs">Ticket médio</dt>
+                    <dt className="text-muted-foreground text-xs">
+                      Ticket médio
+                    </dt>
                     <dd className="font-mono tabular-nums">
                       {formatMoneyPtBr(Number(detail.ticket_medio))}
                     </dd>
@@ -613,7 +618,9 @@ export function FaturamentoEpoc({
                       <thead>
                         <tr className="bg-muted/40 border-b">
                           <th className="px-2 py-1.5 font-medium">Forma</th>
-                          <th className="px-2 py-1.5 font-medium">Adquirente</th>
+                          <th className="px-2 py-1.5 font-medium">
+                            Adquirente
+                          </th>
                           <th className="px-2 py-1.5 font-medium">Op.</th>
                           <th className="px-2 py-1.5 font-medium">Valor</th>
                         </tr>
@@ -630,14 +637,11 @@ export function FaturamentoEpoc({
                               </span>
                             </td>
                             <td className="px-2 py-1.5 text-muted-foreground">
-                              {nestedRelation(p.payment_methods?.acquirers)?.name ??
-                                "—"}
+                              {nestedRelation(p.payment_methods?.acquirers)
+                                ?.name ?? "—"}
                             </td>
                             <td className="px-2 py-1.5 font-mono tabular-nums">
-                              {formatNumberPtBr(
-                                Number(p.operation_count),
-                                0,
-                              )}
+                              {formatNumberPtBr(Number(p.operation_count), 0)}
                             </td>
                             <td className="px-2 py-1.5 font-mono tabular-nums">
                               {formatMoneyPtBr(Number(p.amount))}

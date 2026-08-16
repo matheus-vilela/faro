@@ -71,7 +71,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/contas-a-pagar", label: "Contas a pagar" },
     { prefix: "/app/vendas-realizadas", label: "Vendas realizadas" },
     { prefix: "/app/faturamento", label: "Faturamento" },
-    { prefix: "/app/cmv-margens", label: "CMV & Margens" },
+    { prefix: "/app/cmv-margens", label: "Vendas realizadas" },
     { prefix: "/app/fluxo-de-caixa", label: "Fluxo de caixa" },
     { prefix: "/app/fornecedores", label: "Fornecedores" },
     { prefix: "/app/produtos", label: "Produtos e estoque" },
@@ -82,8 +82,8 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/integracoes", label: "Integrações" },
     { prefix: "/app/desenvolvimento/fornecedores", label: "Fornecedores globais" },
     { prefix: "/app/desenvolvimento", label: "Administrador" },
-    { prefix: "/app/orcamento", label: "Orçamento" },
-    { prefix: "/app/dre", label: "DRE / Resultado" },
+    { prefix: "/app/orcamento", label: "Resultado" },
+    { prefix: "/app/dre", label: "Resultado" },
   ];
 
   for (const { prefix, label } of underApp) {

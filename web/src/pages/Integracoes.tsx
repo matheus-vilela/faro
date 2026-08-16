@@ -18,7 +18,7 @@ export function Integracoes() {
 
   if (!canManage) {
     return (
-      <PageShell className="space-y-8" narrow>
+      <PageShell className="space-y-8 pb-0">
         <PageHeader
           title="Integrações"
           description="Conecte sistemas externos ao Faro"
@@ -37,7 +37,7 @@ export function Integracoes() {
   }
 
   return (
-    <PageShell className="space-y-8" narrow>
+    <PageShell className="space-y-8 pb-0">
       <PageHeader
         title="Integrações"
         description="Conecte sistemas externos ao Faro. As credenciais ficam vinculadas a esta empresa e visíveis apenas para quem tem permissão de integrações."
@@ -45,7 +45,7 @@ export function Integracoes() {
       />
 
       {companyId ? (
-        <div className="space-y-6">
+        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
           <FiscalIntegrationCard companyId={companyId} />
           <EpocIntegrationCard companyId={companyId} />
         </div>
