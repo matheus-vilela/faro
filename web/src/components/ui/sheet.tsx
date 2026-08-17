@@ -5,6 +5,35 @@ import { Dialog as SheetPrimitive } from "radix-ui"
 import { readSheetMaximized, writeSheetMaximized } from "@/lib/sheetUiPrefs"
 import { cn } from "@/lib/utils"
 
+const STACKED_LAYER_SELECTOR = [
+  "[data-slot='sheet-content']",
+  "[data-slot='sheet-overlay']",
+  "[data-slot='dialog-content']",
+  "[data-slot='dialog-overlay']",
+  "[data-slot='alert-dialog-content']",
+  "[data-slot='alert-dialog-overlay']",
+].join(",")
+
+function outsideEventTarget(event: Event): EventTarget | null {
+  if ("detail" in event) {
+    const original = (event as CustomEvent<{ originalEvent?: Event }>).detail
+      ?.originalEvent
+    if (original?.target) return original.target
+  }
+  return event.target
+}
+
+function isForeignStackedLayer(
+  target: EventTarget | null,
+  roots: Array<HTMLElement | null>,
+) {
+  if (!(target instanceof Element)) return false
+  if (roots.some((root) => root?.contains(target))) return false
+  const layer = target.closest(STACKED_LAYER_SELECTOR)
+  if (!(layer instanceof Element)) return false
+  return !roots.some((root) => root && (root === layer || root.contains(layer)))
+}
+
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
 }
@@ -54,6 +83,9 @@ function SheetContent({
   showCloseButton = true,
   maximizable = false,
   onOpenAutoFocus,
+  onPointerDownOutside,
+  onFocusOutside,
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -62,16 +94,31 @@ function SheetContent({
   maximizable?: boolean
 }) {
   const [maximized, setMaximized] = React.useState(readSheetMaximized)
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
+  const overlayRef = React.useRef<HTMLDivElement | null>(null)
 
   const setMaximizedAndPersist = React.useCallback((next: boolean) => {
     setMaximized(next)
     writeSheetMaximized(next)
   }, [])
 
+  const preventStackedDismiss = React.useCallback((event: Event) => {
+    if (
+      isForeignStackedLayer(outsideEventTarget(event), [
+        contentRef.current,
+        overlayRef.current,
+      ])
+    ) {
+      event.preventDefault()
+    }
+  }, [])
+
   return (
     <SheetPortal>
-      <SheetOverlay className={overlayClassName} />
+      <SheetOverlay ref={overlayRef} className={overlayClassName} />
       <SheetPrimitive.Content
+        {...props}
+        ref={contentRef}
         data-slot="sheet-content"
         data-maximized={maximized ? "true" : undefined}
         className={cn(
@@ -94,7 +141,18 @@ function SheetContent({
           setMaximized(readSheetMaximized())
           onOpenAutoFocus?.(event)
         }}
-        {...props}
+        onPointerDownOutside={(event) => {
+          preventStackedDismiss(event)
+          onPointerDownOutside?.(event)
+        }}
+        onFocusOutside={(event) => {
+          preventStackedDismiss(event)
+          onFocusOutside?.(event)
+        }}
+        onInteractOutside={(event) => {
+          preventStackedDismiss(event)
+          onInteractOutside?.(event)
+        }}
       >
         {children}
         {(maximizable || showCloseButton) && (

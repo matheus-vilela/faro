@@ -69,15 +69,12 @@ export function RevenueDaySalesSheet({
   onOpenChange,
   formatCurrency,
   onProductClick,
-  modal = true,
 }: {
   payload: RevenueCalendarDayListPayload | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   formatCurrency: (v: number) => string;
   onProductClick?: (revenueEntryId: string) => void;
-  /** Quando outro sheet está por cima, use false para não fechar este ao interagir. */
-  modal?: boolean;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>(readSheetInfoView);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -134,7 +131,7 @@ export function RevenueDaySalesSheet({
   const serviceCount = allItems.filter((i) => i.kind === "service").length;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} modal={modal}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         maximizable
         className={cn(

@@ -1083,7 +1083,6 @@ export function Receitas() {
         onProductClick={(id) => {
           setDetailRevenueId(id);
         }}
-        modal={!detailRevenueId}
       />
 
       <Sheet open={sheetOpen} onOpenChange={handleOpenSheet}>
