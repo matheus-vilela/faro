@@ -2,14 +2,11 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
-import {
-  getMonthRange,
-  MonthSelector,
-  type MonthYear,
-} from "@/components/MonthSelector";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { NotasRecebimentoListRow, NOTAS_RECEBIMENTO_LIST_GRID } from "@/components/recebimento/NotasRecebimentoListRow";
 import { RecebimentoReviewPanel } from "@/components/recebimento/RecebimentoReviewPanel";
 import { RecebimentoShareDialog } from "@/components/recebimento/RecebimentoShareDialog";
@@ -1239,10 +1236,10 @@ export function Despesas() {
       />
 
       <div className="shrink-0 space-y-3">
-        <MonthSelector
+        <ReferencePeriodCard
           value={period}
           onChange={setPeriod}
-          className="[&_button]:h-9 [&_button]:w-9 [&_span]:min-w-40 [&_span]:text-sm [&_span]:font-semibold sm:[&_span]:min-w-44"
+          description="Lista de notas usa este mês"
         />
         <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">

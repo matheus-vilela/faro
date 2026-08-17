@@ -1,6 +1,7 @@
 import { ExpenseFinancialReconciliationPanel } from "@/components/expenses/ExpenseFinancialReconciliationPanel";
 import { ExpenseRecordedDivergenceBanner } from "@/components/expenses/ExpenseImportAttentionPanel";
 import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
+import { ExpenseItemsInlineTable } from "@/components/expenses/ExpenseItemsInlineTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,8 +42,11 @@ import {
 import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { findExpenseDuplicateId } from "@/lib/expenseDedup";
+import {
+  expenseIsReceived,
+  expenseItemHasVinculo,
+} from "@/lib/expenseItemVinculo";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
-import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -151,8 +155,9 @@ function BoletoUnlinkedBlock() {
 
 const EXPENSE_SELECT = `
   *,
-  expense_items (*, products (id, name, current_quantity, min_quantity)),
-  suppliers (id, name, document, sales_contact_name, sales_whatsapp, commercial_manager)
+  expense_items (*, products (id, name, current_quantity, min_quantity, unit)),
+  suppliers (id, name, document, sales_contact_name, sales_whatsapp, commercial_manager),
+  recebimentos (id, status)
 `;
 
 type ExpenseItemStockRow = {
@@ -283,16 +288,7 @@ export function ExpenseDetailSheet({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [approvingWhatsapp, setApprovingWhatsapp] = useState(false);
-  const [linkItemSheetOpen, setLinkItemSheetOpen] = useState(false);
   const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
-  const [linkItem, setLinkItem] = useState<{
-    id: string;
-    product_name: string;
-    quantity: number;
-    unit_value: number;
-  } | null>(null);
-  const [linkProductId, setLinkProductId] = useState<string>("");
-  const [linkSaving, setLinkSaving] = useState(false);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
   const supportDataLoadedCompanyRef = useRef<string | null>(null);
@@ -324,8 +320,21 @@ export function ExpenseDetailSheet({
 
   const detailUnlinkedProductRows = useMemo(() => {
     if (!detailExpense?.expense_items?.length) return 0;
-    return detailExpense.expense_items.filter((it) => !it.product_id).length;
+    return detailExpense.expense_items.filter(
+      (it) => !expenseItemHasVinculo(it),
+    ).length;
   }, [detailExpense?.expense_items]);
+
+  const noteIsReceived = useMemo(
+    () => (detailExpense ? expenseIsReceived(detailExpense) : false),
+    [detailExpense],
+  );
+
+  const canEditItems =
+    !!detailExpense &&
+    !noteIsReceived &&
+    detailExpense.status !== "rejected" &&
+    (canEditDespesas || isOwner);
 
   const supplierSelectOptions = useMemo(
     () => suppliers.map(supplierSearchOption),
@@ -444,61 +453,6 @@ export function ExpenseDetailSheet({
     }
   };
 
-  const handleLinkItemSave = async () => {
-    if (!linkItem?.id || !linkProductId) return;
-    setLinkSaving(true);
-    const oldItem = detailExpense?.expense_items?.find(
-      (i) => i.id === linkItem.id,
-    );
-    const oldPid = oldItem?.product_id ?? null;
-    const hadStock = !!(oldPid && oldItem?.stock_added);
-
-    if (hadStock && oldPid !== linkProductId) {
-      await reverseExpenseItemStock({
-        id: linkItem.id,
-        product_id: oldPid,
-        stock_added: true,
-        quantity: Number(oldItem!.quantity),
-        stock_quantity: oldItem!.stock_quantity ?? undefined,
-        unit_value: Number(oldItem!.unit_value),
-      });
-      await applyExpenseItemStockIn({
-        id: linkItem.id,
-        product_id: linkProductId,
-        quantity: Number(linkItem.quantity),
-        stock_quantity: oldItem!.stock_quantity ?? undefined,
-        unit_value: Number(linkItem.unit_value),
-      });
-    }
-
-    const { error } = await supabase
-      .from("expense_items")
-      .update({
-        product_id: linkProductId,
-        stock_added: hadStock,
-      })
-      .eq("id", linkItem.id);
-    setLinkSaving(false);
-    if (error) {
-      toast.error("Erro ao vincular");
-      return;
-    }
-    toast.success("Produto vinculado");
-    setLinkItemSheetOpen(false);
-    setLinkItem(null);
-    if (detailExpense?.id) {
-      const { data } = await supabase
-        .from("expenses")
-        .select(
-          "*, expense_items (*, products (id, name, current_quantity, min_quantity))",
-        )
-        .eq("id", detailExpense.id)
-        .single();
-      if (data) setDetailExpense(data as Expense);
-    }
-    onRefresh?.();
-  };
-
   const handleRejectWhatsappExpense = async () => {
     if (!detailExpense?.id || !isOwner) return;
     setApprovingWhatsapp(true);
@@ -528,6 +482,15 @@ export function ExpenseDetailSheet({
 
   const handleApproveWhatsappExpense = async () => {
     if (!detailExpense?.id || !isOwner) return;
+    const missingVinculo = (detailExpense.expense_items ?? []).some(
+      (it) => !expenseItemHasVinculo(it),
+    );
+    if (missingVinculo) {
+      toast.error(
+        "Vincule ou crie um produto em todos os itens antes de aprovar.",
+      );
+      return;
+    }
     setApprovingWhatsapp(true);
     const { data, error } = await supabase.rpc(
       "approve_whatsapp_expense_as_owner",
@@ -550,6 +513,14 @@ export function ExpenseDetailSheet({
       .eq("id", detailExpense.id)
       .single();
     if (updated) setDetailExpense(updated as Expense);
+    if (companyId) {
+      const { data: prod } = await supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name");
+      setProducts((prod as Product[]) ?? []);
+    }
     onRefresh?.();
   };
 
@@ -819,17 +790,6 @@ export function ExpenseDetailSheet({
     onClose();
   };
 
-  const openLinkItemSheet = (it: {
-    id: string;
-    product_name: string;
-    quantity: number;
-    unit_value: number;
-  }) => {
-    setLinkItem(it);
-    setLinkProductId("");
-    setLinkItemSheetOpen(true);
-  };
-
   const handleSheetOpenChange = (o: boolean) => {
     if (!o) {
       onClose();
@@ -844,7 +804,7 @@ export function ExpenseDetailSheet({
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
           maximizable
-          className={cn("overflow-y-auto sm:max-w-xl", elevated && "z-[70]")}
+          className={cn("overflow-y-auto sm:max-w-6xl", elevated && "z-[70]")}
           overlayClassName={elevated ? "z-[70]" : undefined}
         >
           {loading && (
@@ -1359,112 +1319,32 @@ export function ExpenseDetailSheet({
                     unlinkedProductRowCount={detailUnlinkedProductRows}
                   />
 
-                  {(detailExpense.expense_items?.length ?? 0) > 0 && (
-                    <div>
-                      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Itens da nota fiscal
-                      </p>
-                      <div className="rounded-lg border overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-muted/50">
-                              <th className="text-left p-2 font-medium">
-                                Produto
-                              </th>
-                              <th className="text-left p-2 font-medium">
-                                Estoque
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Qtd
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Valor un.
-                              </th>
-                              <th className="text-right p-2 font-medium">
-                                Subtotal
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detailExpense.expense_items!.map((it, i) => {
-                              const rawLineName = it.product_name || "";
-                              const strippedLine =
-                                stripPackSizeFromLabel(rawLineName).trim() ||
-                                rawLineName;
-                              const catalogName = it.products?.name?.trim();
-                              const primary =
-                                catalogName ||
-                                strippedLine ||
-                                rawLineName ||
-                                "—";
-                              return (
-                                <tr key={i} className="border-t">
-                                  <td className="p-2">
-                                    <span>{primary}</span>
-                                    {it.metadata_json?.product_merge ? (
-                                      <Badge
-                                        variant="outline"
-                                        className="mt-1.5 text-xs font-normal"
-                                      >
-                                        Unificado de{" "}
-                                        {
-                                          it.metadata_json.product_merge
-                                            .from_product_name
-                                        }
-                                      </Badge>
-                                    ) : null}
-                                    {catalogName &&
-                                      (strippedLine !== catalogName ||
-                                        rawLineName !== catalogName) && (
-                                        <p className="text-xs text-muted-foreground mt-0.5">
-                                          Nota: {strippedLine || rawLineName}
-                                        </p>
-                                      )}
-                                  </td>
-                                  <td className="p-2">
-                                    {it.product_id ? (
-                                      <Badge variant="secondary">
-                                        Vinculado
-                                      </Badge>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openLinkItemSheet({
-                                            id: it.id!,
-                                            product_name: it.product_name,
-                                            quantity: Number(it.quantity),
-                                            unit_value: Number(it.unit_value),
-                                          });
-                                        }}
-                                      >
-                                        Vincular
-                                      </Button>
-                                    )}
-                                  </td>
-                                  <td className="p-2 text-right">
-                                    {it.quantity}
-                                  </td>
-                                  <td className="p-2 text-right">
-                                    {formatCurrency(Number(it.unit_value))}
-                                  </td>
-                                  <td className="p-2 text-right">
-                                    {formatCurrency(
-                                      Number(it.quantity) *
-                                        Number(it.unit_value),
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+                  <ExpenseItemsInlineTable
+                    items={detailExpense.expense_items ?? []}
+                    canEdit={canEditItems}
+                    companyId={companyId}
+                    products={products}
+                    deferProductCreation={
+                      detailExpense.expense_source === "whatsapp" &&
+                      detailExpense.status === "pending"
+                    }
+                    highlightMissingVinculo={
+                      detailExpense.expense_source === "whatsapp" &&
+                      detailExpense.status === "pending"
+                    }
+                    onSaved={(created) => {
+                      if (created) {
+                        setProducts((prev) => {
+                          if (prev.some((p) => p.id === created.id)) return prev;
+                          return [...prev, created].sort((a, b) =>
+                            a.name.localeCompare(b.name, "pt-BR"),
+                          );
+                        });
+                      }
+                      void loadExpenseData();
+                      onRefresh?.();
+                    }}
+                  />
 
                   {detailExpense.expense_source === "whatsapp" &&
                     detailExpense.status === "pending" &&
@@ -1474,11 +1354,20 @@ export function ExpenseDetailSheet({
                           Esta nota fiscal só entra no recebimento e nos alertas
                           depois da sua aprovação.
                         </p>
+                        {detailUnlinkedProductRows > 0 ? (
+                          <p className="text-sm text-amber-950 dark:text-amber-100">
+                            Vincule ou crie um produto em todos os itens (coluna
+                            Vínculo) antes de aprovar.
+                          </p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
-                            disabled={approvingWhatsapp}
+                            disabled={
+                              approvingWhatsapp ||
+                              detailUnlinkedProductRows > 0
+                            }
                             onClick={() => void handleApproveWhatsappExpense()}
                           >
                             {approvingWhatsapp
@@ -1779,66 +1668,6 @@ export function ExpenseDetailSheet({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Sheet
-        open={linkItemSheetOpen}
-        onOpenChange={(o) => {
-          if (!o) {
-            setLinkItemSheetOpen(false);
-            setLinkItem(null);
-          }
-        }}
-      >
-        <SheetContent>
-          {linkItem && (
-            <>
-              <SheetHeader>
-                <SheetTitle>Vincular ao produto</SheetTitle>
-                <SheetDescription>
-                  Vincule este item da nota a um produto do estoque. O estoque
-                  será atualizado quando o recebimento for confirmado.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="space-y-4 py-6">
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">{linkItem.product_name || "—"}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {Number(linkItem.quantity).toLocaleString("pt-BR")} un ×{" "}
-                    {formatCurrency(linkItem.unit_value)}
-                  </p>
-                </div>
-                <div>
-                  <Label>Produto (estoque)</Label>
-                  <SearchSelect
-                    value={linkProductId}
-                    onValueChange={setLinkProductId}
-                    options={productSelectOptions}
-                    placeholder="Selecione o produto"
-                    searchPlaceholder="Buscar produto…"
-                    emptyMessage="Nenhum produto encontrado."
-                    triggerClassName="mt-2"
-                  />
-                </div>
-              </div>
-              <SheetFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setLinkItemSheetOpen(false)}
-                  disabled={linkSaving}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleLinkItemSave}
-                  disabled={!linkProductId || linkSaving}
-                >
-                  {linkSaving ? "Vinculando..." : "Vincular"}
-                </Button>
-              </SheetFooter>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
     </>
   );
 }
