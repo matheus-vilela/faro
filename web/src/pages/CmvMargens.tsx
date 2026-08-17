@@ -1,4 +1,5 @@
 import { CmvProductDetailSheet } from "@/components/cmv/CmvProductDetailSheet";
+import { FaroTipBand } from "@/components/FaroTipBand";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,6 @@ import { cn } from "@/lib/utils";
 import { getResumoRanges, normalizeWeekStartsOn } from "@/lib/vendasRealizadasResumo";
 import type { RevenueEntry } from "@/types/revenue";
 import {
-  AlertTriangle,
   ExternalLink,
   LayoutGrid,
   Loader2,
@@ -593,14 +593,7 @@ function MargemPanel({
         />
       </div>
 
-      {insight ? (
-        <Card className="shadow-sm">
-          <CardContent className="flex gap-3 p-4 text-sm leading-relaxed text-muted-foreground">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <p>{insight}</p>
-          </CardContent>
-        </Card>
-      ) : null}
+      {insight ? <FaroTipBand>{insight}</FaroTipBand> : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <div

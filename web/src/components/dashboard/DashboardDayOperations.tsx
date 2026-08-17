@@ -442,7 +442,7 @@ export function DashboardDayOperations({
     <section aria-label="Operação do dia" className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight">
             Operação do dia
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -839,12 +839,12 @@ function DayOpMetricCell({
   const isZero = value === "0";
   return (
     <div className="flex min-w-0 flex-col gap-1 px-3.5 py-3">
-      <span className="text-[11px] font-medium text-muted-foreground leading-none">
+      <span className="text-sm text-muted-foreground leading-none">
         {label}
       </span>
       <span
         className={cn(
-          "text-2xl font-bold tabular-nums leading-none tracking-tight",
+          "text-2xl font-bold tabular-nums leading-none tracking-tight sm:text-[1.65rem]",
           emphasize && !isZero && "text-primary",
           isZero && "text-muted-foreground",
         )}
@@ -853,7 +853,7 @@ function DayOpMetricCell({
       </span>
       <span
         className={cn(
-          "line-clamp-2 text-[11px] leading-snug",
+          "line-clamp-2 text-xs leading-snug",
           isZero ? "text-muted-foreground/80" : "text-foreground/70",
         )}
         title={hint}
