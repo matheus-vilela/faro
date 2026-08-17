@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { addDaysYmd } from "@/lib/payableTotals";
 import {
   applyScenarioToRawItems,
   buildWeeklyBuckets,
   computeCashFlowProjection,
+  getCashFlowFetchRange,
+  getCashFlowFetchRangePadded,
   getMondayOfWeekYmd,
   parseOpeningBalance,
   resolveBucketAssignmentYmd,
   toRawCashFlowItem,
 } from "./computeCashFlowProjection";
+import { SCENARIO_FETCH_PADDING_DAYS } from "./scenarioPresets";
 
 describe("computeCashFlowProjection", () => {
   const todayYmd = "2026-07-27"; // segunda-feira
@@ -102,7 +106,7 @@ describe("computeCashFlowProjection", () => {
     const optItem = applyScenarioToRawItems([raw], "optimistic", todayYmd)[0];
 
     expect(baseItem.simulatedDateYmd).toBe("2026-08-10");
-    expect(optItem.simulatedDateYmd).toBe("2026-08-07");
+    expect(optItem.simulatedDateYmd).toBe("2026-08-03");
   });
 
   it("itens antes da semana 1 ficam fora dos buckets (não agrupam na semana atual)", () => {
@@ -161,7 +165,7 @@ describe("computeCashFlowProjection", () => {
     const pendingSim = applyScenarioToRawItems([pending], "optimistic", todayYmd)[0];
 
     expect(settledSim.simulatedDateYmd).toBe("2026-08-10");
-    expect(pendingSim.simulatedDateYmd).toBe("2026-08-07");
+    expect(pendingSim.simulatedDateYmd).toBe("2026-08-03");
   });
 
   it("cenários redistribuem pendentes futuros a partir do vencimento", () => {
@@ -203,12 +207,13 @@ describe("computeCashFlowProjection", () => {
     // Base: ambos em 10/08 → semana índice 2 (10–16/08).
     expect(base.buckets[2].outflows).toBe(1000);
     expect(base.buckets[2].inflows).toBe(2000);
-    // Otimista: entrada −3d (07/08 → sem. 1), saída +7d (17/08 → sem. 3).
+    // Otimista: entrada −7d (03/08 → sem. 1), saída +7d (17/08 → sem. 3).
     expect(optimistic.buckets[1].inflows).toBe(2000);
     expect(optimistic.buckets[2].outflows).toBe(0);
     expect(optimistic.buckets[3].outflows).toBe(1000);
-    // Pessimista: saída 0d (sem. 2), entrada +7d (17/08 → sem. 3).
-    expect(pessimistic.buckets[2].outflows).toBe(1000);
+    // Pessimista: saída −7d (03/08 → sem. 1), entrada +7d (17/08 → sem. 3).
+    expect(pessimistic.buckets[1].outflows).toBe(1000);
+    expect(pessimistic.buckets[2].outflows).toBe(0);
     expect(pessimistic.buckets[2].inflows).toBe(0);
     expect(pessimistic.buckets[3].inflows).toBe(2000);
   });
@@ -269,5 +274,97 @@ describe("computeCashFlowProjection", () => {
     expect(result.meta.clampedToLastBucketCount).toBe(1);
     expect(result.buckets[3].inflows).toBe(800);
     expect(result.buckets[3].items[0]?.clampedToHorizon).toBe(true);
+  });
+
+  it("offset que cairia no passado usa hoje (semana atual)", () => {
+    const raw = toRawCashFlowItem({
+      id: "soon",
+      direction: "inflow",
+      amount: 400,
+      dueDateYmd: "2026-07-29",
+    });
+    const [item] = applyScenarioToRawItems([raw], "optimistic", todayYmd);
+
+    expect(item.simulatedDateYmd).toBe(todayYmd);
+
+    const result = computeCashFlowProjection({
+      rawItems: [raw],
+      scenario: "optimistic",
+      openingBalance: 0,
+      todayYmd,
+      horizonWeeks: 4,
+    });
+    expect(result.buckets[0].inflows).toBe(400);
+  });
+
+  it("item na borda após o horizonte entra só quando o cenário puxa para dentro", () => {
+    const buckets = buildWeeklyBuckets(todayYmd, 4);
+    const lastWeekEnd = buckets[buckets.length - 1].endYmd;
+    const afterHorizon = toRawCashFlowItem({
+      id: "pad-in",
+      direction: "inflow",
+      amount: 900,
+      dueDateYmd: addDaysYmd(lastWeekEnd, 3),
+    });
+
+    const base = computeCashFlowProjection({
+      rawItems: [afterHorizon],
+      scenario: "base",
+      openingBalance: 0,
+      todayYmd,
+      horizonWeeks: 4,
+    });
+    const optimistic = computeCashFlowProjection({
+      rawItems: [afterHorizon],
+      scenario: "optimistic",
+      openingBalance: 0,
+      todayYmd,
+      horizonWeeks: 4,
+    });
+
+    expect(base.kpis.totalInflows).toBe(0);
+    expect(base.meta.clampedToLastBucketCount).toBe(0);
+    expect(optimistic.kpis.totalInflows).toBe(900);
+    expect(optimistic.buckets[3].inflows).toBe(900);
+    expect(optimistic.meta.clampedToLastBucketCount).toBe(0);
+  });
+
+  it("item na borda antes da semana 1 entra no pessimista (atraso de recebimento)", () => {
+    const beforeWeek1 = toRawCashFlowItem({
+      id: "pad-early",
+      direction: "inflow",
+      amount: 350,
+      dueDateYmd: "2026-07-24",
+    });
+
+    const base = computeCashFlowProjection({
+      rawItems: [beforeWeek1],
+      scenario: "base",
+      openingBalance: 0,
+      todayYmd,
+      horizonWeeks: 4,
+    });
+    const pessimistic = computeCashFlowProjection({
+      rawItems: [beforeWeek1],
+      scenario: "pessimistic",
+      openingBalance: 0,
+      todayYmd,
+      horizonWeeks: 4,
+    });
+
+    expect(base.kpis.totalInflows).toBe(0);
+    expect(pessimistic.kpis.totalInflows).toBe(350);
+    expect(pessimistic.buckets[0].inflows).toBe(350);
+  });
+
+  it("busca com folga de 7 dias em volta do horizonte visível", () => {
+    const visible = getCashFlowFetchRange(todayYmd, 4, 1);
+    const padded = getCashFlowFetchRangePadded(todayYmd, 4, 1);
+
+    expect(visible.startYmd).toBe("2026-07-27");
+    expect(visible.endYmd).toBe("2026-08-23");
+    expect(padded.startYmd).toBe("2026-07-20");
+    expect(padded.endYmd).toBe("2026-08-30");
+    expect(SCENARIO_FETCH_PADDING_DAYS).toBe(7);
   });
 });

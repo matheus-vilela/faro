@@ -3,7 +3,10 @@ import {
   normalizeWeekStartsOn,
   startOfAccountingWeek,
 } from "@/lib/vendasRealizadasResumo";
-import { applyScenarioOffset } from "./scenarioPresets";
+import {
+  applyScenarioOffset,
+  SCENARIO_FETCH_PADDING_DAYS,
+} from "./scenarioPresets";
 import type {
   CashFlowBucketItem,
   CashFlowDirection,
@@ -74,6 +77,7 @@ export function resolveBucketAssignmentYmd(
 function resolveBucketIndex(
   assignYmd: string,
   weekDefs: { startYmd: string; endYmd: string }[],
+  originalDueYmd: string,
 ): { index: number; clampedToHorizon: boolean } | null {
   const inRange = findBucketIndexInRange(assignYmd, weekDefs);
   if (inRange != null) {
@@ -88,9 +92,16 @@ function resolveBucketIndex(
     return null;
   }
 
-  // Depois do horizonte → última semana (extrapolação de cenário).
+  // Depois do horizonte: só extrapola itens que já estavam na janela visível.
+  // Itens da folga de busca (após o horizonte) entram só se o offset os puxar para dentro.
   if (assignYmd > weekDefs[lastIdx]!.endYmd) {
-    return { index: lastIdx, clampedToHorizon: true };
+    const originalInVisible =
+      originalDueYmd >= weekDefs[0]!.startYmd &&
+      originalDueYmd <= weekDefs[lastIdx]!.endYmd;
+    if (originalInVisible) {
+      return { index: lastIdx, clampedToHorizon: true };
+    }
+    return null;
   }
 
   return null;
@@ -121,15 +132,15 @@ export function toRawCashFlowItem(input: {
 export function applyScenarioToRawItems(
   items: RawCashFlowItem[],
   scenario: ScenarioKey,
-  _todayYmd: string,
+  todayYmd: string,
 ): CashFlowItem[] {
   return items.map((item) => {
     const baseYmd = item.dueDateYmd.slice(0, 10);
-    // Liquidados: data definitiva. Pendentes: offset a partir do vencimento
-    // (sem reancorar vencidas em "hoje", o que empurrava tudo para a semana 1).
+    // Liquidados: data definitiva. Pendentes: offset a partir do vencimento,
+    // sem cair no passado (clamp em hoje → semana atual).
     const simulatedDateYmd = item.isSettled
       ? baseYmd
-      : applyScenarioOffset(baseYmd, item.direction, scenario);
+      : applyScenarioOffset(baseYmd, item.direction, scenario, todayYmd);
     return {
       ...item,
       simulatedDateYmd,
@@ -200,7 +211,7 @@ export function computeCashFlowProjection(input: {
       input.todayYmd,
       firstBucketStart,
     );
-    const resolved = resolveBucketIndex(assignYmd, weekDefs);
+    const resolved = resolveBucketIndex(assignYmd, weekDefs, item.dueDateYmd);
     if (!resolved) continue;
 
     const { index: bucketIdx, clampedToHorizon } = resolved;
@@ -283,4 +294,21 @@ export function getCashFlowFetchRange(
   );
   const horizonEnd = addDaysYmd(firstWeekStart, horizonWeeks * 7 - 1);
   return { startYmd: firstWeekStart, endYmd: horizonEnd };
+}
+
+/** Horizonte visível ± folga para o offset de cenário puxar contas da borda. */
+export function getCashFlowFetchRangePadded(
+  todayYmd: string,
+  horizonWeeks: HorizonWeeks,
+  weekStartsOn: number = 1,
+): { startYmd: string; endYmd: string } {
+  const { startYmd, endYmd } = getCashFlowFetchRange(
+    todayYmd,
+    horizonWeeks,
+    weekStartsOn,
+  );
+  return {
+    startYmd: addDaysYmd(startYmd, -SCENARIO_FETCH_PADDING_DAYS),
+    endYmd: addDaysYmd(endYmd, SCENARIO_FETCH_PADDING_DAYS),
+  };
 }

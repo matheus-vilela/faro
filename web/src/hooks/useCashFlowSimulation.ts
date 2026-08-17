@@ -221,6 +221,29 @@ export function useCashFlowSimulation(
     ],
   );
 
+  const baseProjection = useMemo(
+    () =>
+      prefs.scenario === "base"
+        ? projection
+        : computeCashFlowProjection({
+            rawItems,
+            scenario: "base",
+            openingBalance: prefs.openingBalance,
+            todayYmd,
+            horizonWeeks: prefs.horizonWeeks,
+            weekStartsOn,
+          }),
+    [
+      prefs.scenario,
+      projection,
+      rawItems,
+      prefs.openingBalance,
+      prefs.horizonWeeks,
+      todayYmd,
+      weekStartsOn,
+    ],
+  );
+
   const partialAccess = useMemo(
     () =>
       !isCompanyOwner &&
@@ -237,6 +260,7 @@ export function useCashFlowSimulation(
     loading,
     error,
     projection,
+    baseProjection,
     rawItems,
     diagnostics,
     openingBalanceHint,

@@ -10,6 +10,7 @@ import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import type { Boleto } from "@/types/expense";
 import {
   getCashFlowFetchRange,
+  getCashFlowFetchRangePadded,
   toRawCashFlowItem,
 } from "./computeCashFlowProjection";
 import type { HorizonWeeks, RawCashFlowItem } from "./types";
@@ -106,19 +107,34 @@ export async function fetchKnownCashFlowItems(input: {
   includeReceivables: boolean;
   weekStartsOn?: number;
 }): Promise<RawCashFlowItem[]> {
-  const { startYmd, endYmd } = getCashFlowFetchRange(
+  const weekStartsOn = input.weekStartsOn ?? 1;
+  const visible = getCashFlowFetchRange(
     input.todayYmd,
     input.horizonWeeks,
-    input.weekStartsOn ?? 1,
+    weekStartsOn,
+  );
+  const padded = getCashFlowFetchRangePadded(
+    input.todayYmd,
+    input.horizonWeeks,
+    weekStartsOn,
   );
 
   const [payablesPending, payablesPaid, receivablesPending, receivablesPaid] =
     await Promise.all([
       input.includePayables
-        ? fetchMergedPayableBoletosInRange(input.companyId, startYmd, endYmd)
+        ? fetchMergedPayableBoletosInRange(
+            input.companyId,
+            padded.startYmd,
+            padded.endYmd,
+          )
         : Promise.resolve([]),
       input.includePayables
-        ? fetchPaidBoletosInRange(input.companyId, "payable", startYmd, endYmd)
+        ? fetchPaidBoletosInRange(
+            input.companyId,
+            "payable",
+            visible.startYmd,
+            visible.endYmd,
+          )
         : Promise.resolve([]),
       input.includeReceivables
         ? fetchAllInRange<PendingReceivableRow>(
@@ -132,8 +148,8 @@ export async function fetchKnownCashFlowItems(input: {
               .eq("status", "pending")
               .eq("exclude_from_fluxo", false)
               .neq("entry_kind", "transfer")
-              .gte("due_date", startYmd)
-              .lte("due_date", endYmd)
+              .gte("due_date", padded.startYmd)
+              .lte("due_date", padded.endYmd)
               .order("due_date", { ascending: true }),
           )
         : Promise.resolve([]),
@@ -141,8 +157,8 @@ export async function fetchKnownCashFlowItems(input: {
         ? fetchPaidBoletosInRange(
             input.companyId,
             "receivable",
-            startYmd,
-            endYmd,
+            visible.startYmd,
+            visible.endYmd,
           )
         : Promise.resolve([]),
     ]);
