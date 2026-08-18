@@ -77,6 +77,12 @@ const EMPTY_HINT: OpeningBalanceHint = {
   netPaid30: 0,
   overduePendingPayablesAmount: 0,
   overduePendingReceivablesAmount: 0,
+  accountsBalanceTotal: 0,
+  accountsWithBalanceCount: 0,
+  ofxBalanceTotal: null,
+  ofxBalanceAsOfYmd: null,
+  ofxAccountCount: 0,
+  ofxFileName: null,
 };
 
 export function useCashFlowSimulation(

@@ -358,7 +358,7 @@ export function BankReconciliationPanel({
     }
     setImporting(true);
     try {
-      await uploadAndImportStatement({
+      const imported = await uploadAndImportStatement({
         companyId,
         companyBankAccountId: accountId,
         file,
@@ -366,7 +366,16 @@ export function BankReconciliationPanel({
       });
       setDoneKeys({});
       setListPage(1);
-      toast.success("Extrato importado.");
+      if (
+        imported.ofxLedgerApplied &&
+        imported.ofxLedgerAmount != null
+      ) {
+        toast.success(
+          `Extrato importado. Saldo da conta atualizado para ${formatCurrency(imported.ofxLedgerAmount)}.`,
+        );
+      } else {
+        toast.success("Extrato importado.");
+      }
       await reloadMatchData();
     } catch (e) {
       console.error(e);

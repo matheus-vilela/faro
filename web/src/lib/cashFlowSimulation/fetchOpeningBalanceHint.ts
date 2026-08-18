@@ -134,9 +134,10 @@ export async function fetchOpeningBalanceHint(input: {
     );
   }
 
-  const [paidResults, overdueResults] = await Promise.all([
+  const [paidResults, overdueResults, bankCash] = await Promise.all([
     Promise.all(paidQueries),
     Promise.all(overdueQueries),
+    fetchBankCashPosition(input.companyId),
   ]);
 
   let paidInflows30 = 0;
@@ -165,5 +166,99 @@ export async function fetchOpeningBalanceHint(input: {
     netPaid30: paidInflows30 - paidOutflows30,
     overduePendingPayablesAmount,
     overduePendingReceivablesAmount,
+    ...bankCash,
+  };
+}
+
+async function fetchBankCashPosition(companyId: string): Promise<{
+  accountsBalanceTotal: number;
+  accountsWithBalanceCount: number;
+  ofxBalanceTotal: number | null;
+  ofxBalanceAsOfYmd: string | null;
+  ofxAccountCount: number;
+  ofxFileName: string | null;
+}> {
+  const empty = {
+    accountsBalanceTotal: 0,
+    accountsWithBalanceCount: 0,
+    ofxBalanceTotal: null as number | null,
+    ofxBalanceAsOfYmd: null as string | null,
+    ofxAccountCount: 0,
+    ofxFileName: null as string | null,
+  };
+
+  const [accountsRes, ofxRes] = await Promise.all([
+    supabase
+      .from("company_bank_accounts")
+      .select("id, current_balance")
+      .eq("company_id", companyId),
+    supabase
+      .from("bank_statement_imports")
+      .select(
+        "company_bank_account_id, ledger_balance, ledger_balance_as_of, file_name, created_at",
+      )
+      .eq("company_id", companyId)
+      .eq("source_format", "ofx")
+      .eq("status", "ready")
+      .not("ledger_balance", "is", null)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (accountsRes.error) throw accountsRes.error;
+  if (ofxRes.error) throw ofxRes.error;
+
+  let accountsBalanceTotal = 0;
+  let accountsWithBalanceCount = 0;
+  for (const row of accountsRes.data ?? []) {
+    const n = Number(row.current_balance);
+    if (!Number.isFinite(n) || row.current_balance == null) continue;
+    accountsBalanceTotal += n;
+    accountsWithBalanceCount += 1;
+  }
+
+  const latestByAccount = new Map<
+    string,
+    { amount: number; asOf: string | null; fileName: string | null }
+  >();
+  for (const row of ofxRes.data ?? []) {
+    const accountId = String(row.company_bank_account_id);
+    if (latestByAccount.has(accountId)) continue;
+    const n = Number(row.ledger_balance);
+    if (!Number.isFinite(n)) continue;
+    latestByAccount.set(accountId, {
+      amount: n,
+      asOf:
+        typeof row.ledger_balance_as_of === "string"
+          ? row.ledger_balance_as_of.slice(0, 10)
+          : null,
+      fileName:
+        typeof row.file_name === "string" && row.file_name
+          ? row.file_name
+          : null,
+    });
+  }
+
+  if (latestByAccount.size === 0) {
+    return { ...empty, accountsBalanceTotal, accountsWithBalanceCount };
+  }
+
+  let ofxBalanceTotal = 0;
+  let ofxBalanceAsOfYmd: string | null = null;
+  let ofxFileName: string | null = null;
+  for (const entry of latestByAccount.values()) {
+    ofxBalanceTotal += entry.amount;
+    if (entry.asOf && (!ofxBalanceAsOfYmd || entry.asOf > ofxBalanceAsOfYmd)) {
+      ofxBalanceAsOfYmd = entry.asOf;
+    }
+    ofxFileName = entry.fileName;
+  }
+
+  return {
+    accountsBalanceTotal,
+    accountsWithBalanceCount,
+    ofxBalanceTotal,
+    ofxBalanceAsOfYmd,
+    ofxAccountCount: latestByAccount.size,
+    ofxFileName: latestByAccount.size === 1 ? ofxFileName : null,
   };
 }

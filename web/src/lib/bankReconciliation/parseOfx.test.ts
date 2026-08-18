@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseOfx, parseOfxDate } from "./parseOfx";
+import { parseOfx, parseOfxDate, parseOfxLedgerBalance } from "./parseOfx";
 
 const SAMPLE_OFX = `OFXHEADER:100
 DATA:OFXSGML
@@ -44,6 +44,10 @@ NEWFILEUID:NONE
 						<MEMO>TARIFA PACOTE MENSAL
 					</STMTTRN>
 				</BANKTRANLIST>
+				<LEDGERBAL>
+					<BALAMT>1221.49
+					<DTASOF>20260719180000[-3:GMT]
+				</LEDGERBAL>
 			</STMTRS>
 		</STMTTRNRS>
 	</BANKMSGSRSV1>
@@ -70,5 +74,29 @@ describe("parseOfx", () => {
     expect(debit?.direction).toBe("debit");
     expect(debit?.amount).toBe(3500);
     expect(debit?.postedAt).toBe("2026-07-08");
+  });
+
+  it("extrai LEDGERBAL (saldo do extrato)", () => {
+    expect(parseOfxLedgerBalance(SAMPLE_OFX)).toEqual({
+      amount: 1221.49,
+      asOfYmd: "2026-07-19",
+    });
+  });
+
+  it("usa AVAILBAL quando não há LEDGERBAL", () => {
+    const ofx = `<OFX>
+      <AVAILBAL>
+        <BALAMT>-50.10
+        <DTASOF>20260801
+      </AVAILBAL>
+    </OFX>`;
+    expect(parseOfxLedgerBalance(ofx)).toEqual({
+      amount: -50.1,
+      asOfYmd: "2026-08-01",
+    });
+  });
+
+  it("retorna null sem bloco de saldo", () => {
+    expect(parseOfxLedgerBalance("<OFX><BANKTRANLIST></BANKTRANLIST></OFX>")).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { buildDedupeKey, dedupeParsedTransactions } from "@/lib/bankReconciliation/dedupe";
 import { parseCsv } from "@/lib/bankReconciliation/parseCsv";
-import { parseOfx } from "@/lib/bankReconciliation/parseOfx";
+import { parseOfx, parseOfxLedgerBalance } from "@/lib/bankReconciliation/parseOfx";
 import {
   competenceDateFromMonthInput,
   computePaidAmount,
@@ -34,13 +34,51 @@ export function parseStatementFile(
   return parseCsv(content, csvMapping).transactions;
 }
 
+async function applyOfxLedgerToAccount(params: {
+  companyBankAccountId: string;
+  amount: number;
+  asOfYmd: string | null;
+}): Promise<boolean> {
+  const { companyBankAccountId, amount, asOfYmd } = params;
+  const { data: account, error: fetchErr } = await supabase
+    .from("company_bank_accounts")
+    .select("id, balance_as_of")
+    .eq("id", companyBankAccountId)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!account) return false;
+
+  const existingAsOf =
+    typeof account.balance_as_of === "string"
+      ? account.balance_as_of.slice(0, 10)
+      : null;
+  if (existingAsOf && asOfYmd && existingAsOf > asOfYmd) {
+    return false;
+  }
+
+  const { error: updErr } = await supabase
+    .from("company_bank_accounts")
+    .update({
+      current_balance: amount,
+      balance_as_of: asOfYmd,
+    })
+    .eq("id", companyBankAccountId);
+  if (updErr) throw updErr;
+  return true;
+}
+
 export async function uploadAndImportStatement(params: {
   companyId: string;
   companyBankAccountId: string;
   file: File;
   userId: string | null;
   csvMapping?: BankCsvColumnMapping | null;
-}): Promise<{ importRow: BankStatementImport; lines: BankStatementLine[] }> {
+}): Promise<{
+  importRow: BankStatementImport;
+  lines: BankStatementLine[];
+  ofxLedgerApplied: boolean;
+  ofxLedgerAmount: number | null;
+}> {
   const { companyId, companyBankAccountId, file, userId, csvMapping } = params;
   const format = detectFormat(file.name);
   const content = await file.text();
@@ -48,6 +86,8 @@ export async function uploadAndImportStatement(params: {
     parseStatementFile(content, format, csvMapping),
     companyBankAccountId,
   );
+  const ofxLedger =
+    format === "ofx" ? parseOfxLedgerBalance(content) : null;
 
   const stamp = Date.now();
   const safeName = file.name.replace(/[^\w.\-]+/g, "_");
@@ -64,6 +104,7 @@ export async function uploadAndImportStatement(params: {
   const dates = parsed.map((p) => p.postedAt).sort();
   const periodStart = dates[0] ?? null;
   const periodEnd = dates[dates.length - 1] ?? null;
+  const ledgerAsOf = ofxLedger?.asOfYmd ?? periodEnd;
 
   const { data: importRow, error: impErr } = await supabase
     .from("bank_statement_imports")
@@ -77,16 +118,33 @@ export async function uploadAndImportStatement(params: {
       period_end: periodEnd,
       status: "ready",
       row_count: parsed.length,
+      ledger_balance: ofxLedger?.amount ?? null,
+      ledger_balance_as_of: ofxLedger ? ledgerAsOf : null,
       created_by: userId,
     })
     .select("*")
     .single();
   if (impErr) throw impErr;
 
+  let ofxLedgerApplied = false;
+  if (ofxLedger) {
+    ofxLedgerApplied = await applyOfxLedgerToAccount({
+      companyBankAccountId,
+      amount: ofxLedger.amount,
+      asOfYmd: ledgerAsOf,
+    });
+  }
+
+  const resultMeta = {
+    ofxLedgerApplied,
+    ofxLedgerAmount: ofxLedger?.amount ?? null,
+  };
+
   if (parsed.length === 0) {
     return {
       importRow: importRow as BankStatementImport,
       lines: [],
+      ...resultMeta,
     };
   }
 
@@ -112,6 +170,7 @@ export async function uploadAndImportStatement(params: {
   return {
     importRow: importRow as BankStatementImport,
     lines: (lines ?? []) as BankStatementLine[],
+    ...resultMeta,
   };
 }
 

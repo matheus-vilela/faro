@@ -23,6 +23,11 @@ function parseCurrencyInput(raw: string): number {
   return parseOpeningBalance(normalized);
 }
 
+function formatYmdBr(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("pt-BR");
+}
+
 export function CashFlowOpeningBalanceInput({
   value,
   onChange,
@@ -50,7 +55,27 @@ export function CashFlowOpeningBalanceInput({
     (hint.overduePendingPayablesAmount > 0 ||
       hint.overduePendingReceivablesAmount > 0);
 
-  const showHintCard = hasPaidActivity30;
+  const hasAccountsBalance =
+    hint != null && hint.accountsWithBalanceCount > 0;
+
+  const hasOfxBalance = hint != null && hint.ofxBalanceTotal != null;
+
+  const showHintCard =
+    hasAccountsBalance || hasOfxBalance || hasPaidActivity30;
+
+  const ofxLabel = (() => {
+    if (!hint || hint.ofxBalanceTotal == null) return null;
+    const parts = [`${formatBrl(hint.ofxBalanceTotal)}`];
+    if (hint.ofxBalanceAsOfYmd) {
+      parts.push(formatYmdBr(hint.ofxBalanceAsOfYmd));
+    }
+    if (hint.ofxAccountCount > 1) {
+      parts.push(`${hint.ofxAccountCount} contas`);
+    } else if (hint.ofxFileName) {
+      parts.push(hint.ofxFileName);
+    }
+    return parts.join(" · ");
+  })();
 
   return (
     <div className="space-y-3">
@@ -69,7 +94,8 @@ export function CashFlowOpeningBalanceInput({
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">Saldo inicial</p>
             <p className="text-xs text-muted-foreground">
-              Informe o caixa disponível hoje. Salvo localmente neste navegador.
+              Caixa disponível hoje. Prefira o saldo das contas ou do último
+              OFX. Salvo neste navegador.
             </p>
           </div>
         </div>
@@ -115,22 +141,37 @@ export function CashFlowOpeningBalanceInput({
           <div className="flex items-start gap-3">
             <Lightbulb className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="min-w-0 flex-1 space-y-2 text-sm">
-              <p className="font-medium text-foreground">Referência assistida</p>
+              <p className="font-medium text-foreground">Referência de caixa</p>
               <ul className="space-y-1 text-muted-foreground">
-                <li>
-                  Últimos 30 dias: entrou {formatBrl(hint.paidInflows30)}, saiu{" "}
-                  {formatBrl(hint.paidOutflows30)} (
-                  <span
-                    className={
-                      hint.netPaid30 >= 0
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-red-600 dark:text-red-400"
-                    }
-                  >
-                    líquido {formatBrl(hint.netPaid30)}
-                  </span>
-                  )
-                </li>
+                {hasAccountsBalance ? (
+                  <li>
+                    Contas bancárias: {formatBrl(hint.accountsBalanceTotal)}
+                    {hint.accountsWithBalanceCount > 1
+                      ? ` (${hint.accountsWithBalanceCount} contas)`
+                      : ""}
+                  </li>
+                ) : null}
+                {hasOfxBalance ? (
+                  <li>
+                    Último OFX: {ofxLabel}
+                  </li>
+                ) : null}
+                {hasPaidActivity30 ? (
+                  <li>
+                    Últimos 30 dias: entrou {formatBrl(hint.paidInflows30)}, saiu{" "}
+                    {formatBrl(hint.paidOutflows30)} (
+                    <span
+                      className={
+                        hint.netPaid30 >= 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-red-600 dark:text-red-400"
+                      }
+                    >
+                      líquido {formatBrl(hint.netPaid30)}
+                    </span>
+                    )
+                  </li>
+                ) : null}
                 {hasOverduePending ? (
                   <li>
                     Vencidas pendentes: a pagar{" "}
@@ -140,19 +181,43 @@ export function CashFlowOpeningBalanceInput({
                 ) : null}
               </ul>
               <p className="text-xs text-muted-foreground">
-                Valores referenciais com base em pagamentos confirmados e contas
-                vencidas. Ajuste conforme seu caixa real.
+                O saldo das contas e do OFX é o caixa real. O líquido de 30 dias
+                é só movimento, não o dinheiro na conta.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={disabled}
-                  onClick={() => onChange(hint.netPaid30)}
-                >
-                  Usar líquido dos últimos 30 dias ({formatBrl(hint.netPaid30)})
-                </Button>
+                {hasAccountsBalance ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => onChange(hint.accountsBalanceTotal)}
+                  >
+                    Usar saldo das contas ({formatBrl(hint.accountsBalanceTotal)})
+                  </Button>
+                ) : null}
+                {hasOfxBalance && hint.ofxBalanceTotal != null ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => onChange(hint.ofxBalanceTotal ?? 0)}
+                  >
+                    Usar saldo do último OFX ({formatBrl(hint.ofxBalanceTotal)})
+                  </Button>
+                ) : null}
+                {hasPaidActivity30 && !hasAccountsBalance && !hasOfxBalance ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => onChange(hint.netPaid30)}
+                  >
+                    Usar líquido dos últimos 30 dias ({formatBrl(hint.netPaid30)})
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
