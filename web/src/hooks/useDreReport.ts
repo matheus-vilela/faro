@@ -70,7 +70,9 @@ const MONTH_NAMES = [
 export function useDreReport(
   companyId: string | undefined,
   period: MonthYear,
+  options?: { enabled?: boolean },
 ): UseDreReportState {
+  const enabled = options?.enabled ?? true;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<CompanyCategory[]>([]);
@@ -80,6 +82,7 @@ export function useDreReport(
   const [salesCmvInPeriod, setSalesCmvInPeriod] = useState(0);
 
   const load = useCallback(async () => {
+    if (!enabled) return;
     if (!companyId) {
       setCategories([]);
       setBoletosInPeriod([]);
@@ -154,7 +157,7 @@ export function useDreReport(
     );
     setSalesCmvInPeriod(salesCmv);
     setLoading(false);
-  }, [companyId, period.month, period.year]);
+  }, [companyId, period.month, period.year, enabled]);
 
   useEffect(() => {
     void load();

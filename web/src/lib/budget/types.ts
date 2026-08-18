@@ -14,6 +14,11 @@ export interface CategoryBudgetRow {
   amount: number;
 }
 
+export type BudgetTableFilter = "all" | "with_activity" | "no_budget";
+
+/** Nó sintético de CMV de vendas (fichas) — não é categoria editável. */
+export const SALES_CMV_NODE_ID = "__sales_cmv__";
+
 export interface BudgetComparisonNode {
   id: string;
   name: string;
@@ -25,6 +30,8 @@ export interface BudgetComparisonNode {
   status: BudgetDeviationStatus;
   children: BudgetComparisonNode[];
   dreBucket?: DreBucket;
+  /** Linha informativa (ex.: CMV de fichas) — sem edição e sem alerta de meta. */
+  isInformational?: boolean;
 }
 
 export interface BudgetComparisonSummary {

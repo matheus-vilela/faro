@@ -3,10 +3,12 @@ import { mapCategoryToDreBucket, type DreBucket } from "@/lib/dre/dreMapping";
 import type { CompanyCategory } from "@/types/category";
 import {
   EXPENSE_BUCKET_SECTIONS,
+  SALES_CMV_NODE_ID,
   type BudgetComparisonNode,
   type BudgetComparisonResult,
   type BudgetComparisonSummary,
   type BudgetDeviationStatus,
+  type BudgetTableFilter,
   type CategoryBudgetRow,
 } from "./types";
 
@@ -275,19 +277,20 @@ export function computeBudgetComparison(input: {
       )
       .filter((n): n is BudgetComparisonNode => n != null);
 
-    // CMV de vendas: nó sintético quando não há boleto CMV correspondente
+    // CMV de vendas: linha informativa (não se edita aqui — orçar nas categorias CMV)
     if (bucket === "CMV" && salesCmv > 0) {
       children.push({
-        id: "__sales_cmv__",
+        id: SALES_CMV_NODE_ID,
         name: "CMV de vendas (fichas)",
         isLeaf: false,
         budgeted: 0,
         actual: salesCmv,
         variance: salesCmv,
         percentConsumed: null,
-        status: "no_budget",
+        status: "empty",
         children: [],
         dreBucket: "CMV",
+        isInformational: true,
       });
     }
 
@@ -322,4 +325,42 @@ export function computeBudgetComparison(input: {
     chartRows: chartRows.slice(0, 8),
     leafCategoryIds: leafIds,
   };
+}
+
+function nodeHasActivity(node: BudgetComparisonNode): boolean {
+  return node.budgeted > 0 || node.actual > 0;
+}
+
+function nodeIsMissingBudget(node: BudgetComparisonNode): boolean {
+  if (node.isInformational) return false;
+  if (node.isLeaf) return node.actual > 0 && node.budgeted <= 0;
+  return node.children.some(nodeIsMissingBudget);
+}
+
+function filterNode(
+  node: BudgetComparisonNode,
+  filter: BudgetTableFilter,
+): BudgetComparisonNode | null {
+  const children = node.children
+    .map((c) => filterNode(c, filter))
+    .filter((n): n is BudgetComparisonNode => n != null);
+
+  const selfMatch =
+    filter === "with_activity"
+      ? nodeHasActivity(node)
+      : nodeIsMissingBudget(node);
+
+  if (!selfMatch && children.length === 0) return null;
+  return { ...node, children };
+}
+
+/** Filtra a árvore do comparativo (mantém ancestrais das folhas que passam). */
+export function filterBudgetSections(
+  sections: BudgetComparisonNode[],
+  filter: BudgetTableFilter,
+): BudgetComparisonNode[] {
+  if (filter === "all") return sections;
+  return sections
+    .map((section) => filterNode(section, filter))
+    .filter((n): n is BudgetComparisonNode => n != null);
 }

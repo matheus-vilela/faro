@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -7,11 +8,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { BudgetAmountInput } from "@/components/budget/BudgetAmountInput";
-import type { BudgetComparisonNode, BudgetDeviationStatus } from "@/lib/budget/types";
+import { filterBudgetSections } from "@/lib/budget/computeBudgetComparison";
+import type {
+  BudgetComparisonNode,
+  BudgetDeviationStatus,
+  BudgetTableFilter,
+} from "@/lib/budget/types";
 import { formatBrl } from "@/lib/dre/formatBrl";
 import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 const STATUS_LABEL: Record<BudgetDeviationStatus, string> = {
   ok: "Dentro",
@@ -36,6 +42,12 @@ const ROW_BG: Record<BudgetDeviationStatus, string> = {
   no_budget: "bg-amber-500/5",
   empty: "",
 };
+
+const TABLE_FILTERS: { value: BudgetTableFilter; label: string }[] = [
+  { value: "all", label: "Todas" },
+  { value: "with_activity", label: "Com movimento" },
+  { value: "no_budget", label: "Sem meta" },
+];
 
 function PercentBar({ percent }: { percent: number | null }) {
   if (percent == null) {
@@ -82,13 +94,13 @@ function ComparisonRow({
   disabled?: boolean;
   avg3mByCategoryId: Map<string, number>;
 }) {
-  const [open, setOpen] = useState(depth < 1);
+  const [open, setOpen] = useState(true);
   const hasChildren = node.children.length > 0;
-  const rowClass = ROW_BG[node.status];
+  const informational = Boolean(node.isInformational);
+  const rowClass = informational ? "" : ROW_BG[node.status];
   const avg3m = node.isLeaf
     ? (avg3mByCategoryId.get(node.id) ?? 0)
     : node.children.reduce((s, ch) => {
-        // rollup approx from leaves in subtree via recursive sum of leaf avgs
         return s + leafAvgSum(ch, avg3mByCategoryId);
       }, 0);
 
@@ -118,22 +130,41 @@ function ComparisonRow({
             ) : (
               <span className="w-6 shrink-0" aria-hidden />
             )}
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                depth === 0 ? "font-semibold text-foreground" : "text-foreground",
-                depth > 0 && !node.isLeaf && "font-medium",
-              )}
-            >
-              {node.name}
-            </span>
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className={cn(
+                  "min-w-0 truncate text-left",
+                  depth === 0
+                    ? "font-semibold text-foreground"
+                    : "font-medium text-foreground",
+                )}
+              >
+                {node.name}
+              </button>
+            ) : (
+              <span
+                className={cn(
+                  "min-w-0 truncate",
+                  depth === 0 ? "font-semibold text-foreground" : "text-foreground",
+                  informational && "text-muted-foreground",
+                )}
+              >
+                {node.name}
+              </span>
+            )}
           </div>
         </td>
         <td className="hidden py-2.5 px-2 text-right tabular-nums text-muted-foreground md:table-cell">
           {avg3m > 0 ? formatBrl(avg3m) : "—"}
         </td>
-        <td className="py-2.5 px-2 text-right">
-          {node.isLeaf ? (
+        <td className="bg-primary/[0.03] py-2.5 px-2 text-right">
+          {informational ? (
+            <span className="text-xs text-muted-foreground">
+              Vem das fichas — orce nas categorias CMV
+            </span>
+          ) : node.isLeaf ? (
             <BudgetAmountInput
               value={node.budgeted}
               onSave={(amount) => onSaveBudget(node.id, amount)}
@@ -141,9 +172,19 @@ function ComparisonRow({
               disabled={disabled}
             />
           ) : (
-            <span className="tabular-nums text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="ml-auto block text-right tabular-nums text-muted-foreground"
+              title="Expanda para editar as subcategorias"
+            >
               {formatBrl(node.budgeted)}
-            </span>
+              {!open ? (
+                <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-primary">
+                  Expanda para editar
+                </span>
+              ) : null}
+            </button>
           )}
         </td>
         <td className="py-2.5 px-2 text-right tabular-nums">
@@ -152,29 +193,41 @@ function ComparisonRow({
         <td
           className={cn(
             "py-2.5 px-2 text-right tabular-nums",
-            node.variance > 0
-              ? "text-red-600 dark:text-red-400"
-              : node.variance < 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-muted-foreground",
+            informational
+              ? "text-muted-foreground"
+              : node.variance > 0
+                ? "text-red-600 dark:text-red-400"
+                : node.variance < 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-muted-foreground",
           )}
         >
-          {node.variance >= 0 ? "+" : ""}
-          {formatBrl(node.variance)}
+          {informational ? (
+            "—"
+          ) : (
+            <>
+              {node.variance >= 0 ? "+" : ""}
+              {formatBrl(node.variance)}
+            </>
+          )}
         </td>
         <td className="hidden py-2.5 px-2 sm:table-cell">
-          <PercentBar percent={node.percentConsumed} />
+          {informational ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <PercentBar percent={node.percentConsumed} />
+          )}
         </td>
         <td className="py-2.5 pl-2 text-right">
-          {node.status !== "empty" ? (
+          {informational || node.status === "empty" ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
             <Badge
               variant="secondary"
               className={cn("text-[11px] font-medium", STATUS_BADGE[node.status])}
             >
               {STATUS_LABEL[node.status]}
             </Badge>
-          ) : (
-            <span className="text-muted-foreground">—</span>
           )}
         </td>
       </tr>
@@ -199,6 +252,7 @@ function leafAvgSum(
   node: BudgetComparisonNode,
   avg3mByCategoryId: Map<string, number>,
 ): number {
+  if (node.isInformational) return 0;
   if (node.isLeaf) return avg3mByCategoryId.get(node.id) ?? 0;
   return node.children.reduce(
     (s, ch) => s + leafAvgSum(ch, avg3mByCategoryId),
@@ -212,16 +266,25 @@ export function BudgetComparisonTable({
   savingCategoryId,
   disabled,
   avg3mByCategoryId = new Map(),
+  toolbar,
 }: {
   sections: BudgetComparisonNode[];
   onSaveBudget: (categoryId: string, amount: number) => Promise<void>;
   savingCategoryId: string | null;
   disabled?: boolean;
   avg3mByCategoryId?: Map<string, number>;
+  toolbar?: ReactNode;
 }) {
+  const [filter, setFilter] = useState<BudgetTableFilter>("all");
+
+  const visibleSections = useMemo(
+    () => filterBudgetSections(sections, filter),
+    [sections, filter],
+  );
+
   if (sections.length === 0) {
     return (
-      <Card className="border-border/80 shadow-sm">
+      <Card id="budget-comparison-table" className="border-border/80 shadow-sm">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
           Nenhuma despesa orçada ou realizada neste período.
         </CardContent>
@@ -230,43 +293,85 @@ export function BudgetComparisonTable({
   }
 
   return (
-    <Card className="border-border/80 shadow-sm">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Comparativo por categoria</CardTitle>
-        <CardDescription>
-          Realizado = contas a pagar no período (não o lucro do DRE). Use a média
-          dos 3 meses anteriores como referência para o orçado.
-        </CardDescription>
+    <Card id="budget-comparison-table" className="border-border/80 shadow-sm">
+      <CardHeader className="space-y-3 pb-2">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <CardTitle className="text-base">Comparativo por categoria</CardTitle>
+            <CardDescription>
+              A meta se edita nas categorias finais (campo Orçado). Grupos
+              mostram só o total. Realizado = contas a pagar no período (não o
+              lucro do DRE).
+            </CardDescription>
+          </div>
+          {toolbar ? (
+            <div className="flex flex-wrap gap-2">{toolbar}</div>
+          ) : null}
+        </div>
+        <div
+          className="inline-flex w-fit max-w-full flex-wrap rounded-full bg-muted p-1"
+          role="tablist"
+          aria-label="Filtro da tabela"
+        >
+          {TABLE_FILTERS.map((opt) => {
+            const active = filter === opt.value;
+            return (
+              <Button
+                key={opt.value}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                variant="ghost"
+                size="sm"
+                onClick={() => setFilter(opt.value)}
+                className={cn(
+                  "h-7 rounded-full px-3 text-xs",
+                  active && "bg-background shadow-sm",
+                )}
+              >
+                {opt.label}
+              </Button>
+            );
+          })}
+        </div>
       </CardHeader>
       <CardContent className="overflow-x-auto px-0 pb-0 sm:px-6">
-        <table className="w-full min-w-[800px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border/60 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="px-4 py-2 text-left sm:px-0">Categoria</th>
-              <th className="hidden px-2 py-2 text-right md:table-cell">
-                Média 3m
-              </th>
-              <th className="px-2 py-2 text-right">Orçado</th>
-              <th className="px-2 py-2 text-right">Realizado</th>
-              <th className="px-2 py-2 text-right">Desvio</th>
-              <th className="hidden px-2 py-2 sm:table-cell">Consumido</th>
-              <th className="px-4 py-2 text-right sm:pl-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sections.map((section) => (
-              <ComparisonRow
-                key={section.id}
-                node={section}
-                depth={0}
-                onSaveBudget={onSaveBudget}
-                savingCategoryId={savingCategoryId}
-                disabled={disabled}
-                avg3mByCategoryId={avg3mByCategoryId}
-              />
-            ))}
-          </tbody>
-        </table>
+        {visibleSections.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground sm:px-0">
+            Nenhuma categoria neste filtro.
+          </p>
+        ) : (
+          <table className="w-full min-w-[800px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border/60 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-left sm:px-0">Categoria</th>
+                <th className="hidden px-2 py-2 text-right md:table-cell">
+                  Média 3m
+                </th>
+                <th className="bg-primary/[0.04] px-2 py-2 text-right text-foreground">
+                  Orçado (editar)
+                </th>
+                <th className="px-2 py-2 text-right">Realizado</th>
+                <th className="px-2 py-2 text-right">Desvio</th>
+                <th className="hidden px-2 py-2 sm:table-cell">Consumido</th>
+                <th className="px-4 py-2 text-right sm:pl-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleSections.map((section) => (
+                <ComparisonRow
+                  key={section.id}
+                  node={section}
+                  depth={0}
+                  onSaveBudget={onSaveBudget}
+                  savingCategoryId={savingCategoryId}
+                  disabled={disabled}
+                  avg3mByCategoryId={avg3mByCategoryId}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
       </CardContent>
     </Card>
   );

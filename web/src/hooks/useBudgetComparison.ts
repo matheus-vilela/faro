@@ -15,6 +15,7 @@ import {
   copyBudgetsFromPreviousMonth,
   upsertCategoryBudget,
 } from "@/lib/budget/upsertCategoryBudget";
+import { shiftMonth } from "@/lib/dre/dreInsight";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -81,6 +82,7 @@ export function useBudgetComparison(
   const [salesCmv, setSalesCmv] = useState(0);
   const [semCategoriaCount, setSemCategoriaCount] = useState(0);
   const [semCategoriaTotal, setSemCategoriaTotal] = useState(0);
+  const [previousMonthBudgetCount, setPreviousMonthBudgetCount] = useState(0);
   const [basis, setBasisState] = useState<BudgetBasis>(
     DEFAULT_BUDGET_PREFS.basis,
   );
@@ -103,14 +105,7 @@ export function useBudgetComparison(
 
   const load = useCallback(async () => {
     if (!companyId) {
-      setCategories([]);
-      setBudgets([]);
-      setActualByCategoryId(new Map());
-      setAvg3mByCategoryId(new Map());
-      setSalesCmv(0);
-      setSemCategoriaCount(0);
-      setSemCategoriaTotal(0);
-      setLoading(false);
+      setLoading(true);
       setError(null);
       return;
     }
@@ -130,15 +125,18 @@ export function useBudgetComparison(
 
       const cats = (catRes.data ?? []) as CompanyCategory[];
       const categoriesById = new Map(cats.map((c) => [c.id, c]));
+      const prevPeriod = shiftMonth(period, -1);
 
-      const [budgetRows, actualRes, avgMap] = await Promise.all([
+      const [budgetRows, prevBudgetRows, actualRes, avgMap] = await Promise.all([
         fetchCategoryBudgets(companyId, period.year, period.month),
+        fetchCategoryBudgets(companyId, prevPeriod.year, prevPeriod.month),
         fetchActualByCategory(companyId, period, basis, categoriesById),
-        fetchActualAvg3Months(companyId, period, basis),
+        fetchActualAvg3Months(companyId, period, basis, categoriesById),
       ]);
 
       setCategories(cats);
       setBudgets(budgetRows);
+      setPreviousMonthBudgetCount(prevBudgetRows.length);
       setActualByCategoryId(actualRes.byCategoryId);
       setAvg3mByCategoryId(avgMap);
       setSalesCmv(actualRes.salesCmv);
@@ -148,6 +146,7 @@ export function useBudgetComparison(
       setError(e instanceof Error ? e.message : "Erro ao carregar orçamento.");
       setCategories([]);
       setBudgets([]);
+      setPreviousMonthBudgetCount(0);
       setActualByCategoryId(new Map());
       setAvg3mByCategoryId(new Map());
       setSalesCmv(0);
@@ -277,6 +276,7 @@ export function useBudgetComparison(
     savingCategoryId,
     bulkActionLoading,
     avg3mByCategoryId,
+    previousMonthBudgetCount,
     semCategoriaCount,
     semCategoriaTotal,
     salesCmv,

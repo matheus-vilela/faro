@@ -14,6 +14,21 @@ export type ActualByCategoryResult = {
   salesCmv: number;
 };
 
+/** Categorias de despesa que entram no realizado do orçamento. */
+export function isBudgetActualCategory(
+  cat: CompanyCategory | undefined,
+): cat is CompanyCategory {
+  if (!cat || cat.natureza !== "DESPESA") return false;
+  const bucket = mapCategoryToDreBucket(cat);
+  return (
+    bucket !== "EXCLUDE" &&
+    bucket !== "UNMAPPED" &&
+    bucket !== "VENDAS_BRUTAS" &&
+    bucket !== "DEDUCAO_RECEITA" &&
+    bucket !== "RESULTADO_FINANCEIRO_RECEITA"
+  );
+}
+
 type BoletoRow = {
   amount: number;
   paid_amount: number | null;
@@ -89,17 +104,7 @@ export async function fetchActualByCategory(
     }
 
     const cat = categoriesById.get(b.company_category_id);
-    if (!cat || cat.natureza !== "DESPESA") continue;
-    const bucket = mapCategoryToDreBucket(cat);
-    if (
-      bucket === "EXCLUDE" ||
-      bucket === "UNMAPPED" ||
-      bucket === "VENDAS_BRUTAS" ||
-      bucket === "DEDUCAO_RECEITA" ||
-      bucket === "RESULTADO_FINANCEIRO_RECEITA"
-    ) {
-      continue;
-    }
+    if (!isBudgetActualCategory(cat)) continue;
 
     byCategoryId.set(
       b.company_category_id,

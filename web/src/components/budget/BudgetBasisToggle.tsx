@@ -9,15 +9,15 @@ const BASIS_OPTIONS: {
 }[] = [
   {
     value: "competencia",
-    label: "Competência",
-      description:
-      "Realizado pelos vencimentos no mês nas contas a pagar + CMV de vendas. Não é o lucro do DRE.",
+    label: "Por vencimento",
+    description:
+      "Competência: realizado pelos vencimentos no mês nas contas a pagar + CMV de vendas. Não é o lucro do DRE.",
   },
   {
     value: "caixa",
-    label: "Caixa",
+    label: "Por pagamento",
     description:
-      "Realizado pelos pagamentos confirmados no mês (data de pagamento das contas a pagar).",
+      "Caixa: realizado pelos pagamentos confirmados no mês (data de pagamento das contas a pagar).",
   },
 ];
 
