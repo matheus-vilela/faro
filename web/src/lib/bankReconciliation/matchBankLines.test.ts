@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMatchResult,
+  buildMatchResultByDirection,
   dayDiffAbs,
   isStrongDateMatch,
   scoreProximity,
@@ -114,10 +115,78 @@ describe("matchBankLines", () => {
     expect(result.sofaroBoletoIds).toEqual(["b-abc"]);
   });
 
+  it("casa crédito do extrato com conta a receber", () => {
+    const result = buildMatchResult(
+      [
+        {
+          id: "l-rend",
+          postedAt: "2026-07-08",
+          amount: 120.5,
+          description: "VALOR DE RENDIMENTO",
+        },
+      ],
+      [
+        {
+          id: "b-rend",
+          description: "Rendimento CDB",
+          amount: 120.5,
+          referenceDate: "2026-07-08",
+          status: "pending",
+        },
+      ],
+    );
+    expect(result.pairs[0]?.kind).toBe("forte");
+    expect(result.pairs[0]?.boletoId).toBe("b-rend");
+  });
+
   it("score sobe com proximidade", () => {
     expect(dayDiffAbs("2026-07-01", "2026-07-03")).toBe(2);
     expect(scoreProximity(0, 0, 100)).toBeGreaterThan(
       scoreProximity(3, 10, 100),
     );
+  });
+
+  it("casa débitos com pagar e créditos com receber separadamente", () => {
+    const result = buildMatchResultByDirection({
+      debitLines: [
+        {
+          id: "l-deb",
+          postedAt: "2026-07-08",
+          amount: 100,
+          description: "PIX CLARO",
+        },
+      ],
+      creditLines: [
+        {
+          id: "l-cred",
+          postedAt: "2026-07-08",
+          amount: 100,
+          description: "RENDIMENTO",
+        },
+      ],
+      payables: [
+        {
+          id: "b-pagar",
+          description: "Claro",
+          amount: 100,
+          referenceDate: "2026-07-08",
+          status: "pending",
+        },
+      ],
+      receivables: [
+        {
+          id: "b-receber",
+          description: "Rendimento",
+          amount: 100,
+          referenceDate: "2026-07-08",
+          status: "pending",
+        },
+      ],
+    });
+    expect(result.pairs).toHaveLength(2);
+    expect(result.pairs.map((p) => p.boletoId).sort()).toEqual([
+      "b-pagar",
+      "b-receber",
+    ]);
   });
 });

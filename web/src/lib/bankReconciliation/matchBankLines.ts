@@ -194,3 +194,18 @@ export function buildMatchResult(
 
   return { pairs, sobancoLineIds, sofaroBoletoIds };
 }
+
+export function buildMatchResultByDirection(params: {
+  debitLines: MatchStatementLine[];
+  creditLines: MatchStatementLine[];
+  payables: MatchBoletoCandidate[];
+  receivables: MatchBoletoCandidate[];
+}): MatchResult {
+  const debit = buildMatchResult(params.debitLines, params.payables);
+  const credit = buildMatchResult(params.creditLines, params.receivables);
+  return {
+    pairs: [...debit.pairs, ...credit.pairs],
+    sobancoLineIds: [...debit.sobancoLineIds, ...credit.sobancoLineIds],
+    sofaroBoletoIds: [...debit.sofaroBoletoIds, ...credit.sofaroBoletoIds],
+  };
+}

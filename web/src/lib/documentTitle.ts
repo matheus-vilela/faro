@@ -73,6 +73,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/faturamento", label: "Faturamento" },
     { prefix: "/app/cmv-margens", label: "Vendas realizadas" },
     { prefix: "/app/fluxo-de-caixa", label: "Fluxo de caixa" },
+    { prefix: "/app/conciliacao-bancaria", label: "Conciliação bancária" },
     { prefix: "/app/fornecedores", label: "Fornecedores" },
     { prefix: "/app/produtos", label: "Produtos e estoque" },
     { prefix: "/app/servicos", label: "Serviços" },
