@@ -70,16 +70,54 @@ async function ensureInventoryShortSlug(
   });
 }
 
+type SupabaseClient = ReturnType<typeof createClient>;
+
+type NameRel =
+  | { name?: string | null }
+  | { name?: string | null }[]
+  | null
+  | undefined;
+
+function relationName(rel: NameRel): string {
+  if (!rel) return "";
+  if (Array.isArray(rel)) return (rel[0]?.name ?? "").trim();
+  return (rel.name ?? "").trim();
+}
+
 type PendingSessionRow = {
+  id?: string;
   token: string;
   created_at: string;
-  inventory_count_groups?: { name?: string | null } | null;
-  inventory_count_listings?: { name?: string | null } | null;
+  inventory_count_listing_id?: string | null;
+  inventory_count_groups?: NameRel;
+  inventory_count_listings?: NameRel;
   inventory_count_short_links?:
     | { slug?: string | null }
     | { slug?: string | null }[]
     | null;
 };
+
+type ListingWithProducts = {
+  id: string;
+  name: string;
+  inventory_count_group_id: string;
+  assigned_company_member_id: string | null;
+  group_name: string;
+};
+
+type CountLink = {
+  label: string;
+  url: string;
+};
+
+function sessionLabel(groupName: string, listingName: string): string {
+  const g = groupName.trim();
+  const l = listingName.trim();
+  if (g && l) return `Grupo: *${g}* · Lista: *${l}*`;
+  if (g) return `Grupo: *${g}*`;
+  if (l) return `Lista: *${l}*`;
+  return "Sem grupo/lista definida";
+}
 
 function shortLinkSlugFromRow(row: PendingSessionRow): string | null {
   const raw = row.inventory_count_short_links;
@@ -92,32 +130,221 @@ function shortLinkSlugFromRow(row: PendingSessionRow): string | null {
   return typeof s === "string" && s ? s : null;
 }
 
+const OPEN_SESSION_SELECT = `
+  id,
+  token,
+  created_at,
+  inventory_count_listing_id,
+  inventory_count_groups ( name ),
+  inventory_count_listings ( name ),
+  inventory_count_short_links ( slug )
+`;
+
 async function fetchPendingAssignedOpenSessions(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   companyId: string,
   memberId: string,
+  listingScopedOnly: boolean,
 ): Promise<PendingSessionRow[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("inventory_count_sessions")
-    .select(
-      `
-      token,
-      created_at,
-      inventory_count_groups ( name ),
-      inventory_count_listings ( name ),
-      inventory_count_short_links ( slug )
-    `,
-    )
+    .select(OPEN_SESSION_SELECT)
     .eq("company_id", companyId)
     .eq("assigned_company_member_id", memberId)
     .in("status", ["open", "returned"])
     .order("created_at", { ascending: false });
+
+  if (listingScopedOnly) {
+    query = query.not("inventory_count_listing_id", "is", null);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("[inventory-flow] fetch pending sessions:", error.message);
     return [];
   }
   return (data ?? []) as PendingSessionRow[];
+}
+
+async function fetchOpenListingSessions(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<PendingSessionRow[]> {
+  const { data, error } = await supabase
+    .from("inventory_count_sessions")
+    .select(OPEN_SESSION_SELECT)
+    .eq("company_id", companyId)
+    .in("status", ["open", "returned"])
+    .not("inventory_count_listing_id", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[inventory-flow] fetch open listing sessions:", error.message);
+    return [];
+  }
+  return (data ?? []) as PendingSessionRow[];
+}
+
+async function companyHasCountGroups(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<boolean | null> {
+  const { count, error } = await supabase
+    .from("inventory_count_groups")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId);
+
+  if (error) {
+    console.error("[inventory-flow] count groups:", error.message);
+    return null;
+  }
+  return (count ?? 0) > 0;
+}
+
+async function fetchListingsWithProducts(
+  supabase: SupabaseClient,
+  companyId: string,
+  assignedMemberId?: string | null,
+): Promise<ListingWithProducts[] | null> {
+  let query = supabase
+    .from("inventory_count_listings")
+    .select(
+      `
+      id,
+      name,
+      inventory_count_group_id,
+      assigned_company_member_id,
+      sort_order,
+      inventory_count_groups ( name ),
+      inventory_count_listing_products ( product_id )
+    `,
+    )
+    .eq("company_id", companyId)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (assignedMemberId) {
+    query = query.eq("assigned_company_member_id", assignedMemberId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("[inventory-flow] fetch listings:", error.message);
+    return null;
+  }
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    name: string;
+    inventory_count_group_id: string;
+    assigned_company_member_id: string | null;
+    inventory_count_groups?: NameRel;
+    inventory_count_listing_products?: { product_id?: string }[] | null;
+  }>;
+
+  return rows
+    .filter((row) => (row.inventory_count_listing_products?.length ?? 0) > 0)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      inventory_count_group_id: row.inventory_count_group_id,
+      assigned_company_member_id: row.assigned_company_member_id,
+      group_name: relationName(row.inventory_count_groups),
+    }));
+}
+
+async function memberHasAssignedListings(
+  supabase: SupabaseClient,
+  companyId: string,
+  memberId: string,
+): Promise<boolean | null> {
+  const { data, error } = await supabase
+    .from("inventory_count_listings")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("assigned_company_member_id", memberId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[inventory-flow] fetch assigned listings:", error.message);
+    return null;
+  }
+  return Boolean(data?.id);
+}
+
+async function sessionToCountLink(
+  supabase: SupabaseClient,
+  companyId: string,
+  row: PendingSessionRow,
+  base: string,
+): Promise<CountLink> {
+  let slug = shortLinkSlugFromRow(row);
+  if (!slug && row.id) {
+    slug = await ensureInventoryShortSlug(
+      supabase,
+      companyId,
+      row.id,
+      row.token,
+    );
+  }
+  const url = slug
+    ? `${base}/i/${slug}`
+    : `${base}/contagem-estoque/${row.token}`;
+  return {
+    label: sessionLabel(
+      relationName(row.inventory_count_groups),
+      relationName(row.inventory_count_listings),
+    ),
+    url,
+  };
+}
+
+async function createListingSessionLink(
+  supabase: SupabaseClient,
+  auth: InventoryAuth,
+  listing: ListingWithProducts,
+  base: string,
+): Promise<CountLink | null> {
+  const assignedMemberId =
+    auth.role === "member"
+      ? auth.companyMemberId
+      : listing.assigned_company_member_id;
+
+  const { data: sess, error: se } = await supabase
+    .from("inventory_count_sessions")
+    .insert({
+      company_id: auth.companyId,
+      company_member_id: auth.companyMemberId,
+      assigned_company_member_id: assignedMemberId,
+      status: "open",
+      inventory_count_group_id: listing.inventory_count_group_id,
+      inventory_count_listing_id: listing.id,
+    })
+    .select("id, token")
+    .single();
+
+  if (se || !sess?.id || !sess?.token) {
+    console.error("[inventory-flow] insert listing session:", se?.message);
+    return null;
+  }
+
+  await supabase.rpc("seed_inventory_count_lines", {
+    p_session_id: sess.id,
+  });
+
+  const slug = await ensureInventoryShortSlug(
+    supabase,
+    auth.companyId,
+    sess.id as string,
+    sess.token as string,
+  );
+  const token = String(sess.token);
+  return {
+    label: sessionLabel(listing.group_name, listing.name),
+    url: slug ? `${base}/i/${slug}` : `${base}/contagem-estoque/${token}`,
+  };
 }
 
 function formatPendingInventoryMessage(
@@ -133,21 +360,46 @@ function formatPendingInventoryMessage(
     const url = slug
       ? `${base}/i/${slug}`
       : `${base}/contagem-estoque/${row.token}`;
-    const g = row.inventory_count_groups?.name?.trim();
-    const l = row.inventory_count_listings?.name?.trim();
-    const label = g
-      ? l
-        ? `Grupo: *${g}* · Lista: *${l}*`
-        : `Grupo: *${g}*`
-      : l
-        ? `Lista: *${l}*`
-        : "Sem grupo/lista definida";
-    lines.push(`${i + 1}) ${label}`);
+    lines.push(
+      `${i + 1}) ${sessionLabel(
+        relationName(row.inventory_count_groups),
+        relationName(row.inventory_count_listings),
+      )}`,
+    );
     lines.push(url);
     lines.push("");
   });
   lines.push(
     "Para abrir um *novo* link de contagem (além destes), responda *nova* ou *nova contagem*.",
+  );
+  return lines.join("\n");
+}
+
+function formatCountLinksMessage(links: CountLink[]): string {
+  const lines: string[] = [
+    "*Contagem de estoque* 🍺",
+    "",
+    links.length === 1
+      ? "Oi! Hora da contagem. Abra o link, conte item a item (sem ver o esperado) e envie para aprovação."
+      : "Oi! Hora da contagem. Abra o link da *sua listagem*, conte item a item (sem ver o esperado) e envie para aprovação.",
+    "",
+  ];
+  if (links.length === 1) {
+    const only = links[0]!;
+    if (only.label !== "Sem grupo/lista definida") {
+      lines.push(only.label);
+    }
+    lines.push(only.url);
+  } else {
+    links.forEach((link, i) => {
+      lines.push(`${i + 1}) ${link.label}`);
+      lines.push(link.url);
+      lines.push("");
+    });
+  }
+  lines.push("");
+  lines.push(
+    "Se algo ficar fora da faixa, o Faro pede para conferir de novo — sem mostrar o número.",
   );
   return lines.join("\n");
 }
@@ -168,6 +420,7 @@ export async function sendInventoryCountLink(
   options?: SendInventoryCountLinkOptions,
 ): Promise<void> {
   const forceNew = options?.forceNew === true;
+  let hasGroups: boolean | null = null;
 
   if (auth.role === "member") {
     if (!auth.companyMemberId) {
@@ -217,11 +470,25 @@ export async function sendInventoryCountLink(
       return;
     }
 
+    hasGroups = await companyHasCountGroups(supabase, auth.companyId);
+    if (hasGroups === null) {
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          "Não foi possível consultar os grupos de contagem agora. Tente de novo em instantes.",
+        ),
+        "inventory_erro_grupos",
+        flowId,
+      );
+      return;
+    }
+
     if (!forceNew && auth.companyMemberId) {
       const pending = await fetchPendingAssignedOpenSessions(
         supabase,
         auth.companyId,
         auth.companyMemberId,
+        hasGroups,
       );
       if (pending.length > 0) {
         const base = publicAppAbsoluteBase();
@@ -280,6 +547,45 @@ export async function sendInventoryCountLink(
     return;
   }
 
+  if (hasGroups === null) {
+    hasGroups = await companyHasCountGroups(supabase, auth.companyId);
+  }
+  if (hasGroups === null) {
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        "Não foi possível consultar os grupos de contagem agora. Tente de novo em instantes.",
+      ),
+      "inventory_erro_grupos",
+      flowId,
+    );
+    return;
+  }
+
+  const base = publicAppAbsoluteBase();
+  if (!base) {
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        "Link indisponível (PUBLIC_APP_URL). Use a contagem pelo painel em Produtos.",
+      ),
+      "inventory_sem_base_url",
+      flowId,
+    );
+    return;
+  }
+
+  if (hasGroups) {
+    await sendListingScopedCountLinks(
+      supabase,
+      auth,
+      sendWhatsappMessage,
+      flowId,
+      base,
+    );
+    return;
+  }
+
   const { data: sess, error: se } = await supabase
     .from("inventory_count_sessions")
     .insert({
@@ -309,19 +615,6 @@ export async function sendInventoryCountLink(
     p_session_id: sess.id,
   });
 
-  const base = publicAppAbsoluteBase();
-  if (!base) {
-    await sendWhatsappMessage(
-      auth.senderNormalized,
-      withFaroFlowFooter(
-        "Link indisponível (PUBLIC_APP_URL). Use a contagem pelo painel em Produtos.",
-      ),
-      "inventory_sem_base_url",
-      flowId,
-    );
-    return;
-  }
-
   const slug = await ensureInventoryShortSlug(
     supabase,
     auth.companyId,
@@ -334,16 +627,138 @@ export async function sendInventoryCountLink(
   await sendWhatsappMessage(
     auth.senderNormalized,
     withFaroFlowFooter(
-      [
-        "*Contagem de estoque* 🍺",
-        "",
-        "Oi! Hora da contagem. Abra o link, conte item a item (sem ver o esperado) e envie para aprovação.",
-        "",
-        link,
-        "",
-        "Se algo ficar fora da faixa, o Faro pede para conferir de novo — sem mostrar o número.",
-      ].join("\n"),
+      formatCountLinksMessage([{ label: "Sem grupo/lista definida", url: link }]),
     ),
+    "inventory_link_enviado",
+    flowId,
+  );
+}
+
+async function sendListingScopedCountLinks(
+  supabase: SupabaseClient,
+  auth: InventoryAuth,
+  sendWhatsappMessage: SendWhatsappMessageFn,
+  flowId: string | undefined,
+  base: string,
+): Promise<void> {
+  const assignedFilter =
+    auth.role === "member" ? auth.companyMemberId : null;
+  const listings = await fetchListingsWithProducts(
+    supabase,
+    auth.companyId,
+    assignedFilter,
+  );
+
+  if (listings === null) {
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        "Não foi possível consultar as listagens de contagem agora. Tente de novo em instantes.",
+      ),
+      "inventory_erro_listagens",
+      flowId,
+    );
+    return;
+  }
+
+  if (listings.length === 0) {
+    if (auth.role === "member" && auth.companyMemberId) {
+      const assigned = await memberHasAssignedListings(
+        supabase,
+        auth.companyId,
+        auth.companyMemberId,
+      );
+      if (assigned === null) {
+        await sendWhatsappMessage(
+          auth.senderNormalized,
+          withFaroFlowFooter(
+            "Não foi possível consultar as listagens de contagem agora. Tente de novo em instantes.",
+          ),
+          "inventory_erro_listagens",
+          flowId,
+        );
+        return;
+      }
+      await sendWhatsappMessage(
+        auth.senderNormalized,
+        withFaroFlowFooter(
+          assigned
+            ? "As listagens atribuídas a você ainda não têm produtos. Peça ao responsável para incluir os itens em *Produtos* → *Contagem*."
+            : "Sua empresa usa grupos de contagem. Você não está atribuído a nenhuma listagem. Peça ao responsável para atribuir você na aba *Contagem* ou gerar o link por lá.",
+        ),
+        assigned
+          ? "inventory_listagem_sem_produtos"
+          : "inventory_membro_sem_listagem",
+        flowId,
+      );
+      return;
+    }
+
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        "Cadastre produtos nas listagens em *Produtos* → *Contagem* antes de contar pelo WhatsApp. Listagens vazias (como Lista principal) não entram na contagem.",
+      ),
+      "inventory_grupos_sem_produtos",
+      flowId,
+    );
+    return;
+  }
+
+  const links: CountLink[] = [];
+
+  if (auth.role === "owner") {
+    const openByListing = new Map<string, PendingSessionRow>();
+    const openRows = await fetchOpenListingSessions(supabase, auth.companyId);
+    for (const row of openRows) {
+      const listingId = row.inventory_count_listing_id;
+      if (!listingId || openByListing.has(listingId)) continue;
+      openByListing.set(listingId, row);
+    }
+
+    for (const listing of listings) {
+      const existing = openByListing.get(listing.id);
+      if (existing) {
+        links.push(
+          await sessionToCountLink(supabase, auth.companyId, existing, base),
+        );
+        continue;
+      }
+      const created = await createListingSessionLink(
+        supabase,
+        auth,
+        listing,
+        base,
+      );
+      if (created) links.push(created);
+    }
+  } else {
+    for (const listing of listings) {
+      const created = await createListingSessionLink(
+        supabase,
+        auth,
+        listing,
+        base,
+      );
+      if (created) links.push(created);
+    }
+  }
+
+  if (links.length === 0) {
+    await sendWhatsappMessage(
+      auth.senderNormalized,
+      withFaroFlowFooter(
+        "Não foi possível abrir a contagem de estoque. Tente novamente.",
+      ),
+      "inventory_erro_sessao",
+      flowId,
+    );
+    return;
+  }
+
+  await sendWhatsappMessage(
+    auth.senderNormalized,
+    withFaroFlowFooter(formatCountLinksMessage(links)),
     "inventory_link_enviado",
     flowId,
   );
