@@ -558,7 +558,7 @@ export function DashboardDayOperations({
         <SheetContent
           side="right"
           maximizable
-          className="flex w-full flex-col sm:max-w-lg"
+          className="flex w-full flex-col overflow-hidden sm:max-w-lg"
         >
           <SheetHeader className="pr-12">
             <SheetTitle>Contas a pagar</SheetTitle>
@@ -566,7 +566,7 @@ export function DashboardDayOperations({
               Boletos pendentes com vencimento hoje e amanhã.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
             <DashboardBoletoDayBlock
               label="Hoje"
               sublabel={todayLabel}
@@ -596,14 +596,14 @@ export function DashboardDayOperations({
         open={sheet === "checklists"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Checklists do dia</SheetTitle>
             <SheetDescription>
               Execuções concluídas hoje e pendências por atribuição.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Concluídos"
               empty="Nenhuma execução concluída hoje."
@@ -659,14 +659,14 @@ export function DashboardDayOperations({
         open={sheet === "inventory"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Contagem de estoque</SheetTitle>
             <SheetDescription>
               Sessões abertas e contagens concluídas hoje.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Pendentes (abertas)"
               empty="Nenhuma contagem em andamento."
@@ -704,14 +704,14 @@ export function DashboardDayOperations({
         open={sheet === "recebimento"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Recebimento de mercadorias</SheetTitle>
             <SheetDescription>
               Recebimentos confirmados hoje e pendentes de confirmação.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Recebidos hoje"
               empty="Nenhum recebimento confirmado hoje."

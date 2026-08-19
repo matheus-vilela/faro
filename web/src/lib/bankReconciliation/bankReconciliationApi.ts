@@ -11,6 +11,7 @@ import {
   type LaunchMemorySuggestion,
 } from "@/lib/bankReconciliation/suggestLaunchFromHistory";
 import { supabase } from "@/lib/supabase";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import type {
   BankCsvColumnMapping,
   BankMatchKind,
@@ -564,11 +565,17 @@ export async function fetchReconciledBoletoIds(
   boletoIds: string[],
 ): Promise<Set<string>> {
   if (boletoIds.length === 0) return new Set();
-  const { data, error } = await supabase
-    .from("bank_reconciliations")
-    .select("boleto_id")
-    .eq("company_id", companyId)
-    .in("boleto_id", boletoIds);
-  if (error) throw error;
-  return new Set((data ?? []).map((r) => r.boleto_id as string));
+  const wanted = new Set(boletoIds);
+  const rows = await fetchAllInRange(
+    supabase
+      .from("bank_reconciliations")
+      .select("boleto_id")
+      .eq("company_id", companyId)
+      .order("id", { ascending: true }),
+  );
+  return new Set(
+    rows
+      .map((r) => r.boleto_id as string)
+      .filter((id) => wanted.has(id)),
+  );
 }

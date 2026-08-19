@@ -230,7 +230,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           }),
         supabase
           .from("boletos")
-          .select("id, description, due_date, amount, status, is_projected")
+          .select("id, description, due_date, amount, status")
           .eq("company_id", companyId)
           .eq("flow_type", "payable")
           .eq("exclude_from_fluxo", false)
@@ -348,13 +348,16 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setMarginPct(cmvDash.kpis.marginPct);
       setCmvPct(cmvDash.kpis.cmvPct);
 
+      if (boletosRows.error) throw boletosRows.error;
+      if (dreBoletosRes.error) throw dreBoletosRes.error;
+      if (dreCmvRes.error) throw dreCmvRes.error;
+
       const boletos = (boletosRows.data ?? []) as Array<{
         id: string;
         description: string | null;
         due_date: string;
         amount: number;
         status: BoletoStatus;
-        is_projected?: boolean;
       }>;
       const totals = computePayableTotals(boletos, monthPeriod, todayYmd);
       setDueIn7Amount(totals.dueInNext7Days.amount);

@@ -684,7 +684,7 @@ export function DashboardAlertsCard({
                 <SheetContent
                   side="right"
                   maximizable
-                  className="w-full p-0 sm:max-w-2xl"
+                  className="flex w-full flex-col overflow-hidden p-0 sm:max-w-2xl"
                 >
                   <SheetHeader className="border-b px-4 py-3 pr-20">
                     <SheetTitle>Central de pendências</SheetTitle>
@@ -693,7 +693,7 @@ export function DashboardAlertsCard({
                       <strong>Revisão pós-importação → Abrir vínculos</strong>.
                     </SheetDescription>
                   </SheetHeader>
-                  <div className="space-y-4 overflow-y-auto p-4">
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
                     <div className="flex items-center justify-between rounded-lg border bg-card p-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Itens pendentes</p>
