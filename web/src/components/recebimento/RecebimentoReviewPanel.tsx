@@ -384,6 +384,8 @@ export function RecebimentoReviewPanel({
     }
   };
 
+  const fieldsLocked = header?.status === "received";
+
   const saveItemLinkAndUnit = async (
     item: ReviewItem,
     next: {
@@ -393,6 +395,10 @@ export function RecebimentoReviewPanel({
       recipeId: string | null;
     },
   ) => {
+    if (header?.status === "received") {
+      toast.error("Recebimento confirmado — vínculo e conversão não podem ser alterados.");
+      return;
+    }
     setSavingId(item.id);
     try {
       const productId = next.productId;
@@ -409,7 +415,6 @@ export function RecebimentoReviewPanel({
           invoice_unit: invoiceUnit,
           stock_quantity: stockQty,
           import_pending_resolution: false,
-          updated_at: new Date().toISOString(),
         })
         .eq("id", item.id);
       if (upErr) throw upErr;
@@ -489,6 +494,10 @@ export function RecebimentoReviewPanel({
     next: ProductUnitConversionDraft[],
   ) => {
     if (!companyId) return;
+    if (header?.status === "received") {
+      toast.error("Recebimento confirmado — conversões não podem ser alteradas aqui.");
+      return;
+    }
     const result = await persistProductUnitConversions(
       companyId,
       productId,
@@ -565,6 +574,9 @@ export function RecebimentoReviewPanel({
                   header.invoiceNumber ? ` · NF ${header.invoiceNumber}` : ""
                 }`
               : "Carregando…"}
+            {fieldsLocked
+              ? " · Confirmado: vínculo, entrada e conversão ficam só leitura."
+              : ""}
           </DialogDescription>
           <div className="flex flex-wrap gap-2 pt-2">
             <Button
@@ -616,12 +628,14 @@ export function RecebimentoReviewPanel({
                   ? (recipesByProduct[productId] ?? [])
                   : [];
                 const saving = savingId === it.id;
+                const rowDisabled = saving || fieldsLocked;
                 const needsAttention =
-                  !productId ||
-                  it.import_pending_resolution === true ||
-                  (productId &&
-                    it.invoice_unit &&
-                    it.stock_quantity == null);
+                  !fieldsLocked &&
+                  (!productId ||
+                    it.import_pending_resolution === true ||
+                    (productId &&
+                      it.invoice_unit &&
+                      it.stock_quantity == null));
                 const ready =
                   !saving && !!productId && !!it.invoice_unit;
 
@@ -684,7 +698,7 @@ export function RecebimentoReviewPanel({
                     <div className="min-w-0">
                       <SearchSelect
                         value={productId ?? "__none__"}
-                        disabled={saving}
+                        disabled={rowDisabled}
                         onValueChange={(v) => {
                           const nextPid = v === "__none__" ? null : v;
                           const nextUnit =
@@ -715,7 +729,7 @@ export function RecebimentoReviewPanel({
                     <div className="min-w-0 space-y-1.5">
                       <Select
                         value={it.import_stock_resolution ?? "DIRECT"}
-                        disabled={saving || !productId}
+                        disabled={rowDisabled || !productId}
                         onValueChange={(v) => {
                           void saveItemLinkAndUnit(it, {
                             productId,
@@ -748,7 +762,7 @@ export function RecebimentoReviewPanel({
                             it.resolved_entry_breakdown_recipe_id ??
                             "__none__"
                           }
-                          disabled={saving || recipes.length === 0}
+                          disabled={rowDisabled || recipes.length === 0}
                           onValueChange={(v) => {
                             void saveItemLinkAndUnit(it, {
                               productId,
@@ -797,7 +811,7 @@ export function RecebimentoReviewPanel({
                             onConversionsChange={(next) =>
                               handleConversionsChange(productId, next)
                             }
-                            disabled={saving}
+                            disabled={rowDisabled}
                             placeholder="Unidade da NF"
                             triggerClassName={FIELD_CLASS}
                           />
