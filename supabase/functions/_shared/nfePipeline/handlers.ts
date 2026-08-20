@@ -3,13 +3,16 @@ import {
   clearOnboardingSefaz,
   cnpj14,
   companyHasOpenJobs,
+  companyHasOpenJobs,
   enqueueJob,
   enqueuePendingInterpretations,
   enqueueProcessNfe,
+  isOnboardingFiscalOpen,
   loadCompanyFocus,
   loadSyncState,
   patchOnboardingCaptureCompleted,
   patchOnboardingSefazUnavailable,
+  refreshOnboardingFiscalProgress,
 } from "./db.ts";
 import {
   NFE_XML_BUCKET,
@@ -19,6 +22,7 @@ import {
   steadyIntervalMinutes,
 } from "./env.ts";
 import { FOCUS_AUTO_RATE_LIMITED } from "../focusApiAutoRateLimit.ts";
+import { canMarkOnboardingFiscalCompleted } from "../nfeFlowDiagnostic.ts";
 import {
   fetchNfeRecebidaXml,
   fetchNfesRecebidasPage,
@@ -83,14 +87,38 @@ async function handleSyncCompany(
     typeof job.payload?.cycle_id === "string"
       ? job.payload.cycle_id.trim()
       : "";
-  const cycleId = payloadCycle || crypto.randomUUID();
+  const existingCycle =
+    typeof state.cycle_id === "string" && state.cycle_id.trim()
+      ? state.cycle_id.trim()
+      : "";
+
+  if (state.mode === "onboarding") {
+    const hasOpen = await companyHasOpenJobs(admin, companyId, job.id);
+    if (hasOpen) {
+      const keepCycle = existingCycle || payloadCycle || null;
+      console.log(LOG, JSON.stringify({
+        fase: "sync_company_reuse",
+        company_id: companyId,
+        cycle_id: keepCycle,
+        reason: "open_jobs",
+      }));
+      return {
+        ok: true,
+        detail: { reused_cycle: keepCycle, skipped: "onboarding_active" },
+      };
+    }
+  }
+
+  const cycleId = state.mode === "onboarding" && existingCycle
+    ? existingCycle
+    : payloadCycle || crypto.randomUUID();
   const { error: updErr } = await admin
     .from("nfe_sync_state")
     .update({
       status: "running",
-      running_since: nowIso(),
+      running_since: state.running_since ?? nowIso(),
       cycle_id: cycleId,
-      pending_cursor_versao: state.cursor_versao,
+      pending_cursor_versao: state.pending_cursor_versao ?? state.cursor_versao,
       last_error: null,
       updated_at: nowIso(),
     })
@@ -236,28 +264,26 @@ async function handleFetchPage(
     if (existing?.id) {
       const alreadyDownloaded = existing.fetch_status === "downloaded";
       if (alreadyDownloaded) {
-        // Mantém downloaded; atualiza metadados + cycle_id (histórico desta consulta).
+        // Não recarimba cycle_id: senão o histórico do ciclo novo "rouba"
+        // notas já importadas e o close_cycle pode fechar o onboarding cedo.
         await admin.from("nfe_documents").update({
           focus_version: focusVersion,
           situacao,
           nfe_completa: completa,
           focus_payload: cab,
-          cycle_id: state.cycle_id,
           updated_at: nowIso(),
         }).eq("id", existing.id);
-        if (elegivel) {
-          listed += 1;
-          if (
-            existing.process_status !== "done" &&
-            existing.process_status !== "skipped"
-          ) {
-            await enqueueProcessNfe(admin, {
-              companyId,
-              documentId: String(existing.id),
-              chave,
-            });
-          }
-        } else {
+        if (
+          elegivel &&
+          existing.process_status !== "done" &&
+          existing.process_status !== "skipped"
+        ) {
+          await enqueueProcessNfe(admin, {
+            companyId,
+            documentId: String(existing.id),
+            chave,
+          });
+        } else if (!elegivel) {
           ignored += 1;
         }
       } else {
@@ -325,6 +351,12 @@ async function handleFetchPage(
     });
   }
 
+  if (state.mode === "onboarding") {
+    await refreshOnboardingFiscalProgress(admin, companyId, {
+      listExhausted: listDone,
+    });
+  }
+
   if (!listDone && nextVersao != null) {
     await enqueueJob(admin, {
       type: "fetch_page",
@@ -336,7 +368,7 @@ async function handleFetchPage(
     await enqueueJob(admin, {
       type: "close_cycle",
       companyId,
-      payload: {},
+      payload: { list_done: true },
       priority: state.priority,
     });
   }
@@ -522,11 +554,19 @@ async function handleDownloadXml(
     .eq("type", "fetch_page")
     .in("status", ["queued", "leased"]);
 
-  if ((pendingFetch ?? 0) === 0 && (openDl ?? 0) === 0 && (openFetch ?? 0) === 0) {
+  const progress = state?.mode === "onboarding"
+    ? await refreshOnboardingFiscalProgress(admin, companyId)
+    : { listExhausted: true };
+  if (
+    progress.listExhausted &&
+    (pendingFetch ?? 0) === 0 &&
+    (openDl ?? 0) === 0 &&
+    (openFetch ?? 0) === 0
+  ) {
     await enqueueJob(admin, {
       type: "close_cycle",
       companyId,
-      payload: {},
+      payload: { list_done: progress.listExhausted },
       priority: state?.priority ?? 0,
     });
   }
@@ -732,7 +772,26 @@ async function handleCloseCycle(
   }
 
   if (state.mode === "onboarding") {
-    if (downloadedN >= 1 && processedN >= downloadedN) {
+    const fiscal = (await loadCompanyFocus(admin, companyId))?.onboarding_fiscal;
+    const listExhausted =
+      job.payload?.list_done === true || fiscal?.list_exhausted === true;
+    const listingStillOpen = isOnboardingFiscalOpen(fiscal) && !listExhausted;
+
+    if (listingStillOpen) {
+      await refreshOnboardingFiscalProgress(admin, companyId);
+      return {
+        ok: true,
+        detail: { skipped: "onboarding_list_open" },
+      };
+    }
+
+    if (
+      canMarkOnboardingFiscalCompleted({
+        listExhausted,
+        downloaded: downloadedN,
+        processed: processedN,
+      })
+    ) {
       captureOk = true;
       completedOk = true;
       nextMode = "steady";
@@ -755,6 +814,7 @@ async function handleCloseCycle(
       emptyPoll += 1;
       nextSyncAt = addMinutesIso(onboardingEmptyPollMinutes());
       nextPriority = 100;
+      await refreshOnboardingFiscalProgress(admin, companyId);
     }
   }
 

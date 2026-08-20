@@ -10,7 +10,7 @@ import {
   persistStagingInterpretExpenseAndBoletos,
   resolveProductsForInterpretLog,
 } from "../stagingNfeInterpretPostProcess.ts";
-import { enqueueJob, loadSyncState } from "./db.ts";
+import { enqueueJob, loadSyncState, refreshOnboardingFiscalProgress } from "./db.ts";
 import { recordConsultaHistory } from "./consultaHistory.ts";
 import { NFE_XML_BUCKET } from "./env.ts";
 import type { JobResult } from "./types.ts";
@@ -149,16 +149,20 @@ export async function processNfeDocumentById(
       updated_at: new Date().toISOString(),
     }).eq("id", documentId);
 
+    const progress = isOnboarding
+      ? await refreshOnboardingFiscalProgress(admin, companyId)
+      : { listExhausted: true };
+
     const { count: stillPending } = await admin
       .from("nfe_documents")
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId)
       .in("process_status", ["pending", "processing"]);
-    if ((stillPending ?? 0) === 0) {
+    if ((stillPending ?? 0) === 0 && progress.listExhausted) {
       await enqueueJob(admin, {
         type: "close_cycle",
         companyId,
-        payload: {},
+        payload: { list_done: true },
         priority: 0,
       });
     }

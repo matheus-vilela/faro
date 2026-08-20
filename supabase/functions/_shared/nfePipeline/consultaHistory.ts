@@ -7,7 +7,7 @@ import {
   buildNfeQueuedFlowDiagnostic,
   type NfeFlowDiagnostic,
 } from "../nfeFlowDiagnostic.ts";
-import { enqueueJob } from "./db.ts";
+import { enqueueJob, onboardingHasActiveWork } from "./db.ts";
 
 const LOG = "[nfe-pipeline]";
 
@@ -71,8 +71,20 @@ export async function enqueueSyncCompanyWithQueuedHistory(
   jobId: string | null;
   cycleId: string | null;
   error?: string;
+  skipped?: string;
 }> {
-  const cycleId = crypto.randomUUID();
+  const active = input.onboarding
+    ? await onboardingHasActiveWork(admin, input.companyId)
+    : { busy: false, cycleId: null as string | null };
+  if (active.busy) {
+    return {
+      jobId: null,
+      cycleId: active.cycleId,
+      skipped: active.reason ?? "onboarding_active",
+    };
+  }
+
+  const cycleId = active.cycleId || crypto.randomUUID();
   const enq = await enqueueJob(admin, {
     type: "sync_company",
     companyId: input.companyId,

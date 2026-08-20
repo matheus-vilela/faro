@@ -195,6 +195,97 @@ export async function companyHasOpenJobs(
   return (count ?? 0) > 0;
 }
 
+/** Onboarding fiscal ainda em captura (não marcar completed). */
+export function isOnboardingFiscalOpen(
+  fiscal: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!fiscal) return true;
+  return fiscal.completed !== true && fiscal.capture_completed !== true;
+}
+
+/**
+ * Atualiza a barra do card de onboarding sem fechar a etapa.
+ * `max_nfes_sync` = notas já conhecidas; `nfes_sync` = interpretadas.
+ */
+export async function refreshOnboardingFiscalProgress(
+  admin: SupabaseClient,
+  companyId: string,
+  extra?: { listExhausted?: boolean },
+): Promise<{ listExhausted: boolean }> {
+  const { data: row, error } = await admin
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error || !row) return { listExhausted: false };
+  const base =
+    row.onboarding_fiscal && typeof row.onboarding_fiscal === "object" &&
+      !Array.isArray(row.onboarding_fiscal)
+      ? { ...(row.onboarding_fiscal as Record<string, unknown>) }
+      : {};
+  if (base.completed === true) {
+    return { listExhausted: base.list_exhausted === true };
+  }
+
+  const count = async (filters: Record<string, string>) => {
+    let q = admin
+      .from("nfe_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+    for (const [k, v] of Object.entries(filters)) q = q.eq(k, v);
+    const { count: n } = await q;
+    return n ?? 0;
+  };
+
+  const [downloaded, processed, ignored, listed, downloading] = await Promise.all([
+    count({ fetch_status: "downloaded" }),
+    count({ fetch_status: "downloaded", process_status: "done" }),
+    count({ fetch_status: "ignored" }),
+    count({ fetch_status: "listed" }),
+    count({ fetch_status: "downloading" }),
+  ]);
+  const known = downloaded + listed + downloading + ignored;
+  const next: Record<string, unknown> = {
+    ...base,
+    sync: true,
+    max_nfes_sync: Math.max(Number(base.max_nfes_sync) || 0, known),
+    nfes_sync: processed,
+    nfes_ignored: ignored,
+  };
+  if (extra?.listExhausted) next.list_exhausted = true;
+
+  await admin
+    .from("companies")
+    .update({
+      onboarding_fiscal: next,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", companyId);
+  return { listExhausted: next.list_exhausted === true };
+}
+
+/** Ciclo de onboarding já em curso — não abrir outro exec_id. */
+export async function onboardingHasActiveWork(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<{ busy: boolean; cycleId: string | null; reason?: string }> {
+  const state = await loadSyncState(admin, companyId);
+  const cycleId =
+    typeof state?.cycle_id === "string" && state.cycle_id.trim()
+      ? state.cycle_id.trim()
+      : null;
+  if (!state || state.mode !== "onboarding") {
+    return { busy: false, cycleId };
+  }
+  if (state.status === "running") {
+    return { busy: true, cycleId, reason: "running" };
+  }
+  if (await companyHasOpenJobs(admin, companyId)) {
+    return { busy: true, cycleId, reason: "open_jobs" };
+  }
+  return { busy: false, cycleId };
+}
+
 export async function patchOnboardingCaptureCompleted(
   admin: SupabaseClient,
   companyId: string,

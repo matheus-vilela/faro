@@ -74,6 +74,19 @@ export type NfeCycleFlowDiagnosticInput = {
   ignored?: number;
 };
 
+/** Só fecha o card/onboarding quando a janela Focus acabou e tudo foi interpretado. */
+export function canMarkOnboardingFiscalCompleted(input: {
+  listExhausted: boolean;
+  downloaded: number;
+  processed: number;
+}): boolean {
+  return (
+    input.listExhausted &&
+    input.downloaded >= 1 &&
+    input.processed >= input.downloaded
+  );
+}
+
 /** Diagnóstico inicial ao enfileirar (antes do worker processar). */
 export function buildNfeQueuedFlowDiagnostic(): NfeFlowDiagnostic {
   return buildDiagnostic(

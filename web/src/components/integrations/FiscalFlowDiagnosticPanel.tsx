@@ -22,6 +22,7 @@ export function FiscalFlowDiagnosticPanel({
       phaseLabels={NFE_FLOW_PHASE_LABELS}
       titleOk="Fluxo fiscal concluído"
       titleBlocked="Fluxo fiscal interrompido"
+      titlePending="Fluxo fiscal em curso"
       statusLabel={nfeFlowPhaseStatusLabel}
       compact={compact}
       className={className}

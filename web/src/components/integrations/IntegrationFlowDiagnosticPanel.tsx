@@ -69,6 +69,7 @@ export function IntegrationFlowDiagnosticPanel({
   phaseLabels,
   titleOk,
   titleBlocked,
+  titlePending,
   statusLabel = defaultStatusLabel,
   compact = false,
   className,
@@ -78,6 +79,7 @@ export function IntegrationFlowDiagnosticPanel({
   phaseLabels?: Record<string, string>;
   titleOk: string;
   titleBlocked: string;
+  titlePending?: string;
   statusLabel?: (status: IntegrationFlowPhaseStatus) => string;
   compact?: boolean;
   className?: string;
@@ -97,7 +99,13 @@ export function IntegrationFlowDiagnosticPanel({
         )}
         <div className="min-w-0 space-y-1">
           <p className="font-medium text-foreground">
-            {diagnostic.blocked_at ? titleBlocked : titleOk}
+            {diagnostic.blocked_at
+              ? titleBlocked
+              : phaseOrder.some(
+                    (k) => diagnostic.phases[k]?.status === "pending",
+                  )
+                ? (titlePending ?? "Fluxo em curso")
+                : titleOk}
           </p>
           <p className="text-xs text-muted-foreground">{diagnostic.summary}</p>
         </div>

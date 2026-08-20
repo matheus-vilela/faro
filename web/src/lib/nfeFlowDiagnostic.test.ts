@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildNfeCycleFlowDiagnostic,
   buildNfeQueuedFlowDiagnostic,
+  canMarkOnboardingFiscalCompleted,
 } from "../../../supabase/functions/_shared/nfeFlowDiagnostic.ts";
 import { inferNfeFlowDiagnosticFromHistory } from "./nfeFlowDiagnostic";
 
@@ -74,6 +75,28 @@ describe("buildNfeCycleFlowDiagnostic", () => {
     expect(d.phases.xml_download.status).toBe("ok");
     expect(d.phases.xml_interpret.status).toBe("pending");
     expect(d.phases.xml_interpret.message).toBe("0/28 nota(s) interpretadas.");
+  });
+});
+
+describe("canMarkOnboardingFiscalCompleted", () => {
+  it("não fecha o onboarding só porque a 1.ª página já foi interpretada", () => {
+    expect(
+      canMarkOnboardingFiscalCompleted({
+        listExhausted: false,
+        downloaded: 50,
+        processed: 50,
+      }),
+    ).toBe(false);
+  });
+
+  it("fecha só quando a listagem esgotou e tudo foi interpretado", () => {
+    expect(
+      canMarkOnboardingFiscalCompleted({
+        listExhausted: true,
+        downloaded: 274,
+        processed: 274,
+      }),
+    ).toBe(true);
   });
 });
 

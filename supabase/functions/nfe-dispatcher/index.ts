@@ -123,6 +123,16 @@ Deno.serve(async (req) => {
     if (enq.error) {
       return json({ ok: false, error: enq.error, ensured }, 500);
     }
+    if (enq.skipped) {
+      return json({
+        ok: true,
+        mode,
+        ensured,
+        enqueued: 0,
+        skipped: enq.skipped,
+        cycle_id: enq.cycleId,
+      });
+    }
     if (enq.jobId) enqueued += 1;
 
     console.log(LOG, JSON.stringify({
@@ -160,7 +170,7 @@ Deno.serve(async (req) => {
     const cutoff = new Date(Date.now() - 30 * 60_000).toISOString();
     const { data: stuck } = await admin
       .from("nfe_sync_state")
-      .select("company_id")
+      .select("company_id, mode, cycle_id")
       .eq("status", "running")
       .lt("running_since", cutoff)
       .limit(50);
@@ -172,10 +182,11 @@ Deno.serve(async (req) => {
         .eq("company_id", cid)
         .in("status", ["queued", "leased"]);
       if ((count ?? 0) === 0) {
+        const keepCycle = String(row.mode ?? "") === "onboarding";
         await admin.from("nfe_sync_state").update({
           status: "idle",
           running_since: null,
-          cycle_id: null,
+          cycle_id: keepCycle ? row.cycle_id : null,
           next_sync_at: new Date().toISOString(),
           last_error: "ciclo stuck recuperado pelo dispatcher",
           updated_at: new Date().toISOString(),
@@ -243,6 +254,7 @@ Deno.serve(async (req) => {
       company_id: cid,
       job_id: enq.jobId,
       cycle_id: enq.cycleId,
+      ...(enq.skipped ? { skipped: enq.skipped } : {}),
     });
   }
 

@@ -65,7 +65,10 @@ export function isFiscalOnboardingSyncInProgress(raw: unknown): boolean {
 }
 
 /**
- * Card de onboarding fiscal no dashboard: só enquanto `onboarding_fiscal.completed` ≠ true.
+ * Card de onboarding fiscal no dashboard: some só quando `completed === true`.
+ * O pipeline só pode gravar `completed` depois da listagem Focus esgotar
+ * e de todas as notas conhecidas serem interpretadas — senão o card some
+ * no meio da importação (ex.: após a 1.ª página de ~50 NF-e).
  */
 export function isOnboardingFiscalDashboardCardVisible(raw: unknown): boolean {
   return !isOnboardingFiscalJsonCompleted(raw);

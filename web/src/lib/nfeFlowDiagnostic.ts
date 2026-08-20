@@ -1,6 +1,7 @@
 export {
   buildNfeCycleFlowDiagnostic,
   buildNfeQueuedFlowDiagnostic,
+  canMarkOnboardingFiscalCompleted,
   NFE_FLOW_PHASE_LABELS,
   NFE_FLOW_PHASE_ORDER,
   type NfeCycleFlowDiagnosticInput,
