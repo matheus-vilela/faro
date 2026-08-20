@@ -80,6 +80,12 @@ export type OpeningBalanceHint = {
   netPaid30: number;
   overduePendingPayablesAmount: number;
   overduePendingReceivablesAmount: number;
+  accountsBalanceTotal: number;
+  accountsWithBalanceCount: number;
+  ofxBalanceTotal: number | null;
+  ofxBalanceAsOfYmd: string | null;
+  ofxAccountCount: number;
+  ofxFileName: string | null;
 };
 
 export const DEFAULT_CASH_FLOW_PREFS: CashFlowSimulationPrefs = {

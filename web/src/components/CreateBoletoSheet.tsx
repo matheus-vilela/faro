@@ -49,7 +49,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 /** Opções do select "Tipo de lançamento" (série + transferência). */
-type LaunchTypeSelect = ExpenseSeriesType | "transfer";
+export type BoletoLaunchType = ExpenseSeriesType | "transfer";
+type LaunchTypeSelect = BoletoLaunchType;
 
 function pickDefaultCategoryId(list: CompanyCategory[]): string {
   const leaves = list.filter(isSelectableDespesaLeaf);
@@ -190,6 +191,12 @@ interface CreateBoletoSheetProps {
   defaultAccountFlow?: BoletoFlowType;
   /** Fixa o fluxo e oculta o seletor conta a pagar / a receber (ex.: página de Contas a pagar). */
   fixedAccountFlow?: BoletoFlowType;
+  /** Prefill do tipo de lançamento (única, transferência, etc.). */
+  defaultLaunchType?: BoletoLaunchType;
+  /** Categoria inicial ao abrir (ex.: memória da conciliação). */
+  defaultCategoryId?: string | null;
+  defaultOriginBankAccountId?: string | null;
+  defaultDestBankAccountId?: string | null;
   onSuccess?: (boleto: Boleto) => void;
 }
 
@@ -203,6 +210,10 @@ export function CreateBoletoSheet({
   defaultDescription,
   defaultAccountFlow = "payable",
   fixedAccountFlow,
+  defaultLaunchType,
+  defaultCategoryId,
+  defaultOriginBankAccountId,
+  defaultDestBankAccountId,
   onSuccess,
 }: CreateBoletoSheetProps) {
   const [accountFlow, setAccountFlow] = useState<BoletoFlowType>(
@@ -235,7 +246,9 @@ export function CreateBoletoSheet({
   const [account, setAccount] = useState("");
   const [accountType, setAccountType] = useState("conta_corrente");
 
-  const [launchType, setLaunchType] = useState<LaunchTypeSelect>("single");
+  const [launchType, setLaunchType] = useState<LaunchTypeSelect>(
+    defaultLaunchType ?? "single",
+  );
   const [recurrenceFrequency, setRecurrenceFrequency] =
     useState<RecurrenceFrequency>("monthly");
   const [installmentCount, setInstallmentCount] = useState("12");
@@ -261,10 +274,10 @@ export function CreateBoletoSheet({
     if (!expenseId) {
       setAccountFlow(fixedAccountFlow ?? defaultAccountFlow);
     }
-    setLaunchType("single");
+    setLaunchType(defaultLaunchType ?? "single");
     setEmissionDate(localDateYmd());
-    setOriginBankAccountId("");
-    setDestBankAccountId("");
+    setOriginBankAccountId(defaultOriginBankAccountId?.trim() || "");
+    setDestBankAccountId(defaultDestBankAccountId?.trim() || "");
     if (defaultDueDate?.trim()) {
       setDueDate(defaultDueDate.trim().slice(0, 10));
     } else {
@@ -283,6 +296,9 @@ export function CreateBoletoSheet({
     defaultDescription,
     defaultAccountFlow,
     fixedAccountFlow,
+    defaultLaunchType,
+    defaultOriginBankAccountId,
+    defaultDestBankAccountId,
     expenseId,
   ]);
 
@@ -319,11 +335,20 @@ export function CreateBoletoSheet({
       const list = (data ?? []) as CompanyCategory[];
       setCompanyCategories(list);
       if (opts?.selectDefault) {
-        const flow = expenseId ? "payable" : (fixedAccountFlow ?? accountFlow);
-        setCompanyCategoryId(pickDefaultForFlow(list, flow));
+        if (
+          defaultCategoryId &&
+          list.some((c) => c.id === defaultCategoryId)
+        ) {
+          setCompanyCategoryId(defaultCategoryId);
+        } else {
+          const flow = expenseId
+            ? "payable"
+            : (fixedAccountFlow ?? accountFlow);
+          setCompanyCategoryId(pickDefaultForFlow(list, flow));
+        }
       }
     },
-    [companyId, expenseId, accountFlow, fixedAccountFlow, effectiveFlow],
+    [companyId, expenseId, accountFlow, fixedAccountFlow, effectiveFlow, defaultCategoryId],
   );
 
   useEffect(() => {
@@ -701,7 +726,9 @@ export function CreateBoletoSheet({
         </SheetHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="grid gap-4">
-            {!expenseId && effectiveFlow === "payable" && (
+            {!expenseId &&
+              effectiveFlow === "payable" &&
+              defaultLaunchType == null && (
               <div className="space-y-3 rounded-lg border p-4">
                 <Label>Tipo de lançamento</Label>
                 <Select

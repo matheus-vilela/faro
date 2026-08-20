@@ -108,10 +108,14 @@ export function Dre() {
     hasMappedMovement,
     hasOnlyUnclassified,
     reload,
-  } = useDreReport(currentCompany?.id, period);
+  } = useDreReport(currentCompany?.id, period, {
+    enabled: pageTab === "resultado",
+  });
 
   const prevPeriod = useMemo(() => shiftMonth(period, -1), [period]);
-  const prevReport = useDreReport(currentCompany?.id, prevPeriod);
+  const prevReport = useDreReport(currentCompany?.id, prevPeriod, {
+    enabled: pageTab === "resultado",
+  });
 
   const categoriesById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
@@ -162,7 +166,7 @@ export function Dre() {
   );
 
   useEffect(() => {
-    if (!currentCompany?.id || categories.length === 0) {
+    if (!currentCompany?.id || categories.length === 0 || pageTab === "orcamento") {
       setHistory([]);
       return;
     }
@@ -181,7 +185,7 @@ export function Dre() {
     return () => {
       cancelled = true;
     };
-  }, [currentCompany?.id, categories, period.month, period.year]);
+  }, [currentCompany?.id, categories, period.month, period.year, pageTab]);
 
   const projection = useMemo(() => {
     if (!computed) return null;
@@ -197,7 +201,10 @@ export function Dre() {
     const nextParams = new URLSearchParams(searchParams);
     if (next === "resultado") nextParams.delete("tab");
     else nextParams.set("tab", next);
-    if (next === "orcamento") nextParams.delete("view");
+    if (next === "orcamento") {
+      nextParams.delete("view");
+      nextParams.delete("from");
+    }
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -210,13 +217,13 @@ export function Dre() {
   return (
     <PageShell>
       <PageHeader
-        title="Resultado"
+        title={pageTab === "orcamento" ? "Orçamento" : "Resultado"}
         description={
           pageTab === "orcamento"
-            ? "Metas de custo/despesa por categoria — o realizado usa contas a pagar (e CMV de vendas na competência)."
+            ? "Meta de custo por categoria versus o que já foi gasto no mês — não é o lucro do DRE."
             : "Quanto sobrou no período — por vencimento dos lançamentos (competência)."
         }
-        icon={BarChart3}
+        icon={pageTab === "orcamento" ? Target : BarChart3}
       />
 
       <div
@@ -560,11 +567,27 @@ export function Dre() {
       {mainView === "sem-categoria" ? (
         <Card className="border-border/80 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Lançamentos sem categoria</CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              Boletos com vencimento em {periodLabel} sem categoria do plano —
-              fora do resultado classificado do DRE.
-            </CardDescription>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-lg">Lançamentos sem categoria</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
+                  Boletos com vencimento em {periodLabel} sem categoria do plano —
+                  fora do resultado classificado do DRE.
+                </CardDescription>
+              </div>
+              {searchParams.get("from") === "orcamento" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setPageTab("orcamento")}
+                >
+                  <Target className="mr-2 h-4 w-4" />
+                  Voltar ao orçamento
+                </Button>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <DreSemCategoriaTable

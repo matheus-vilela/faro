@@ -3,7 +3,9 @@ import {
   computeBudgetComparison,
   computeDeviationStatus,
   computePercentConsumed,
+  filterBudgetSections,
 } from "./computeBudgetComparison";
+import { SALES_CMV_NODE_ID } from "./types";
 import type { CompanyCategory } from "@/types/category";
 
 function cat(
@@ -123,4 +125,98 @@ describe("computeBudgetComparison", () => {
     expect(result.chartRows[0]?.categoryId).toBe("leaf-energia");
     expect(Math.abs(result.chartRows[0]?.variance ?? 0)).toBe(500);
   });
+
+  it("mantém folhas mapeadas mesmo com orçado e realizado zero", () => {
+    const result = computeBudgetComparison({
+      categories,
+      budgets: [],
+      actualByCategoryId: new Map(),
+    });
+
+    const fixas = result.sections.find((s) => s.dreBucket === "DESPESAS_FIXAS");
+    const aluguel = fixas?.children[0]?.children.find(
+      (n) => n.id === "leaf-aluguel",
+    );
+    expect(aluguel).toBeDefined();
+    expect(aluguel?.isLeaf).toBe(true);
+    expect(aluguel?.status).toBe("empty");
+    expect(aluguel?.budgeted).toBe(0);
+    expect(aluguel?.actual).toBe(0);
+  });
+
+  it("marca CMV de vendas como linha informativa, sem alerta de meta", () => {
+    const result = computeBudgetComparison({
+      categories,
+      budgets: [],
+      actualByCategoryId: new Map(),
+      salesCmv: 400,
+    });
+
+    const cmv = result.sections.find((s) => s.dreBucket === "CMV");
+    const sales = cmv?.children.find((n) => n.id === SALES_CMV_NODE_ID);
+    expect(sales?.isInformational).toBe(true);
+    expect(sales?.isLeaf).toBe(false);
+    expect(sales?.status).toBe("empty");
+    expect(sales?.actual).toBe(400);
+  });
 });
+
+describe("filterBudgetSections", () => {
+  const categories: CompanyCategory[] = [
+    cat({ id: "root-fixa", name: "Fixas", tipo: "FIXA" }),
+    cat({
+      id: "leaf-aluguel",
+      name: "Aluguel",
+      parent_id: "root-fixa",
+      tipo: "FIXA",
+    }),
+    cat({
+      id: "leaf-energia",
+      name: "Energia",
+      parent_id: "root-fixa",
+      tipo: "FIXA",
+    }),
+  ];
+
+  it("filtra com movimento e sem meta", () => {
+    const result = computeBudgetComparison({
+      categories,
+      budgets: [{ categoryId: "leaf-aluguel", amount: 1000 }],
+      actualByCategoryId: new Map([
+        ["leaf-aluguel", 1000],
+        ["leaf-energia", 200],
+      ]),
+    });
+
+    const withActivity = filterBudgetSections(result.sections, "with_activity");
+    const namesWithActivity = collectLeafNames(withActivity);
+    expect(namesWithActivity).toContain("Aluguel");
+    expect(namesWithActivity).toContain("Energia");
+
+    const noBudget = filterBudgetSections(result.sections, "no_budget");
+    const namesNoBudget = collectLeafNames(noBudget);
+    expect(namesNoBudget).toContain("Energia");
+    expect(namesNoBudget).not.toContain("Aluguel");
+  });
+});
+
+function collectLeafNames(
+  nodes: { name: string; isLeaf: boolean; children: unknown[] }[],
+): string[] {
+  const out: string[] = [];
+  for (const n of nodes) {
+    if (n.isLeaf) out.push(n.name);
+    if (n.children.length) {
+      out.push(
+        ...collectLeafNames(
+          n.children as {
+            name: string;
+            isLeaf: boolean;
+            children: unknown[];
+          }[],
+        ),
+      );
+    }
+  }
+  return out;
+}

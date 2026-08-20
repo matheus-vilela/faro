@@ -7,6 +7,8 @@ export interface CompanyBankAccount {
   tipo: BankAccountType;
   acquirer_id?: string | null;
   acquirer_name?: string | null;
+  current_balance?: number | null;
+  balance_as_of?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -311,31 +311,92 @@ export function buildHomeActionItems(
   );
 }
 
-export function buildHomeInsightText(input: {
+export type BuildHomeInsightInput = {
+  loading?: boolean;
   periodLabel: string;
   faturamento: number;
   faturamentoDeltaPct: number | null;
+  hasPeriodSales: boolean;
   actionCount: number;
-}): string {
-  const fat = formatBrl(input.faturamento);
-  const delta =
-    input.faturamentoDeltaPct != null
-      ? ` (${input.faturamentoDeltaPct > 0 ? "+" : ""}${input.faturamentoDeltaPct.toLocaleString(
-          "pt-BR",
-          { maximumFractionDigits: 0 },
-        )}% vs período anterior)`
-      : "";
+  payablesTodayCount: number;
+  payablesTodayAmount: number;
+  payablesTomorrowCount: number;
+  payablesTomorrowAmount: number;
+  dueIn7Count: number;
+  dueIn7Amount: number;
+  lucroMes: number | null;
+  marginPct: number | null;
+};
 
-  if (input.actionCount < 0) {
-    return `Seu faturamento ${input.periodLabel} está em ${fat}${delta}. Estou checando o que precisa de você…`;
+function formatPctDelta(pct: number | null): string {
+  if (pct == null) return "";
+  return ` (${pct > 0 ? "+" : ""}${pct.toLocaleString("pt-BR", {
+    maximumFractionDigits: 0,
+  })}% vs período anterior)`;
+}
+
+function formatPayablesDuePhrase(
+  when: "hoje" | "amanhã",
+  count: number,
+  amount: number,
+): string {
+  const fat = formatBrl(amount);
+  const day = when === "hoje" ? "Hoje" : "Amanhã";
+  if (count === 1) return `${day} vence 1 conta de ${fat}.`;
+  return `${day} vencem ${count} contas, somando ${fat}.`;
+}
+
+/** Uma frase só: a mais urgente. Nunca cita faturamento zerado. */
+export function buildHomeInsightText(input: BuildHomeInsightInput): string {
+  if (input.loading) {
+    return "Estou checando o que precisa de você…";
   }
 
-  if (input.actionCount <= 0) {
-    return `Seu faturamento ${input.periodLabel} está em ${fat}${delta}. Nada pendente agora — eu te aviso quando surgir algo.`;
+  if (input.payablesTodayCount > 0) {
+    return formatPayablesDuePhrase(
+      "hoje",
+      input.payablesTodayCount,
+      input.payablesTodayAmount,
+    );
   }
 
-  const n = input.actionCount;
-  return `Seu faturamento ${input.periodLabel} está em ${fat}${delta}. Deixei ${n} coisa${n === 1 ? "" : "s"} esperando você ali embaixo — alguns minutos e tá tudo em dia.`;
+  if (input.payablesTomorrowCount > 0) {
+    return formatPayablesDuePhrase(
+      "amanhã",
+      input.payablesTomorrowCount,
+      input.payablesTomorrowAmount,
+    );
+  }
+
+  if (input.actionCount > 0) {
+    const n = input.actionCount;
+    return `Deixei ${n} coisa${n === 1 ? "" : "s"} esperando você ali embaixo — alguns minutos e tá tudo em dia.`;
+  }
+
+  if (input.dueIn7Count > 0) {
+    const n = input.dueIn7Count;
+    const fat = formatBrl(input.dueIn7Amount);
+    const noun = n === 1 ? "conta" : "contas";
+    return `Tem ${n} ${noun} a vencer nos próximos 7 dias, somando ${fat}.`;
+  }
+
+  if (input.hasPeriodSales && input.faturamento > 0) {
+    const fat = formatBrl(input.faturamento);
+    return `Seu faturamento ${input.periodLabel} está em ${fat}${formatPctDelta(input.faturamentoDeltaPct)}.`;
+  }
+
+  if (input.lucroMes != null) {
+    return `O lucro do mês está em ${formatBrl(input.lucroMes)}.`;
+  }
+
+  if (input.marginPct != null) {
+    const pct = input.marginPct.toLocaleString("pt-BR", {
+      maximumFractionDigits: 0,
+    });
+    return `A margem do período está em ${pct}%.`;
+  }
+
+  return "Nada urgente agora — quando houver vendas, contas ou pendências, eu te aviso aqui.";
 }
 
 export function greetingForHour(now = new Date()): string {

@@ -68,10 +68,30 @@ type LoadJson = {
   status?: string;
   company_name?: string;
   group_name?: string;
+  listing_name?: string;
   assigned_to_name?: string;
   validate_live?: boolean;
   products?: ProductLine[];
 };
+
+function publicCountErrorMessage(code: string | undefined): string {
+  if (code === "closed" || code === "already_submitted") {
+    return "Esta contagem já foi enviada ou o link expirou.";
+  }
+  if (code === "listing_required") {
+    return "Esta contagem precisa de uma listagem. Peça um link gerado em Produtos → Contagem (por grupo ou listagem).";
+  }
+  if (code === "group_required") {
+    return "Esta contagem precisa de um grupo. Peça um link gerado em Produtos → Contagem.";
+  }
+  if (code === "out_of_band") {
+    return "Há itens fora da faixa — confira de novo antes de enviar.";
+  }
+  if (code === "incomplete") {
+    return "Ainda há itens sem quantidade.";
+  }
+  return "Link inválido ou expirado.";
+}
 
 type BandSignal = "ok" | "out" | null;
 
@@ -81,6 +101,7 @@ export function ContagemEstoquePublic() {
   const [error, setError] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("");
   const [groupName, setGroupName] = useState("");
+  const [listingName, setListingName] = useState("");
   const [assignedToName, setAssignedToName] = useState("");
   const [products, setProducts] = useState<ProductLine[]>([]);
   const [validateLive, setValidateLive] = useState(true);
@@ -120,16 +141,13 @@ export function ContagemEstoquePublic() {
     }
     const row = res as LoadJson;
     if (!row?.ok) {
-      setError(
-        row?.error === "closed"
-          ? "Esta contagem já foi enviada ou o link expirou."
-          : "Link inválido ou expirado.",
-      );
+      setError(publicCountErrorMessage(row?.error));
       return;
     }
     const list = row.products ?? [];
     setCompanyName(row.company_name ?? "");
     setGroupName((row.group_name ?? "").trim());
+    setListingName((row.listing_name ?? "").trim());
     setAssignedToName((row.assigned_to_name ?? "").trim());
     setValidateLive(row.validate_live !== false);
     setSessionStatus(row.status ?? "open");
@@ -255,6 +273,10 @@ export function ContagemEstoquePublic() {
         setError("Ainda há itens sem quantidade.");
         return;
       }
+      if (row?.error === "group_required" || row?.error === "listing_required") {
+        setError(publicCountErrorMessage(row.error));
+        return;
+      }
       setError(
         row?.error === "already_submitted"
           ? "Esta contagem já foi enviada."
@@ -359,6 +381,7 @@ export function ContagemEstoquePublic() {
               <p className="font-medium text-foreground">{companyName}</p>
             ) : null}
             {groupName ? <p>Grupo: {groupName}</p> : null}
+            {listingName ? <p>Listagem: {listingName}</p> : null}
             {assignedToName ? <p>Operador: {assignedToName}</p> : null}
             {sessionStatus === "returned" ? (
               <p className="text-amber-700 dark:text-amber-400">

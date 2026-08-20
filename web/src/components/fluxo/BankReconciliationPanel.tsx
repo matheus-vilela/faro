@@ -1,5 +1,7 @@
+import { AssociateBoletoDialog } from "@/components/fluxo/AssociateBoletoDialog";
 import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
+import type { BoletoLaunchType } from "@/components/CreateBoletoSheet";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -17,6 +19,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,15 +40,19 @@ import { useCompany } from "@/contexts/CompanyContext";
 import {
   boletoReferenceDate,
   confirmReconciliation,
+  fetchBoletosForRecon,
   fetchImportLines,
   fetchLatestImport,
-  fetchPayableBoletosForRecon,
   fetchReconciledBoletoIds,
+  isPendingReconLine,
   markLineCreatedPayable,
+  searchBoletosForAssociate,
+  suggestLaunchFromStatementHistory,
   uploadAndImportStatement,
 } from "@/lib/bankReconciliation/bankReconciliationApi";
+import type { LaunchMemorySuggestion } from "@/lib/bankReconciliation/suggestLaunchFromHistory";
 import {
-  buildMatchResult,
+  buildMatchResultByDirection,
   type MatchPairSuggestion,
 } from "@/lib/bankReconciliation/matchBankLines";
 import {
@@ -52,14 +65,21 @@ import type { CompanyBankAccount } from "@/types/bankAccount";
 import { bankAccountTypeLabel } from "@/types/bankAccount";
 import type { BankStatementLine } from "@/types/bankReconciliation";
 import type { Boleto } from "@/types/expense";
+import { isBoletoPayable } from "@/types/expense";
 import {
+  ArrowLeftRight,
   Check,
+  ChevronDown,
   Landmark,
   Loader2,
   Plus,
   Upload,
   HelpCircle,
   Hourglass,
+  FilePlus,
+  Link2,
+  Percent,
+  TrendingUp,
 } from "lucide-react";
 import {
   useCallback,
@@ -155,8 +175,20 @@ export function BankReconciliationPanel({
   const [createFromLine, setCreateFromLine] = useState<BankStatementLine | null>(
     null,
   );
+  const [createIntent, setCreateIntent] = useState<
+    "entry" | "transfer" | "receivable"
+  >("entry");
+  const [createMemory, setCreateMemory] =
+    useState<LaunchMemorySuggestion | null>(null);
   const [createBankOpen, setCreateBankOpen] = useState(false);
   const [listPage, setListPage] = useState(1);
+
+  const [associateOpen, setAssociateOpen] = useState(false);
+  const [associateLine, setAssociateLine] = useState<BankStatementLine | null>(
+    null,
+  );
+  const [associateBoletos, setAssociateBoletos] = useState<Boleto[]>([]);
+  const [associateLoading, setAssociateLoading] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     if (!companyId) return;
@@ -204,16 +236,15 @@ export function BankReconciliationPanel({
       setFileLabel(imp.file_name);
       const allLines = await fetchImportLines(imp.id);
       setLines(allLines);
-      const debits = allLines.filter((l) => l.direction === "debit");
       const periodStart =
         imp.period_start ??
-        debits[0]?.posted_at ??
+        allLines[0]?.posted_at ??
         new Date().toISOString().slice(0, 10);
       const periodEnd =
         imp.period_end ??
-        debits[debits.length - 1]?.posted_at ??
+        allLines[allLines.length - 1]?.posted_at ??
         periodStart;
-      const pays = await fetchPayableBoletosForRecon(
+      const pays = await fetchBoletosForRecon(
         companyId,
         periodStart,
         periodEnd,
@@ -237,38 +268,48 @@ export function BankReconciliationPanel({
     void reloadMatchData();
   }, [reloadMatchData]);
 
-  const debitLines = useMemo(
-    () => lines.filter((l) => l.direction === "debit"),
+  const pendingLines = useMemo(
+    () => lines.filter((l) => isPendingReconLine(l)),
     [lines],
   );
 
   const matchResult = useMemo(() => {
-    const unmatchedLines = debitLines.filter(
-      (l) => l.status === "unmatched" && !doneKeys[`line:${l.id}`],
+    const unmatchedLines = pendingLines.filter(
+      (l) => !doneKeys[`line:${l.id}`],
     );
     const availableBoletos = boletos.filter((b) => {
       if (reconciledBoletoIds.has(b.id)) return false;
       if (doneKeys[`boleto:${b.id}`]) return false;
       return true;
     });
+    const toMatchLine = (l: BankStatementLine) => ({
+      id: l.id,
+      postedAt: l.posted_at,
+      amount: Number(l.amount),
+      description: l.description,
+    });
+    const toMatchBoleto = (b: Boleto) => ({
+      id: b.id,
+      description: b.description,
+      amount: Number(b.amount),
+      referenceDate: boletoReferenceDate(b),
+      status: b.status,
+      company_category_id: b.company_category_id,
+    });
 
-    return buildMatchResult(
-      unmatchedLines.map((l) => ({
-        id: l.id,
-        postedAt: l.posted_at,
-        amount: Number(l.amount),
-        description: l.description,
-      })),
-      availableBoletos.map((b) => ({
-        id: b.id,
-        description: b.description,
-        amount: Number(b.amount),
-        referenceDate: boletoReferenceDate(b),
-        status: b.status,
-        company_category_id: b.company_category_id,
-      })),
-    );
-  }, [debitLines, boletos, doneKeys, reconciledBoletoIds]);
+    return buildMatchResultByDirection({
+      debitLines: unmatchedLines
+        .filter((l) => l.direction === "debit")
+        .map(toMatchLine),
+      creditLines: unmatchedLines
+        .filter((l) => l.direction === "credit")
+        .map(toMatchLine),
+      payables: availableBoletos.filter(isBoletoPayable).map(toMatchBoleto),
+      receivables: availableBoletos
+        .filter((b) => !isBoletoPayable(b))
+        .map(toMatchBoleto),
+    });
+  }, [pendingLines, boletos, doneKeys, reconciledBoletoIds]);
 
   const lineById = useMemo(() => {
     const m = new Map<string, BankStatementLine>();
@@ -302,7 +343,7 @@ export function BankReconciliationPanel({
       const line = lineById.get(id);
       if (!line) continue;
       const key = `sobanco:${id}`;
-      if (doneKeys[key] || line.status !== "unmatched") continue;
+      if (doneKeys[key] || !isPendingReconLine(line)) continue;
       out.push({ key, kind: "sobanco", line, done: !!doneKeys[key] });
     }
     for (const id of matchResult.sofaroBoletoIds) {
@@ -358,7 +399,7 @@ export function BankReconciliationPanel({
     }
     setImporting(true);
     try {
-      await uploadAndImportStatement({
+      const imported = await uploadAndImportStatement({
         companyId,
         companyBankAccountId: accountId,
         file,
@@ -366,7 +407,16 @@ export function BankReconciliationPanel({
       });
       setDoneKeys({});
       setListPage(1);
-      toast.success("Extrato importado.");
+      if (
+        imported.ofxLedgerApplied &&
+        imported.ofxLedgerAmount != null
+      ) {
+        toast.success(
+          `Extrato importado. Saldo da conta atualizado para ${formatCurrency(imported.ofxLedgerAmount)}.`,
+        );
+      } else {
+        toast.success("Extrato importado.");
+      }
       await reloadMatchData();
     } catch (e) {
       console.error(e);
@@ -470,11 +520,139 @@ export function BankReconciliationPanel({
     setReviewOpen(true);
   };
 
+  const lineFromRow = (row: UiRow): BankStatementLine | null => {
+    if (row.kind === "sofaro") return null;
+    return row.line;
+  };
+
+  const openCreateFromLine = async (
+    line: BankStatementLine,
+    intent: "entry" | "transfer" | "receivable",
+  ) => {
+    if (!companyId) return;
+    setConfirming(true);
+    try {
+      const preferFlow: "payable" | "receivable" =
+        intent === "receivable" || line.direction === "credit"
+          ? "receivable"
+          : "payable";
+      const memory = await suggestLaunchFromStatementHistory({
+        companyId,
+        bankDescription: line.description,
+        preferEntryKind: intent === "transfer" ? "transfer" : "standard",
+        preferFlowType: intent === "transfer" ? undefined : preferFlow,
+      });
+      setCreateFromLine(line);
+      setCreateIntent(intent);
+      setCreateMemory(memory);
+      setCreateOpen(true);
+    } catch (e) {
+      console.error(e);
+      setCreateFromLine(line);
+      setCreateIntent(intent);
+      setCreateMemory(null);
+      setCreateOpen(true);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const handleAssociateSearch = useCallback(
+    async (query: string) => {
+      if (!companyId || !associateLine) return;
+      setAssociateLoading(true);
+      try {
+        const flow =
+          associateLine.direction === "credit" ? "receivable" : "payable";
+        const found = await searchBoletosForAssociate({
+          companyId,
+          query,
+          flowType: flow,
+          excludeIds: [...reconciledBoletoIds],
+        });
+        setAssociateBoletos(found);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setAssociateLoading(false);
+      }
+    },
+    [companyId, associateLine, reconciledBoletoIds],
+  );
+
+  const openAssociate = (line: BankStatementLine) => {
+    setAssociateLine(line);
+    setAssociateBoletos([]);
+    setAssociateOpen(true);
+  };
+
+  const handleAssociateSelect = async (boleto: Boleto) => {
+    if (!companyId || !accountId || !associateLine) return;
+    const amountDiff = Math.round(
+      Math.abs(Number(associateLine.amount) - Number(boleto.amount)) * 100,
+    ) / 100;
+    setConfirming(true);
+    try {
+      await confirmReconciliation({
+        companyId,
+        userId: user?.id ?? null,
+        statementLineId: associateLine.id,
+        boletoId: boleto.id,
+        matchKind: "manual",
+        confidence: null,
+        amountDiff,
+        companyBankAccountId: accountId,
+        paymentDate: associateLine.posted_at,
+      });
+      setDoneKeys((s) => ({
+        ...s,
+        [`line:${associateLine.id}`]: "1",
+        [`boleto:${boleto.id}`]: "1",
+        [`sobanco:${associateLine.id}`]: "Conciliado",
+        [`pair:${associateLine.id}:${boleto.id}`]: "Conciliado",
+      }));
+      toast.success("Movimento associado ao lançamento.");
+      setAssociateOpen(false);
+      setAssociateLine(null);
+      await reloadMatchData();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível associar.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const createDefaultFlow =
+    createIntent === "receivable"
+      ? "receivable"
+      : createIntent === "entry"
+        ? createFromLine?.direction === "credit"
+          ? "receivable"
+          : "payable"
+        : "payable";
+  const createLaunchType: BoletoLaunchType =
+    createIntent === "transfer" ? "transfer" : "single";
+  const createOriginAccount =
+    createIntent === "transfer"
+      ? createFromLine?.direction === "credit"
+        ? (createMemory?.originBankAccountId ?? "")
+        : accountId
+      : (createMemory?.originBankAccountId ?? "");
+  const createDestAccount =
+    createIntent === "transfer"
+      ? createFromLine?.direction === "credit"
+        ? accountId
+        : (createMemory?.destBankAccountId ?? "")
+      : (createMemory?.destBankAccountId ?? "");
+
   const insight =
     pendingRows.length === 0 && rows.length > 0
-      ? "Conciliação fechada. Cada saída do banco tem um lançamento no Faro."
+      ? "Conciliação fechada. Cada movimento do banco tem um lançamento no Faro."
       : lines.length === 0
-        ? "Suba um extrato CSV ou OFX para cruzar com as contas a pagar."
+        ? "Suba um extrato CSV ou OFX para cruzar com as contas a pagar e a receber."
         : `Cruzei o extrato com os lançamentos. ${safePairs.length} correspondência(s) forte(s) pronta(s) para confirmar.`;
 
   const body = (
@@ -669,14 +847,14 @@ export function BankReconciliationPanel({
             <Check className="h-10 w-10 text-emerald-600" />
             <p className="text-lg font-semibold">Extrato batido</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Tudo que saiu do banco está lançado no Faro.
+              Tudo que entrou e saiu do banco está lançado no Faro.
             </p>
           </CardContent>
         </Card>
       ) : rows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhum movimento para conciliar. Suba um extrato com débitos.
+            Nenhum movimento para conciliar. Suba um extrato CSV ou OFX.
           </CardContent>
         </Card>
       ) : (
@@ -694,16 +872,26 @@ export function BankReconciliationPanel({
                   );
                 }
               }}
-              onReview={() => {
+              onReviewInterest={() => {
                 if (row.kind === "forte" || row.kind === "provavel") {
                   openReview(row.pair);
                 }
               }}
-              onCreate={() => {
-                if (row.kind === "sobanco") {
-                  setCreateFromLine(row.line);
-                  setCreateOpen(true);
-                }
+              onLaunchEntry={() => {
+                const line = lineFromRow(row);
+                if (line) void openCreateFromLine(line, "entry");
+              }}
+              onLaunchTransfer={() => {
+                const line = lineFromRow(row);
+                if (line) void openCreateFromLine(line, "transfer");
+              }}
+              onLaunchReceivable={() => {
+                const line = lineFromRow(row);
+                if (line) void openCreateFromLine(line, "receivable");
+              }}
+              onAssociate={() => {
+                const line = lineFromRow(row);
+                if (line) openAssociate(line);
               }}
               onAwait={() => {
                 if (row.kind === "sofaro") {
@@ -816,15 +1004,39 @@ export function BankReconciliationPanel({
       </Dialog>
 
       <CreateBoletoSheet
+        key={
+          createOpen
+            ? `${createFromLine?.id ?? "line"}-${createIntent}`
+            : "closed"
+        }
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        onOpenChange={(next) => {
+          setCreateOpen(next);
+          if (!next) {
+            setCreateFromLine(null);
+            setCreateMemory(null);
+          }
+        }}
         companyId={companyId}
-        fixedAccountFlow="payable"
+        fixedAccountFlow={
+          createIntent === "transfer" ? undefined : createDefaultFlow
+        }
+        defaultAccountFlow={createDefaultFlow}
+        defaultLaunchType={createLaunchType}
+        defaultCategoryId={
+          createIntent === "transfer"
+            ? null
+            : (createMemory?.companyCategoryId ?? null)
+        }
+        defaultOriginBankAccountId={createOriginAccount || null}
+        defaultDestBankAccountId={createDestAccount || null}
         defaultDueDate={createFromLine?.posted_at}
         defaultAmount={
           createFromLine ? Number(createFromLine.amount) : null
         }
-        defaultDescription={createFromLine?.description ?? null}
+        defaultDescription={
+          createMemory?.description ?? createFromLine?.description ?? null
+        }
         onSuccess={(boleto) => {
           if (!createFromLine || !companyId || !accountId) return;
           void (async () => {
@@ -836,20 +1048,34 @@ export function BankReconciliationPanel({
                 userId: user?.id ?? null,
                 companyBankAccountId: accountId,
                 paymentDate: createFromLine.posted_at,
+                statementDirection: createFromLine.direction,
               });
               setDoneKeys((s) => ({
                 ...s,
                 [`sobanco:${createFromLine.id}`]: "Lançada",
                 [`line:${createFromLine.id}`]: "1",
               }));
-              toast.success("Despesa criada a partir do movimento do banco.");
+              toast.success("Lançamento criado a partir do movimento do banco.");
               setCreateFromLine(null);
+              setCreateMemory(null);
               await reloadMatchData();
             } catch (e) {
               console.error(e);
               toast.error("Conta criada, mas falhou o vínculo com o extrato.");
             }
           })();
+        }}
+      />
+
+      <AssociateBoletoDialog
+        open={associateOpen}
+        onOpenChange={setAssociateOpen}
+        loading={associateLoading}
+        confirming={confirming}
+        boletos={associateBoletos}
+        onSearch={handleAssociateSearch}
+        onSelect={(b) => {
+          void handleAssociateSelect(b);
         }}
       />
 
@@ -876,18 +1102,80 @@ export function BankReconciliationPanel({
   return <PageShell className="space-y-4">{body}</PageShell>;
 }
 
+function RevisarMenu({
+  confirming,
+  showInterest,
+  onReviewInterest,
+  onLaunchEntry,
+  onLaunchTransfer,
+  onLaunchReceivable,
+  onAssociate,
+}: {
+  confirming: boolean;
+  showInterest: boolean;
+  onReviewInterest: () => void;
+  onLaunchEntry: () => void;
+  onLaunchTransfer: () => void;
+  onLaunchReceivable: () => void;
+  onAssociate: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" disabled={confirming}>
+          Revisar
+          <ChevronDown className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72">
+        {showInterest ? (
+          <>
+            <DropdownMenuItem onClick={onReviewInterest}>
+              <Percent className="h-4 w-4" />
+              Ajustar juros e desconto
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        <DropdownMenuItem onClick={onLaunchEntry}>
+          <FilePlus className="h-4 w-4" />
+          Adicionar como novo lançamento
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onLaunchTransfer}>
+          <ArrowLeftRight className="h-4 w-4" />
+          Adicionar como transferência
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onLaunchReceivable}>
+          <TrendingUp className="h-4 w-4" />
+          Adicionar como conta a receber
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onAssociate}>
+          <Link2 className="h-4 w-4" />
+          Buscar e associar a um lançamento
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ReconRow({
   row,
   onConfirm,
-  onReview,
-  onCreate,
+  onReviewInterest,
+  onLaunchEntry,
+  onLaunchTransfer,
+  onLaunchReceivable,
+  onAssociate,
   onAwait,
   confirming,
 }: {
   row: UiRow;
   onConfirm: () => void;
-  onReview: () => void;
-  onCreate: () => void;
+  onReviewInterest: () => void;
+  onLaunchEntry: () => void;
+  onLaunchTransfer: () => void;
+  onLaunchReceivable: () => void;
+  onAssociate: () => void;
   onAwait: () => void;
   confirming: boolean;
 }) {
@@ -898,6 +1186,18 @@ function ReconRow({
   let left: ReactNode = null;
   let right: ReactNode = null;
   let actions: ReactNode = null;
+
+  const revisarMenu = (
+    <RevisarMenu
+      confirming={confirming}
+      showInterest={row.kind === "forte" || row.kind === "provavel"}
+      onReviewInterest={onReviewInterest}
+      onLaunchEntry={onLaunchEntry}
+      onLaunchTransfer={onLaunchTransfer}
+      onLaunchReceivable={onLaunchReceivable}
+      onAssociate={onAssociate}
+    />
+  );
 
   if (row.kind === "forte" || row.kind === "provavel") {
     linkIcon = done ? "✓" : isForte ? "=" : "≈";
@@ -928,8 +1228,8 @@ function ReconRow({
       <SideCard
         title={row.line.description || "Movimento"}
         sub={`${formatDateShort(row.line.posted_at)}${
-          !isForte ? ` · ${row.pair.confidence}%` : ""
-        }`}
+          row.line.direction === "credit" ? " · entrada" : " · saída"
+        }${!isForte ? ` · ${row.pair.confidence}%` : ""}`}
         amount={Number(row.line.amount)}
         borderClass={
           isForte && !done
@@ -945,29 +1245,11 @@ function ReconRow({
     ) : (
       <div className="flex flex-wrap justify-end gap-2">
         {isForte ? (
-          <>
-            <Button size="sm" disabled={confirming} onClick={onConfirm}>
-              Confirmar
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={confirming}
-              onClick={onReview}
-            >
-              Revisar
-            </Button>
-          </>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={confirming}
-            onClick={onReview}
-          >
-            Revisar
+          <Button size="sm" disabled={confirming} onClick={onConfirm}>
+            Confirmar
           </Button>
-        )}
+        ) : null}
+        {revisarMenu}
       </div>
     );
   } else if (row.kind === "sobanco") {
@@ -981,7 +1263,9 @@ function ReconRow({
     right = (
       <SideCard
         title={row.line.description || "Movimento"}
-        sub={formatDateShort(row.line.posted_at)}
+        sub={`${formatDateShort(row.line.posted_at)}${
+          row.line.direction === "credit" ? " · entrada" : " · saída"
+        }`}
         amount={Number(row.line.amount)}
         borderClass="border-destructive/40"
       />
@@ -989,9 +1273,7 @@ function ReconRow({
     actions = done ? (
       <Badge variant="secondary">Lançada</Badge>
     ) : (
-      <Button size="sm" onClick={onCreate}>
-        Criar despesa
-      </Button>
+      revisarMenu
     );
   } else {
     linkIcon = "⌛";
@@ -1044,7 +1326,7 @@ function ReconRow({
         )}
       </div>
       {right}
-      <div className="flex self-center justify-end sm:min-w-[140px]">
+      <div className="flex self-center justify-end sm:min-w-[168px]">
         {actions}
       </div>
     </div>

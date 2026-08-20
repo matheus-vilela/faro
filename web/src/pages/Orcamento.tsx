@@ -5,6 +5,24 @@ import { BudgetComparisonChart } from "@/components/budget/BudgetComparisonChart
 import { BudgetComparisonTable } from "@/components/budget/BudgetComparisonTable";
 import { BudgetEmptyState } from "@/components/budget/BudgetEmptyState";
 import { BudgetKpiCards } from "@/components/budget/BudgetKpiCards";
+import { BudgetSetupCard } from "@/components/budget/BudgetSetupCard";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,6 +37,7 @@ import { PageShell } from "@/components/PageShell";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useBudgetComparison } from "@/hooks/useBudgetComparison";
 import { formatBrl } from "@/lib/dre/formatBrl";
+import { ptBrUi } from "@/lib/ptBrUiStrings";
 import {
   AlertTriangle,
   Copy,
@@ -50,6 +69,7 @@ export function OrcamentoPanel({
     savingCategoryId,
     bulkActionLoading,
     avg3mByCategoryId,
+    previousMonthBudgetCount,
     semCategoriaCount,
     semCategoriaTotal,
     saveBudget,
@@ -117,18 +137,109 @@ export function OrcamentoPanel({
     }
   };
 
+  const scrollToTable = () => {
+    document
+      .getElementById("budget-comparison-table")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const showEmptyCategories =
     !loading && !error && expenseCategoryCount === 0;
 
   const summary = comparison?.summary ?? null;
   const hasNoBudgets = !loading && (summary?.totalBudgeted ?? 0) <= 0;
-  const hasNoActual =
+  const hasActual = !loading && (summary?.totalActual ?? 0) > 0;
+  const mappedLeafCount = comparison?.leafCategoryIds.size ?? 0;
+  const showUnmappedEmpty =
     !loading &&
-    (summary?.totalActual ?? 0) <= 0 &&
-    semCategoriaCount === 0;
+    !error &&
+    expenseCategoryCount > 0 &&
+    mappedLeafCount === 0 &&
+    (comparison?.sections.length ?? 0) === 0;
+  const showKpis =
+    loading ||
+    (summary != null &&
+      ((summary.totalBudgeted ?? 0) > 0 || (summary.totalActual ?? 0) > 0));
+  const chartRows = comparison?.chartRows ?? [];
+  const canApplyAvg = avg3mByCategoryId.size > 0;
+  const canCopyPrevious = previousMonthBudgetCount > 0;
+
+  const bulkToolbar = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={loading || bulkActionLoading || !canApplyAvg}
+        title={
+          canApplyAvg
+            ? undefined
+            : "Não há média dos 3 meses anteriores para preencher."
+        }
+        onClick={() => void handleApplyAvg()}
+      >
+        <Sparkles className="mr-2 h-4 w-4" />
+        Média 3 meses
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={loading || bulkActionLoading || !canCopyPrevious}
+        title={
+          canCopyPrevious
+            ? undefined
+            : "Não há orçamentos no mês anterior para copiar."
+        }
+        onClick={() => void handleCopyPrevious()}
+      >
+        <Copy className="mr-2 h-4 w-4" />
+        Copiar mês anterior
+      </Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading || bulkActionLoading || hasNoBudgets}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Limpar mês
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Limpar orçamentos do mês?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove as metas de {periodLabel.toLowerCase()}. O realizado não é
+              alterado. Esta ação não desfaz sozinha.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleClear()}>
+              Limpar orçamentos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 
   return (
     <div className="space-y-6">
+      <Accordion type="single" collapsible>
+        <AccordionItem value="como-conta" className="border-border/60">
+          <AccordionTrigger className="py-2 text-sm text-muted-foreground hover:no-underline">
+            Como o orçamento conta
+          </AccordionTrigger>
+          <AccordionContent className="text-sm text-muted-foreground leading-relaxed">
+            {ptBrUi.orcamento.comoConta}
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+
       <ReferencePeriodCard
         value={period}
         onChange={onPeriodChange}
@@ -161,6 +272,8 @@ export function OrcamentoPanel({
         </Card>
       ) : showEmptyCategories ? (
         <BudgetEmptyState />
+      ) : showUnmappedEmpty ? (
+        <BudgetEmptyState variant="unmapped" />
       ) : (
         <>
           {semCategoriaCount > 0 ? (
@@ -177,7 +290,7 @@ export function OrcamentoPanel({
                 <p>
                   Não entram no realizado do orçamento. Classifique em{" "}
                   <Link
-                    to="/app/dre?view=sem-categoria"
+                    to="/app/dre?view=sem-categoria&from=orcamento"
                     className="font-medium text-orange-800 underline underline-offset-2 dark:text-orange-200"
                   >
                     Resultado → Sem categoria
@@ -188,46 +301,21 @@ export function OrcamentoPanel({
             </div>
           ) : null}
 
-          {hasNoBudgets && !hasNoActual ? (
-            <div
-              role="status"
-              className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-            >
-              <p className="text-muted-foreground">
-                Há despesas no período, mas o <strong className="text-foreground">orçado</strong>{" "}
-                ainda não foi definido — por isso os KPIs de meta ficam zerados.
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                disabled={bulkActionLoading || avg3mByCategoryId.size === 0}
-                onClick={() => void handleApplyAvg()}
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Preencher com média 3 meses
-              </Button>
-            </div>
-          ) : null}
-
-          {hasNoBudgets && hasNoActual && semCategoriaCount === 0 && !loading ? (
-            <Card className="border-border/80 shadow-sm">
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                Nenhuma despesa classificada neste mês. Cadastre contas a pagar
-                com categoria do plano, ou defina o orçado nas linhas abaixo.
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <BudgetKpiCards summary={summary} loading={loading} />
-
-          {loading ? (
-            <Skeleton className="h-[280px] w-full sm:h-[360px]" />
-          ) : (
-            <BudgetComparisonChart
-              chartRows={comparison?.chartRows ?? []}
-              loading={loading}
+          {hasNoBudgets && !loading ? (
+            <BudgetSetupCard
+              hasActual={hasActual}
+              canApplyAvg={canApplyAvg}
+              canCopyPrevious={canCopyPrevious}
+              bulkLoading={bulkActionLoading}
+              onApplyAvg={() => void handleApplyAvg()}
+              onCopyPrevious={() => void handleCopyPrevious()}
+              onScrollToTable={scrollToTable}
             />
-          )}
+          ) : null}
+
+          {showKpis ? (
+            <BudgetKpiCards summary={summary} loading={loading} />
+          ) : null}
 
           {loading ? (
             <Card className="border-border/80 shadow-sm">
@@ -245,41 +333,13 @@ export function OrcamentoPanel({
               savingCategoryId={savingCategoryId}
               disabled={bulkActionLoading}
               avg3mByCategoryId={avg3mByCategoryId}
+              toolbar={bulkToolbar}
             />
           )}
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading || bulkActionLoading}
-              onClick={() => void handleApplyAvg()}
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              Preencher com média 3 meses
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading || bulkActionLoading}
-              onClick={() => void handleCopyPrevious()}
-            >
-              <Copy className="mr-2 h-4 w-4" />
-              Copiar do mês anterior
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading || bulkActionLoading}
-              onClick={() => void handleClear()}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Limpar orçamentos do mês
-            </Button>
-          </div>
+          {!loading && chartRows.length > 0 ? (
+            <BudgetComparisonChart chartRows={chartRows} loading={false} />
+          ) : null}
         </>
       )}
     </div>
@@ -297,7 +357,7 @@ export function Orcamento() {
     <PageShell>
       <PageHeader
         title="Orçamento vs Realizado"
-        description="Metas de custo/despesa por categoria — o realizado usa contas a pagar (e CMV de vendas na competência)."
+        description="Meta de custo por categoria versus o que já foi gasto no mês — não é o lucro do DRE."
         icon={Target}
       />
       <OrcamentoPanel period={period} onPeriodChange={setPeriod} />

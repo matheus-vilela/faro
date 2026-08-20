@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 type Tone = "neutral" | "danger" | "success" | "warning";
 
 function toneFromStatus(status: BudgetDeviationStatus): Tone {
-  if (status === "over" || status === "no_budget") return "danger";
+  if (status === "over") return "danger";
   if (status === "warning") return "warning";
   if (status === "ok") return "success";
   return "neutral";
@@ -74,16 +74,20 @@ export function BudgetKpiCards({
   summary: BudgetComparisonSummary | null;
   loading: boolean;
 }) {
+  const hasBudget = (summary?.totalBudgeted ?? 0) > 0;
+
   const statusTone = summary
     ? toneFromStatus(summary.aggregateStatus)
     : "neutral";
 
   const varianceTone =
-    summary && summary.totalVariance > 0
-      ? "danger"
-      : summary && summary.totalVariance < 0
-        ? "success"
-        : "neutral";
+    !hasBudget
+      ? "neutral"
+      : summary && summary.totalVariance > 0
+        ? "danger"
+        : summary && summary.totalVariance < 0
+          ? "success"
+          : "neutral";
 
   const percentLabel =
     summary?.percentConsumed != null
@@ -98,6 +102,7 @@ export function BudgetKpiCards({
       <KpiCard
         label="Orçado"
         amount={summary ? formatBrl(summary.totalBudgeted) : formatBrl(0)}
+        subtitle={hasBudget ? undefined : "Ainda sem meta neste mês"}
         tone="neutral"
         loading={loading}
       />
@@ -115,9 +120,9 @@ export function BudgetKpiCards({
             : formatBrl(0)
         }
         subtitle={
-          summary && summary.totalVariance > 0
+          summary && hasBudget && summary.totalVariance > 0
             ? "Acima do orçado"
-            : summary && summary.totalVariance < 0
+            : summary && hasBudget && summary.totalVariance < 0
               ? "Abaixo do orçado"
               : undefined
         }

@@ -26,6 +26,7 @@ export function FluxoDeCaixa() {
     loading,
     error,
     projection,
+    baseProjection,
     diagnostics,
     openingBalanceHint,
     hasVisibleMovements,
@@ -103,6 +104,9 @@ export function FluxoDeCaixa() {
 
       <CashFlowKpiCards
         kpis={projection.kpis}
+        baseKpis={
+          prefs.scenario === "base" ? undefined : baseProjection.kpis
+        }
         loading={loading}
         formatCurrency={formatBrl}
       />
@@ -131,7 +135,13 @@ export function FluxoDeCaixa() {
         />
       ) : null}
 
-      <CashFlowProjectionChart buckets={projection.buckets} loading={loading} />
+      <CashFlowProjectionChart
+        buckets={projection.buckets}
+        baseBuckets={
+          prefs.scenario === "base" ? undefined : baseProjection.buckets
+        }
+        loading={loading}
+      />
 
       <CashFlowPeriodTable
         buckets={projection.buckets}

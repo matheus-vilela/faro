@@ -30,6 +30,7 @@ import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { MeuDesempenho } from "@/pages/MeuDesempenho";
 import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSlug";
 import { ContasAPagar } from "@/pages/ContasAPagar";
+import { ConciliacaoBancaria } from "@/pages/ConciliacaoBancaria";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
 import { ConfiguracoesAdquirentes } from "@/pages/ConfiguracoesAdquirentes";
@@ -139,6 +140,16 @@ function AuthenticatedLayout() {
           />
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
+          <Route
+            path="conciliacao-bancaria"
+            element={
+              <PermissionRouteGuard
+                permissions={["contas_a_pagar", "vendas_realizadas"]}
+              >
+                <ConciliacaoBancaria />
+              </PermissionRouteGuard>
+            }
+          />
           <Route
             path="faturamento"
             element={<Navigate to="/app/vendas-realizadas?tab=faturamento" replace />}

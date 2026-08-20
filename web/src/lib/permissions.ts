@@ -96,5 +96,6 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   if (path.startsWith("/app/configuracoes")) return "configuracoes";
   if (path.startsWith("/app/desenvolvimento")) return null;
   if (path.startsWith("/app/fluxo-de-caixa")) return "contas_a_pagar";
+  if (path.startsWith("/app/conciliacao-bancaria")) return "contas_a_pagar";
   return null;
 }

@@ -118,6 +118,10 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
   const [cmvPct, setCmvPct] = useState<number | null>(null);
   const [dueIn7Amount, setDueIn7Amount] = useState(0);
   const [dueIn7Count, setDueIn7Count] = useState(0);
+  const [payablesTodayCount, setPayablesTodayCount] = useState(0);
+  const [payablesTodayAmount, setPayablesTodayAmount] = useState(0);
+  const [payablesTomorrowCount, setPayablesTomorrowCount] = useState(0);
+  const [payablesTomorrowAmount, setPayablesTomorrowAmount] = useState(0);
   const [upcoming, setUpcoming] = useState<UpcomingPayableRow[]>([]);
   const [lucroMes, setLucroMes] = useState<number | null>(null);
   const [actions, setActions] = useState<HomeActionItem[]>([]);
@@ -152,6 +156,10 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setCmvPct(null);
       setDueIn7Amount(0);
       setDueIn7Count(0);
+      setPayablesTodayCount(0);
+      setPayablesTodayAmount(0);
+      setPayablesTomorrowCount(0);
+      setPayablesTomorrowAmount(0);
       setUpcoming([]);
       setLucroMes(null);
       setLoading(false);
@@ -222,7 +230,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           }),
         supabase
           .from("boletos")
-          .select("id, description, due_date, amount, status, is_projected")
+          .select("id, description, due_date, amount, status")
           .eq("company_id", companyId)
           .eq("flow_type", "payable")
           .eq("exclude_from_fluxo", false)
@@ -340,17 +348,43 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setMarginPct(cmvDash.kpis.marginPct);
       setCmvPct(cmvDash.kpis.cmvPct);
 
+      if (boletosRows.error) throw boletosRows.error;
+      if (dreBoletosRes.error) throw dreBoletosRes.error;
+      if (dreCmvRes.error) throw dreCmvRes.error;
+
       const boletos = (boletosRows.data ?? []) as Array<{
         id: string;
         description: string | null;
         due_date: string;
         amount: number;
         status: BoletoStatus;
-        is_projected?: boolean;
       }>;
       const totals = computePayableTotals(boletos, monthPeriod, todayYmd);
       setDueIn7Amount(totals.dueInNext7Days.amount);
       setDueIn7Count(totals.dueInNext7Days.count);
+
+      const tomorrowYmd = addDaysYmd(todayYmd, 1);
+      let todayCount = 0;
+      let todayAmount = 0;
+      let tomorrowCount = 0;
+      let tomorrowAmount = 0;
+      for (const b of boletos) {
+        if (b.status !== "pending") continue;
+        const due = String(b.due_date ?? "").slice(0, 10);
+        const amount = Number(b.amount) || 0;
+        if (due === todayYmd) {
+          todayCount += 1;
+          todayAmount += amount;
+        } else if (due === tomorrowYmd) {
+          tomorrowCount += 1;
+          tomorrowAmount += amount;
+        }
+      }
+      setPayablesTodayCount(todayCount);
+      setPayablesTodayAmount(todayAmount);
+      setPayablesTomorrowCount(tomorrowCount);
+      setPayablesTomorrowAmount(tomorrowAmount);
+
       setUpcoming(
         boletos
           .filter((b) => {
@@ -414,6 +448,10 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setCmvPct(null);
       setDueIn7Amount(0);
       setDueIn7Count(0);
+      setPayablesTodayCount(0);
+      setPayablesTodayAmount(0);
+      setPayablesTomorrowCount(0);
+      setPayablesTomorrowAmount(0);
       setUpcoming([]);
       setLucroMes(null);
     }
@@ -589,23 +627,37 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
   }, [loadActions]);
 
   const insight = useMemo(() => {
-    const fat = sales?.kpis.net.current ?? 0;
-    const delta = sales?.kpis.net.pctChange ?? null;
-    if (actionsLoading) {
-      return buildHomeInsightText({
-        periodLabel: periodLabelShort,
-        faturamento: fat,
-        faturamentoDeltaPct: delta,
-        actionCount: -1,
-      });
-    }
     return buildHomeInsightText({
+      loading: loading || actionsLoading,
       periodLabel: periodLabelShort,
-      faturamento: fat,
-      faturamentoDeltaPct: delta,
+      faturamento: sales?.kpis.net.current ?? 0,
+      faturamentoDeltaPct: sales?.kpis.net.pctChange ?? null,
+      hasPeriodSales: sales?.hasPeriodSales ?? false,
       actionCount: actions.length,
+      payablesTodayCount,
+      payablesTodayAmount,
+      payablesTomorrowCount,
+      payablesTomorrowAmount,
+      dueIn7Count,
+      dueIn7Amount,
+      lucroMes,
+      marginPct,
     });
-  }, [actions.length, actionsLoading, periodLabelShort, sales]);
+  }, [
+    actions.length,
+    actionsLoading,
+    dueIn7Amount,
+    dueIn7Count,
+    loading,
+    lucroMes,
+    marginPct,
+    payablesTodayAmount,
+    payablesTodayCount,
+    payablesTomorrowAmount,
+    payablesTomorrowCount,
+    periodLabelShort,
+    sales,
+  ]);
 
   return {
     loading,

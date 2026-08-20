@@ -17,6 +17,46 @@ function extractTagValue(block: string, tag: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+export type OfxLedgerBalance = {
+  amount: number;
+  asOfYmd: string | null;
+};
+
+function extractBalanceBlock(text: string, tag: string): string | null {
+  const start = text.search(new RegExp(`<${tag}>`, "i"));
+  if (start < 0) return null;
+  const after = text.slice(start);
+  const close = after.search(new RegExp(`</${tag}>`, "i"));
+  if (close >= 0) return after.slice(0, close);
+  return after.slice(0, 500);
+}
+
+function parseBalAmount(raw: string): number | null {
+  const n = parseFloat(raw.replace(",", ".").trim());
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** LEDGERBAL do OFX; se ausente, AVAILBAL. */
+export function parseOfxLedgerBalance(content: string): OfxLedgerBalance | null {
+  const text = content.replace(/^\uFEFF/, "");
+  const block =
+    extractBalanceBlock(text, "LEDGERBAL") ??
+    extractBalanceBlock(text, "AVAILBAL");
+  if (!block) return null;
+
+  const amtRaw = extractTagValue(block, "BALAMT");
+  if (!amtRaw) return null;
+  const amount = parseBalAmount(amtRaw);
+  if (amount === null) return null;
+
+  const dtRaw = extractTagValue(block, "DTASOF");
+  return {
+    amount,
+    asOfYmd: dtRaw ? parseOfxDate(dtRaw) : null,
+  };
+}
+
 function parseTrnAmount(
   raw: string,
 ): { amount: number; signed: number } | null {

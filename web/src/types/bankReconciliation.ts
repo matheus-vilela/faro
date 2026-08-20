@@ -30,6 +30,8 @@ export interface BankStatementImport {
   period_end: string | null;
   status: BankStatementImportStatus;
   row_count: number;
+  ledger_balance?: number | null;
+  ledger_balance_as_of?: string | null;
   error_message: string | null;
   created_by: string | null;
   created_at: string;

@@ -1,3 +1,4 @@
+import { FaroTipBand } from "@/components/FaroTipBand";
 import {
   Card,
   CardContent,
@@ -17,7 +18,6 @@ import { pontoEquilibrioReceita } from "@/lib/dre/dreIndicators";
 import type { ExpenseMixItem } from "@/lib/dre/expenseMix";
 import { formatBrl } from "@/lib/dre/formatBrl";
 import { cn } from "@/lib/utils";
-import { Dog } from "lucide-react";
 
 const MIX_COLORS = [
   "bg-blue-500",
@@ -133,12 +133,7 @@ export function DreOwnerSummary({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-3 rounded-xl border border-primary/25 bg-linear-to-br from-primary/12 via-primary/5 to-transparent p-4 shadow-sm">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Dog className="h-5 w-5" aria-hidden />
-        </div>
-        <p className="text-sm leading-relaxed text-foreground">{insight}</p>
-      </div>
+      <FaroTipBand>{insight}</FaroTipBand>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_1fr]">
         <Card className="border-border/80 shadow-sm">

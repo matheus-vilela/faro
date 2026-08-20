@@ -2,15 +2,19 @@ import type { MonthYear } from "@/components/MonthSelector";
 import { shiftMonth } from "@/lib/dre/dreInsight";
 import { getMonthYmdRange } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
+import type { CompanyCategory } from "@/types/category";
+import { isBudgetActualCategory } from "./fetchActualByCategory";
 import type { BudgetBasis } from "./types";
 
 /**
  * Média do realizado (payables) por categoria nos 3 meses anteriores ao período.
+ * Usa os mesmos filtros do realizado do mês (sem transferências, só DESPESA mapeada).
  */
 export async function fetchActualAvg3Months(
   companyId: string,
   period: MonthYear,
   basis: BudgetBasis,
+  categoriesById: Map<string, CompanyCategory>,
 ): Promise<Map<string, number>> {
   const months: MonthYear[] = [
     shiftMonth(period, -1),
@@ -25,9 +29,12 @@ export async function fetchActualAvg3Months(
 
   let query = supabase
     .from("boletos")
-    .select("amount, paid_amount, company_category_id, due_date, paid_at, status, flow_type")
+    .select(
+      "amount, paid_amount, company_category_id, due_date, paid_at, status, flow_type, entry_kind",
+    )
     .eq("company_id", companyId)
-    .or("flow_type.eq.payable,flow_type.is.null");
+    .or("flow_type.eq.payable,flow_type.is.null")
+    .neq("entry_kind", "transfer");
 
   if (basis === "competencia") {
     query = query.gte("due_date", startYmd).lte("due_date", endYmd);
@@ -48,8 +55,12 @@ export async function fetchActualAvg3Months(
 
   for (const row of data ?? []) {
     if (row.flow_type === "receivable") continue;
+    if (row.entry_kind === "transfer") continue;
     const catId = row.company_category_id as string | null;
     if (!catId) continue;
+
+    const cat = categoriesById.get(catId);
+    if (!isBudgetActualCategory(cat)) continue;
 
     let ymd: string | null = null;
     if (basis === "competencia") {

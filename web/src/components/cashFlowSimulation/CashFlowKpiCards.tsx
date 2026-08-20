@@ -60,16 +60,17 @@ function KpiCard({
 
 export function CashFlowKpiCards({
   kpis,
+  baseKpis,
   loading,
   formatCurrency,
 }: {
   kpis: CashFlowProjectionKpis;
+  baseKpis?: CashFlowProjectionKpis | null;
   loading: boolean;
   formatCurrency: (v: number) => string;
 }) {
   const minTone: Tone = kpis.minBalance < 0 ? "danger" : "warning";
-  const minSubtitle =
-    kpis.minBalance < 0 ? "Atenção: caixa negativo no período" : "Menor saldo previsto";
+  const minSubtitle = minBalanceSubtitle(kpis.minBalance, baseKpis, formatCurrency);
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -104,4 +105,24 @@ export function CashFlowKpiCards({
       />
     </div>
   );
+}
+
+function minBalanceSubtitle(
+  minBalance: number,
+  baseKpis: CashFlowProjectionKpis | null | undefined,
+  formatCurrency: (v: number) => string,
+): string {
+  if (baseKpis) {
+    const delta = minBalance - baseKpis.minBalance;
+    if (delta !== 0) {
+      const vsBase =
+        delta > 0
+          ? `${formatCurrency(delta)} melhor que o Base`
+          : `${formatCurrency(Math.abs(delta))} pior que o Base`;
+      return vsBase;
+    }
+  }
+  return minBalance < 0
+    ? "Atenção: caixa negativo no período"
+    : "Menor saldo previsto";
 }

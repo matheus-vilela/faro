@@ -1248,7 +1248,9 @@ export function FluxoBoletosPage({
       {!isReceivableFlow && (
         <Sheet
           open={!!calendarDayList}
+          modal={false}
           onOpenChange={(o) => {
+            if (!o && (boletoResumo || seriesEditOpen)) return;
             if (!o) {
               setCalendarDayList(null);
               setCalendarDayListView("category");
@@ -1308,10 +1310,7 @@ export function FluxoBoletosPage({
                       loading={false}
                       emptyMessage="Nenhum lançamento com vencimento neste dia."
                       formatCurrency={formatCurrency}
-                      onSelect={(b) => {
-                        setCalendarDayList(null);
-                        setBoletoResumo(b);
-                      }}
+                      onSelect={setBoletoResumo}
                     />
                   )}
                   {calendarDayListView === "due" && (
@@ -1323,10 +1322,7 @@ export function FluxoBoletosPage({
                       loading={false}
                       emptyMessage="Nenhum lançamento com vencimento neste dia."
                       formatCurrency={formatCurrency}
-                      onSelect={(b) => {
-                        setCalendarDayList(null);
-                        setBoletoResumo(b);
-                      }}
+                      onSelect={setBoletoResumo}
                     />
                   )}
                   {calendarDayListView === "status" && (
@@ -1412,7 +1408,6 @@ export function FluxoBoletosPage({
           onProductClick={(id) => {
             setDetailRevenueId(id);
           }}
-          modal={!detailRevenueId}
         />
       )}
 
@@ -1428,7 +1423,10 @@ export function FluxoBoletosPage({
         open={!!boletoResumo}
         onOpenChange={(o) => !o && setBoletoResumo(null)}
       >
-        <SheetContent className="z-[60] sm:max-w-md">
+        <SheetContent
+          className="z-[60] sm:max-w-md"
+          overlayClassName="z-[60]"
+        >
           {boletoResumo && (
             <>
               <SheetHeader>

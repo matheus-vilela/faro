@@ -2,15 +2,12 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
-import {
-  getMonthRange,
-  MonthSelector,
-  type MonthYear,
-} from "@/components/MonthSelector";
+import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
-import { NotasRecebimentoListRow } from "@/components/recebimento/NotasRecebimentoListRow";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
+import { NotasRecebimentoListRow, NOTAS_RECEBIMENTO_LIST_GRID } from "@/components/recebimento/NotasRecebimentoListRow";
 import { RecebimentoReviewPanel } from "@/components/recebimento/RecebimentoReviewPanel";
 import { RecebimentoShareDialog } from "@/components/recebimento/RecebimentoShareDialog";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +57,19 @@ import {
   divergenceReasonLabel,
   getNfeExpenseValueBreakdown,
 } from "@/lib/expenseDivergenceUi";
+import {
+  expenseHasUnlinkedProduct,
+  expenseHasValueRisk,
+  filterIdsByBoleto,
+  filterIdsByRecebimento,
+  recebimentoKindFromRow,
+  type NotasAtencaoFilter,
+  type NotasBoletoFilter,
+  type NotasOrigemFilter,
+  type NotasRecebimentoFilter,
+  type RecebimentoListKind,
+} from "@/lib/notasRecebimentoListFilters";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { maskCpfCnpj } from "@/lib/masks";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
@@ -85,6 +95,7 @@ import {
   CheckCircle2,
   Copy,
   FileText,
+  FilterX,
   Loader2,
   PackageCheck,
   Plus,
@@ -175,6 +186,51 @@ function localDateYmd(): string {
   return `${y}-${m}-${day}`;
 }
 
+function clampYmdToRange(value: string, min: string, max: string): string {
+  if (!value) return "";
+  if (value < min || value > max) return "";
+  return value;
+}
+
+function MonthLockedDateInput({
+  id,
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  min: string;
+  max: string;
+}) {
+  return (
+    <Input
+      id={id}
+      type="date"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (!next) {
+          onChange("");
+          return;
+        }
+        if (next < min || next > max) return;
+        onChange(next);
+      }}
+      onBlur={(e) => {
+        const next = e.target.value;
+        if (next && (next < min || next > max)) {
+          e.currentTarget.value = value;
+        }
+      }}
+    />
+  );
+}
+
 const STATUS_LABELS = {
   pending: "Pendente",
   approved: "Aprovada",
@@ -208,6 +264,13 @@ export function Despesas() {
   const debouncedSearch = useDebounce(expensesSearch, 300);
   /** Somente despesas WhatsApp com status pendente (aguardando aprovação do proprietário). */
   const [onlyPendingApproval, setOnlyPendingApproval] = useState(false);
+  const [recebimentoFilter, setRecebimentoFilter] =
+    useState<NotasRecebimentoFilter>("all");
+  const [boletoFilter, setBoletoFilter] = useState<NotasBoletoFilter>("all");
+  const [origemFilter, setOrigemFilter] = useState<NotasOrigemFilter>("all");
+  const [atencaoFilter, setAtencaoFilter] = useState<NotasAtencaoFilter>("all");
+  const [competenceFrom, setCompetenceFrom] = useState("");
+  const [competenceTo, setCompetenceTo] = useState("");
   const [recebimentosByExpenseId, setRecebimentosByExpenseId] = useState<
     Map<string, RecebimentoListInfo>
   >(new Map());
@@ -313,6 +376,36 @@ export function Despesas() {
       products.filter((p) => p.is_active !== false).map(productSearchOption),
     [products],
   );
+  const extraListFiltersActive =
+    recebimentoFilter !== "all" ||
+    boletoFilter !== "all" ||
+    origemFilter !== "all" ||
+    atencaoFilter !== "all";
+  const competenceDateFilterActive =
+    competenceFrom.trim().length > 0 || competenceTo.trim().length > 0;
+  const hasListFilters =
+    extraListFiltersActive ||
+    onlyPendingApproval ||
+    expensesSearch.trim().length > 0 ||
+    competenceDateFilterActive;
+  const clearListFilters = () => {
+    setExpensesSearch("");
+    setOnlyPendingApproval(false);
+    setRecebimentoFilter("all");
+    setBoletoFilter("all");
+    setOrigemFilter("all");
+    setAtencaoFilter("all");
+    setCompetenceFrom("");
+    setCompetenceTo("");
+  };
+  const competenceMonthBounds = useMemo(() => {
+    const lastDay = new Date(period.year, period.month, 0).getDate();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return {
+      min: `${period.year}-${pad(period.month)}-01`,
+      max: `${period.year}-${pad(period.month)}-${pad(lastDay)}`,
+    };
+  }, [period.month, period.year]);
   const conversionsByProduct = useMemo(() => {
     const out = new Map<string, ProductUnitConversionDraft[]>();
     for (const row of productConversions) {
@@ -403,54 +496,179 @@ export function Despesas() {
   const fetchData = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
+    try {
     const { start, end } = getMonthRange(period.month, period.year);
     const startDate = start.slice(0, 10);
     const endDate = end.slice(0, 10);
     const searchActive = debouncedSearch.trim().length > 0;
-    let exQuery = supabase
-      .from("expenses")
-      .select(
-        `
+    const expenseListSelect = `
         *,
         expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
-      `,
-        { count: "estimated" },
-      )
-      .eq("company_id", companyId)
-      .order("reference_date", { ascending: false })
-      .order("created_at", { ascending: false });
-    if (!searchActive) {
-      // Competência no mês OU despesa criada/importada neste mês (NF-e antiga
-      // sincronizada agora continua visível em Despesas).
-      exQuery = exQuery.or(
-        `and(reference_date.gte.${startDate},reference_date.lte.${endDate}),and(created_at.gte.${start},created_at.lte.${end})`,
+      `;
+    const needsIdSetFilter =
+      recebimentoFilter !== "all" ||
+      boletoFilter !== "all" ||
+      atencaoFilter !== "all";
+
+    const applyListFilters = (query: any) => {
+      let q = query.eq("company_id", companyId);
+      const fromDate = clampYmdToRange(
+        competenceFrom.trim(),
+        competenceMonthBounds.min,
+        competenceMonthBounds.max,
       );
-    }
-    if (onlyPendingApproval) {
-      exQuery = exQuery
-        .eq("expense_source", "whatsapp")
-        .eq("status", "pending");
-    }
-    if (searchActive) {
-      const term = `%${debouncedSearch.trim()}%`;
-      exQuery = exQuery.or(
-        `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term},supplier_document.ilike.${term}`,
+      const toDate = clampYmdToRange(
+        competenceTo.trim(),
+        competenceMonthBounds.min,
+        competenceMonthBounds.max,
       );
-    }
-    const { data: ex, count } = await exQuery.range(
-      (expensesPage - 1) * PAGE_SIZE,
-      expensesPage * PAGE_SIZE - 1,
-    );
+      if (fromDate || toDate) {
+        const gte = fromDate && toDate && fromDate > toDate ? toDate : fromDate;
+        const lte = fromDate && toDate && fromDate > toDate ? fromDate : toDate;
+        if (gte) q = q.gte("reference_date", gte);
+        if (lte) q = q.lte("reference_date", lte);
+      } else if (!searchActive) {
+        q = q.or(
+          `and(reference_date.gte.${startDate},reference_date.lte.${endDate}),and(created_at.gte.${start},created_at.lte.${end})`,
+        );
+      }
+      if (onlyPendingApproval) {
+        q = q.eq("expense_source", "whatsapp").eq("status", "pending");
+      } else if (origemFilter === "whatsapp") {
+        q = q.eq("expense_source", "whatsapp");
+      } else if (origemFilter === "manual") {
+        q = q.eq("expense_source", "manual");
+      }
+      if (searchActive) {
+        const term = `%${debouncedSearch.trim()}%`;
+        q = q.or(
+          `supplier_name.ilike.${term},invoice_number.ilike.${term},display_name.ilike.${term},supplier_document.ilike.${term}`,
+        );
+      }
+      return q;
+    };
+
     const { data: bo } = await supabase
       .from("boletos")
       .select("*")
       .eq("company_id", companyId)
       .eq("flow_type", "payable");
-    const expenseList = (ex as Expense[]) ?? [];
+    const boletoRows = (bo as Boleto[]) ?? [];
+    setBoletos(boletoRows);
+
+    let expenseList: Expense[] = [];
+    let totalCount = 0;
+
+    if (!needsIdSetFilter) {
+      let exQuery = applyListFilters(
+        supabase.from("expenses").select(expenseListSelect, { count: "estimated" }),
+      );
+      exQuery = exQuery
+        .order("reference_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      const { data: ex, count } = await exQuery.range(
+        (expensesPage - 1) * PAGE_SIZE,
+        expensesPage * PAGE_SIZE - 1,
+      );
+      expenseList = (ex as Expense[]) ?? [];
+      totalCount = count ?? 0;
+    } else {
+      type LightExpenseRow = {
+        id: string;
+        document_total?: number | null;
+        financial_reconciliation_json?: Record<string, unknown> | null;
+        expense_items?: Array<{
+          product_id?: string | null;
+          quantity: number;
+          unit_value: number;
+        }> | null;
+      };
+      const lightSelect =
+        atencaoFilter === "all"
+          ? "id"
+          : "id, document_total, financial_reconciliation_json, expense_items(product_id, quantity, unit_value)";
+      const lightRows = await fetchAllInRange<LightExpenseRow>(
+        applyListFilters(
+          supabase
+            .from("expenses")
+            .select(lightSelect)
+            .order("reference_date", { ascending: false })
+            .order("created_at", { ascending: false }),
+        ),
+      );
+      let ids = lightRows.map((r) => r.id);
+
+      const withBoleto = new Set(
+        boletoRows
+          .map((b) => b.expense_id)
+          .filter((id): id is string => Boolean(id)),
+      );
+      ids = filterIdsByBoleto(ids, withBoleto, boletoFilter);
+
+      if (recebimentoFilter !== "all" && ids.length > 0) {
+        const { data: recRows } = await supabase
+          .from("recebimentos")
+          .select(
+            `
+            expense_id,
+            status,
+            recebimento_item_status (status)
+          `,
+          )
+          .eq("company_id", companyId);
+        const kindByExpenseId = new Map<string, RecebimentoListKind>();
+        for (const r of recRows ?? []) {
+          kindByExpenseId.set(
+            r.expense_id as string,
+            recebimentoKindFromRow({
+              status: String(r.status ?? ""),
+              itemStatuses:
+                (r.recebimento_item_status as Array<{ status: string }> | null) ??
+                [],
+            }),
+          );
+        }
+        ids = filterIdsByRecebimento(ids, kindByExpenseId, recebimentoFilter);
+      } else if (recebimentoFilter !== "all") {
+        ids = [];
+      }
+
+      if (atencaoFilter !== "all") {
+        const byId = new Map(lightRows.map((r) => [r.id, r]));
+        ids = ids.filter((id) => {
+          const row = byId.get(id);
+          if (!row) return false;
+          if (atencaoFilter === "unlinked_product") {
+            return expenseHasUnlinkedProduct(row.expense_items);
+          }
+          return expenseHasValueRisk({
+            documentTotal: row.document_total,
+            items: row.expense_items,
+            financialReconciliationJson: row.financial_reconciliation_json,
+          });
+        });
+      }
+
+      totalCount = ids.length;
+      const pageStart = (expensesPage - 1) * PAGE_SIZE;
+      const pageIds = ids.slice(pageStart, pageStart + PAGE_SIZE);
+      if (pageIds.length > 0) {
+        const { data: ex } = await supabase
+          .from("expenses")
+          .select(expenseListSelect)
+          .in("id", pageIds);
+        const byId = new Map(
+          ((ex as Expense[]) ?? []).map((row) => [row.id, row]),
+        );
+        expenseList = pageIds
+          .map((id) => byId.get(id))
+          .filter((row): row is Expense => Boolean(row));
+      }
+    }
+
     setExpenses(expenseList);
-    setExpensesCount(count ?? 0);
-    setBoletos((bo as Boleto[]) ?? []);
+    setExpensesCount(totalCount);
 
     const expenseIds = expenseList.map((e) => e.id);
     if (expenseIds.length === 0) {
@@ -488,8 +706,9 @@ export function Despesas() {
       }
       setRecebimentosByExpenseId(map);
     }
-
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   }, [
     companyId,
     period.month,
@@ -497,11 +716,38 @@ export function Despesas() {
     debouncedSearch,
     expensesPage,
     onlyPendingApproval,
+    recebimentoFilter,
+    boletoFilter,
+    origemFilter,
+    atencaoFilter,
+    competenceFrom,
+    competenceTo,
   ]);
 
   useEffect(() => {
     setExpensesPage(1);
-  }, [debouncedSearch, period.month, period.year, onlyPendingApproval]);
+  }, [
+    debouncedSearch,
+    period.month,
+    period.year,
+    onlyPendingApproval,
+    recebimentoFilter,
+    boletoFilter,
+    origemFilter,
+    atencaoFilter,
+    competenceFrom,
+    competenceTo,
+  ]);
+
+  useEffect(() => {
+    const { min, max } = competenceMonthBounds;
+    setCompetenceFrom((prev) =>
+      prev && (prev < min || prev > max) ? "" : prev,
+    );
+    setCompetenceTo((prev) =>
+      prev && (prev < min || prev > max) ? "" : prev,
+    );
+  }, [competenceMonthBounds]);
 
   useEffect(() => {
     queueMicrotask(() => fetchData());
@@ -989,30 +1235,139 @@ export function Despesas() {
         }
       />
 
-      <div className="flex shrink-0 flex-col gap-3 rounded-xl border bg-card/60 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4 sm:px-4">
-        <MonthSelector
+      <div className="shrink-0 space-y-3">
+        <ReferencePeriodCard
           value={period}
           onChange={setPeriod}
-          className="shrink-0 [&_button]:h-9 [&_button]:w-9 [&_span]:min-w-40 [&_span]:text-sm [&_span]:font-semibold sm:[&_span]:min-w-44"
+          description="Lista de notas usa este mês"
         />
-        <Input
-          placeholder="Filtrar por fornecedor ou nota..."
-          value={expensesSearch}
-          onChange={(e) => setExpensesSearch(e.target.value)}
-          className="h-9 min-w-0 flex-1 sm:max-w-xs"
-        />
-        <div className="flex items-center gap-2 shrink-0 sm:ml-auto">
-          <Switch
-            id="filter-pending-approval"
-            checked={onlyPendingApproval}
-            onCheckedChange={setOnlyPendingApproval}
-          />
-          <Label
-            htmlFor="filter-pending-approval"
-            className="text-sm font-normal cursor-pointer leading-snug"
-          >
-            Aguardando aprovação
-          </Label>
+        <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
+            <Label htmlFor="notas-list-search">Busca</Label>
+            <Input
+              id="notas-list-search"
+              placeholder="Filtrar por fornecedor ou nota..."
+              value={expensesSearch}
+              onChange={(e) => setExpensesSearch(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="notas-competence-from">De</Label>
+            <MonthLockedDateInput
+              id="notas-competence-from"
+              min={competenceMonthBounds.min}
+              max={competenceTo || competenceMonthBounds.max}
+              value={competenceFrom}
+              onChange={setCompetenceFrom}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="notas-competence-to">Até</Label>
+            <MonthLockedDateInput
+              id="notas-competence-to"
+              min={competenceFrom || competenceMonthBounds.min}
+              max={competenceMonthBounds.max}
+              value={competenceTo}
+              onChange={setCompetenceTo}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Recebimento</Label>
+            <Select
+              value={recebimentoFilter}
+              onValueChange={(v) =>
+                setRecebimentoFilter(v as NotasRecebimentoFilter)
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Recebimento" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="none">Sem recebimento</SelectItem>
+                <SelectItem value="pending">Pendente</SelectItem>
+                <SelectItem value="confirmed">Confirmado</SelectItem>
+                <SelectItem value="pending_receipt">C/ pendências</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Boleto</Label>
+            <Select
+              value={boletoFilter}
+              onValueChange={(v) => setBoletoFilter(v as NotasBoletoFilter)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Boleto" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="with">Com boleto</SelectItem>
+                <SelectItem value="without">Sem boleto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Origem</Label>
+            <Select
+              value={origemFilter}
+              onValueChange={(v) => setOrigemFilter(v as NotasOrigemFilter)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Origem" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as origens</SelectItem>
+                <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                <SelectItem value="manual">Plataforma</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Atenção</Label>
+            <Select
+              value={atencaoFilter}
+              onValueChange={(v) => setAtencaoFilter(v as NotasAtencaoFilter)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Atenção" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="unlinked_product">
+                  Produto sem vínculo
+                </SelectItem>
+                <SelectItem value="value_risk">
+                  Divergência de valores
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
+            <Label htmlFor="filter-pending-approval">Aprovação</Label>
+            <div className="flex h-9 items-center gap-2">
+              <Switch
+                id="filter-pending-approval"
+                checked={onlyPendingApproval}
+                onCheckedChange={setOnlyPendingApproval}
+              />
+              <span className="text-sm text-muted-foreground">
+                Aguardando aprovação
+              </span>
+            </div>
+          </div>
+          <div className="flex items-end sm:col-span-2 xl:col-span-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={!hasListFilters}
+              onClick={clearListFilters}
+            >
+              <FilterX className="mr-2 size-4" />
+              Limpar filtros
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1618,29 +1973,29 @@ export function Despesas() {
 
       {/* Listagem full-bleed */}
       <div className="flex max-h-[calc(100dvh-11rem)] min-h-[min(28rem,calc(100dvh-13rem))] flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-        <div className="hidden shrink-0 border-b bg-muted/30 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.1fr)_6.5rem_7.5rem_auto] md:gap-3">
-          <span>Fornecedor / NF</span>
-          <span>Recebimento</span>
-          <span>Competência</span>
-          <span className="text-right">Total</span>
-          <span className="text-right pr-1 min-w-28">Ações</span>
-        </div>
-
         <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={cn("min-w-0", NOTAS_RECEBIMENTO_LIST_GRID)}>
+            <div className="sticky top-0 z-10 hidden border-b border-l-[3px] border-l-transparent bg-muted px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:col-span-5 md:grid md:grid-cols-subgrid">
+              <span className="min-w-0">Fornecedor / NF</span>
+              <span className="min-w-0">Recebimento</span>
+              <span className="whitespace-nowrap pl-8 text-right">Competência</span>
+              <span className="whitespace-nowrap pl-8 text-right">Total</span>
+              <span className="whitespace-nowrap pl-8 text-right">Ações</span>
+            </div>
           {loading ? (
-            <p className="px-4 py-8 text-sm text-muted-foreground">
+            <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
               Carregando...
             </p>
           ) : expenses.length === 0 ? (
-            <p className="px-4 py-8 text-sm text-muted-foreground">
-              {onlyPendingApproval
+            <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
+              {onlyPendingApproval && !extraListFiltersActive && !debouncedSearch.trim()
                 ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
-                : debouncedSearch.trim()
-                  ? "Nenhuma nota fiscal encontrada para este filtro. A conta a pagar pode existir com vencimento em outro mês — confira em Contas a pagar ou altere o mês de competência acima."
+                : hasListFilters
+                  ? "Nenhuma nota fiscal encontrada para estes filtros."
                   : "Nenhuma nota fiscal neste mês (por competência ou data de importação)."}
             </p>
           ) : (
-            <div className="divide-y">
+            <>
               {expenses.map((exp) => {
                 const isHighlight = highlightExpenseId === exp.id;
                 const boleto = getBoletoForExpense(exp.id);
@@ -1724,6 +2079,7 @@ export function Despesas() {
                     boletoLinked={linked}
                     isHighlight={isHighlight}
                     pendingOwnerApproval={pendingOwnerApproval}
+                    unapproved={pendingOwnerApproval}
                     valueRisk={valueRisk}
                     valueRiskTitle={
                       nfeVal.hasIcmsBreakdown
@@ -1746,8 +2102,9 @@ export function Despesas() {
                   />
                 );
               })}
-            </div>
+            </>
           )}
+          </div>
         </div>
 
         {!loading && (

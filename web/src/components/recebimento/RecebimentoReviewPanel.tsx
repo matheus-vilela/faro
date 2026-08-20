@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import {
   productSearchOption,
   SearchSelect,
@@ -97,6 +96,10 @@ function statusLabel(s: ItemStatus | undefined): string {
   if (s === "received") return "Recebido";
   return "Aguardando";
 }
+
+const REVIEW_ROW_GRID =
+  "min-w-[56rem] grid-cols-[minmax(12rem,1.2fr)_minmax(14rem,1.3fr)_minmax(11rem,1fr)_minmax(12rem,1.1fr)] gap-x-3 px-3";
+const FIELD_CLASS = "h-9";
 
 export function RecebimentoReviewPanel({
   open,
@@ -381,6 +384,8 @@ export function RecebimentoReviewPanel({
     }
   };
 
+  const fieldsLocked = header?.status === "received";
+
   const saveItemLinkAndUnit = async (
     item: ReviewItem,
     next: {
@@ -390,6 +395,10 @@ export function RecebimentoReviewPanel({
       recipeId: string | null;
     },
   ) => {
+    if (header?.status === "received") {
+      toast.error("Recebimento confirmado — vínculo e conversão não podem ser alterados.");
+      return;
+    }
     setSavingId(item.id);
     try {
       const productId = next.productId;
@@ -406,7 +415,6 @@ export function RecebimentoReviewPanel({
           invoice_unit: invoiceUnit,
           stock_quantity: stockQty,
           import_pending_resolution: false,
-          updated_at: new Date().toISOString(),
         })
         .eq("id", item.id);
       if (upErr) throw upErr;
@@ -486,6 +494,10 @@ export function RecebimentoReviewPanel({
     next: ProductUnitConversionDraft[],
   ) => {
     if (!companyId) return;
+    if (header?.status === "received") {
+      toast.error("Recebimento confirmado — conversões não podem ser alteradas aqui.");
+      return;
+    }
     const result = await persistProductUnitConversions(
       companyId,
       productId,
@@ -543,7 +555,7 @@ export function RecebimentoReviewPanel({
       <DialogContent
         showCloseButton
         className={cn(
-          "flex h-[min(96vh,920px)] w-[min(96vw,1200px)] max-w-none translate-x-[-50%] translate-y-[-50%] flex-col gap-0 overflow-hidden p-0 sm:max-w-none",
+          "flex h-[min(96vh,920px)] w-[min(96vw,1280px)] max-w-none translate-x-[-50%] translate-y-[-50%] flex-col gap-0 overflow-hidden p-0 sm:max-w-none",
         )}
       >
         <DialogHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-12 text-left">
@@ -562,6 +574,9 @@ export function RecebimentoReviewPanel({
                   header.invoiceNumber ? ` · NF ${header.invoiceNumber}` : ""
                 }`
               : "Carregando…"}
+            {fieldsLocked
+              ? " · Confirmado: vínculo, entrada e conversão ficam só leitura."
+              : ""}
           </DialogDescription>
           <div className="flex flex-wrap gap-2 pt-2">
             <Button
@@ -590,7 +605,19 @@ export function RecebimentoReviewPanel({
           ) : items.length === 0 ? (
             <p className="text-muted-foreground">Nenhum item nesta nota.</p>
           ) : (
-            <div className="space-y-4">
+            <div className="overflow-x-auto rounded-lg border">
+              <div
+                className={cn(
+                  "grid items-center bg-muted/50 py-2 text-xs font-medium text-muted-foreground",
+                  REVIEW_ROW_GRID,
+                )}
+              >
+                <span>Produto</span>
+                <span>Produto vinculado</span>
+                <span>Entrada no estoque</span>
+                <span>Unidade NF → estoque</span>
+              </div>
+              <div className="divide-y border-t">
               {items.map((it) => {
                 const productId = it.product_id;
                 const product = productId
@@ -601,55 +628,65 @@ export function RecebimentoReviewPanel({
                   ? (recipesByProduct[productId] ?? [])
                   : [];
                 const saving = savingId === it.id;
+                const rowDisabled = saving || fieldsLocked;
                 const needsAttention =
-                  !productId ||
-                  it.import_pending_resolution === true ||
-                  (productId &&
-                    it.invoice_unit &&
-                    it.stock_quantity == null);
+                  !fieldsLocked &&
+                  (!productId ||
+                    it.import_pending_resolution === true ||
+                    (productId &&
+                      it.invoice_unit &&
+                      it.stock_quantity == null));
+                const ready =
+                  !saving && !!productId && !!it.invoice_unit;
 
                 return (
                   <div
                     key={it.id}
                     className={cn(
-                      "rounded-xl border bg-card p-4 shadow-sm",
+                      "grid items-start py-2.5",
+                      REVIEW_ROW_GRID,
                       needsAttention &&
-                        "border-amber-500/40 ring-1 ring-amber-500/15",
+                        "bg-amber-500/8 dark:bg-amber-500/10",
                     )}
                   >
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-lg font-semibold leading-snug">
+                    <div className="min-w-0">
+                      <div className="flex min-h-9 items-center gap-2">
+                        {ready ? (
+                          <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        ) : saving ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                        ) : null}
+                        <p className="truncate font-medium leading-snug">
                           {it.product_name}
                         </p>
-                        <p className="text-sm text-muted-foreground">
-                          Qtd na NF:{" "}
-                          <span className="font-medium text-foreground tabular-nums">
-                            {Number(it.quantity)}
-                          </span>
-                          {" · "}
-                          Confirmação:{" "}
-                          <span className="font-medium text-foreground">
-                            {statusLabel(confStatus?.status)}
-                            {confStatus?.status === "partial" &&
-                            confStatus.quantity_received != null
-                              ? ` (${confStatus.quantity_received})`
-                              : ""}
-                          </span>
-                        </p>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <p className="text-xs text-muted-foreground">
+                        Qtd na NF:{" "}
+                        <span className="font-medium tabular-nums text-foreground">
+                          {Number(it.quantity)}
+                        </span>
+                        {" · "}
+                        {statusLabel(confStatus?.status)}
+                        {confStatus?.status === "partial" &&
+                        confStatus.quantity_received != null
+                          ? ` (${confStatus.quantity_received})`
+                          : ""}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
                         {it.import_pending_resolution && (
                           <Badge
                             variant="outline"
-                            className="border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                            className="border-amber-600/30 bg-amber-500/10 text-[11px] font-normal text-amber-950 dark:text-amber-100"
                           >
                             <AlertTriangle className="mr-1 h-3 w-3" />
                             Revisão pendente
                           </Badge>
                         )}
                         {it.import_confidence_0_1 != null && (
-                          <Badge variant="outline" className="text-[11px]">
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] font-normal"
+                          >
                             Confiança{" "}
                             {Math.round(Number(it.import_confidence_0_1) * 100)}
                             %
@@ -658,159 +695,145 @@ export function RecebimentoReviewPanel({
                       </div>
                     </div>
 
-                    <div className="grid gap-4 lg:grid-cols-3">
-                      <div className="space-y-2">
-                        <Label>Produto vinculado</Label>
-                        <SearchSelect
-                          value={productId ?? "__none__"}
-                          disabled={saving}
-                          onValueChange={(v) => {
-                            const nextPid = v === "__none__" ? null : v;
-                            const nextUnit =
-                              nextPid && productById.get(nextPid)
-                                ? it.invoice_unit ??
-                                  productById.get(nextPid)!.unit
-                                : null;
-                            void saveItemLinkAndUnit(it, {
-                              productId: nextPid,
-                              invoiceUnit: nextUnit,
-                              stockResolution:
-                                it.import_stock_resolution ?? "DIRECT",
-                              recipeId: it.resolved_entry_breakdown_recipe_id,
-                            });
-                          }}
-                          options={productSelectOptions}
-                          leadingOptions={[
-                            { value: "__none__", label: "Não vincular" },
-                          ]}
-                          placeholder="Não vincular"
-                          searchPlaceholder="Buscar produto…"
-                          emptyMessage="Nenhum produto encontrado."
-                          listMaxHeightClassName="max-h-[min(50vh,320px)]"
-                        />
-                      </div>
+                    <div className="min-w-0">
+                      <SearchSelect
+                        value={productId ?? "__none__"}
+                        disabled={rowDisabled}
+                        onValueChange={(v) => {
+                          const nextPid = v === "__none__" ? null : v;
+                          const nextUnit =
+                            nextPid && productById.get(nextPid)
+                              ? it.invoice_unit ??
+                                productById.get(nextPid)!.unit
+                              : null;
+                          void saveItemLinkAndUnit(it, {
+                            productId: nextPid,
+                            invoiceUnit: nextUnit,
+                            stockResolution:
+                              it.import_stock_resolution ?? "DIRECT",
+                            recipeId: it.resolved_entry_breakdown_recipe_id,
+                          });
+                        }}
+                        options={productSelectOptions}
+                        leadingOptions={[
+                          { value: "__none__", label: "Não vincular" },
+                        ]}
+                        placeholder="Não vincular"
+                        searchPlaceholder="Buscar produto…"
+                        emptyMessage="Nenhum produto encontrado."
+                        listMaxHeightClassName="max-h-[min(50vh,320px)]"
+                        triggerClassName={FIELD_CLASS}
+                      />
+                    </div>
 
-                      <div className="space-y-2">
-                        <Label>Entrada no estoque</Label>
-                        <Select
-                          value={it.import_stock_resolution ?? "DIRECT"}
-                          disabled={saving || !productId}
+                    <div className="min-w-0 space-y-1.5">
+                      <Select
+                        value={it.import_stock_resolution ?? "DIRECT"}
+                        disabled={rowDisabled || !productId}
+                        onValueChange={(v) => {
+                          void saveItemLinkAndUnit(it, {
+                            productId,
+                            invoiceUnit: it.invoice_unit,
+                            stockResolution: v,
+                            recipeId:
+                              v === "EXPLODE_BY_RECIPE"
+                                ? it.resolved_entry_breakdown_recipe_id ??
+                                  recipes[0]?.id ??
+                                  null
+                                : null,
+                          });
+                        }}
+                      >
+                        <SelectTrigger className={cn("w-full", FIELD_CLASS)}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="DIRECT">
+                            Entrada direta
+                          </SelectItem>
+                          <SelectItem value="EXPLODE_BY_RECIPE">
+                            Explodir por receita
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {it.import_stock_resolution === "EXPLODE_BY_RECIPE" && (
+                        <SearchSelect
+                          value={
+                            it.resolved_entry_breakdown_recipe_id ??
+                            "__none__"
+                          }
+                          disabled={rowDisabled || recipes.length === 0}
                           onValueChange={(v) => {
                             void saveItemLinkAndUnit(it, {
                               productId,
                               invoiceUnit: it.invoice_unit,
-                              stockResolution: v,
-                              recipeId:
-                                v === "EXPLODE_BY_RECIPE"
-                                  ? it.resolved_entry_breakdown_recipe_id ??
-                                    recipes[0]?.id ??
-                                    null
-                                  : null,
+                              stockResolution: "EXPLODE_BY_RECIPE",
+                              recipeId: v === "__none__" ? null : v,
                             });
                           }}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="DIRECT">
-                              Entrada direta
-                            </SelectItem>
-                            <SelectItem value="EXPLODE_BY_RECIPE">
-                              Explodir por receita
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {it.import_stock_resolution === "EXPLODE_BY_RECIPE" && (
-                          <SearchSelect
-                            value={
-                              it.resolved_entry_breakdown_recipe_id ??
-                              "__none__"
-                            }
-                            disabled={saving || recipes.length === 0}
-                            onValueChange={(v) => {
-                              void saveItemLinkAndUnit(it, {
-                                productId,
-                                invoiceUnit: it.invoice_unit,
-                                stockResolution: "EXPLODE_BY_RECIPE",
-                                recipeId: v === "__none__" ? null : v,
-                              });
-                            }}
-                            options={recipes.map((r) => ({
-                              value: r.id,
-                              label: r.name,
-                            }))}
-                            leadingOptions={[
-                              { value: "__none__", label: "Sem receita" },
-                            ]}
-                            placeholder="Receita de entrada"
-                            searchPlaceholder="Buscar receita…"
-                            emptyMessage="Nenhuma receita encontrada."
-                          />
-                        )}
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Unidade da NF → estoque</Label>
-                        {productId && product ? (
-                          <>
-                            <ProductUnitPickerWithConversion
-                              companyId={companyId!}
-                              stockUnitCode={product.unit}
-                              hubUnitCode={product.unit}
-                              unitCodes={allowedUnitsForProduct(productId)}
-                              value={it.invoice_unit ?? product.unit}
-                              onValueChange={(code) => {
-                                void saveItemLinkAndUnit(it, {
-                                  productId,
-                                  invoiceUnit: code,
-                                  stockResolution:
-                                    it.import_stock_resolution ?? "DIRECT",
-                                  recipeId:
-                                    it.resolved_entry_breakdown_recipe_id,
-                                });
-                              }}
-                              conversions={
-                                conversionsByProduct[productId] ?? []
-                              }
-                              onConversionsChange={(next) =>
-                                handleConversionsChange(productId, next)
-                              }
-                              disabled={saving}
-                              placeholder="Unidade da NF"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              Estoque:{" "}
-                              <span className="font-medium text-foreground tabular-nums">
-                                {it.stock_quantity != null
-                                  ? `${it.stock_quantity} ${product.unit}`
-                                  : "— (defina conversão)"}
-                              </span>
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            Vincule um produto para definir a conversão.
-                          </p>
-                        )}
-                      </div>
+                          options={recipes.map((r) => ({
+                            value: r.id,
+                            label: r.name,
+                          }))}
+                          leadingOptions={[
+                            { value: "__none__", label: "Sem receita" },
+                          ]}
+                          placeholder="Receita de entrada"
+                          searchPlaceholder="Buscar receita…"
+                          emptyMessage="Nenhuma receita encontrada."
+                          triggerClassName={FIELD_CLASS}
+                        />
+                      )}
                     </div>
 
-                    {saving && (
-                      <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Salvando…
-                      </p>
-                    )}
-                    {!saving && productId && it.invoice_unit && (
-                      <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-                        <Check className="h-3.5 w-3.5" />
-                        Vínculo e conversão prontos
-                      </p>
-                    )}
+                    <div className="min-w-0">
+                      {productId && product ? (
+                        <>
+                          <ProductUnitPickerWithConversion
+                            companyId={companyId!}
+                            stockUnitCode={product.unit}
+                            hubUnitCode={product.unit}
+                            unitCodes={allowedUnitsForProduct(productId)}
+                            value={it.invoice_unit ?? product.unit}
+                            onValueChange={(code) => {
+                              void saveItemLinkAndUnit(it, {
+                                productId,
+                                invoiceUnit: code,
+                                stockResolution:
+                                  it.import_stock_resolution ?? "DIRECT",
+                                recipeId:
+                                  it.resolved_entry_breakdown_recipe_id,
+                              });
+                            }}
+                            conversions={
+                              conversionsByProduct[productId] ?? []
+                            }
+                            onConversionsChange={(next) =>
+                              handleConversionsChange(productId, next)
+                            }
+                            disabled={rowDisabled}
+                            placeholder="Unidade da NF"
+                            triggerClassName={FIELD_CLASS}
+                          />
+                          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                            Estoque:{" "}
+                            <span className="font-medium tabular-nums text-foreground">
+                              {it.stock_quantity != null
+                                ? `${it.stock_quantity} ${product.unit}`
+                                : "— (defina conversão)"}
+                            </span>
+                          </p>
+                        </>
+                      ) : (
+                        <p className="flex min-h-9 items-center text-xs text-muted-foreground">
+                          Vincule um produto para definir a conversão.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
         </div>

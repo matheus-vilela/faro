@@ -661,8 +661,8 @@ export function ConfiguracoesCategorias() {
       ) : null}
 
       <Sheet open={sheetOpen} onOpenChange={(o) => !saving && setSheetOpen(o)}>
-        <SheetContent className="flex flex-col sm:max-w-md">
-          <SheetHeader>
+        <SheetContent className="flex flex-col overflow-hidden sm:max-w-md">
+          <SheetHeader className="shrink-0">
             <SheetTitle>
               {editing
                 ? "Editar categoria"
@@ -679,7 +679,7 @@ export function ConfiguracoesCategorias() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="grid gap-4 py-4">
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto py-4">
             <div className="space-y-2">
               <Label>Nome</Label>
               <Input
@@ -946,7 +946,7 @@ export function ConfiguracoesCategorias() {
             ) : null}
           </div>
 
-          <SheetFooter className="gap-2">
+          <SheetFooter className="shrink-0 gap-2">
             <Button
               onClick={save}
               disabled={saving || !isOwner}

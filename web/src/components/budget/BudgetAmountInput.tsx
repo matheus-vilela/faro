@@ -1,5 +1,4 @@
 import { Input } from "@/components/ui/input";
-import { parseOpeningBalance } from "@/lib/cashFlowSimulation/computeCashFlowProjection";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +15,8 @@ function parseCurrencyInput(raw: string): number {
   const trimmed = raw.trim();
   if (!trimmed) return 0;
   const normalized = trimmed.replace(/\./g, "").replace(",", ".");
-  return parseOpeningBalance(normalized);
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function BudgetAmountInput({
@@ -61,8 +61,10 @@ export function BudgetAmountInput({
         R$
       </span>
       <Input
+        type="text"
         inputMode="decimal"
-        placeholder="0,00"
+        autoComplete="off"
+        placeholder="digite a meta"
         disabled={disabled || saving}
         value={draft}
         onChange={(e) => {
@@ -79,7 +81,7 @@ export function BudgetAmountInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="h-8 pl-8 pr-7 text-right text-sm tabular-nums"
+        className="h-8 border-primary/40 bg-primary/5 pl-8 pr-7 text-right text-sm tabular-nums"
       />
       {saving ? (
         <Loader2 className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />

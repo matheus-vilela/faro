@@ -10,6 +10,21 @@ export type BoletoEntryKind = 'standard' | 'transfer'
 
 import type { ExpenseItemProductMergeMeta } from '@/types/productMergeAudit'
 
+export type PendingNewProductConversion = {
+  primary_qty: number
+  primary_unit_code: string
+  secondary_qty: number
+  secondary_unit_code: string
+}
+
+export type PendingNewProductMeta = {
+  name: string
+  unit: string
+  conversions: PendingNewProductConversion[]
+  canonical_name?: string | null
+  ncm?: string | null
+}
+
 export interface ExpenseItem {
   id?: string
   product_id?: string | null
@@ -19,10 +34,12 @@ export interface ExpenseItem {
   unit_value: number
   invoice_unit?: string | null
   stock_quantity?: number | null
+  import_resolution_status?: string | null
   metadata_json?: {
     product_merge?: ExpenseItemProductMergeMeta
+    pending_new_product?: PendingNewProductMeta
   } | null
-  products?: { id: string; name: string; current_quantity: number; min_quantity: number } | null
+  products?: { id: string; name: string; current_quantity: number; min_quantity: number; unit?: string } | null
 }
 
 /** Origem do lançamento; `whatsapp` aguarda aprovação do proprietário antes do recebimento. */
@@ -79,6 +96,10 @@ export interface Expense {
   expense_items?: ExpenseItem[]
   total?: number
   boleto?: Boleto | null
+  recebimentos?:
+    | { id: string; status: string | null }[]
+    | { id: string; status: string | null }
+    | null
 }
 
 export type PaymentType = 'boleto' | 'pix' | 'ted'

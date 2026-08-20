@@ -26,6 +26,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
+import { parseOpeningBalance } from "@/lib/cashFlowSimulation/computeCashFlowProjection";
+import { formatBrl } from "@/lib/dre/formatBrl";
 import { supabase } from "@/lib/supabase";
 import {
   nestedRelation,
@@ -43,6 +45,30 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 const NO_ACQUIRER = "__none__";
+
+function parseBalanceInput(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const n = parseOpeningBalance(trimmed.replace(/\./g, "").replace(",", "."));
+  return n;
+}
+
+function formatBalanceInput(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "";
+  }
+  return Number(value).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatBalanceAsOf(ymd: string | null | undefined): string {
+  if (!ymd) return "";
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString("pt-BR");
+}
 
 function mapSupabaseError(message: string): string {
   if (message.includes("company_bank_accounts_company_name_unique")) {
@@ -62,6 +88,8 @@ export function ConfiguracoesContasBancarias() {
   const [editing, setEditing] = useState<CompanyBankAccount | null>(null);
   const [name, setName] = useState("");
   const [tipo, setTipo] = useState<BankAccountType>("corrente");
+  const [currentBalance, setCurrentBalance] = useState("");
+  const [balanceAsOf, setBalanceAsOf] = useState("");
   const [acquirerId, setAcquirerId] = useState<string | null>(null);
   const [acquirers, setAcquirers] = useState<CompanyAcquirer[]>([]);
   const [saving, setSaving] = useState(false);
@@ -98,6 +126,11 @@ export function ConfiguracoesContasBancarias() {
           ...row,
           acquirer_id: row.acquirer_id ?? acquirer?.id ?? null,
           acquirer_name: acquirer?.name ?? null,
+          current_balance:
+            row.current_balance == null
+              ? null
+              : Number(row.current_balance),
+          balance_as_of: row.balance_as_of ?? null,
         };
       }),
     );
@@ -130,6 +163,8 @@ export function ConfiguracoesContasBancarias() {
     setName("");
     setTipo("corrente");
     setAcquirerId(null);
+    setCurrentBalance("");
+    setBalanceAsOf("");
     setSheetOpen(true);
   };
 
@@ -138,6 +173,8 @@ export function ConfiguracoesContasBancarias() {
     setName(row.name);
     setTipo(row.tipo);
     setAcquirerId(row.acquirer_id ?? null);
+    setCurrentBalance(formatBalanceInput(row.current_balance));
+    setBalanceAsOf(row.balance_as_of?.slice(0, 10) ?? "");
     setSheetOpen(true);
   };
 
@@ -149,11 +186,21 @@ export function ConfiguracoesContasBancarias() {
       return;
     }
 
+    const parsedBalance = parseBalanceInput(currentBalance);
+    const asOf = balanceAsOf.trim() || null;
+    const payload = {
+      name: trimmedName,
+      tipo,
+      acquirer_id: acquirerId,
+      current_balance: parsedBalance,
+      balance_as_of: parsedBalance === null ? null : asOf,
+    };
+
     setSaving(true);
     if (editing) {
       const { error } = await supabase
         .from("company_bank_accounts")
-        .update({ name: trimmedName, tipo, acquirer_id: acquirerId })
+        .update(payload)
         .eq("id", editing.id)
         .eq("company_id", companyId);
       setSaving(false);
@@ -165,9 +212,7 @@ export function ConfiguracoesContasBancarias() {
     } else {
       const { error } = await supabase.from("company_bank_accounts").insert({
         company_id: companyId,
-        name: trimmedName,
-        tipo,
-        acquirer_id: acquirerId,
+        ...payload,
       });
       setSaving(false);
       if (error) {
@@ -217,8 +262,8 @@ export function ConfiguracoesContasBancarias() {
             <div className="space-y-1">
               <CardTitle className="text-base">Contas cadastradas</CardTitle>
               <CardDescription>
-                Cada conta tem um nome, um tipo e, se quiser, a adquirente
-                cujos recebíveis caem nela.
+                Nome, tipo, saldo atual (digitado ou puxado do OFX) e, se
+                quiser, a adquirente cujos recebíveis caem nela.
               </CardDescription>
             </div>
             <Button
@@ -242,11 +287,12 @@ export function ConfiguracoesContasBancarias() {
           ) : (
             <div className="rounded-lg border bg-card overflow-x-auto">
               <div
-                className="grid min-w-[min(100%,36rem)] grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,8rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
+                className="grid min-w-[min(100%,42rem)] grid-cols-1 gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,7rem)_minmax(0,9rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
                 role="row"
               >
                 <span>Nome</span>
                 <span>Tipo</span>
+                <span>Saldo</span>
                 <span>Adquirente</span>
                 <span className="hidden text-center md:block">Ações</span>
               </div>
@@ -254,11 +300,25 @@ export function ConfiguracoesContasBancarias() {
                 {rows.map((row) => (
                   <li
                     key={row.id}
-                    className="flex min-w-[min(100%,36rem)] flex-col gap-2 px-4 py-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,8rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
+                    className="flex min-w-[min(100%,42rem)] flex-col gap-2 px-4 py-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,7rem)_minmax(0,9rem)_minmax(0,10rem)_5.5rem] md:items-center md:gap-3"
                   >
                     <span className="font-medium">{row.name}</span>
                     <span className="text-muted-foreground text-sm">
                       {bankAccountTypeLabel(row.tipo)}
+                    </span>
+                    <span className="text-sm tabular-nums">
+                      {row.current_balance == null ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <>
+                          {formatBrl(Number(row.current_balance))}
+                          {row.balance_as_of ? (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              em {formatBalanceAsOf(row.balance_as_of)}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
                     </span>
                     <span className="text-muted-foreground text-sm">
                       {row.acquirer_name ?? "—"}
@@ -300,14 +360,14 @@ export function ConfiguracoesContasBancarias() {
         open={sheetOpen}
         onOpenChange={(open) => !busy && setSheetOpen(open)}
       >
-        <SheetContent className="flex flex-col sm:max-w-md">
+        <SheetContent className="flex flex-col overflow-y-auto sm:max-w-md">
           <SheetHeader>
             <SheetTitle>
               {editing ? "Editar conta bancária" : "Nova conta bancária"}
             </SheetTitle>
             <SheetDescription>
-              Informe o nome, o tipo e, se os recebíveis de uma adquirente
-              caírem nesta conta, associe-a.
+              Informe o nome, o tipo, o saldo atual e, se os recebíveis de uma
+              adquirente caírem nesta conta, associe-a.
             </SheetDescription>
           </SheetHeader>
 
@@ -340,6 +400,37 @@ export function ConfiguracoesContasBancarias() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bank-account-balance">Saldo atual</Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                  R$
+                </span>
+                <Input
+                  id="bank-account-balance"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={currentBalance}
+                  onChange={(e) => setCurrentBalance(e.target.value)}
+                  disabled={saving}
+                  className="pl-10 tabular-nums"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Atualizado automaticamente ao importar um OFX com saldo, ou
+                informe aqui.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bank-account-balance-as-of">Data do saldo</Label>
+              <Input
+                id="bank-account-balance-as-of"
+                type="date"
+                value={balanceAsOf}
+                onChange={(e) => setBalanceAsOf(e.target.value)}
+                disabled={saving}
+              />
             </div>
             <div className="space-y-2">
               <Label>Adquirente</Label>

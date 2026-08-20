@@ -41,6 +41,7 @@ import {
   Building2,
   ConciergeBell,
   FlaskConical,
+  Landmark,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -131,6 +132,13 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           url: "/app/vendas-realizadas",
           icon: TrendingUp,
           permission: "vendas_realizadas",
+        },
+        {
+          title: "Conciliação bancária",
+          url: "/app/conciliacao-bancaria",
+          icon: Landmark,
+          permission: "contas_a_pagar",
+          permissions: ["contas_a_pagar", "vendas_realizadas"],
         },
         {
           title: "Fluxo de caixa",

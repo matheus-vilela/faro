@@ -25,6 +25,7 @@ type ChartRow = {
   inflows: number;
   outflows: number;
   balance: number;
+  baseBalance?: number;
 };
 
 function CashFlowTooltip({
@@ -64,6 +65,14 @@ function CashFlowTooltip({
             {formatBrl(byKey.balance ?? 0)}
           </span>
         </p>
+        {byKey.baseBalance != null ? (
+          <p>
+            Saldo Base:{" "}
+            <span className="font-medium text-foreground">
+              {formatBrl(byKey.baseBalance)}
+            </span>
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -71,17 +80,28 @@ function CashFlowTooltip({
 
 export function CashFlowProjectionChart({
   buckets,
+  baseBuckets,
   loading,
 }: {
   buckets: PeriodBucket[];
+  baseBuckets?: PeriodBucket[] | null;
   loading: boolean;
 }) {
-  const data: ChartRow[] = buckets.map((b, i) => ({
-    label: `Sem ${i + 1}`,
-    inflows: b.inflows,
-    outflows: b.outflows,
-    balance: b.runningBalance,
-  }));
+  const showBaseLine = Boolean(
+    baseBuckets && baseBuckets.length === buckets.length,
+  );
+  const data: ChartRow[] = buckets.map((b, i) => {
+    const row: ChartRow = {
+      label: `Sem ${i + 1}`,
+      inflows: b.inflows,
+      outflows: b.outflows,
+      balance: b.runningBalance,
+    };
+    if (showBaseLine && baseBuckets) {
+      row.baseBalance = baseBuckets[i]?.runningBalance ?? 0;
+    }
+    return row;
+  });
 
   const hasNegativeBalance = buckets.some((b) => b.runningBalance < 0);
 
@@ -90,7 +110,8 @@ export function CashFlowProjectionChart({
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Projeção de caixa</CardTitle>
         <CardDescription>
-          Barras: entradas e saídas por semana. Linha: saldo acumulado.
+          Barras: entradas e saídas por semana. Linha: saldo acumulado
+          {showBaseLine ? ". Tracejado: saldo no cenário Base" : ""}.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -151,6 +172,18 @@ export function CashFlowProjectionChart({
                 strokeWidth={2.5}
                 dot={{ r: 3, fill: "var(--primary)" }}
               />
+              {showBaseLine ? (
+                <Line
+                  type="monotone"
+                  dataKey="baseBalance"
+                  name="Saldo Base"
+                  stroke="var(--muted-foreground)"
+                  strokeWidth={1.75}
+                  strokeDasharray="6 4"
+                  dot={false}
+                  legendType="none"
+                />
+              ) : null}
             </ComposedChart>
           </ResponsiveContainer>
         </div>

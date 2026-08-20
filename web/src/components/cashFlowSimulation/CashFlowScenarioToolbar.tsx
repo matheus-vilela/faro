@@ -1,4 +1,9 @@
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { SCENARIO_OPTIONS } from "@/lib/cashFlowSimulation/scenarioPresets";
 import type { HorizonWeeks, ScenarioKey } from "@/lib/cashFlowSimulation/types";
 import { cn } from "@/lib/utils";
@@ -35,23 +40,28 @@ export function CashFlowScenarioToolbar({
         {SCENARIO_OPTIONS.map((opt) => {
           const active = scenario === opt.value;
           return (
-            <Button
-              key={opt.value}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              onClick={() => onScenarioChange(opt.value)}
-              className={cn(
-                "rounded-full px-4",
-                active && "bg-background shadow-sm",
-              )}
-              title={opt.description}
-            >
-              {opt.label}
-            </Button>
+            <Tooltip key={opt.value}>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={`${opt.label}: ${opt.tooltip}`}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onScenarioChange(opt.value)}
+                  className={cn(
+                    "rounded-full px-4",
+                    active && "bg-background shadow-sm",
+                  )}
+                >
+                  {opt.label}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-left">
+                {opt.tooltip}
+              </TooltipContent>
+            </Tooltip>
           );
         })}
       </div>

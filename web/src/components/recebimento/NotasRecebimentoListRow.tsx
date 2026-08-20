@@ -14,6 +14,10 @@ import {
   Share2,
 } from "lucide-react";
 
+/** Desktop columns for header + rows (parent grid; rows use subgrid). */
+export const NOTAS_RECEBIMENTO_LIST_GRID =
+  "md:grid md:grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] md:gap-x-4";
+
 export type RecebimentoBadgeInfo = {
   label: string;
   className: string;
@@ -32,6 +36,8 @@ export type NotasRecebimentoListRowProps = {
   boletoLinked: boolean;
   isHighlight?: boolean;
   pendingOwnerApproval?: boolean;
+  /** WhatsApp aguardando aprovação do proprietário. */
+  unapproved?: boolean;
   valueRisk?: boolean;
   valueRiskTitle?: string;
   unlinkedProducts?: number;
@@ -56,6 +62,7 @@ export function NotasRecebimentoListRow({
   boletoLinked,
   isHighlight,
   pendingOwnerApproval,
+  unapproved,
   valueRisk,
   valueRiskTitle,
   unlinkedProducts = 0,
@@ -85,28 +92,30 @@ export function NotasRecebimentoListRow({
         }
       }}
       className={cn(
-        "group relative border-l-[3px] bg-card outline-none transition-colors",
-        "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "group relative border-b border-l-[3px] outline-none transition-colors last:border-b-0",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "md:col-span-5 md:grid md:grid-cols-subgrid md:items-center md:px-4 md:py-2.5",
+        unapproved
+          ? "bg-amber-500/8 hover:bg-amber-500/14 focus-visible:bg-amber-500/14 dark:bg-amber-500/10 dark:hover:bg-amber-500/16"
+          : "bg-card hover:bg-muted/40 focus-visible:bg-muted/40",
         boletoLinked
           ? "border-l-emerald-600/80"
           : "border-l-amber-500/55",
-        isHighlight && "bg-primary/5 ring-1 ring-inset ring-primary/20",
+        isHighlight && "ring-1 ring-inset ring-primary/20",
       )}
     >
-      {/* Desktop: single dense row */}
-      <div className="hidden md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.1fr)_6.5rem_7.5rem_auto] md:items-center md:gap-3 md:px-4 md:py-2.5">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold leading-tight tracking-tight">
-            {displayTitle}
-          </p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {nfLine}
-            <span className="text-muted-foreground/50"> · </span>
-            {statusLabel}
-          </p>
-        </div>
+      <div className="hidden min-w-0 md:block">
+        <p className="truncate text-sm font-semibold leading-tight tracking-tight">
+          {displayTitle}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {nfLine}
+          <span className="text-muted-foreground/50"> · </span>
+          {statusLabel}
+        </p>
+      </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
+      <div className="hidden min-w-0 flex-wrap items-center gap-1 md:flex">
           <Badge
             variant="outline"
             className={cn("max-w-full truncate text-[10px] font-normal", recebimento.className)}
@@ -144,16 +153,16 @@ export function NotasRecebimentoListRow({
           )}
         </div>
 
-        <p className="text-xs tabular-nums text-muted-foreground">
+        <p className="hidden whitespace-nowrap pl-8 text-right text-xs tabular-nums text-muted-foreground md:block">
           {competenceLabel}
         </p>
 
-        <p className="text-right text-sm font-semibold tabular-nums tracking-tight">
+        <p className="hidden whitespace-nowrap pl-8 text-right text-sm font-semibold tabular-nums tracking-tight md:block">
           {totalLabel}
         </p>
 
         <div
-          className="flex items-center justify-end gap-0.5"
+          className="hidden items-center justify-end gap-0.5 pl-8 md:flex"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -189,7 +198,6 @@ export function NotasRecebimentoListRow({
             <Banknote className="h-4 w-4" />
           </RowIconButton>
         </div>
-      </div>
 
       {/* Mobile: compact stacked card */}
       <div className="flex flex-col gap-2.5 px-3 py-3 md:hidden">

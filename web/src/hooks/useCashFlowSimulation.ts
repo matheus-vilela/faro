@@ -77,6 +77,12 @@ const EMPTY_HINT: OpeningBalanceHint = {
   netPaid30: 0,
   overduePendingPayablesAmount: 0,
   overduePendingReceivablesAmount: 0,
+  accountsBalanceTotal: 0,
+  accountsWithBalanceCount: 0,
+  ofxBalanceTotal: null,
+  ofxBalanceAsOfYmd: null,
+  ofxAccountCount: 0,
+  ofxFileName: null,
 };
 
 export function useCashFlowSimulation(
@@ -221,6 +227,29 @@ export function useCashFlowSimulation(
     ],
   );
 
+  const baseProjection = useMemo(
+    () =>
+      prefs.scenario === "base"
+        ? projection
+        : computeCashFlowProjection({
+            rawItems,
+            scenario: "base",
+            openingBalance: prefs.openingBalance,
+            todayYmd,
+            horizonWeeks: prefs.horizonWeeks,
+            weekStartsOn,
+          }),
+    [
+      prefs.scenario,
+      projection,
+      rawItems,
+      prefs.openingBalance,
+      prefs.horizonWeeks,
+      todayYmd,
+      weekStartsOn,
+    ],
+  );
+
   const partialAccess = useMemo(
     () =>
       !isCompanyOwner &&
@@ -237,6 +266,7 @@ export function useCashFlowSimulation(
     loading,
     error,
     projection,
+    baseProjection,
     rawItems,
     diagnostics,
     openingBalanceHint,

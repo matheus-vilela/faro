@@ -442,7 +442,7 @@ export function DashboardDayOperations({
     <section aria-label="Operação do dia" className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight">
             Operação do dia
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -558,7 +558,7 @@ export function DashboardDayOperations({
         <SheetContent
           side="right"
           maximizable
-          className="flex w-full flex-col sm:max-w-lg"
+          className="flex w-full flex-col overflow-hidden sm:max-w-lg"
         >
           <SheetHeader className="pr-12">
             <SheetTitle>Contas a pagar</SheetTitle>
@@ -566,7 +566,7 @@ export function DashboardDayOperations({
               Boletos pendentes com vencimento hoje e amanhã.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
             <DashboardBoletoDayBlock
               label="Hoje"
               sublabel={todayLabel}
@@ -596,14 +596,14 @@ export function DashboardDayOperations({
         open={sheet === "checklists"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Checklists do dia</SheetTitle>
             <SheetDescription>
               Execuções concluídas hoje e pendências por atribuição.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Concluídos"
               empty="Nenhuma execução concluída hoje."
@@ -659,14 +659,14 @@ export function DashboardDayOperations({
         open={sheet === "inventory"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Contagem de estoque</SheetTitle>
             <SheetDescription>
               Sessões abertas e contagens concluídas hoje.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Pendentes (abertas)"
               empty="Nenhuma contagem em andamento."
@@ -704,14 +704,14 @@ export function DashboardDayOperations({
         open={sheet === "recebimento"}
         onOpenChange={(o) => !o && setSheet(null)}
       >
-        <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
+        <SheetContent side="right" className="flex w-full flex-col overflow-hidden sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>Recebimento de mercadorias</SheetTitle>
             <SheetDescription>
               Recebimentos confirmados hoje e pendentes de confirmação.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
             <DetailSection
               title="Recebidos hoje"
               empty="Nenhum recebimento confirmado hoje."
@@ -839,12 +839,12 @@ function DayOpMetricCell({
   const isZero = value === "0";
   return (
     <div className="flex min-w-0 flex-col gap-1 px-3.5 py-3">
-      <span className="text-[11px] font-medium text-muted-foreground leading-none">
+      <span className="text-sm text-muted-foreground leading-none">
         {label}
       </span>
       <span
         className={cn(
-          "text-2xl font-bold tabular-nums leading-none tracking-tight",
+          "text-2xl font-bold tabular-nums leading-none tracking-tight sm:text-[1.65rem]",
           emphasize && !isZero && "text-primary",
           isZero && "text-muted-foreground",
         )}
@@ -853,7 +853,7 @@ function DayOpMetricCell({
       </span>
       <span
         className={cn(
-          "line-clamp-2 text-[11px] leading-snug",
+          "line-clamp-2 text-xs leading-snug",
           isZero ? "text-muted-foreground/80" : "text-foreground/70",
         )}
         title={hint}
