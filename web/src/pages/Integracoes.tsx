@@ -45,9 +45,13 @@ export function Integracoes() {
       />
 
       {companyId ? (
-        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
-          <FiscalIntegrationCard companyId={companyId} />
-          <EpocIntegrationCard companyId={companyId} />
+        <div className="flex w-full flex-wrap gap-3">
+          <div className="min-w-0 w-full max-w-[350px] flex-1 basis-[min(100%,250px)]">
+            <FiscalIntegrationCard companyId={companyId} />
+          </div>
+          <div className="min-w-0 w-full max-w-[350px] flex-1 basis-[min(100%,250px)]">
+            <EpocIntegrationCard companyId={companyId} />
+          </div>
         </div>
       ) : null}
     </PageShell>

@@ -27,10 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { emitCompanyIntegrationUpdated } from "@/lib/companyIntegrationEvents";
 import { isEpocCsvSyncUiBusy } from "@/lib/epocCsvSyncProgress";
-import {
-  inferEpocFlowDiagnosticFromLegacy,
-  type EpocFlowDiagnostic,
-} from "@/lib/epocFlowDiagnostic";
+import { inferEpocFlowDiagnosticFromLegacy } from "@/lib/epocFlowDiagnostic";
 import { isOnboardingPdvSyncInProgress } from "@/lib/onboardingPdvDefaults";
 import { supabase } from "@/lib/supabase";
 import { triggerEpocPipelineInBackground } from "@/services/epocPipelineService";
@@ -108,26 +105,14 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   const [codigoFilial, setCodigoFilial] = useState("");
   const [ambiente, setAmbiente] = useState<EpocAmbiente>("producao");
   const [existingPassword, setExistingPassword] = useState<string | null>(null);
-  const [lastEpocCsvSyncAt, setLastEpocCsvSyncAt] = useState<string | null>(
-    null,
-  );
-  const [lastEpocCsvStoragePath, setLastEpocCsvStoragePath] = useState<
-    string | null
-  >(null);
-  const [downloadingLastCsv, setDownloadingLastCsv] = useState(false);
-  const [syncingFull, setSyncingFull] = useState(false);
   const epocSyncUiBusy = useMemo(
     () =>
       isEpocCsvSyncUiBusy(companyId, {
-        localSyncing: syncingFull,
+        localSyncing: false,
         onboardingPdv: companyMeta?.onboarding_pdv,
       }),
-    [companyId, syncingFull, companyMeta?.onboarding_pdv],
+    [companyId, companyMeta?.onboarding_pdv],
   );
-  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
-  const [purgeCount, setPurgeCount] = useState<number | null>(null);
-  const [purgeCountLoading, setPurgeCountLoading] = useState(false);
-  const [purging, setPurging] = useState(false);
   const [activeTab, setActiveTab] = useState<"config" | "history">("config");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [syncHistory, setSyncHistory] = useState<EpocSyncHistoryRow[]>([]);
@@ -145,8 +130,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   >(null);
   const [historyDeleteLoading, setHistoryDeleteLoading] = useState(false);
   const [replayRunId, setReplayRunId] = useState<string | null>(null);
-  const [lastFlowDiagnostic, setLastFlowDiagnostic] =
-    useState<EpocFlowDiagnostic | null>(null);
   const [sheetConfigBaseline, setSheetConfigBaseline] =
     useState<EpocSheetConfigBaseline | null>(null);
 
@@ -180,8 +163,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setExistingPassword(
         s.password && s.password.length > 0 ? s.password : null,
       );
-      setLastEpocCsvSyncAt(s.last_epoc_csv_sync_at ?? null);
-      setLastEpocCsvStoragePath(s.last_epoc_csv_storage_path ?? null);
       setSheetConfigBaseline({
         enabled: r.enabled,
         baseUrl: (s.base_url ?? "").trim(),
@@ -195,8 +176,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       setCodigoFilial("");
       setAmbiente("producao");
       setExistingPassword(null);
-      setLastEpocCsvSyncAt(null);
-      setLastEpocCsvStoragePath(null);
       setSheetConfigBaseline({
         enabled: false,
         baseUrl: "",
@@ -462,38 +441,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     void loadHistory();
   };
 
-  const handleDownloadLastCsv = async () => {
-    if (!lastEpocCsvStoragePath?.trim()) {
-      toast.error("Ainda não há CSV sincronizado para esta unidade.");
-      return;
-    }
-    setDownloadingLastCsv(true);
-    const { data, error } = await supabase.storage
-      .from("company-setup")
-      .download(lastEpocCsvStoragePath.trim());
-    setDownloadingLastCsv(false);
-    if (error) {
-      console.error(error);
-      toast.error(
-        error.message ||
-          "Não foi possível baixar o arquivo. Verifique as permissões.",
-      );
-      return;
-    }
-    const name = fileNameFromStoragePath(
-      lastEpocCsvStoragePath,
-      "epoc-ultimo.csv",
-    );
-    const url = URL.createObjectURL(data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.rel = "noopener";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.message(`Download iniciado: ${name}`);
-  };
-
   const handleDownloadIgnoredRowsReport = async (
     jobId: string,
     bucket: string,
@@ -526,116 +473,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     toast.message(`Download iniciado: ${name}`);
   };
 
-  const handleSyncNow = async () => {
-    if (!enabled || !baseUrl.trim()) {
-      toast.error("Ative a integração e indique a URL base do portal EPOC.");
-      return;
-    }
-    const oldPaths = [lastEpocCsvStoragePath?.trim() ?? ""].filter(Boolean);
-    const uniqueOldPaths = Array.from(new Set(oldPaths));
-    if (uniqueOldPaths.length > 0) {
-      const { error: removeErr } = await supabase.storage
-        .from("company-setup")
-        .remove(uniqueOldPaths);
-      if (removeErr) {
-        console.warn(
-          "[epoc-sync-csv] falha ao remover arquivos antigos",
-          removeErr,
-        );
-        toast.warning(
-          "Não foi possível remover todos os arquivos antigos antes da nova sincronização. Continuando mesmo assim.",
-        );
-      } else {
-        toast.message(
-          `Arquivos antigos removidos (${uniqueOldPaths.length}) antes da nova sincronização.`,
-        );
-      }
-      setLastEpocCsvStoragePath(null);
-      setLastEpocCsvSyncAt(null);
-    }
-
-    setSyncingFull(true);
-    let res: Awaited<ReturnType<typeof invokeEpocCsvSync>>;
-    try {
-      res = await invokeEpocCsvSync(companyId);
-    } finally {
-      setSyncingFull(false);
-      await refetchCompanies();
-    }
-    if (res.flow_diagnostic) {
-      setLastFlowDiagnostic(res.flow_diagnostic);
-    }
-    if (res.steps?.length) {
-      console.groupCollapsed(`[epoc-sync-csv] steps (${res.steps.length})`);
-      for (const s of res.steps) {
-        console.info(
-          `#${s.index} ${s.name} [${s.status}] http=${s.http_status ?? "-"} bytes=${s.bytes ?? 0}`,
-          { url: s.download_url, message: s.message, detalhes: s.detalhes },
-        );
-      }
-      console.groupEnd();
-    }
-    if (!res.ok) {
-      const lastFail = [...(res.steps ?? [])]
-        .reverse()
-        .find((s) => s.status !== "ok");
-      const downloadOnErr = lastFail?.download_url ?? res.download_url ?? null;
-      const failName = lastFail?.label ?? lastFail?.name;
-      const tail = failName ? ` Etapa com problema: ${failName}.` : "";
-      const diagHint = res.flow_diagnostic?.summary
-        ? ` ${res.flow_diagnostic.summary}`
-        : "";
-      if (downloadOnErr) {
-        toast.error(
-          (res.error ?? "Falha na sincronização.") +
-            tail +
-            diagHint +
-            " A resposta foi guardada — abrindo o download.",
-        );
-        await load();
-        window.open(downloadOnErr, "_blank", "noopener,noreferrer");
-        return;
-      }
-      toast.error(
-        (res.error ?? "Falha na sincronização. Veja os logs da função.") +
-          tail +
-          diagHint,
-      );
-      return;
-    }
-    if (res.continuing) {
-      toast.message(
-        res.message?.trim() ||
-          (res.days_done != null && res.days_planned != null
-            ? `Download do CSV em lotes (${res.days_done}/${res.days_planned} dias). Continua em segundo plano.`
-            : "Download do CSV em lotes — continua em segundo plano."),
-        { duration: 8000 },
-      );
-      await load();
-      return;
-    }
-    if (res.flow_diagnostic?.blocked_at) {
-      toast.warning(res.flow_diagnostic.summary, { duration: 12_000 });
-    } else if (res.csv_uploaded) {
-      toast.success("CSV guardado no armazenamento da unidade.");
-    } else {
-      toast.success(
-        "Sincronização concluída, mas o CSV não foi extraído automaticamente.",
-      );
-    }
-    await load();
-    if (res.download_url) {
-      window.open(res.download_url, "_blank", "noopener,noreferrer");
-    } else {
-      toast.message(
-        "Use os botões de download abaixo se o browser bloqueou pop-ups.",
-        {
-          duration: 5000,
-        },
-      );
-    }
-  };
-
   const handleReplaySyncRun = async (run: EpocSyncRunHistoryRow) => {
     if (!enabled || !baseUrl.trim()) {
       toast.error("Ative a integração e indique a URL base do portal EPOC.");
@@ -653,9 +490,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
       const res = await invokeEpocCsvSync(companyId, {
         consulta_dias_br: dias,
       });
-      if (res.flow_diagnostic) {
-        setLastFlowDiagnostic(res.flow_diagnostic);
-      }
       if (res.steps?.length) {
         console.groupCollapsed(`[epoc-sync-csv] replay (${res.steps.length})`);
         for (const st of res.steps) {
@@ -692,61 +526,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
     } finally {
       setReplayRunId(null);
       await refetchCompanies();
-    }
-  };
-
-  const fetchEpocIntegrationRevenueCount = async () => {
-    setPurgeCountLoading(true);
-    setPurgeCount(null);
-    try {
-      const { data, error } = await supabase.rpc(
-        "count_revenue_entries_from_integration_import",
-        { p_company_id: companyId, p_provider: "epoc" },
-      );
-      if (error) throw error;
-      setPurgeCount(Number(data ?? 0));
-    } catch (e) {
-      console.error(e);
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : "Não foi possível contar as receitas importadas.",
-      );
-      setPurgeCount(null);
-    } finally {
-      setPurgeCountLoading(false);
-    }
-  };
-
-  const openPurgeEpocRevenuesDialog = () => {
-    setPurgeDialogOpen(true);
-    void fetchEpocIntegrationRevenueCount();
-  };
-
-  const handleConfirmPurgeEpocRevenues = async () => {
-    setPurging(true);
-    try {
-      const { data, error } = await supabase.rpc(
-        "delete_revenue_entries_from_integration_import",
-        { p_company_id: companyId, p_provider: "epoc" },
-      );
-      if (error) throw error;
-      const n = Number(data ?? 0);
-      toast.success(
-        n === 0
-          ? "Nenhuma receita importada do EPOC para remover."
-          : `Removidas ${n} receita(s) criadas pela integração EPOC.`,
-      );
-      setPurgeDialogOpen(false);
-    } catch (e) {
-      console.error(e);
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : "Não foi possível apagar as receitas importadas.",
-      );
-    } finally {
-      setPurging(false);
     }
   };
 
@@ -836,10 +615,10 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
   }
 
   return (
-    <div className="h-full min-w-0">
+    <div className="h-full w-full min-w-0">
       <IntegrationProviderCard
         title="EPOC"
-        description="Por enquanto, importa só vendas realizadas. Sincronização automática uma vez ao dia."
+        description="Sincronização automática uma vez ao dia."
         status={enabled ? "active" : "inactive"}
         statusLabel={enabled ? "Ativo" : "Inativo"}
         meta={
@@ -851,7 +630,7 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
         onOpen={() => setSheetOpen(true)}
         brand={
           <div className="flex h-full items-center justify-center bg-black">
-            <img src={epocLogo} alt="" className="h-10 w-auto object-contain" />
+            <img src={epocLogo} alt="" className="h-7 w-auto object-contain" />
           </div>
         }
       />
@@ -996,62 +775,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                     </Select>
                   </div> */}
                 </div>
-
-                {/* <div className="space-y-2 rounded-lg border border-border/80 bg-muted/15 p-3">
-                  <p className="text-sm font-medium">Importação EPOC</p>
-                  <p className="text-xs text-muted-foreground">
-                    O import automático de receitas usa as categorias
-                    configuradas em receita operacional.
-                  </p>
-                  {lastEpocCsvSyncAt ? (
-                    <p className="text-xs text-muted-foreground">
-                      Última importação:{" "}
-                      {new Date(lastEpocCsvSyncAt).toLocaleString("pt-BR")}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Nada sincronizado ainda — use o botão abaixo.
-                    </p>
-                  )}
-                  <Button
-                    type="button"
-                    className="w-full"
-                    onClick={() => void handleSyncNow()}
-                    disabled={!enabled || !baseUrl.trim() || epocSyncUiBusy}
-                  >
-                    {syncingFull ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Sincronizar agora (EPOC → Storage)
-                  </Button>
-                  {lastFlowDiagnostic ? (
-                    <EpocFlowDiagnosticPanel
-                      diagnostic={lastFlowDiagnostic}
-                      compact
-                    />
-                  ) : null}
-                </div> */}
-
-                {/* <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                  <p className="text-sm font-medium text-destructive">
-                    Receitas importadas do EPOC
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Remove receitas ligadas a integração EPOC, com estorno de
-                    estoque em vendas de produto.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => openPurgeEpocRevenuesDialog()}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Apagar receitas importadas do EPOC
-                  </Button>
-                </div> */}
               </>
             ) : (
               <div className="space-y-3">
@@ -1409,66 +1132,6 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                 </>
               ) : (
                 "Apagar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={purgeDialogOpen}
-        onOpenChange={(open) => {
-          setPurgeDialogOpen(open);
-          if (!open) {
-            setPurgeCount(null);
-            setPurgeCountLoading(false);
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Apagar receitas importadas do EPOC?</DialogTitle>
-            <DialogDescription>
-              Esta ação remove permanentemente os lançamentos ligados aos lotes
-              de importação automática do EPOC nesta unidade. Não pode ser
-              desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 text-sm text-muted-foreground">
-            {purgeCountLoading ? (
-              <p className="flex items-center gap-2 font-medium text-foreground">
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />A contar
-                receitas…
-              </p>
-            ) : purgeCount !== null ? (
-              <p className="font-medium text-foreground">
-                {purgeCount === 0
-                  ? "Neste momento não há receitas importadas do EPOC para apagar."
-                  : `Serão apagadas ${purgeCount} receita(s).`}
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPurgeDialogOpen(false)}
-              disabled={purging}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void handleConfirmPurgeEpocRevenues()}
-              disabled={purging || purgeCountLoading}
-            >
-              {purging ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />A apagar…
-                </>
-              ) : (
-                "Apagar receitas"
               )}
             </Button>
           </DialogFooter>

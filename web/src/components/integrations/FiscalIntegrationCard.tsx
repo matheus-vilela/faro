@@ -222,7 +222,7 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
   };
 
   return (
-    <div className="h-full min-w-0">
+    <div className="h-full w-full min-w-0">
       <IntegrationProviderCard
         title="Fiscal"
         description="Certificado A1 e consulta de NF-e recebidas na SEFAZ NFe."
@@ -245,9 +245,9 @@ export function FiscalIntegrationCard({ companyId }: { companyId: string }) {
         onOpen={() => setSheetOpen(true)}
         brand={
           <div className="flex h-full items-center justify-center bg-sky-950">
-            <div className="flex items-center gap-3 text-sky-50">
-              <FileKey className="h-8 w-8" aria-hidden />
-              <span className="text-xl font-semibold tracking-tight">
+            <div className="flex items-center gap-2 text-sky-50">
+              <FileKey className="h-5 w-5" aria-hidden />
+              <span className="text-sm font-semibold tracking-tight">
                 NF-e
               </span>
             </div>

@@ -22,8 +22,8 @@ const STATUS_DOT: Record<IntegrationCardStatus, string> = {
 
 export function IntegrationProviderCardSkeleton() {
   return (
-    <Card className="flex h-full min-h-72 items-center justify-center gap-0 py-0">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    <Card className="flex h-full min-h-44 w-full items-center justify-center gap-0 py-0">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
     </Card>
   );
 }
@@ -48,16 +48,16 @@ export function IntegrationProviderCard({
   brand: ReactNode;
 }) {
   return (
-    <Card className="h-full gap-0 overflow-hidden py-0 shadow-sm">
-      <div className="relative h-28 shrink-0 border-b bg-muted/40">{brand}</div>
-      <div className="flex flex-1 flex-col gap-3 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-lg font-semibold tracking-tight text-foreground">
+    <Card className="h-full w-full gap-0 overflow-hidden py-0 shadow-sm">
+      <div className="relative h-20 shrink-0 border-b bg-muted/40">{brand}</div>
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
             {title}
           </h3>
           <span
             className={cn(
-              "inline-flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
+              "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
               STATUS_CLASS[status],
             )}
           >
@@ -68,19 +68,24 @@ export function IntegrationProviderCard({
             {statusLabel}
           </span>
         </div>
-        <p className="text-sm leading-relaxed text-muted-foreground">
+        <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">
           {description}
         </p>
-        {meta ? <p className="text-xs text-muted-foreground">{meta}</p> : null}
-        <div className="mt-auto pt-2">
+        {meta ? (
+          <p className="line-clamp-1 text-[11px] text-muted-foreground">
+            {meta}
+          </p>
+        ) : null}
+        <div className="mt-auto pt-1">
           <Button
             type="button"
             variant="outline"
-            className="w-full justify-between"
+            size="sm"
+            className="h-8 w-full justify-between text-xs"
             onClick={onOpen}
           >
             {actionLabel}
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>

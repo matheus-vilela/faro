@@ -34,6 +34,19 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
+type ProdutosServicosJson = {
+  produtos?: {
+    total?: {
+      valor: string;
+    };
+  };
+  servicos?: {
+    total?: {
+      valor: string;
+    };
+  };
+};
+
 type FaturamentoRow = {
   id: string;
   faturamento_date: string;
@@ -43,7 +56,7 @@ type FaturamentoRow = {
   taxas: number | null;
   total: number | null;
   ticket_medio: number | null;
-  produtos_servicos_json: unknown;
+  produtos_servicos_json: ProdutosServicosJson;
   fiscal_json: unknown;
 };
 
@@ -445,10 +458,26 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
                         {formatIsoDateBr(row.faturamento_date)}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
-                        {formatMoneyPtBr(Number(row.produtos))}
+                        {formatMoneyPtBr(
+                          Number(
+                            row.produtos_servicos_json?.produtos?.total?.valor
+                              .replace(".", "")
+                              .replace(",", ".") ??
+                              row.produtos ??
+                              "0",
+                          ),
+                        )}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
-                        {formatMoneyPtBr(Number(row.servicos))}
+                        {formatMoneyPtBr(
+                          Number(
+                            row.produtos_servicos_json?.servicos?.total?.valor
+                              .replace(".", "")
+                              .replace(",", ".") ??
+                              row.servicos ??
+                              "0",
+                          ),
+                        )}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
                         {formatNumberPtBr(Number(row.quantity), 0)}
