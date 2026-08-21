@@ -2,10 +2,9 @@ import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImportAttentionPanel";
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
+import { type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { NotasRecebimentoListRow, NOTAS_RECEBIMENTO_LIST_GRID } from "@/components/recebimento/NotasRecebimentoListRow";
 import { RecebimentoReviewPanel } from "@/components/recebimento/RecebimentoReviewPanel";
@@ -61,12 +60,12 @@ import {
   expenseHasUnlinkedProduct,
   expenseHasValueRisk,
   filterIdsByBoleto,
-  filterIdsByRecebimento,
+  filterIdsByRecebimentoSection,
+  parseRecebimentoListSection,
   recebimentoKindFromRow,
   type NotasAtencaoFilter,
   type NotasBoletoFilter,
   type NotasOrigemFilter,
-  type NotasRecebimentoFilter,
   type RecebimentoListKind,
 } from "@/lib/notasRecebimentoListFilters";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
@@ -92,7 +91,9 @@ import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import type { Supplier } from "@/types/supplier";
 import {
+  AlertTriangle,
   CheckCircle2,
+  Clock,
   Copy,
   FileText,
   FilterX,
@@ -113,6 +114,77 @@ type RecebimentoListInfo = {
   assigned_company_member_id?: string | null;
   hasPendingReceipt: boolean;
 };
+
+type RecebimentoListSectionIds = {
+  divergence: string[];
+  awaiting: string[];
+  received: string[];
+};
+
+const EXPENSE_IN_CHUNK = 80;
+
+function NotasListSectionHeader({
+  id,
+  title,
+  count,
+  tone,
+  icon: Icon,
+}: {
+  id: string;
+  title: string;
+  count: number;
+  tone: "red" | "amber" | "emerald";
+  icon: typeof AlertTriangle;
+}) {
+  return (
+    <div
+      id={id}
+      className={cn(
+        "col-span-full flex items-center gap-3 border-l-[3px] px-4 py-3.5 md:col-span-5",
+        tone === "red" &&
+          "border-y-2 border-red-600/40 border-l-red-600 bg-red-500/15 text-red-950 dark:border-red-500/40 dark:bg-red-500/20 dark:text-red-50",
+        tone === "amber" &&
+          "border-y-2 border-amber-500/50 border-l-amber-500 bg-amber-500/15 text-amber-950 dark:border-amber-400/50 dark:bg-amber-500/20 dark:text-amber-50",
+        tone === "emerald" &&
+          "border-y-2 border-y-emerald-600/40 border-l-green-600 bg-emerald-500/15 text-emerald-950 dark:border-y-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-50",
+      )}
+    >
+      <span
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+          tone === "red" && "bg-red-600/20 text-red-800 dark:text-red-200",
+          tone === "amber" && "bg-amber-500/25 text-amber-800 dark:text-amber-200",
+          tone === "emerald" &&
+            "bg-emerald-600/20 text-emerald-800 dark:text-emerald-200",
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <p className="min-w-0 flex-1 text-sm font-semibold tracking-tight">
+        {title}
+      </p>
+      <span
+        className={cn(
+          "rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums",
+          tone === "red" && "bg-red-600/20",
+          tone === "amber" && "bg-amber-500/25",
+          tone === "emerald" && "bg-emerald-600/20",
+        )}
+      >
+        {count}
+      </span>
+    </div>
+  );
+}
+
+function NotasListSectionGap() {
+  return (
+    <div
+      className="col-span-full h-10 border-y bg-background md:col-span-5"
+      aria-hidden
+    />
+  );
+}
 
 function formatDocForDisplay(doc: string | null): string {
   if (!doc || !doc.replace(/\D/g, "")) return "";
@@ -186,49 +258,18 @@ function localDateYmd(): string {
   return `${y}-${m}-${day}`;
 }
 
-function clampYmdToRange(value: string, min: string, max: string): string {
-  if (!value) return "";
-  if (value < min || value > max) return "";
-  return value;
+function monthYmdBounds(month: number, year: number): { min: string; max: string } {
+  const lastDay = new Date(year, month, 0).getDate();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    min: `${year}-${pad(month)}-01`,
+    max: `${year}-${pad(month)}-${pad(lastDay)}`,
+  };
 }
 
-function MonthLockedDateInput({
-  id,
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  id: string;
-  value: string;
-  onChange: (value: string) => void;
-  min: string;
-  max: string;
-}) {
-  return (
-    <Input
-      id={id}
-      type="date"
-      min={min}
-      max={max}
-      value={value}
-      onChange={(e) => {
-        const next = e.target.value;
-        if (!next) {
-          onChange("");
-          return;
-        }
-        if (next < min || next > max) return;
-        onChange(next);
-      }}
-      onBlur={(e) => {
-        const next = e.target.value;
-        if (next && (next < min || next > max)) {
-          e.currentTarget.value = value;
-        }
-      }}
-    />
-  );
+function orderedYmdRange(from: string, to: string): { gte: string; lte: string } {
+  if (from && to && from > to) return { gte: to, lte: from };
+  return { gte: from, lte: to };
 }
 
 const STATUS_LABELS = {
@@ -251,26 +292,33 @@ export function Despesas() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const highlightExpenseId = searchParams.get("expense");
+  const sectionFromUrl = parseRecebimentoListSection(searchParams.get("tab"));
 
   const now = new Date();
   const [period, setPeriod] = useState<MonthYear>({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
+  const [competenceFrom, setCompetenceFrom] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).min,
+  );
+  const [competenceTo, setCompetenceTo] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).max,
+  );
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [expensesCount, setExpensesCount] = useState(0);
-  const [expensesPage, setExpensesPage] = useState(1);
+  const [listSectionIds, setListSectionIds] =
+    useState<RecebimentoListSectionIds>({
+      divergence: [],
+      awaiting: [],
+      received: [],
+    });
   const [expensesSearch, setExpensesSearch] = useState("");
   const debouncedSearch = useDebounce(expensesSearch, 300);
   /** Somente despesas WhatsApp com status pendente (aguardando aprovação do proprietário). */
   const [onlyPendingApproval, setOnlyPendingApproval] = useState(false);
-  const [recebimentoFilter, setRecebimentoFilter] =
-    useState<NotasRecebimentoFilter>("all");
   const [boletoFilter, setBoletoFilter] = useState<NotasBoletoFilter>("all");
   const [origemFilter, setOrigemFilter] = useState<NotasOrigemFilter>("all");
   const [atencaoFilter, setAtencaoFilter] = useState<NotasAtencaoFilter>("all");
-  const [competenceFrom, setCompetenceFrom] = useState("");
-  const [competenceTo, setCompetenceTo] = useState("");
   const [recebimentosByExpenseId, setRecebimentosByExpenseId] = useState<
     Map<string, RecebimentoListInfo>
   >(new Map());
@@ -346,6 +394,7 @@ export function Despesas() {
   const [selectedBoletoId, setSelectedBoletoId] = useState<string>("");
   const [linking, setLinking] = useState(false);
   const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
+  const [detailReloadNonce, setDetailReloadNonce] = useState(0);
 
   const boletosByExpenseId = useMemo(() => {
     const map = new Map<string, Boleto>();
@@ -358,6 +407,30 @@ export function Despesas() {
 
   const getBoletoForExpense = (expenseId: string) =>
     boletosByExpenseId.get(expenseId);
+
+  const expensesById = useMemo(
+    () => new Map(expenses.map((e) => [e.id, e])),
+    [expenses],
+  );
+  const expensesFromIds = useCallback(
+    (ids: string[]) =>
+      ids
+        .map((id) => expensesById.get(id))
+        .filter((row): row is Expense => Boolean(row)),
+    [expensesById],
+  );
+  const divergenceExpenses = useMemo(
+    () => expensesFromIds(listSectionIds.divergence),
+    [expensesFromIds, listSectionIds.divergence],
+  );
+  const awaitingExpenses = useMemo(
+    () => expensesFromIds(listSectionIds.awaiting),
+    [expensesFromIds, listSectionIds.awaiting],
+  );
+  const receivedExpenses = useMemo(
+    () => expensesFromIds(listSectionIds.received),
+    [expensesFromIds, listSectionIds.received],
+  );
 
   const categoriesById = useMemo(
     () => new Map(companyCategories.map((c) => [c.id, c])),
@@ -377,35 +450,36 @@ export function Despesas() {
     [products],
   );
   const extraListFiltersActive =
-    recebimentoFilter !== "all" ||
     boletoFilter !== "all" ||
     origemFilter !== "all" ||
     atencaoFilter !== "all";
-  const competenceDateFilterActive =
-    competenceFrom.trim().length > 0 || competenceTo.trim().length > 0;
+  const competenceMonthBounds = useMemo(
+    () => monthYmdBounds(period.month, period.year),
+    [period.month, period.year],
+  );
+  const dateRangeIsCustom =
+    competenceFrom !== competenceMonthBounds.min ||
+    competenceTo !== competenceMonthBounds.max;
   const hasListFilters =
     extraListFiltersActive ||
     onlyPendingApproval ||
     expensesSearch.trim().length > 0 ||
-    competenceDateFilterActive;
+    dateRangeIsCustom;
+  const applyPeriod = (next: MonthYear) => {
+    const bounds = monthYmdBounds(next.month, next.year);
+    setPeriod(next);
+    setCompetenceFrom(bounds.min);
+    setCompetenceTo(bounds.max);
+  };
   const clearListFilters = () => {
     setExpensesSearch("");
     setOnlyPendingApproval(false);
-    setRecebimentoFilter("all");
     setBoletoFilter("all");
     setOrigemFilter("all");
     setAtencaoFilter("all");
-    setCompetenceFrom("");
-    setCompetenceTo("");
+    setCompetenceFrom(competenceMonthBounds.min);
+    setCompetenceTo(competenceMonthBounds.max);
   };
-  const competenceMonthBounds = useMemo(() => {
-    const lastDay = new Date(period.year, period.month, 0).getDate();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return {
-      min: `${period.year}-${pad(period.month)}-01`,
-      max: `${period.year}-${pad(period.month)}-${pad(lastDay)}`,
-    };
-  }, [period.month, period.year]);
   const conversionsByProduct = useMemo(() => {
     const out = new Map<string, ProductUnitConversionDraft[]>();
     for (const row of productConversions) {
@@ -497,42 +571,21 @@ export function Despesas() {
     if (!companyId) return;
     setLoading(true);
     try {
-    const { start, end } = getMonthRange(period.month, period.year);
-    const startDate = start.slice(0, 10);
-    const endDate = end.slice(0, 10);
     const searchActive = debouncedSearch.trim().length > 0;
     const expenseListSelect = `
         *,
         expense_items (*, products (id, name, current_quantity, min_quantity)),
         suppliers (id, name, document)
       `;
-    const needsIdSetFilter =
-      recebimentoFilter !== "all" ||
-      boletoFilter !== "all" ||
-      atencaoFilter !== "all";
 
     const applyListFilters = (query: any) => {
       let q = query.eq("company_id", companyId);
-      const fromDate = clampYmdToRange(
-        competenceFrom.trim(),
-        competenceMonthBounds.min,
-        competenceMonthBounds.max,
-      );
-      const toDate = clampYmdToRange(
-        competenceTo.trim(),
-        competenceMonthBounds.min,
-        competenceMonthBounds.max,
-      );
-      if (fromDate || toDate) {
-        const gte = fromDate && toDate && fromDate > toDate ? toDate : fromDate;
-        const lte = fromDate && toDate && fromDate > toDate ? fromDate : toDate;
-        if (gte) q = q.gte("reference_date", gte);
-        if (lte) q = q.lte("reference_date", lte);
-      } else if (!searchActive) {
-        q = q.or(
-          `and(reference_date.gte.${startDate},reference_date.lte.${endDate}),and(created_at.gte.${start},created_at.lte.${end})`,
-        );
-      }
+      const fromDate =
+        competenceFrom.trim() || competenceMonthBounds.min;
+      const toDate = competenceTo.trim() || competenceMonthBounds.max;
+      const { gte, lte } = orderedYmdRange(fromDate, toDate);
+      if (gte) q = q.gte("reference_date", gte);
+      if (lte) q = q.lte("reference_date", lte);
       if (onlyPendingApproval) {
         q = q.eq("expense_source", "whatsapp").eq("status", "pending");
       } else if (origemFilter === "whatsapp") {
@@ -558,23 +611,8 @@ export function Despesas() {
     setBoletos(boletoRows);
 
     let expenseList: Expense[] = [];
-    let totalCount = 0;
 
-    if (!needsIdSetFilter) {
-      let exQuery = applyListFilters(
-        supabase.from("expenses").select(expenseListSelect, { count: "estimated" }),
-      );
-      exQuery = exQuery
-        .order("reference_date", { ascending: false })
-        .order("created_at", { ascending: false });
-      const { data: ex, count } = await exQuery.range(
-        (expensesPage - 1) * PAGE_SIZE,
-        expensesPage * PAGE_SIZE - 1,
-      );
-      expenseList = (ex as Expense[]) ?? [];
-      totalCount = count ?? 0;
-    } else {
-      type LightExpenseRow = {
+    type LightExpenseRow = {
         id: string;
         document_total?: number | null;
         financial_reconciliation_json?: Record<string, unknown> | null;
@@ -606,34 +644,28 @@ export function Despesas() {
       );
       ids = filterIdsByBoleto(ids, withBoleto, boletoFilter);
 
-      if (recebimentoFilter !== "all" && ids.length > 0) {
-        const { data: recRows } = await supabase
-          .from("recebimentos")
-          .select(
-            `
+      const { data: recRows } = await supabase
+        .from("recebimentos")
+        .select(
+          `
             expense_id,
             status,
             recebimento_item_status (status)
           `,
-          )
-          .eq("company_id", companyId);
-        const kindByExpenseId = new Map<string, RecebimentoListKind>();
-        for (const r of recRows ?? []) {
-          kindByExpenseId.set(
-            r.expense_id as string,
-            recebimentoKindFromRow({
-              status: String(r.status ?? ""),
-              itemStatuses:
-                (r.recebimento_item_status as Array<{ status: string }> | null) ??
-                [],
-            }),
-          );
-        }
-        ids = filterIdsByRecebimento(ids, kindByExpenseId, recebimentoFilter);
-      } else if (recebimentoFilter !== "all") {
-        ids = [];
+        )
+        .eq("company_id", companyId);
+      const kindByExpenseId = new Map<string, RecebimentoListKind>();
+      for (const r of recRows ?? []) {
+        kindByExpenseId.set(
+          r.expense_id as string,
+          recebimentoKindFromRow({
+            status: String(r.status ?? ""),
+            itemStatuses:
+              (r.recebimento_item_status as Array<{ status: string }> | null) ??
+              [],
+          }),
+        );
       }
-
       if (atencaoFilter !== "all") {
         const byId = new Map(lightRows.map((r) => [r.id, r]));
         ids = ids.filter((id) => {
@@ -650,59 +682,83 @@ export function Despesas() {
         });
       }
 
-      totalCount = ids.length;
-      const pageStart = (expensesPage - 1) * PAGE_SIZE;
-      const pageIds = ids.slice(pageStart, pageStart + PAGE_SIZE);
+      const divergenceIds = filterIdsByRecebimentoSection(
+        ids,
+        kindByExpenseId,
+        "divergence",
+      );
+      const awaitingIds = filterIdsByRecebimentoSection(
+        ids,
+        kindByExpenseId,
+        "awaiting",
+      );
+      const receivedIds = filterIdsByRecebimentoSection(
+        ids,
+        kindByExpenseId,
+        "received",
+      );
+      setListSectionIds({
+        divergence: divergenceIds,
+        awaiting: awaitingIds,
+        received: receivedIds,
+      });
+      const pageIds = [...divergenceIds, ...awaitingIds, ...receivedIds];
       if (pageIds.length > 0) {
-        const { data: ex } = await supabase
-          .from("expenses")
-          .select(expenseListSelect)
-          .in("id", pageIds);
-        const byId = new Map(
-          ((ex as Expense[]) ?? []).map((row) => [row.id, row]),
-        );
+        const byId = new Map<string, Expense>();
+        for (let i = 0; i < pageIds.length; i += EXPENSE_IN_CHUNK) {
+          const chunk = pageIds.slice(i, i + EXPENSE_IN_CHUNK);
+          const { data: ex } = await supabase
+            .from("expenses")
+            .select(expenseListSelect)
+            .in("id", chunk);
+          for (const row of (ex as Expense[]) ?? []) {
+            byId.set(row.id, row);
+          }
+        }
         expenseList = pageIds
           .map((id) => byId.get(id))
           .filter((row): row is Expense => Boolean(row));
       }
-    }
 
     setExpenses(expenseList);
-    setExpensesCount(totalCount);
 
     const expenseIds = expenseList.map((e) => e.id);
     if (expenseIds.length === 0) {
       setRecebimentosByExpenseId(new Map());
     } else {
-      const { data: recRows } = await supabase
-        .from("recebimentos")
-        .select(
-          `
+      const map = new Map<string, RecebimentoListInfo>();
+      for (let i = 0; i < expenseIds.length; i += EXPENSE_IN_CHUNK) {
+        const chunk = expenseIds.slice(i, i + EXPENSE_IN_CHUNK);
+        const { data: recRows } = await supabase
+          .from("recebimentos")
+          .select(
+            `
           id,
           expense_id,
           status,
           assigned_company_member_id,
           recebimento_item_status (status)
         `,
-        )
-        .in("expense_id", expenseIds);
-      const map = new Map<string, RecebimentoListInfo>();
-      for (const r of recRows ?? []) {
-        const statuses =
-          (r.recebimento_item_status as Array<{ status: string }> | null) ?? [];
-        const isReceived = r.status === "received";
-        const hasPendingReceipt =
-          isReceived &&
-          statuses.some(
-            (s) => s.status === "not_received" || s.status === "partial",
-          );
-        map.set(r.expense_id as string, {
-          id: r.id as string,
-          status: r.status as "pending" | "received",
-          assigned_company_member_id:
-            (r.assigned_company_member_id as string | null) ?? null,
-          hasPendingReceipt,
-        });
+          )
+          .in("expense_id", chunk);
+        for (const r of recRows ?? []) {
+          const statuses =
+            (r.recebimento_item_status as Array<{ status: string }> | null) ??
+            [];
+          const isReceived = r.status === "received";
+          const hasPendingReceipt =
+            isReceived &&
+            statuses.some(
+              (s) => s.status === "not_received" || s.status === "partial",
+            );
+          map.set(r.expense_id as string, {
+            id: r.id as string,
+            status: r.status as "pending" | "received",
+            assigned_company_member_id:
+              (r.assigned_company_member_id as string | null) ?? null,
+            hasPendingReceipt,
+          });
+        }
       }
       setRecebimentosByExpenseId(map);
     }
@@ -714,40 +770,15 @@ export function Despesas() {
     period.month,
     period.year,
     debouncedSearch,
-    expensesPage,
     onlyPendingApproval,
-    recebimentoFilter,
     boletoFilter,
     origemFilter,
     atencaoFilter,
     competenceFrom,
     competenceTo,
+    competenceMonthBounds.min,
+    competenceMonthBounds.max,
   ]);
-
-  useEffect(() => {
-    setExpensesPage(1);
-  }, [
-    debouncedSearch,
-    period.month,
-    period.year,
-    onlyPendingApproval,
-    recebimentoFilter,
-    boletoFilter,
-    origemFilter,
-    atencaoFilter,
-    competenceFrom,
-    competenceTo,
-  ]);
-
-  useEffect(() => {
-    const { min, max } = competenceMonthBounds;
-    setCompetenceFrom((prev) =>
-      prev && (prev < min || prev > max) ? "" : prev,
-    );
-    setCompetenceTo((prev) =>
-      prev && (prev < min || prev > max) ? "" : prev,
-    );
-  }, [competenceMonthBounds]);
 
   useEffect(() => {
     queueMicrotask(() => fetchData());
@@ -811,8 +842,14 @@ export function Despesas() {
     if (highlightExpenseId && !loading && expenses.length) {
       const el = document.getElementById(highlightExpenseId);
       el?.scrollIntoView({ behavior: "smooth" });
+      return;
     }
-  }, [highlightExpenseId, loading, expenses.length]);
+    if (sectionFromUrl && !loading && expenses.length) {
+      document
+        .getElementById(`recebimento-section-${sectionFromUrl}`)
+        ?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [highlightExpenseId, sectionFromUrl, loading, expenses.length]);
 
   const addItem = () =>
     setItems((prev) => [
@@ -1212,13 +1249,121 @@ export function Despesas() {
       currency: "BRL",
     }).format(v);
 
+  const renderExpenseRow = (
+    exp: Expense,
+    reviewLabel: string,
+    stage: "divergence" | "awaiting" | "received",
+  ) => {
+    const isHighlight = highlightExpenseId === exp.id;
+    const boleto = getBoletoForExpense(exp.id);
+    const linked = !!boleto;
+    const recInfo = recebimentosByExpenseId.get(exp.id);
+    const pendingOwnerApproval =
+      exp.expense_source === "whatsapp" && exp.status === "pending";
+    const sumItemsRow =
+      exp.expense_items?.reduce(
+        (s, it) => s + Number(it.quantity) * Number(it.unit_value),
+        0,
+      ) ?? 0;
+    const documentTotalImport =
+      exp.document_total != null ? Number(exp.document_total) : null;
+    const nfeVal = getNfeExpenseValueBreakdown({
+      documentTotal: documentTotalImport,
+      sumItems: sumItemsRow,
+      financialReconciliationJson: exp.financial_reconciliation_json ?? null,
+    });
+    const valueRisk = nfeVal.needsAttention;
+    const unlinkedProducts =
+      exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
+    const typeLabel =
+      exp.type === "nota_fiscal"
+        ? "Nota fiscal"
+        : TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS];
+    const displayTitle =
+      exp.display_name?.trim() ||
+      exp.supplier_name?.trim() ||
+      typeLabel ||
+      "Sem fornecedor";
+    const recebimentoBadge = !recInfo
+      ? {
+          label: "Sem recebimento",
+          className: "border-muted-foreground/30",
+        }
+      : recInfo.status === "pending"
+        ? {
+            label: "Pendente",
+            className:
+              "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
+          }
+        : recInfo.hasPendingReceipt
+          ? {
+              label: "Itens com divergência",
+              className:
+                "border-red-600/35 bg-red-500/10 text-red-950 dark:text-red-100",
+            }
+          : {
+              label: "Confirmado",
+              className:
+                "border-emerald-600/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100",
+            };
+    const competenceLabel = exp.reference_date
+      ? formatDate(`${exp.reference_date}T12:00:00`)
+      : "—";
+    const secondaryParts = [
+      exp.supplier_document
+        ? formatDocForDisplay(exp.supplier_document)
+        : null,
+      boleto
+        ? `Venc. ${formatDate(boleto.due_date)} · ${formatBoletoCategoryLabel(boleto, categoriesById)}`
+        : "Sem boleto",
+      compactLauncherFallback(exp),
+    ].filter(Boolean);
+
+    return (
+      <NotasRecebimentoListRow
+        key={exp.id}
+        id={exp.id}
+        displayTitle={displayTitle}
+        invoiceNumber={exp.invoice_number}
+        typeLabel={typeLabel}
+        statusLabel={STATUS_LABELS[exp.status]}
+        competenceLabel={competenceLabel}
+        totalLabel={formatCurrency(expenseListDisplayTotal(exp))}
+        secondaryTitle={secondaryParts.join(" · ")}
+        boletoLinked={linked}
+        stage={stage}
+        isHighlight={isHighlight}
+        pendingOwnerApproval={pendingOwnerApproval}
+        unapproved={pendingOwnerApproval}
+        valueRisk={valueRisk}
+        valueRiskTitle={
+          nfeVal.hasIcmsBreakdown
+            ? "Há ICMSTot no registro — totais do XML são a referência."
+            : "Total do documento difere da soma das linhas"
+        }
+        unlinkedProducts={unlinkedProducts}
+        recebimento={recebimentoBadge}
+        ensuringRecebimento={ensuringRecebimentoExpenseId === exp.id}
+        showShareAction={isCompanyOwner}
+        reviewLabel={reviewLabel}
+        onOpenDetail={() => setDetailExpenseId(exp.id)}
+        onOpenReview={() => void openReviewForExpense(exp.id)}
+        onOpenShare={() => void openShareForExpense(exp.id)}
+        onBoletoClick={() => {
+          if (linked) setBoletoResumo(boleto!);
+          else openLinkDialog(exp.id);
+        }}
+      />
+    );
+  };
+
   return (
     <PageShell className="flex min-h-0 flex-1 flex-col gap-4 pb-0">
       <PageHeader
         title="Notas e recebimento"
         description={
           <span className="hidden sm:inline">
-            Notas, vínculos de produto e confirmação de mercadoria
+            Notas, conferência de mercadoria e vínculo de produto — tudo nesta tela
           </span>
         }
         icon={PackageCheck}
@@ -1235,139 +1380,114 @@ export function Despesas() {
         }
       />
 
-      <div className="shrink-0 space-y-3">
-        <ReferencePeriodCard
-          value={period}
-          onChange={setPeriod}
-          description="Lista de notas usa este mês"
-        />
-        <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
-            <Label htmlFor="notas-list-search">Busca</Label>
-            <Input
-              id="notas-list-search"
-              placeholder="Filtrar por fornecedor ou nota..."
-              value={expensesSearch}
-              onChange={(e) => setExpensesSearch(e.target.value)}
+      <div className="flex shrink-0 flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ReferencePeriodCard
+            value={period}
+            onChange={applyPeriod}
+            description="Mês da lista"
+            className="rounded-lg p-1.5"
+            compact
+            monthSelectorClassName="shrink-0 [&_button]:h-8 [&_button]:w-8 [&_span]:min-w-36 [&_span]:text-sm [&_span]:font-semibold"
+          />
+          <Input
+            id="notas-list-search"
+            placeholder="Fornecedor ou NF…"
+            value={expensesSearch}
+            onChange={(e) => setExpensesSearch(e.target.value)}
+            className="h-8 min-w-[12rem] flex-1 md:max-w-xs"
+          />
+          <Input
+            id="notas-competence-from"
+            type="date"
+            aria-label="Data de início"
+            title="Data de início"
+            value={competenceFrom}
+            max={competenceTo || undefined}
+            onChange={(e) =>
+              setCompetenceFrom(
+                e.target.value || competenceMonthBounds.min,
+              )
+            }
+            className="h-8 w-[9.5rem]"
+          />
+          <Input
+            id="notas-competence-to"
+            type="date"
+            aria-label="Data de fim"
+            title="Data de fim"
+            value={competenceTo}
+            min={competenceFrom || undefined}
+            onChange={(e) =>
+              setCompetenceTo(e.target.value || competenceMonthBounds.max)
+            }
+            className="h-8 w-[9.5rem]"
+          />
+          <Select
+            value={boletoFilter}
+            onValueChange={(v) => setBoletoFilter(v as NotasBoletoFilter)}
+          >
+            <SelectTrigger size="sm" className="w-[8.5rem]">
+              <SelectValue placeholder="Boleto" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Boleto: todos</SelectItem>
+              <SelectItem value="with">Com boleto</SelectItem>
+              <SelectItem value="without">Sem boleto</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={origemFilter}
+            onValueChange={(v) => setOrigemFilter(v as NotasOrigemFilter)}
+          >
+            <SelectTrigger size="sm" className="w-[8.5rem]">
+              <SelectValue placeholder="Origem" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Origem: todas</SelectItem>
+              <SelectItem value="whatsapp">WhatsApp</SelectItem>
+              <SelectItem value="manual">Plataforma</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={atencaoFilter}
+            onValueChange={(v) => setAtencaoFilter(v as NotasAtencaoFilter)}
+          >
+            <SelectTrigger size="sm" className="w-[10.5rem]">
+              <SelectValue placeholder="Atenção" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Atenção: todas</SelectItem>
+              <SelectItem value="unlinked_product">
+                Produto sem vínculo
+              </SelectItem>
+              <SelectItem value="value_risk">
+                Divergência de valores
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <label
+            htmlFor="filter-pending-approval"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-input px-2 text-xs text-muted-foreground"
+          >
+            <Switch
+              id="filter-pending-approval"
+              checked={onlyPendingApproval}
+              onCheckedChange={setOnlyPendingApproval}
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="notas-competence-from">De</Label>
-            <MonthLockedDateInput
-              id="notas-competence-from"
-              min={competenceMonthBounds.min}
-              max={competenceTo || competenceMonthBounds.max}
-              value={competenceFrom}
-              onChange={setCompetenceFrom}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="notas-competence-to">Até</Label>
-            <MonthLockedDateInput
-              id="notas-competence-to"
-              min={competenceFrom || competenceMonthBounds.min}
-              max={competenceMonthBounds.max}
-              value={competenceTo}
-              onChange={setCompetenceTo}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Recebimento</Label>
-            <Select
-              value={recebimentoFilter}
-              onValueChange={(v) =>
-                setRecebimentoFilter(v as NotasRecebimentoFilter)
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Recebimento" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="none">Sem recebimento</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
-                <SelectItem value="confirmed">Confirmado</SelectItem>
-                <SelectItem value="pending_receipt">C/ pendências</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Boleto</Label>
-            <Select
-              value={boletoFilter}
-              onValueChange={(v) => setBoletoFilter(v as NotasBoletoFilter)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Boleto" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="with">Com boleto</SelectItem>
-                <SelectItem value="without">Sem boleto</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Origem</Label>
-            <Select
-              value={origemFilter}
-              onValueChange={(v) => setOrigemFilter(v as NotasOrigemFilter)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Origem" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as origens</SelectItem>
-                <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                <SelectItem value="manual">Plataforma</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Atenção</Label>
-            <Select
-              value={atencaoFilter}
-              onValueChange={(v) => setAtencaoFilter(v as NotasAtencaoFilter)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Atenção" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="unlinked_product">
-                  Produto sem vínculo
-                </SelectItem>
-                <SelectItem value="value_risk">
-                  Divergência de valores
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
-            <Label htmlFor="filter-pending-approval">Aprovação</Label>
-            <div className="flex h-9 items-center gap-2">
-              <Switch
-                id="filter-pending-approval"
-                checked={onlyPendingApproval}
-                onCheckedChange={setOnlyPendingApproval}
-              />
-              <span className="text-sm text-muted-foreground">
-                Aguardando aprovação
-              </span>
-            </div>
-          </div>
-          <div className="flex items-end sm:col-span-2 xl:col-span-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              disabled={!hasListFilters}
-              onClick={clearListFilters}
-            >
-              <FilterX className="mr-2 size-4" />
-              Limpar filtros
-            </Button>
-          </div>
+            Aprovar
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8"
+            disabled={!hasListFilters}
+            onClick={clearListFilters}
+          >
+            <FilterX className="mr-1 size-3.5" />
+            Limpar
+          </Button>
         </div>
       </div>
 
@@ -1982,140 +2102,71 @@ export function Despesas() {
               <span className="whitespace-nowrap pl-8 text-right">Total</span>
               <span className="whitespace-nowrap pl-8 text-right">Ações</span>
             </div>
-          {loading ? (
-            <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
-              Carregando...
-            </p>
-          ) : expenses.length === 0 ? (
-            <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
-              {onlyPendingApproval && !extraListFiltersActive && !debouncedSearch.trim()
-                ? "Nenhuma nota fiscal aguardando aprovação do proprietário."
-                : hasListFilters
-                  ? "Nenhuma nota fiscal encontrada para estes filtros."
-                  : "Nenhuma nota fiscal neste mês (por competência ou data de importação)."}
-            </p>
-          ) : (
-            <>
-              {expenses.map((exp) => {
-                const isHighlight = highlightExpenseId === exp.id;
-                const boleto = getBoletoForExpense(exp.id);
-                const linked = !!boleto;
-                const recInfo = recebimentosByExpenseId.get(exp.id);
-                const pendingOwnerApproval =
-                  exp.expense_source === "whatsapp" && exp.status === "pending";
-                const sumItemsRow =
-                  exp.expense_items?.reduce(
-                    (s, it) => s + Number(it.quantity) * Number(it.unit_value),
-                    0,
-                  ) ?? 0;
-                const documentTotalImport =
-                  exp.document_total != null
-                    ? Number(exp.document_total)
-                    : null;
-                const nfeVal = getNfeExpenseValueBreakdown({
-                  documentTotal: documentTotalImport,
-                  sumItems: sumItemsRow,
-                  financialReconciliationJson:
-                    exp.financial_reconciliation_json ?? null,
-                });
-                const valueRisk = nfeVal.needsAttention;
-                const unlinkedProducts =
-                  exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
-                const typeLabel =
-                  exp.type === "nota_fiscal"
-                    ? "Nota fiscal"
-                    : TYPE_LABELS[exp.type as keyof typeof TYPE_LABELS];
-                const displayTitle =
-                  exp.display_name?.trim() ||
-                  exp.supplier_name?.trim() ||
-                  typeLabel ||
-                  "Sem fornecedor";
-                const recebimentoBadge = !recInfo
-                  ? {
-                      label: "Sem recebimento",
-                      className: "border-muted-foreground/30",
-                    }
-                  : recInfo.status === "pending"
-                    ? {
-                        label: "Pendente",
-                        className:
-                          "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
-                      }
-                    : recInfo.hasPendingReceipt
-                      ? {
-                          label: "C/ pendências",
-                          className:
-                            "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
-                        }
-                      : {
-                          label: "Confirmado",
-                          className:
-                            "border-emerald-600/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100",
-                        };
-                const competenceLabel = exp.reference_date
-                  ? formatDate(`${exp.reference_date}T12:00:00`)
-                  : "—";
-                const secondaryParts = [
-                  exp.supplier_document
-                    ? formatDocForDisplay(exp.supplier_document)
-                    : null,
-                  boleto
-                    ? `Venc. ${formatDate(boleto.due_date)} · ${formatBoletoCategoryLabel(boleto, categoriesById)}`
-                    : "Sem boleto",
-                  compactLauncherFallback(exp),
-                ].filter(Boolean);
-
-                return (
-                  <NotasRecebimentoListRow
-                    key={exp.id}
-                    id={exp.id}
-                    displayTitle={displayTitle}
-                    invoiceNumber={exp.invoice_number}
-                    typeLabel={typeLabel}
-                    statusLabel={STATUS_LABELS[exp.status]}
-                    competenceLabel={competenceLabel}
-                    totalLabel={formatCurrency(expenseListDisplayTotal(exp))}
-                    secondaryTitle={secondaryParts.join(" · ")}
-                    boletoLinked={linked}
-                    isHighlight={isHighlight}
-                    pendingOwnerApproval={pendingOwnerApproval}
-                    unapproved={pendingOwnerApproval}
-                    valueRisk={valueRisk}
-                    valueRiskTitle={
-                      nfeVal.hasIcmsBreakdown
-                        ? "Há ICMSTot no registro — totais do XML são a referência."
-                        : "Total do documento difere da soma das linhas"
-                    }
-                    unlinkedProducts={unlinkedProducts}
-                    recebimento={recebimentoBadge}
-                    ensuringRecebimento={
-                      ensuringRecebimentoExpenseId === exp.id
-                    }
-                    showShareAction={isCompanyOwner}
-                    onOpenDetail={() => setDetailExpenseId(exp.id)}
-                    onOpenReview={() => void openReviewForExpense(exp.id)}
-                    onOpenShare={() => void openShareForExpense(exp.id)}
-                    onBoletoClick={() => {
-                      if (linked) setBoletoResumo(boleto!);
-                      else openLinkDialog(exp.id);
-                    }}
-                  />
-                );
-              })}
-            </>
-          )}
+            {loading ? (
+              <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
+                Carregando...
+              </p>
+            ) : expenses.length === 0 ? (
+              <p className="col-span-full px-4 py-8 text-sm text-muted-foreground">
+                {hasListFilters
+                  ? "Nenhuma nota para estes filtros."
+                  : "Nenhuma nota neste mês."}
+              </p>
+            ) : (
+              <>
+                {divergenceExpenses.length > 0 ? (
+                  <>
+                    <NotasListSectionHeader
+                      id="recebimento-section-divergence"
+                      title="Com divergência"
+                      count={divergenceExpenses.length}
+                      tone="red"
+                      icon={AlertTriangle}
+                    />
+                    {divergenceExpenses.map((exp) =>
+                      renderExpenseRow(exp, "Ver conferência", "divergence"),
+                    )}
+                  </>
+                ) : null}
+                {awaitingExpenses.length > 0 ? (
+                  <>
+                    {divergenceExpenses.length > 0 ? (
+                      <NotasListSectionGap />
+                    ) : null}
+                    <NotasListSectionHeader
+                      id="recebimento-section-awaiting"
+                      title="Aguardando recebimento"
+                      count={awaitingExpenses.length}
+                      tone="amber"
+                      icon={Clock}
+                    />
+                    {awaitingExpenses.map((exp) =>
+                      renderExpenseRow(exp, "Receber", "awaiting"),
+                    )}
+                  </>
+                ) : null}
+                {receivedExpenses.length > 0 ? (
+                  <>
+                    {divergenceExpenses.length > 0 ||
+                    awaitingExpenses.length > 0 ? (
+                      <NotasListSectionGap />
+                    ) : null}
+                    <NotasListSectionHeader
+                      id="recebimento-section-received"
+                      title="Já recebidas"
+                      count={receivedExpenses.length}
+                      tone="emerald"
+                      icon={CheckCircle2}
+                    />
+                    {receivedExpenses.map((exp) =>
+                      renderExpenseRow(exp, "Ver conferência", "received"),
+                    )}
+                  </>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
-
-        {!loading && (
-          <div className="shrink-0 border-t px-2 py-2 sm:px-4">
-            <Pagination
-              page={expensesPage}
-              totalCount={expensesCount}
-              onPageChange={setExpensesPage}
-            />
-          </div>
-        )}
       </div>
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
@@ -2335,6 +2386,8 @@ export function Despesas() {
 
       <ExpenseDetailSheet
         expenseId={detailExpenseId}
+        keepOpen={!!reviewRecebimentoId || !!shareRecebimentoId}
+        reloadNonce={detailReloadNonce}
         onClose={() => {
           setDetailExpenseId(null);
           if (highlightExpenseId) {
@@ -2342,6 +2395,20 @@ export function Despesas() {
           }
         }}
         onRefresh={fetchData}
+        onOpenRecebimento={
+          detailExpenseId
+            ? () => {
+                void openReviewForExpense(detailExpenseId);
+              }
+            : undefined
+        }
+        onOpenShare={
+          detailExpenseId
+            ? () => {
+                void openShareForExpense(detailExpenseId);
+              }
+            : undefined
+        }
       />
 
       <RecebimentoReviewPanel
@@ -2351,7 +2418,11 @@ export function Despesas() {
         }}
         recebimentoId={reviewRecebimentoId}
         companyId={companyId || null}
-        onChanged={() => void fetchData()}
+        onChanged={() => {
+          void fetchData();
+          setDetailReloadNonce((n) => n + 1);
+          if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
+        }}
       />
 
       <RecebimentoShareDialog
@@ -2364,7 +2435,10 @@ export function Despesas() {
         }}
         recebimentoId={shareRecebimentoId}
         initialMemberId={shareInitialMemberId}
-        onShared={() => void fetchData()}
+        onShared={() => {
+          void fetchData();
+          setDetailReloadNonce((n) => n + 1);
+        }}
       />
     </PageShell>
   );

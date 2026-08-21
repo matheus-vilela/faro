@@ -31,12 +31,14 @@ import {
   maskWhatsappBrInput,
   validateAndNormalizePhone,
 } from "@/lib/whatsappPhone";
+import { Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 type CompanyMemberRow = { id: string; name: string };
 
 const ADD_MEMBER_SELECT_VALUE = "__add_member__";
+const NONE_MEMBER_SELECT_VALUE = "__none__";
 
 function mapCompanyMemberError(message: string): string {
   if (message.includes("Limite de 3")) {
@@ -69,6 +71,7 @@ export function RecebimentoShareDialog({
   const { currentCompany, isCompanyOwner } = useCompany();
   const [members, setMembers] = useState<CompanyMemberRow[]>([]);
   const [memberId, setMemberId] = useState("");
+  const [shareUrl, setShareUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -89,39 +92,63 @@ export function RecebimentoShareDialog({
     })();
   }, [open, currentCompany?.id, initialMemberId]);
 
+  useEffect(() => {
+    if (!open || !recebimentoId) {
+      setShareUrl("");
+      return;
+    }
+    void (async () => {
+      const { data: shortSlug, error } = await supabase.rpc(
+        "ensure_recebimento_short_slug",
+        { p_recebimento_id: recebimentoId },
+      );
+      if (error || !shortSlug) {
+        setShareUrl("");
+        return;
+      }
+      setShareUrl(`${window.location.origin}/s/${shortSlug}`);
+    })();
+  }, [open, recebimentoId]);
+
+  const assignedMemberName = members.find(
+    (m) => m.id === (initialMemberId ?? ""),
+  )?.name;
+
   const copyShareLink = async (memberIdOverride?: string) => {
     if (!recebimentoId || !currentCompany?.id) return;
     const mid = memberIdOverride ?? memberId;
-    if (!mid) {
-      toast.error("Selecione o operador de referência para este recebimento.");
-      return;
-    }
+    const assignId =
+      mid && mid !== NONE_MEMBER_SELECT_VALUE ? mid : "";
     setSaving(true);
-    const { data: res, error } = await supabase.rpc(
-      "set_recebimento_assigned_member",
-      {
-        p_recebimento_id: recebimentoId,
-        p_company_member_id: mid,
-      },
-    );
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    const out = res as { success?: boolean; error?: string };
-    if (!out?.success) {
-      toast.error(
-        out?.error === "Sem permissão"
-          ? "Apenas o proprietário pode vincular o operador."
-          : (out?.error ?? "Não foi possível salvar o vínculo."),
+    if (assignId) {
+      const { data: res, error } = await supabase.rpc(
+        "set_recebimento_assigned_member",
+        {
+          p_recebimento_id: recebimentoId,
+          p_company_member_id: assignId,
+        },
       );
-      return;
+      if (error) {
+        setSaving(false);
+        toast.error(error.message);
+        return;
+      }
+      const out = res as { success?: boolean; error?: string };
+      if (!out?.success) {
+        setSaving(false);
+        toast.error(
+          out?.error === "Sem permissão"
+            ? "Apenas o proprietário pode vincular o operador."
+            : (out?.error ?? "Não foi possível salvar o vínculo."),
+        );
+        return;
+      }
     }
     const { data: shortSlug, error: slugErr } = await supabase.rpc(
       "ensure_recebimento_short_slug",
       { p_recebimento_id: recebimentoId },
     );
+    setSaving(false);
     if (slugErr || !shortSlug) {
       toast.error(
         slugErr?.message ??
@@ -130,9 +157,12 @@ export function RecebimentoShareDialog({
       return;
     }
     const url = `${window.location.origin}/s/${shortSlug}`;
+    setShareUrl(url);
     await navigator.clipboard.writeText(url);
     toast.success(
-      "Link copiado. Qualquer pessoa com o link pode confirmar; o operador é só referência.",
+      assignId
+        ? "Operador atribuído e link copiado. Envie o link ou o operador inicia pelo WhatsApp."
+        : "Link copiado. Envie ao operador; se ele estiver no WhatsApp do Faro, também pode iniciar por lá.",
     );
     onOpenChange(false);
     onShared?.();
@@ -180,12 +210,12 @@ export function RecebimentoShareDialog({
   if (!isCompanyOwner) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent overlayClassName="z-[80]" className="z-[80]">
           <DialogHeader>
-            <DialogTitle>Vincular operador</DialogTitle>
+            <DialogTitle>Link para o operador</DialogTitle>
             <DialogDescription>
-              Apenas o proprietário pode vincular o operador e copiar o link de
-              confirmação.
+              Apenas o proprietário pode atribuir o operador e gerar o link
+              externo. O recebimento pode ser confirmado na tela de notas.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -201,31 +231,41 @@ export function RecebimentoShareDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent overlayClassName="z-[80]" className="z-[80] sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Vincular operador</DialogTitle>
+            <DialogTitle>Link para o operador</DialogTitle>
             <DialogDescription>
-              Escolha o operador de referência e copie o link. Qualquer pessoa
-              com o link pode confirmar o recebimento.
+              Atribua quem vai receber a mercadoria (opcional) e copie o link.
+              O operador pode abrir o link que você enviar ou iniciar o
+              recebimento pelo WhatsApp.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-1">
+            {assignedMemberName ? (
+              <p className="rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-foreground">
+                Já atribuído a{" "}
+                <span className="font-medium">{assignedMemberName}</span>.
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label>Operador</Label>
               <Select
-                value={memberId || undefined}
+                value={memberId || NONE_MEMBER_SELECT_VALUE}
                 onValueChange={(v) => {
                   if (v === ADD_MEMBER_SELECT_VALUE) {
                     setAddMemberOpen(true);
                     return;
                   }
-                  setMemberId(v);
+                  setMemberId(v === NONE_MEMBER_SELECT_VALUE ? "" : v);
                 }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Selecione o operador" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[90]">
+                  <SelectItem value={NONE_MEMBER_SELECT_VALUE}>
+                    Sem atribuir (só o link)
+                  </SelectItem>
                   {members.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.name}
@@ -236,6 +276,37 @@ export function RecebimentoShareDialog({
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Se o operador tiver WhatsApp cadastrado no Faro, ele também
+                consegue iniciar o recebimento por lá, sem precisar do link.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recebimento-share-url">Link</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="recebimento-share-url"
+                  readOnly
+                  value={shareUrl || "Gerando…"}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={!shareUrl}
+                  aria-label="Copiar link"
+                  onClick={() => {
+                    if (!shareUrl) return;
+                    void navigator.clipboard.writeText(shareUrl).then(() => {
+                      toast.success("Link copiado.");
+                    });
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -248,7 +319,7 @@ export function RecebimentoShareDialog({
             </Button>
             <Button
               type="button"
-              disabled={saving || !memberId}
+              disabled={saving}
               onClick={() => void copyShareLink()}
             >
               {saving ? "Gerando…" : "Copiar link"}
@@ -258,11 +329,15 @@ export function RecebimentoShareDialog({
       </Dialog>
 
       <Sheet open={addMemberOpen} onOpenChange={setAddMemberOpen}>
-        <SheetContent className="sm:max-w-md">
+        <SheetContent
+          className="z-[90] sm:max-w-md"
+          overlayClassName="z-[90]"
+        >
           <SheetHeader>
             <SheetTitle>Novo operador</SheetTitle>
             <SheetDescription>
-              Cadastro usado como referência no link de recebimento (máx. 3).
+              Cadastre o operador para atribuir este recebimento (máx. 3).
+              Com o WhatsApp cadastrado, ele também inicia o fluxo por lá.
             </SheetDescription>
           </SheetHeader>
           <div className="space-y-4 py-4">

@@ -29,11 +29,7 @@ import {
   SYSTEM_PRODUCT_UNITS,
   systemUnitLabel,
 } from "@/lib/companyUnits/systemUnits";
-import {
-  expenseItemVinculoBadgeClassName,
-  expenseItemVinculoKind,
-  expenseItemVinculoLabel,
-} from "@/lib/expenseItemVinculo";
+import { expenseItemVinculoLabel } from "@/lib/expenseItemVinculo";
 import { stripPackSizeFromLabel } from "@/lib/productImport/packSizeFromLabel";
 import { parseProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import { loadProductUnitConversions } from "@/lib/productUnitConversionsService";
@@ -53,8 +49,9 @@ import { toast } from "sonner";
 
 const CREATE_VALUE = "__new__";
 const NONE_VALUE = "__none__";
-const EDIT_ROW_GRID =
-  "min-w-[68rem] grid-cols-[minmax(10rem,1.1fr)_minmax(14rem,1.4fr)_minmax(10rem,12rem)_5.5rem_7rem_6.5rem_auto] gap-x-3 px-3";
+const TH =
+  "px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap";
+const TD = "px-3 py-2.5 align-top";
 
 function formatCurrency(v: number): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -65,6 +62,64 @@ function formatCurrency(v: number): string {
 
 function formatQty(v: number): string {
   return Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+}
+
+function ReceiptStatusBadge({
+  kind,
+  receivedQty,
+  orderedQty,
+}: {
+  kind: "received" | "partial" | "not_delivered" | "none";
+  receivedQty?: number | null;
+  orderedQty?: number;
+}) {
+  if (kind === "none") {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  if (kind === "not_delivered") {
+    return (
+      <Badge
+        variant="outline"
+        className="shrink-0 border-red-300 bg-red-100/80 text-[10px] font-normal text-red-800 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200"
+      >
+        Não entregue
+      </Badge>
+    );
+  }
+  if (kind === "partial") {
+    return (
+      <Badge
+        variant="outline"
+        className="shrink-0 border-amber-400/50 bg-amber-100/80 text-[10px] font-normal text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100"
+      >
+        Parcial
+        {receivedQty != null && orderedQty != null
+          ? ` · ${formatQty(receivedQty)} de ${formatQty(orderedQty)}`
+          : ""}
+      </Badge>
+    );
+  }
+  return (
+    <Badge
+      variant="outline"
+      className="shrink-0 border-emerald-600/35 bg-emerald-500/10 text-[10px] font-normal text-emerald-900 dark:text-emerald-100"
+    >
+      Recebido
+    </Badge>
+  );
+}
+
+function receiptKindForItem(
+  itemId: string | undefined,
+  notDeliveredIds: Set<string>,
+  partialQtyByItemId: Record<string, number | null>,
+  receivedItemIds: Set<string>,
+): "received" | "partial" | "not_delivered" | "none" {
+  if (!itemId) return "none";
+  if (notDeliveredIds.has(itemId)) return "not_delivered";
+  if (itemId in partialQtyByItemId) return "partial";
+  if (receivedItemIds.has(itemId)) return "received";
+  return "none";
 }
 
 function invoiceLineLabel(item: ExpenseItem): string {
@@ -104,21 +159,26 @@ type RowState = {
 
 function ExpenseItemReadOnlyTable({
   items,
-  highlightMissingVinculo,
+  notDeliveredIds,
+  partialQtyByItemId,
+  receivedItemIds,
 }: {
   items: ExpenseItem[];
-  highlightMissingVinculo: boolean;
+  notDeliveredIds: Set<string>;
+  partialQtyByItemId: Record<string, number | null>;
+  receivedItemIds: Set<string>;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-muted/50">
-            <th className="p-2 text-left font-medium">Produto</th>
-            <th className="p-2 text-left font-medium">Vínculo</th>
-            <th className="p-2 text-right font-medium">Qtd</th>
-            <th className="p-2 text-right font-medium">Valor un.</th>
-            <th className="p-2 text-right font-medium">Subtotal</th>
+            <th className={TH}>Produto</th>
+            <th className={TH}>Produto no estoque</th>
+            <th className={TH}>Recebimento</th>
+            <th className={cn(TH, "text-right")}>Qtd</th>
+            <th className={cn(TH, "text-right")}>Valor un.</th>
+            <th className={cn(TH, "text-right")}>Subtotal</th>
           </tr>
         </thead>
         <tbody>
@@ -127,15 +187,33 @@ function ExpenseItemReadOnlyTable({
             const stagedName =
               it.metadata_json?.pending_new_product?.name?.trim();
             const stripped = invoiceLineLabel(it);
-            const primary =
-              catalogName || stagedName || stripped || it.product_name || "—";
-            const vinculoKind = expenseItemVinculoKind(it);
-            const missingVinculo =
-              highlightMissingVinculo && vinculoKind === "none";
+            const stockName = catalogName || stagedName || "—";
+            const notDelivered = !!it.id && notDeliveredIds.has(it.id);
+            const isPartial = !!it.id && it.id in partialQtyByItemId;
+            const partialQty = it.id
+              ? (partialQtyByItemId[it.id] ?? null)
+              : null;
+            const kind = receiptKindForItem(
+              it.id,
+              notDeliveredIds,
+              partialQtyByItemId,
+              receivedItemIds,
+            );
             return (
-              <tr key={it.id ?? i} className="border-t">
+              <tr
+                key={it.id ?? i}
+                className={cn(
+                  "border-t",
+                  notDelivered && "bg-red-50 dark:bg-red-950/35",
+                  !notDelivered &&
+                    isPartial &&
+                    "bg-amber-50 dark:bg-amber-950/30",
+                )}
+              >
                 <td className="p-2">
-                  <span>{primary}</span>
+                  <span className={cn(notDelivered && "text-muted-foreground")}>
+                    {stripped || it.product_name || "—"}
+                  </span>
                   {it.metadata_json?.product_merge ? (
                     <Badge
                       variant="outline"
@@ -145,37 +223,24 @@ function ExpenseItemReadOnlyTable({
                       {it.metadata_json.product_merge.from_product_name}
                     </Badge>
                   ) : null}
-                  {catalogName && stripped !== catalogName ? (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Nota: {stripped}
-                    </p>
-                  ) : null}
-                  {!catalogName && stagedName && stagedName !== stripped ? (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Nota: {stripped}
-                    </p>
-                  ) : null}
                 </td>
+                <td className="p-2">{stockName}</td>
                 <td className="p-2">
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "font-normal",
-                      expenseItemVinculoBadgeClassName(vinculoKind),
-                      missingVinculo && "ring-1 ring-amber-500/60",
-                    )}
-                  >
-                    {expenseItemVinculoLabel(vinculoKind)}
-                  </Badge>
+                  <ReceiptStatusBadge
+                    kind={kind}
+                    receivedQty={partialQty}
+                    orderedQty={Number(it.quantity)}
+                  />
                 </td>
-                <td className="p-2 text-right tabular-nums">{it.quantity}</td>
+                <td className="p-2 text-right tabular-nums">
+                  {formatQty(Number(it.quantity))}
+                  {it.invoice_unit?.trim() ? ` ${it.invoice_unit.trim()}` : ""}
+                </td>
                 <td className="p-2 text-right tabular-nums">
                   {formatCurrency(Number(it.unit_value))}
                 </td>
                 <td className="p-2 text-right tabular-nums">
-                  {formatCurrency(
-                    Number(it.quantity) * Number(it.unit_value),
-                  )}
+                  {formatCurrency(Number(it.quantity) * Number(it.unit_value))}
                 </td>
               </tr>
             );
@@ -199,6 +264,9 @@ function ExpenseItemInlineRow({
   onDraftChange,
   onConversionsLoaded,
   onRequestSave,
+  notDelivered,
+  partialQty,
+  received,
 }: {
   item: ExpenseItem;
   itemId: string;
@@ -216,6 +284,9 @@ function ExpenseItemInlineRow({
     rows: ProductUnitConversionDraft[],
   ) => void;
   onRequestSave: () => void;
+  notDelivered: boolean;
+  partialQty: number | null | undefined;
+  received: boolean;
 }) {
   const unitOptions = useMemo(() => getSystemProductUnitSelectOptions(), []);
   const vinculoKind =
@@ -314,33 +385,48 @@ function ExpenseItemInlineRow({
   };
 
   const fieldClass = "h-9";
+  const locked = saving || notDelivered;
+  const isPartial = !notDelivered && partialQty !== undefined;
+  const receiptKind: "received" | "partial" | "not_delivered" | "none" =
+    notDelivered
+      ? "not_delivered"
+      : isPartial
+        ? "partial"
+        : received
+          ? "received"
+          : "none";
+  const rowTone = cn(
+    "border-t",
+    notDelivered && "bg-red-50 dark:bg-red-950/35",
+    isPartial && "bg-amber-50 dark:bg-amber-950/30",
+  );
 
   return (
-    <div className={cn("grid items-start py-2.5", EDIT_ROW_GRID)}>
-      <div className="min-w-0">
-        <div className="flex min-h-9 min-w-0 items-center gap-2">
-          <p className="truncate font-medium leading-snug">
-            {invoiceLineLabel(item)}
-          </p>
-          <Badge
-            variant="outline"
-            className={cn(
-              "shrink-0 font-normal",
-              expenseItemVinculoBadgeClassName(vinculoKind),
-              missingVinculo && "ring-1 ring-amber-500/60",
-            )}
-          >
-            {expenseItemVinculoLabel(vinculoKind)}
-          </Badge>
-        </div>
+    <tr className={rowTone}>
+      <td className={cn(TD, "min-w-40")}>
+        <p
+          className={cn(
+            "min-h-9 truncate font-medium leading-snug",
+            notDelivered && "text-muted-foreground",
+          )}
+        >
+          {invoiceLineLabel(item)}
+        </p>
         {item.metadata_json?.product_merge ? (
           <Badge variant="outline" className="mt-1 text-xs font-normal">
             Unificado de {item.metadata_json.product_merge.from_product_name}
           </Badge>
         ) : null}
-      </div>
+      </td>
+      <td className={cn(TD, "whitespace-nowrap")}>
+        <ReceiptStatusBadge
+          kind={receiptKind}
+          receivedQty={isPartial ? (partialQty ?? null) : null}
+          orderedQty={Number(item.quantity)}
+        />
+      </td>
 
-      <div className="min-w-0 space-y-1.5">
+      <td className={cn(TD, "min-w-[14rem]")}>
         <SearchSelect
           value={selectValue}
           onValueChange={handleModeChange}
@@ -357,14 +443,17 @@ function ExpenseItemInlineRow({
           searchPlaceholder="Buscar produto…"
           emptyMessage="Nenhum produto encontrado."
           listMaxHeightClassName="max-h-[min(40vh,260px)]"
-          triggerClassName={fieldClass}
-          disabled={saving}
+          triggerClassName={cn(
+            fieldClass,
+            missingVinculo && "ring-1 ring-amber-500/60",
+          )}
+          disabled={locked}
         />
         {draft.mode === "create" ? (
-          <div className="grid grid-cols-[1fr_7.5rem] gap-1.5">
+          <div className="mt-1.5 grid grid-cols-[1fr_7.5rem] gap-1.5">
             <Input
               value={draft.newProductName}
-              disabled={saving}
+              disabled={locked}
               className={fieldClass}
               placeholder="Nome no Faro"
               onChange={(e) =>
@@ -373,7 +462,7 @@ function ExpenseItemInlineRow({
             />
             <Select
               value={draft.newProductUnit}
-              disabled={saving}
+              disabled={locked}
               onValueChange={(v) =>
                 onDraftChange({ ...draft, newProductUnit: v })
               }
@@ -391,9 +480,9 @@ function ExpenseItemInlineRow({
             </Select>
           </div>
         ) : null}
-      </div>
+      </td>
 
-      <div className="min-w-0">
+      <td className={cn(TD, "min-w-[12rem]")}>
         {draft.mode !== "none" ? (
           <>
             <ProductUnitPickerWithConversion
@@ -409,65 +498,67 @@ function ExpenseItemInlineRow({
               onConversionsChange={(next: ProductUnitConversionDraft[]) =>
                 onDraftChange({ ...draft, conversions: next })
               }
-              disabled={saving}
+              disabled={locked}
               placeholder="Unidade da NF"
               triggerClassName={fieldClass}
             />
-            <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-              Estoque:{" "}
-              <span className="font-medium tabular-nums text-foreground">
-                {stockQtyPreview != null
-                  ? `${formatQty(stockQtyPreview)} ${hubUnit}`
-                  : "— (defina conversão)"}
-              </span>
-            </p>
           </>
         ) : (
-          <p className="pt-2 text-xs text-muted-foreground">—</p>
+          <p className="pt-1.5 text-xs text-muted-foreground">—</p>
         )}
-      </div>
+      </td>
 
-      <Input
-        type="number"
-        min={0}
-        step="any"
-        className={cn(fieldClass, "text-right tabular-nums")}
-        value={draft.quantity}
-        disabled={saving}
-        onChange={(e) =>
-          onDraftChange({
-            ...draft,
-            quantity: parseFloat(e.target.value) || 0,
-          })
-        }
-      />
-      <Input
-        type="number"
-        min={0}
-        step="0.01"
-        className={cn(fieldClass, "text-right tabular-nums")}
-        value={draft.unitValue}
-        disabled={saving}
-        onChange={(e) =>
-          onDraftChange({
-            ...draft,
-            unitValue: parseFloat(e.target.value) || 0,
-          })
-        }
-      />
-      <p className="flex min-h-9 items-center justify-end text-sm font-medium tabular-nums">
-        {formatCurrency(draft.quantity * draft.unitValue)}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        className="h-9 shrink-0"
-        disabled={!dirty || !canSubmit || saving}
-        onClick={onRequestSave}
+      <td className={cn(TD, "w-24")}>
+        <Input
+          type="number"
+          min={0}
+          step="any"
+          className={cn(fieldClass, "text-right tabular-nums")}
+          value={draft.quantity}
+          disabled={locked}
+          onChange={(e) =>
+            onDraftChange({
+              ...draft,
+              quantity: parseFloat(e.target.value) || 0,
+            })
+          }
+        />
+      </td>
+      <td className={cn(TD, "w-28")}>
+        <Input
+          type="number"
+          min={0}
+          step="0.01"
+          className={cn(fieldClass, "text-right tabular-nums")}
+          value={draft.unitValue}
+          disabled={locked}
+          onChange={(e) =>
+            onDraftChange({
+              ...draft,
+              unitValue: parseFloat(e.target.value) || 0,
+            })
+          }
+        />
+      </td>
+      <td
+        className={cn(TD, "w-28 text-right text-sm font-medium tabular-nums")}
       >
-        {saving ? "Salvando…" : "Salvar"}
-      </Button>
-    </div>
+        <span className="inline-flex min-h-9 items-center">
+          {formatCurrency(draft.quantity * draft.unitValue)}
+        </span>
+      </td>
+      <td className={cn(TD, "w-24")}>
+        <Button
+          type="button"
+          size="sm"
+          className="h-9 shrink-0"
+          disabled={notDelivered || !dirty || !canSubmit || saving}
+          onClick={onRequestSave}
+        >
+          {saving ? "Salvando…" : "Salvar"}
+        </Button>
+      </td>
+    </tr>
   );
 }
 
@@ -478,6 +569,9 @@ export function ExpenseItemsInlineTable({
   products,
   deferProductCreation,
   highlightMissingVinculo,
+  notDeliveredItemIds = [],
+  partialQtyByItemId = {},
+  receivedItemIds = [],
   onSaved,
 }: {
   items: ExpenseItem[];
@@ -486,6 +580,9 @@ export function ExpenseItemsInlineTable({
   products: Product[];
   deferProductCreation: boolean;
   highlightMissingVinculo: boolean;
+  notDeliveredItemIds?: string[];
+  partialQtyByItemId?: Record<string, number | null>;
+  receivedItemIds?: string[];
   onSaved: (created?: Product) => void;
 }) {
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -499,8 +596,17 @@ export function ExpenseItemsInlineTable({
     [products],
   );
   const productSelectOptions = useMemo(
-    () => products.filter((p) => p.is_active !== false).map(productSearchOption),
+    () =>
+      products.filter((p) => p.is_active !== false).map(productSearchOption),
     [products],
+  );
+  const notDeliveredIds = useMemo(
+    () => new Set(notDeliveredItemIds),
+    [notDeliveredItemIds],
+  );
+  const receivedIds = useMemo(
+    () => new Set(receivedItemIds),
+    [receivedItemIds],
   );
 
   useEffect(() => {
@@ -547,10 +653,7 @@ export function ExpenseItemsInlineTable({
       setRows((prev) => {
         const cur = prev[itemId];
         if (!cur || cur.draft.productId !== productId) return prev;
-        if (
-          conversionRows.length === 0 &&
-          cur.draft.conversions.length > 0
-        ) {
+        if (conversionRows.length === 0 && cur.draft.conversions.length > 0) {
           return prev;
         }
         const wasPristine = !isExpenseItemDraftDirty(cur.draft, cur.pristine);
@@ -616,55 +719,74 @@ export function ExpenseItemsInlineTable({
       </p>
       {canEdit ? (
         <div className="overflow-x-auto rounded-lg border">
-          <div
-            className={cn(
-              "grid items-center bg-muted/50 py-2 text-xs font-medium text-muted-foreground",
-              EDIT_ROW_GRID,
-            )}
-          >
-            <span>Produto</span>
-            <span>Vínculo</span>
-            <span>Unidade NF → estoque</span>
-            <span className="text-right">Qtd</span>
-            <span className="text-right">Valor un.</span>
-            <span className="text-right">Subtotal</span>
-            <span className="sr-only">Ações</span>
-          </div>
-          <div className="divide-y border-t">
-          {items.map((it, i) => {
-            if (!it.id) return null;
-            const row = rows[it.id];
-            if (!row) {
-              return (
-                <div key={it.id ?? i} className="p-3">
-                  <p className="text-sm text-muted-foreground">Carregando…</p>
-                </div>
-              );
-            }
-            return (
-              <ExpenseItemInlineRow
-                key={it.id}
-                item={it}
-                itemId={it.id}
-                draft={row.draft}
-                dirty={isExpenseItemDraftDirty(row.draft, row.pristine)}
-                saving={savingId === it.id}
-                companyId={companyId}
-                productById={productById}
-                productSelectOptions={productSelectOptions}
-                highlightMissingVinculo={highlightMissingVinculo}
-                onDraftChange={(next) => handleDraftChange(it.id!, next)}
-                onConversionsLoaded={handleConversionsLoaded}
-                onRequestSave={() => setConfirmId(it.id!)}
-              />
-            );
-          })}
-          </div>
+          <table className="w-full min-w-[68rem] text-sm">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className={TH}>Produto</th>
+                <th className={TH}>Recebimento</th>
+                <th className={TH}>Produto no estoque</th>
+                <th className={TH}>Unidade da NF × estoque</th>
+                <th className={cn(TH, "text-center")}>Qtd</th>
+                <th className={cn(TH, "text-center")}>Valor un.</th>
+                <th className={cn(TH, "text-right")}>Subtotal</th>
+                <th className={cn(TH, "text-center")}>
+                  <span className="sr-only">Ações</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => {
+                if (!it.id) return null;
+                const row = rows[it.id];
+                if (!row) {
+                  return (
+                    <tr key={it.id ?? i} className="border-t">
+                      <td
+                        colSpan={8}
+                        className="px-3 py-3 text-muted-foreground"
+                      >
+                        Carregando…
+                      </td>
+                    </tr>
+                  );
+                }
+                return (
+                  <ExpenseItemInlineRow
+                    key={it.id}
+                    item={it}
+                    itemId={it.id}
+                    draft={row.draft}
+                    dirty={isExpenseItemDraftDirty(row.draft, row.pristine)}
+                    saving={savingId === it.id}
+                    companyId={companyId}
+                    productById={productById}
+                    productSelectOptions={productSelectOptions}
+                    highlightMissingVinculo={highlightMissingVinculo}
+                    notDelivered={notDeliveredIds.has(it.id)}
+                    received={receivedIds.has(it.id)}
+                    partialQty={
+                      it.id in partialQtyByItemId
+                        ? (partialQtyByItemId[it.id] ?? null)
+                        : undefined
+                    }
+                    onDraftChange={(next) => handleDraftChange(it.id!, next)}
+                    onConversionsLoaded={handleConversionsLoaded}
+                    onRequestSave={() => {
+                      if (notDeliveredIds.has(it.id!)) return;
+                      setConfirmId(it.id!);
+                    }}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       ) : (
         <ExpenseItemReadOnlyTable
           items={items}
-          highlightMissingVinculo={highlightMissingVinculo}
+          notDeliveredIds={notDeliveredIds}
+          partialQtyByItemId={partialQtyByItemId}
+          receivedItemIds={receivedIds}
         />
       )}
 

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   catalogResolutionFromOperationalConfig,
@@ -57,6 +58,7 @@ interface RecebimentoItem {
   product_name: string;
   quantity: number;
   unit_value: number;
+  invoice_unit?: string | null;
   product_id?: string | null;
   import_nature?: string | null;
   import_engine_suggestion?: string | null;
@@ -137,6 +139,7 @@ export function ConfirmarRecebimento() {
   const [itemStatus, setItemStatus] = useState<Record<number, ItemStatus>>({});
   /** Quantidade recebida quando status é parcial (texto do input) */
   const [partialQty, setPartialQty] = useState<Record<number, string>>({});
+  const [itemNotes, setItemNotes] = useState<Record<number, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [success, setSuccess] = useState(false);
   const [itemClassificationIncomplete, setItemClassificationIncomplete] = useState<number | null>(
@@ -253,6 +256,7 @@ export function ConfirmarRecebimento() {
         expense_item_id: string;
         status: ItemStatus;
         quantity_received?: number;
+        notes?: string;
       } = {
         expense_item_id: it.id,
         status: st,
@@ -264,6 +268,10 @@ export function ConfirmarRecebimento() {
           return { ...base, quantity_received: NaN };
         }
         base.quantity_received = n;
+      }
+      if (st === "partial" || st === "not_received") {
+        const notes = (itemNotes[i] ?? "").trim();
+        if (notes) base.notes = notes;
       }
       return base;
     });
@@ -303,13 +311,19 @@ export function ConfirmarRecebimento() {
       "confirmar_recebimento",
       {
         p_token: token,
-        p_items: pItems.map((p) => {
+        p_items:         pItems.map((p) => {
           const row: Record<string, unknown> = {
             expense_item_id: p.expense_item_id,
             status: p.status,
           };
           if (p.status === "partial" && p.quantity_received != null) {
             row.quantity_received = p.quantity_received;
+          }
+          if (
+            (p.status === "partial" || p.status === "not_received") &&
+            p.notes
+          ) {
+            row.notes = p.notes;
           }
           return row;
         }),
@@ -470,10 +484,7 @@ export function ConfirmarRecebimento() {
           <p className="text-sm text-muted-foreground">
             Para cada item, informe se recebeu tudo, uma parte da quantidade ou
             nada. Faltas e parciais geram alerta para o gestor (ex.: pediu 10 e
-            chegaram 6 — informe 6 em &quot;Parcial&quot;). A forma de entrada no
-            estoque (direta ou por ficha) usa automaticamente a classificação
-            operacional do produto no Faro; ajuste no assistente de itens, se
-            precisar.
+            chegaram 6 — informe 6 em &quot;Parcial&quot;).
           </p>
           {itemClassificationIncomplete != null && itemClassificationIncomplete > 0 ? (
             <p className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-50">
@@ -491,6 +502,7 @@ export function ConfirmarRecebimento() {
               const isPartial = st === "partial";
               const isNot = st === "not_received";
               const maxPedido = Math.max(0, Number(it.quantity));
+              const unit = it.invoice_unit?.trim() || "un";
               return (
                 <div
                   key={it.id}
@@ -507,7 +519,7 @@ export function ConfirmarRecebimento() {
                   <div className="flex flex-col gap-2  sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0 space-y-1.5 w-full ">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="min-w-0 flex-1 font-medium leading-snug">
+                        <p className="min-w-0 flex-1 text-base font-semibold leading-snug">
                           {it.product_name || "—"}
                         </p>
                         <span className="inline-flex shrink-0 items-baseline gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-2.5 py-1 shadow-sm">
@@ -516,8 +528,8 @@ export function ConfirmarRecebimento() {
                               maximumFractionDigits: 4,
                             })}
                           </span>
-                          <span className="text-xs font-semibold text-primary/85">
-                            un
+                          <span className="text-xs font-semibold uppercase text-primary/85">
+                            {unit}
                           </span>
                         </span>
                       </div>
@@ -576,7 +588,7 @@ export function ConfirmarRecebimento() {
                         {maxPedido.toLocaleString("pt-BR", {
                           maximumFractionDigits: 4,
                         })}{" "}
-                        un)
+                        {unit})
                       </Label>
                       <Input
                         id={`qty-${i}`}
@@ -615,6 +627,33 @@ export function ConfirmarRecebimento() {
                         }}
                         disabled={!canConfirm}
                         className="max-w-[12rem]"
+                      />
+                    </div>
+                  )}
+                  {(isPartial || isNot) && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`notes-${i}`} className="text-xs">
+                        Observações{" "}
+                        <span className="font-normal text-muted-foreground">
+                          (opcional)
+                        </span>
+                      </Label>
+                      <Textarea
+                        id={`notes-${i}`}
+                        className="min-h-18"
+                        placeholder={
+                          isPartial
+                            ? "Ex.: faltou volume, avaria na caixa…"
+                            : "Ex.: não veio no pedido, recusado na entrega…"
+                        }
+                        disabled={!canConfirm}
+                        value={itemNotes[i] ?? ""}
+                        onChange={(e) =>
+                          setItemNotes((prev) => ({
+                            ...prev,
+                            [i]: e.target.value,
+                          }))
+                        }
                       />
                     </div>
                   )}

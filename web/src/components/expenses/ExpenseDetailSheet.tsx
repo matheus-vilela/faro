@@ -1,7 +1,7 @@
 import { ExpenseFinancialReconciliationPanel } from "@/components/expenses/ExpenseFinancialReconciliationPanel";
 import { ExpenseRecordedDivergenceBanner } from "@/components/expenses/ExpenseImportAttentionPanel";
-import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { ExpenseItemsInlineTable } from "@/components/expenses/ExpenseItemsInlineTable";
+import { ExpenseLauncherInfo } from "@/components/expenses/ExpenseLauncherInfo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +61,8 @@ import type { Supplier } from "@/types/supplier";
 import {
   ChevronDown,
   Copy,
+  Link2,
+  PackageCheck,
   Pencil,
   Plus,
   Trash2,
@@ -95,6 +97,17 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 
 const BOLETO_STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
+function formatBoletoPaymentDate(s: string) {
+  const ymd = s.slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return new Date(s).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 function BoletoLinkedBlock({
   boleto,
   formatCurrency,
@@ -104,6 +117,7 @@ function BoletoLinkedBlock({
   formatCurrency: (v: number) => string;
   onVerBoleto: () => void;
 }) {
+  const paymentDate = boleto.paid_at || boleto.due_date;
   return (
     <div
       className="cursor-pointer rounded-xl border-2 border-green-300/60 bg-green-100/10 p-4 shadow-sm transition-colors hover:bg-green-600/15"
@@ -125,9 +139,20 @@ function BoletoLinkedBlock({
           <p className="mt-1 truncate text-sm font-medium text-foreground">
             {boleto.description}
           </p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-green-700 dark:text-green-400">
-            {formatCurrency(boleto.amount)}
-          </p>
+          <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
+            <div>
+              <p className="text-xs text-muted-foreground">Valor</p>
+              <p className="text-xl font-bold tabular-nums text-green-700 dark:text-green-400">
+                {formatCurrency(boleto.amount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Data de pagamento</p>
+              <p className="text-xl font-semibold tabular-nums text-foreground">
+                {formatBoletoPaymentDate(paymentDate)}
+              </p>
+            </div>
+          </div>
         </div>
         <Badge className="shrink-0 bg-green-600 hover:bg-green-700">
           Ver detalhes
@@ -248,15 +273,26 @@ type ExpenseDetailSheetProps = {
   expenseId: string | null;
   onClose: () => void;
   onRefresh?: () => void;
+  onOpenRecebimento?: () => void;
+  /** Abre o fluxo de atribuir operador e gerar o link. */
+  onOpenShare?: () => void;
   /** Empilha acima de outros sheets (ex.: resumo de boleto no fluxo). */
   elevated?: boolean;
+  /** Não fecha o detalhe enquanto outro modal/sheet está aberto por cima. */
+  keepOpen?: boolean;
+  /** Recarrega os dados da nota (ex.: após conferência). */
+  reloadNonce?: number;
 };
 
 export function ExpenseDetailSheet({
   expenseId,
   onClose,
   onRefresh,
+  onOpenRecebimento,
+  onOpenShare,
   elevated = false,
+  keepOpen = false,
+  reloadNonce = 0,
 }: ExpenseDetailSheetProps) {
   const { currentCompany, isCompanyOwner } = useCompany();
   const navigate = useNavigate();
@@ -265,6 +301,15 @@ export function ExpenseDetailSheet({
   const isOwner = isCompanyOwner;
 
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+  const [recebimentoInfo, setRecebimentoInfo] = useState<{
+    id: string;
+    status: "pending" | "received";
+    hasItemDivergence: boolean;
+    notDeliveredItemIds: string[];
+    partialQtyByItemId: Record<string, number | null>;
+    receivedItemIds: string[];
+    assignedMemberName: string | null;
+  } | null>(null);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -318,6 +363,12 @@ export function ExpenseDetailSheet({
     );
   }, [detailExpense?.expense_items]);
 
+  const detailNoteTotal = useMemo(() => {
+    const docTotal = Number(detailExpense?.document_total ?? 0);
+    if (Number.isFinite(docTotal) && docTotal > 0) return docTotal;
+    return detailLineSum;
+  }, [detailExpense?.document_total, detailLineSum]);
+
   const detailUnlinkedProductRows = useMemo(() => {
     if (!detailExpense?.expense_items?.length) return 0;
     return detailExpense.expense_items.filter(
@@ -325,14 +376,13 @@ export function ExpenseDetailSheet({
     ).length;
   }, [detailExpense?.expense_items]);
 
-  const noteIsReceived = useMemo(
-    () => (detailExpense ? expenseIsReceived(detailExpense) : false),
-    [detailExpense],
-  );
+  const noteIsReceived =
+    recebimentoInfo?.status === "received" ||
+    (detailExpense ? expenseIsReceived(detailExpense) : false);
+  const conferenceHasDivergence = !!recebimentoInfo?.hasItemDivergence;
 
   const canEditItems =
     !!detailExpense &&
-    !noteIsReceived &&
     detailExpense.status !== "rejected" &&
     (canEditDespesas || isOwner);
 
@@ -343,9 +393,7 @@ export function ExpenseDetailSheet({
 
   const productSelectOptions = useMemo(
     () =>
-      products
-        .filter((p) => p.is_active !== false)
-        .map(productSearchOption),
+      products.filter((p) => p.is_active !== false).map(productSearchOption),
     [products],
   );
 
@@ -362,6 +410,64 @@ export function ExpenseDetailSheet({
       return;
     }
     setDetailExpense(exp as Expense);
+    const { data: recRow } = await supabase
+      .from("recebimentos")
+      .select(
+        "id, status, assigned_company_member_id, recebimento_item_status (expense_item_id, status, quantity_received)",
+      )
+      .eq("expense_id", expenseId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recRow) {
+      const itemStatuses =
+        (recRow.recebimento_item_status as Array<{
+          expense_item_id: string;
+          status: string;
+          quantity_received?: number | null;
+        }> | null) ?? [];
+      const isReceived = recRow.status === "received";
+      const partialQtyByItemId: Record<string, number | null> = {};
+      if (isReceived) {
+        for (const s of itemStatuses) {
+          if (s.status !== "partial") continue;
+          partialQtyByItemId[s.expense_item_id] =
+            s.quantity_received != null ? Number(s.quantity_received) : null;
+        }
+      }
+      const assignedId =
+        (recRow.assigned_company_member_id as string | null) ?? null;
+      let assignedMemberName: string | null = null;
+      if (assignedId) {
+        const { data: mem } = await supabase
+          .from("company_members")
+          .select("name")
+          .eq("id", assignedId)
+          .maybeSingle();
+        assignedMemberName = (mem?.name as string | undefined)?.trim() || null;
+      }
+      setRecebimentoInfo({
+        id: recRow.id as string,
+        status: isReceived ? "received" : "pending",
+        hasItemDivergence: itemStatuses.some(
+          (s) => s.status === "not_received" || s.status === "partial",
+        ),
+        notDeliveredItemIds: isReceived
+          ? itemStatuses
+              .filter((s) => s.status === "not_received")
+              .map((s) => s.expense_item_id)
+          : [],
+        receivedItemIds: isReceived
+          ? itemStatuses
+              .filter((s) => s.status === "received")
+              .map((s) => s.expense_item_id)
+          : [],
+        partialQtyByItemId,
+        assignedMemberName,
+      });
+    } else {
+      setRecebimentoInfo(null);
+    }
     const shouldLoadSupportData =
       supportDataLoadedCompanyRef.current !== companyId;
     if (shouldLoadSupportData) {
@@ -399,6 +505,7 @@ export function ExpenseDetailSheet({
   useEffect(() => {
     if (!expenseId || !companyId) {
       setDetailExpense(null);
+      setRecebimentoInfo(null);
       setDetailEditMode(false);
       setLoading(false);
       return;
@@ -407,6 +514,13 @@ export function ExpenseDetailSheet({
     setLoading(true);
     void loadExpenseData().finally(() => setLoading(false));
   }, [expenseId, companyId, loadExpenseData]);
+
+  useEffect(() => {
+    if (!reloadNonce || !expenseId || !companyId) return;
+    void loadExpenseData();
+    // Recarrega só quando a conferência (ou outro fluxo) pede refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloadNonce
+  }, [reloadNonce]);
 
   useEffect(() => {
     const path = detailExpense?.source_document_path?.trim();
@@ -792,6 +906,7 @@ export function ExpenseDetailSheet({
 
   const handleSheetOpenChange = (o: boolean) => {
     if (!o) {
+      if (keepOpen || deleteDialogOpen || boletoResumo) return;
       onClose();
       setDetailEditMode(false);
     }
@@ -803,8 +918,10 @@ export function ExpenseDetailSheet({
     <>
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
-          maximizable
-          className={cn("overflow-y-auto sm:max-w-6xl", elevated && "z-[70]")}
+          className={cn(
+            "w-full overflow-y-auto sm:!max-w-[min(100vw-1rem,90rem)]",
+            elevated && "z-[70]",
+          )}
           overlayClassName={elevated ? "z-[70]" : undefined}
         >
           {loading && (
@@ -812,74 +929,174 @@ export function ExpenseDetailSheet({
           )}
           {!loading && detailExpense && (
             <>
-              <SheetHeader>
-                <div className="flex items-center justify-between pr-16">
-                  <SheetTitle>
-                    {detailEditMode ? "Editar nota fiscal" : "Dados da nota fiscal"}
-                  </SheetTitle>
+              <SheetHeader className="gap-1 p-3 pr-12">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <SheetTitle className="text-xl font-semibold leading-tight tracking-tight">
+                      {detailEditMode
+                        ? "Editar nota fiscal"
+                        : "Detalhes da nota"}
+                    </SheetTitle>
+                    {!detailEditMode && (
+                      <>
+                        <p className="mt-1 truncate text-base font-semibold leading-tight text-foreground">
+                          {detailExpense.display_name?.trim() ||
+                            detailExpense.supplier_name ||
+                            TYPE_LABELS[
+                              detailExpense.type as keyof typeof TYPE_LABELS
+                            ] ||
+                            "Nota fiscal"}
+                        </p>
+                        <SheetDescription className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 leading-snug">
+                          {detailExpense.invoice_number ? (
+                            <span className="text-base font-semibold tabular-nums text-foreground">
+                              NF {detailExpense.invoice_number}
+                              {detailExpense.invoice_series ? (
+                                <span className="text-base font-semibold text-foreground">
+                                  {" "}
+                                  · Série {detailExpense.invoice_series}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span className="text-sm font-medium text-foreground">
+                              {TYPE_LABELS[
+                                detailExpense.type as keyof typeof TYPE_LABELS
+                              ] ?? "Documento"}
+                            </span>
+                          )}
+                          {detailExpense.supplier_document ? (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDocForDisplay(
+                                detailExpense.supplier_document,
+                              )}
+                            </span>
+                          ) : null}
+                          {detailExpense.parent_expense_id ? (
+                            <Badge
+                              variant="secondary"
+                              className="h-5 px-1.5 text-[10px]"
+                            >
+                              Exceção de série
+                            </Badge>
+                          ) : null}
+                          {(detailExpense.series_type === "recurring" ||
+                            detailExpense.series_type === "installment") &&
+                          !detailExpense.parent_expense_id ? (
+                            <Badge
+                              variant="outline"
+                              className="h-5 px-1.5 text-[10px]"
+                            >
+                              {detailExpense.series_type === "recurring"
+                                ? "Recorrente"
+                                : "Parcelada"}
+                            </Badge>
+                          ) : null}
+                          {linkedBoletoForDetail ? (
+                            <Badge className="h-5 bg-green-600 px-1.5 text-[10px]">
+                              Boleto
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="secondary"
+                              className="h-5 px-1.5 text-[10px]"
+                            >
+                              Sem boleto
+                            </Badge>
+                          )}
+                        </SheetDescription>
+                      </>
+                    )}
+                  </div>
                   {!detailEditMode && (
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={startEdit}>
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Editar
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {/* {onOpenRecebimento && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8"
+                          onClick={onOpenRecebimento}
+                        >
+                          <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
+                          {noteIsReceived
+                            ? "Ver conferência"
+                            : "Iniciar recebimento"}
+                        </Button>
+                      )} */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={startEdit}
+                      >
+                        <Pencil className="h-3.5 w-3.5 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Editar</span>
                       </Button>
                       <Button
                         variant="destructive"
                         size="sm"
+                        className="h-8"
                         onClick={() => setDeleteDialogOpen(true)}
                       >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Excluir
+                        <Trash2 className="h-3.5 w-3.5 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Excluir</span>
                       </Button>
                     </div>
                   )}
                 </div>
-                {!detailEditMode && (
-                  <SheetDescription className="flex flex-wrap items-center gap-2">
-                    <span>
-                      {detailExpense.display_name?.trim() ||
-                        detailExpense.supplier_name ||
-                        TYPE_LABELS[
-                          detailExpense.type as keyof typeof TYPE_LABELS
-                        ] ||
-                        "Sem fornecedor"}
-                    </span>
-                    {detailExpense.parent_expense_id ? (
-                      <Badge variant="secondary" className="shrink-0">
-                        Exceção de série
-                      </Badge>
-                    ) : null}
-                    {(detailExpense.series_type === "recurring" ||
-                      detailExpense.series_type === "installment") &&
-                    !detailExpense.parent_expense_id ? (
-                      <Badge variant="outline" className="shrink-0">
-                        Série ·{" "}
-                        {detailExpense.series_type === "recurring"
-                          ? "recorrente"
-                          : "parcelada"}
-                      </Badge>
-                    ) : null}
-                    {linkedBoletoForDetail ? (
-                      <Badge
-                        variant="default"
-                        className="bg-green-600 shrink-0"
-                      >
-                        Boleto vinculado
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="shrink-0">
-                        Sem boleto vinculado
-                      </Badge>
-                    )}
-                  </SheetDescription>
-                )}
               </SheetHeader>
-              {!detailEditMode && (
-                <div className="mt-4 space-y-1 border-t border-border pt-4">
-                  <ExpenseLauncherInfo expenseId={detailExpense.id} />
-                  <p className="text-sm text-muted-foreground">
-                    Cadastrada em {formatDate(detailExpense.created_at)}
-                  </p>
+              {!detailEditMode && onOpenRecebimento && (
+                <div
+                  className={cn(
+                    "mt-3 flex w-full flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between",
+                    noteIsReceived
+                      ? conferenceHasDivergence
+                        ? "border-amber-600/40 bg-amber-500/10"
+                        : "border-primary/40 bg-primary/10"
+                      : "border-primary/40 bg-primary/10",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {noteIsReceived
+                        ? conferenceHasDivergence
+                          ? "Conferência com divergência"
+                          : "Conferência realizada"
+                        : "Aguardando recebimento"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {noteIsReceived
+                        ? conferenceHasDivergence
+                          ? "Há itens parciais ou não recebidos. Abra para ver o detalhe e ajustar."
+                          : "Veja o que foi marcado em cada item e, se precisar, ajuste."
+                        : recebimentoInfo?.assignedMemberName
+                          ? `Atribuído a ${recebimentoInfo.assignedMemberName}. Confira aqui ou envie o link / WhatsApp para o operador.`
+                          : "Confira os itens da nota aqui, ou gere um link para o operador receber."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      className="h-10 shadow-sm"
+                      onClick={onOpenRecebimento}
+                    >
+                      <PackageCheck className="mr-2 h-4 w-4" />
+                      {noteIsReceived
+                        ? "Ver conferência"
+                        : "Iniciar recebimento"}
+                    </Button>
+                    {!noteIsReceived && onOpenShare && isOwner ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 bg-background shadow-sm"
+                        onClick={onOpenShare}
+                      >
+                        <Link2 className="mr-2 h-4 w-4" />
+                        Gerar link para operador
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               )}
               {detailExpense.parent_expense_id && !detailEditMode ? (
@@ -893,8 +1110,8 @@ export function ExpenseDetailSheet({
               !detailExpense.parent_expense_id &&
               !detailEditMode ? (
                 <p className="mt-3 rounded-md border border-amber-600/25 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-                  Esta é a nota fiscal principal da série. Excluí-la remove toda a
-                  recorrência/parcelamento e exceções vinculadas. Gerencie
+                  Esta é a nota fiscal principal da série. Excluí-la remove toda
+                  a recorrência/parcelamento e exceções vinculadas. Gerencie
                   ocorrências futuras em Contas a pagar.
                 </p>
               ) : null}
@@ -1181,84 +1398,90 @@ export function ExpenseDetailSheet({
                   </SheetFooter>
                 </form>
               ) : (
-                <div className="space-y-4 pb-6 pt-4">
+                <div className="space-y-3 pb-6 pt-2">
                   {(() => {
-                    const supplierRecord = detailExpense.supplier_id
-                      ? suppliers.find(
-                          (x) => x.id === detailExpense.supplier_id,
-                        )
-                      : undefined;
-                    const supplierLabel =
-                      detailExpense.supplier_name?.trim() ||
-                      supplierRecord?.name?.trim() ||
-                      "Sem fornecedor";
                     const chaveNfe = expenseChaveNfe(
                       detailExpense.financial_reconciliation_json,
                     );
+                    if (!chaveNfe) return null;
                     return (
-                      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Fornecedor
-                        </p>
-                        <p className="mt-1 text-xl font-semibold leading-tight text-foreground">
-                          {supplierLabel}
-                        </p>
-                        {detailExpense.supplier_document ? (
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {formatDocForDisplay(
-                              detailExpense.supplier_document,
-                            )}
-                          </p>
-                        ) : null}
-                        {detailExpense.invoice_number || chaveNfe ? (
-                          <div className="mt-4 border-t border-border/80 pt-4">
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                              {detailExpense.type === "nota_fiscal"
-                                ? "Nota fiscal"
-                                : "Documento"}
-                            </p>
-                            {detailExpense.invoice_number ? (
-                              <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                                Nº {detailExpense.invoice_number}
-                                {detailExpense.invoice_series ? (
-                                  <span className="font-medium text-muted-foreground">
-                                    {" "}
-                                    · Série {detailExpense.invoice_series}
-                                  </span>
-                                ) : null}
-                              </p>
-                            ) : null}
-                            {chaveNfe ? (
-                              <div className="mt-3">
-                                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Chave NF-e
-                                </p>
-                                <div className="mt-1 flex items-start gap-2">
-                                  <p className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-foreground">
-                                    {chaveNfe}
-                                  </p>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 shrink-0 px-2"
-                                    onClick={() => {
-                                      void navigator.clipboard.writeText(
-                                        chaveNfe,
-                                      );
-                                      toast.success("Chave copiada.");
-                                    }}
-                                  >
-                                    <Copy className="h-3.5 w-3.5" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="shrink-0 font-medium">Chave NF-e</span>
+                        <span className="min-w-0 truncate font-mono">
+                          {chaveNfe}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 shrink-0 px-1.5"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(chaveNfe);
+                            toast.success("Chave copiada.");
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     );
                   })()}
+
+                  <ExpenseRecordedDivergenceBanner
+                    documentTotal={detailExpense.document_total}
+                    sumLines={detailLineSum}
+                    financialReconciliationJson={
+                      detailExpense.financial_reconciliation_json ?? null
+                    }
+                    divergenceReason={detailExpense.divergence_reason}
+                    unlinkedProductRowCount={detailUnlinkedProductRows}
+                  />
+
+                  <ExpenseItemsInlineTable
+                    items={detailExpense.expense_items ?? []}
+                    canEdit={canEditItems}
+                    companyId={companyId}
+                    products={products}
+                    notDeliveredItemIds={
+                      recebimentoInfo?.notDeliveredItemIds ?? []
+                    }
+                    partialQtyByItemId={
+                      recebimentoInfo?.partialQtyByItemId ?? {}
+                    }
+                    receivedItemIds={recebimentoInfo?.receivedItemIds ?? []}
+                    deferProductCreation={
+                      detailExpense.expense_source === "whatsapp" &&
+                      detailExpense.status === "pending"
+                    }
+                    highlightMissingVinculo={
+                      detailExpense.expense_source === "whatsapp" &&
+                      detailExpense.status === "pending"
+                    }
+                    onSaved={(created) => {
+                      if (created) {
+                        setProducts((prev) => {
+                          if (prev.some((p) => p.id === created.id))
+                            return prev;
+                          return [...prev, created].sort((a, b) =>
+                            a.name.localeCompare(b.name, "pt-BR"),
+                          );
+                        });
+                      }
+                      void loadExpenseData();
+                      onRefresh?.();
+                    }}
+                  />
+
+                  {(detailExpense.expense_items?.length ?? 0) > 0 ||
+                  detailNoteTotal > 0 ? (
+                    <div className="flex items-baseline justify-start gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        Total da nota
+                      </span>
+                      <span className="text-lg font-semibold tabular-nums text-foreground">
+                        {formatCurrency(detailNoteTotal)}
+                      </span>
+                    </div>
+                  ) : null}
 
                   {(detailExpense.type === "nota_fiscal" ||
                     detailExpense.financial_reconciliation_json) && (
@@ -1269,7 +1492,7 @@ export function ExpenseDetailSheet({
                       <CollapsibleTrigger asChild>
                         <button
                           type="button"
-                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/40"
+                          className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted/40"
                         >
                           <span>Impostos e totais</span>
                           <ChevronDown
@@ -1292,7 +1515,8 @@ export function ExpenseDetailSheet({
                         />
                         {!detailExpense.financial_reconciliation_json && (
                           <p className="text-sm text-muted-foreground">
-                            Sem dados de impostos e totais para esta nota fiscal.
+                            Sem dados de impostos e totais para esta nota
+                            fiscal.
                           </p>
                         )}
                       </CollapsibleContent>
@@ -1308,43 +1532,6 @@ export function ExpenseDetailSheet({
                   ) : (
                     <BoletoUnlinkedBlock />
                   )}
-
-                  <ExpenseRecordedDivergenceBanner
-                    documentTotal={detailExpense.document_total}
-                    sumLines={detailLineSum}
-                    financialReconciliationJson={
-                      detailExpense.financial_reconciliation_json ?? null
-                    }
-                    divergenceReason={detailExpense.divergence_reason}
-                    unlinkedProductRowCount={detailUnlinkedProductRows}
-                  />
-
-                  <ExpenseItemsInlineTable
-                    items={detailExpense.expense_items ?? []}
-                    canEdit={canEditItems}
-                    companyId={companyId}
-                    products={products}
-                    deferProductCreation={
-                      detailExpense.expense_source === "whatsapp" &&
-                      detailExpense.status === "pending"
-                    }
-                    highlightMissingVinculo={
-                      detailExpense.expense_source === "whatsapp" &&
-                      detailExpense.status === "pending"
-                    }
-                    onSaved={(created) => {
-                      if (created) {
-                        setProducts((prev) => {
-                          if (prev.some((p) => p.id === created.id)) return prev;
-                          return [...prev, created].sort((a, b) =>
-                            a.name.localeCompare(b.name, "pt-BR"),
-                          );
-                        });
-                      }
-                      void loadExpenseData();
-                      onRefresh?.();
-                    }}
-                  />
 
                   {detailExpense.expense_source === "whatsapp" &&
                     detailExpense.status === "pending" &&
@@ -1365,8 +1552,7 @@ export function ExpenseDetailSheet({
                             type="button"
                             size="sm"
                             disabled={
-                              approvingWhatsapp ||
-                              detailUnlinkedProductRows > 0
+                              approvingWhatsapp || detailUnlinkedProductRows > 0
                             }
                             onClick={() => void handleApproveWhatsappExpense()}
                           >
@@ -1444,8 +1630,8 @@ export function ExpenseDetailSheet({
                   ) : null}
 
                   {detailExpense.source_document_path && (
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <p className="font-medium">Comprovante</p>
+                    <div className="rounded-lg border p-3 space-y-2">
+                      <p className="text-sm font-medium">Comprovante</p>
                       {!comprovanteUrl ? (
                         <p className="text-sm text-muted-foreground">
                           Carregando visualização…
@@ -1477,6 +1663,16 @@ export function ExpenseDetailSheet({
                       )}
                     </div>
                   )}
+
+                  <p className="text-xs text-muted-foreground">
+                    <ExpenseLauncherInfo
+                      expenseId={detailExpense.id}
+                      compact
+                      className="inline"
+                    />
+                    <span className="mx-1.5">·</span>
+                    Cadastrada em {formatDate(detailExpense.created_at)}
+                  </p>
                 </div>
               )}
             </>
@@ -1488,10 +1684,7 @@ export function ExpenseDetailSheet({
         open={!!boletoResumo}
         onOpenChange={(o) => !o && setBoletoResumo(null)}
       >
-        <SheetContent
-          className={cn("sm:max-w-md", elevated && "z-[80]")}
-          overlayClassName={elevated ? "z-[80]" : undefined}
-        >
+        <SheetContent className="z-[80] sm:max-w-md" overlayClassName="z-[80]">
           {boletoResumo && (
             <>
               <SheetHeader>
@@ -1628,7 +1821,7 @@ export function ExpenseDetailSheet({
       </Sheet>
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent overlayClassName="z-[80]" className="z-[80]">
           <DialogHeader>
             <DialogTitle>Excluir nota fiscal</DialogTitle>
             <DialogDescription>
@@ -1643,8 +1836,8 @@ export function ExpenseDetailSheet({
                 </>
               ) : (
                 <>
-                  Tem certeza que deseja excluir esta nota fiscal? O recebimento e
-                  boleto vinculados serão excluídos. Se o recebimento já foi
+                  Tem certeza que deseja excluir esta nota fiscal? O recebimento
+                  e boleto vinculados serão excluídos. Se o recebimento já foi
                   confirmado, as quantidades serão deduzidas do estoque.
                 </>
               )}

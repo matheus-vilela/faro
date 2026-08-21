@@ -4,6 +4,9 @@ import {
   expenseHasValueRisk,
   filterIdsByBoleto,
   filterIdsByRecebimento,
+  filterIdsByRecebimentoSection,
+  parseRecebimentoListSection,
+  parseRecebimentoListTab,
   recebimentoKindFromRow,
 } from "./notasRecebimentoListFilters";
 
@@ -33,6 +36,32 @@ describe("filterIdsByRecebimento / boleto", () => {
       ["a", "pending" as const],
     ]);
     expect(filterIdsByRecebimento(["a", "b"], kinds, "none")).toEqual(["b"]);
+  });
+
+  it("splits divergence, awaiting and received lists", () => {
+    const kinds = new Map([
+      ["a", "pending" as const],
+      ["b", "confirmed" as const],
+      ["c", "pending_receipt" as const],
+    ]);
+    expect(
+      filterIdsByRecebimentoSection(["a", "b", "c", "d"], kinds, "divergence"),
+    ).toEqual(["c"]);
+    expect(
+      filterIdsByRecebimentoSection(["a", "b", "c", "d"], kinds, "awaiting"),
+    ).toEqual(["a", "d"]);
+    expect(
+      filterIdsByRecebimentoSection(["a", "b", "c", "d"], kinds, "received"),
+    ).toEqual(["b"]);
+  });
+
+  it("parses list section from query", () => {
+    expect(parseRecebimentoListTab("received")).toBe("received");
+    expect(parseRecebimentoListTab("awaiting")).toBe("awaiting");
+    expect(parseRecebimentoListTab("divergence")).toBe("divergence");
+    expect(parseRecebimentoListTab(null)).toBe("awaiting");
+    expect(parseRecebimentoListSection(null)).toBeNull();
+    expect(parseRecebimentoListSection("divergence")).toBe("divergence");
   });
 
   it("splits boleto linked vs unlinked", () => {

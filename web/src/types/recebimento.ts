@@ -25,5 +25,6 @@ export interface Recebimento {
     expense_item_id: string
     status: 'received' | 'not_received' | 'partial'
     quantity_received?: number | null
+    notes?: string | null
   }>
 }

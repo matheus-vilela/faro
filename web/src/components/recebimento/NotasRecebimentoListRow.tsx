@@ -23,6 +23,8 @@ export type RecebimentoBadgeInfo = {
   className: string;
 };
 
+export type NotasRecebimentoListStage = "divergence" | "awaiting" | "received";
+
 export type NotasRecebimentoListRowProps = {
   id: string;
   displayTitle: string;
@@ -34,6 +36,7 @@ export type NotasRecebimentoListRowProps = {
   /** Tooltip com metadados secundários (CNPJ, categoria, etc.). */
   secondaryTitle?: string;
   boletoLinked: boolean;
+  stage: NotasRecebimentoListStage;
   isHighlight?: boolean;
   pendingOwnerApproval?: boolean;
   /** WhatsApp aguardando aprovação do proprietário. */
@@ -44,6 +47,7 @@ export type NotasRecebimentoListRowProps = {
   recebimento: RecebimentoBadgeInfo;
   ensuringRecebimento?: boolean;
   showShareAction?: boolean;
+  reviewLabel?: string;
   onOpenDetail: () => void;
   onOpenReview: () => void;
   onOpenShare: () => void;
@@ -60,6 +64,7 @@ export function NotasRecebimentoListRow({
   totalLabel,
   secondaryTitle,
   boletoLinked,
+  stage,
   isHighlight,
   pendingOwnerApproval,
   unapproved,
@@ -69,6 +74,7 @@ export function NotasRecebimentoListRow({
   recebimento,
   ensuringRecebimento,
   showShareAction,
+  reviewLabel = "Receber",
   onOpenDetail,
   onOpenReview,
   onOpenShare,
@@ -98,9 +104,9 @@ export function NotasRecebimentoListRow({
         unapproved
           ? "bg-amber-500/8 hover:bg-amber-500/14 focus-visible:bg-amber-500/14 dark:bg-amber-500/10 dark:hover:bg-amber-500/16"
           : "bg-card hover:bg-muted/40 focus-visible:bg-muted/40",
-        boletoLinked
-          ? "border-l-emerald-600/80"
-          : "border-l-amber-500/55",
+        stage === "divergence" && "border-l-red-600",
+        stage === "awaiting" && "border-l-amber-500",
+        stage === "received" && "!border-l-green-600",
         isHighlight && "ring-1 ring-inset ring-primary/20",
       )}
     >
@@ -167,7 +173,7 @@ export function NotasRecebimentoListRow({
           onKeyDown={(e) => e.stopPropagation()}
         >
           <RowIconButton
-            label="Abrir revisão"
+            label={reviewLabel}
             disabled={ensuringRecebimento}
             onClick={onOpenReview}
           >
@@ -179,7 +185,7 @@ export function NotasRecebimentoListRow({
           </RowIconButton>
           {showShareAction && (
             <RowIconButton
-              label="Vincular operador"
+              label="Compartilhar link"
               disabled={ensuringRecebimento}
               onClick={onOpenShare}
             >
@@ -269,7 +275,7 @@ export function NotasRecebimentoListRow({
             ) : (
               <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
             )}
-            Revisão
+            {reviewLabel}
           </Button>
           {showShareAction && (
             <Button
@@ -281,7 +287,7 @@ export function NotasRecebimentoListRow({
               onClick={onOpenShare}
             >
               <Share2 className="mr-1.5 h-3.5 w-3.5" />
-              Operador
+              Link
             </Button>
           )}
           <Button

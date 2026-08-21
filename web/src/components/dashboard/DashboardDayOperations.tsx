@@ -134,6 +134,7 @@ function isChecklistDueToday(r: ChecklistRow, now = new Date()): boolean {
 
 type RecebimentoDashboardRow = {
   id: string;
+  expense_id: string;
   status: "pending" | "received";
   created_at: string;
   received_at: string | null;
@@ -391,6 +392,7 @@ export function DashboardDayOperations({
         .select(
           `
           id,
+          expense_id,
           status,
           created_at,
           received_at,
@@ -733,7 +735,10 @@ export function DashboardDayOperations({
           </div>
           <SheetFooter className="border-t">
             <Button asChild className="w-full sm:w-auto">
-              <Link to="/app/notas-recebimento" onClick={() => setSheet(null)}>
+              <Link
+                to="/app/notas-recebimento?tab=awaiting"
+                onClick={() => setSheet(null)}
+              >
                 Abrir recebimento
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -931,15 +936,19 @@ function RecebimentoListItem({
   received?: boolean;
 }) {
   const nf = row.expenses?.invoice_number?.trim();
+  const tab = received ? "received" : "awaiting";
+  const to = `/app/notas-recebimento?tab=${tab}&expense=${encodeURIComponent(row.expense_id)}`;
   return (
     <li className="px-3 py-2.5 text-sm">
-      <p className="font-medium truncate">{recebimentoTitle(row)}</p>
-      <p className="text-xs text-muted-foreground">
-        {nf ? `NF ${nf} · ` : ""}
-        {received
-          ? formatDt(row.received_at)
-          : `Criado ${formatDt(row.created_at)}`}
-      </p>
+      <Link to={to} className="block min-w-0 hover:underline">
+        <p className="font-medium truncate">{recebimentoTitle(row)}</p>
+        <p className="text-xs text-muted-foreground">
+          {nf ? `NF ${nf} · ` : ""}
+          {received
+            ? formatDt(row.received_at)
+            : `Criado ${formatDt(row.created_at)}`}
+        </p>
+      </Link>
     </li>
   );
 }

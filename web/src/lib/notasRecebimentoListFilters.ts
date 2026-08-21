@@ -7,6 +7,31 @@ export type NotasRecebimentoFilter =
   | "confirmed"
   | "pending_receipt";
 
+/** Listagens da tela: divergência, conferência pendente e já recebidas. */
+export type NotasRecebimentoListSection =
+  | "divergence"
+  | "awaiting"
+  | "received";
+
+/** @deprecated Preferir NotasRecebimentoListSection. */
+export type NotasRecebimentoListTab = NotasRecebimentoListSection;
+
+export function parseRecebimentoListTab(
+  value: string | null | undefined,
+): NotasRecebimentoListTab {
+  if (value === "received" || value === "divergence") return value;
+  return "awaiting";
+}
+
+export function parseRecebimentoListSection(
+  value: string | null | undefined,
+): NotasRecebimentoListSection | null {
+  if (value === "received" || value === "awaiting" || value === "divergence") {
+    return value;
+  }
+  return null;
+}
+
 export type NotasBoletoFilter = "all" | "with" | "without";
 
 export type NotasOrigemFilter = "all" | "whatsapp" | "manual";
@@ -42,6 +67,38 @@ export function filterIdsByRecebimento(
 ): string[] {
   if (filter === "all") return expenseIds;
   return expenseIds.filter((id) => (kindByExpenseId.get(id) ?? "none") === filter);
+}
+
+export function recebimentoListSectionFromKind(
+  kind: RecebimentoListKind,
+): NotasRecebimentoListSection {
+  if (kind === "pending_receipt") return "divergence";
+  if (kind === "confirmed") return "received";
+  return "awaiting";
+}
+
+export function isAwaitingRecebimentoKind(kind: RecebimentoListKind): boolean {
+  return recebimentoListSectionFromKind(kind) === "awaiting";
+}
+
+export function filterIdsByRecebimentoSection(
+  expenseIds: string[],
+  kindByExpenseId: Map<string, RecebimentoListKind>,
+  section: NotasRecebimentoListSection,
+): string[] {
+  return expenseIds.filter(
+    (id) =>
+      recebimentoListSectionFromKind(kindByExpenseId.get(id) ?? "none") ===
+      section,
+  );
+}
+
+export function filterIdsByRecebimentoTab(
+  expenseIds: string[],
+  kindByExpenseId: Map<string, RecebimentoListKind>,
+  tab: NotasRecebimentoListTab,
+): string[] {
+  return filterIdsByRecebimentoSection(expenseIds, kindByExpenseId, tab);
 }
 
 export function filterIdsByBoleto(
