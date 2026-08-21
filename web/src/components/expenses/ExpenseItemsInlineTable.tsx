@@ -37,7 +37,6 @@ import {
   initialDraftFromItem,
   isExpenseItemDraftDirty,
   saveExpenseItemLinkEdit,
-  stockQuantityForDraft,
   type ExpenseItemLinkEditDraft,
 } from "@/lib/saveExpenseItemLinkEdit";
 import { cn } from "@/lib/utils";
@@ -308,15 +307,7 @@ function ExpenseItemInlineRow({
     () => allowedUnitsForDraft(draft, hubUnit, item.invoice_unit),
     [draft, hubUnit, item.invoice_unit],
   );
-  const stockQtyPreview =
-    draft.mode === "none"
-      ? null
-      : stockQuantityForDraft(
-          draft.quantity,
-          draft.invoiceUnit,
-          hubUnit,
-          draft.conversions,
-        );
+
   const selectValue =
     draft.mode === "create"
       ? CREATE_VALUE

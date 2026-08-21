@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  Banknote,
+  FileText,
   Loader2,
   MessageCircle,
   PackageCheck,
@@ -122,88 +122,91 @@ export function NotasRecebimentoListRow({
       </div>
 
       <div className="hidden min-w-0 flex-wrap items-center gap-1 md:flex">
+        <Badge
+          variant="outline"
+          className={cn(
+            "max-w-full truncate text-[10px] font-normal",
+            recebimento.className,
+          )}
+        >
+          {recebimento.label}
+        </Badge>
+        {pendingOwnerApproval && (
           <Badge
             variant="outline"
-            className={cn("max-w-full truncate text-[10px] font-normal", recebimento.className)}
+            className="gap-0.5 border-amber-600/30 bg-amber-500/10 text-[10px] text-amber-950 dark:text-amber-100"
+            title="Importação pelo WhatsApp — aguardando aprovação"
           >
-            {recebimento.label}
+            <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
+            WhatsApp
           </Badge>
-          {pendingOwnerApproval && (
-            <Badge
-              variant="outline"
-              className="gap-0.5 border-amber-600/30 bg-amber-500/10 text-[10px] text-amber-950 dark:text-amber-100"
-              title="Importação pelo WhatsApp — aguardando aprovação"
-            >
-              <MessageCircle className="h-3 w-3 shrink-0" aria-hidden />
-              WhatsApp
-            </Badge>
-          )}
-          {valueRisk && (
-            <Badge
-              variant="outline"
-              className="border-destructive/35 bg-destructive/10 text-[10px] text-destructive"
-              title={valueRiskTitle}
-            >
-              Valores
-            </Badge>
-          )}
-          {unlinkedProducts > 0 && (
-            <Badge
-              variant="outline"
-              className="border-violet-500/35 bg-violet-500/10 text-[10px] text-violet-900 dark:text-violet-100"
-              title="Linhas sem produto vinculado ao estoque"
-            >
-              Produto
-              {unlinkedProducts > 1 ? ` (${unlinkedProducts})` : ""}
-            </Badge>
-          )}
-        </div>
+        )}
+        {valueRisk && (
+          <Badge
+            variant="outline"
+            className="border-destructive/35 bg-destructive/10 text-[10px] text-destructive"
+            title={valueRiskTitle}
+          >
+            Valores
+          </Badge>
+        )}
+        {unlinkedProducts > 0 && (
+          <Badge
+            variant="outline"
+            className="border-violet-500/35 bg-violet-500/10 text-[10px] text-violet-900 dark:text-violet-100"
+            title="Linhas sem produto vinculado ao estoque"
+          >
+            Produto
+            {unlinkedProducts > 1 ? ` (${unlinkedProducts})` : ""}
+          </Badge>
+        )}
+      </div>
 
-        <p className="hidden whitespace-nowrap pl-8 text-right text-xs tabular-nums text-muted-foreground md:block">
-          {competenceLabel}
-        </p>
+      <p className="hidden whitespace-nowrap pl-8 text-right text-xs tabular-nums text-muted-foreground md:block">
+        {competenceLabel}
+      </p>
 
-        <p className="hidden whitespace-nowrap pl-8 text-right text-sm font-semibold tabular-nums tracking-tight md:block">
-          {totalLabel}
-        </p>
+      <p className="hidden whitespace-nowrap pl-8 text-right text-sm font-semibold tabular-nums tracking-tight md:block">
+        {totalLabel}
+      </p>
 
-        <div
-          className="hidden items-center justify-end gap-0.5 pl-8 md:flex"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+      <div
+        className="hidden items-center justify-end gap-0.5 pl-8 md:flex"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <RowIconButton
+          label={reviewLabel}
+          disabled={ensuringRecebimento}
+          onClick={onOpenReview}
         >
-          <RowIconButton
-            label={reviewLabel}
-            disabled={ensuringRecebimento}
-            onClick={onOpenReview}
-          >
-            {ensuringRecebimento ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PackageCheck className="h-4 w-4" />
-            )}
-          </RowIconButton>
-          {showShareAction && (
-            <RowIconButton
-              label="Compartilhar link"
-              disabled={ensuringRecebimento}
-              onClick={onOpenShare}
-            >
-              <Share2 className="h-4 w-4" />
-            </RowIconButton>
+          {ensuringRecebimento ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <PackageCheck className="h-4 w-4" />
           )}
+        </RowIconButton>
+        {showShareAction && (
           <RowIconButton
-            label={boletoLinked ? "Ver boleto" : "Vincular boleto"}
-            onClick={onBoletoClick}
-            className={
-              boletoLinked
-                ? "text-emerald-700 hover:text-emerald-800 dark:text-emerald-300"
-                : "text-destructive hover:text-destructive"
-            }
+            label="Compartilhar link"
+            disabled={ensuringRecebimento}
+            onClick={onOpenShare}
           >
-            <Banknote className="h-4 w-4" />
+            <Share2 className="h-4 w-4" />
           </RowIconButton>
-        </div>
+        )}
+        <RowIconButton
+          label={boletoLinked ? "Ver boleto" : "Vincular boleto"}
+          onClick={onBoletoClick}
+          className={
+            boletoLinked
+              ? "text-emerald-700 hover:text-emerald-800 dark:text-emerald-300"
+              : "text-destructive hover:text-destructive"
+          }
+        >
+          <FileText className="h-4 w-4" />
+        </RowIconButton>
+      </div>
 
       {/* Mobile: compact stacked card */}
       <div className="flex flex-col gap-2.5 px-3 py-3 md:hidden">
@@ -302,7 +305,7 @@ export function NotasRecebimentoListRow({
             )}
             onClick={onBoletoClick}
           >
-            <Banknote className="mr-1.5 h-3.5 w-3.5" />
+            <FileText className="mr-1.5 h-3.5 w-3.5" />
             Boleto
           </Button>
         </div>
