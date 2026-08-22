@@ -2,19 +2,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import {
   DaySaleItemCard,
   daySaleFromRevenueEntry,
@@ -23,27 +17,20 @@ import {
   type DaySaleListItem,
 } from "@/components/revenue/RevenueDaySaleListCard";
 import type { RevenueCalendarDayListPayload } from "@/components/revenue/RevenueEntriesCalendar";
-import {
-  readSheetInfoView,
-  writeSheetInfoView,
-  type SheetInfoView,
-} from "@/lib/sheetUiPrefs";
+import { useSheetListView } from "@/hooks/useSheetListView";
 import { cn } from "@/lib/utils";
-import { ArrowDownAZ, ArrowUpAZ, LayoutGrid, List, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type KindFilter = "all" | DaySaleKind;
-type SortKey = "name" | "quantity" | "unitPrice" | "gross" | "tax" | "net";
-type ViewMode = SheetInfoView;
-
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "name", label: "Nome" },
-  { value: "quantity", label: "Quantidade" },
-  { value: "unitPrice", label: "Preço unit." },
-  { value: "gross", label: "Total bruto" },
-  { value: "tax", label: "Taxa" },
-  { value: "net", label: "Total líquido" },
-];
+type SortKey =
+  | "kind"
+  | "name"
+  | "quantity"
+  | "unitPrice"
+  | "gross"
+  | "tax"
+  | "net";
 
 function compareItems(
   a: DaySaleListItem,
@@ -52,8 +39,10 @@ function compareItems(
   ascending: boolean,
 ): number {
   let cmp = 0;
-  if (sortKey === "name") {
-    cmp = a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+  if (sortKey === "name" || sortKey === "kind") {
+    cmp = String(a[sortKey]).localeCompare(String(b[sortKey]), "pt-BR", {
+      sensitivity: "base",
+    });
   } else {
     cmp = Number(a[sortKey]) - Number(b[sortKey]);
   }
@@ -76,7 +65,7 @@ export function RevenueDaySalesSheet({
   formatCurrency: (v: number) => string;
   onProductClick?: (revenueEntryId: string) => void;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>(readSheetInfoView);
+  const viewMode = useSheetListView();
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("net");
@@ -84,17 +73,11 @@ export function RevenueDaySalesSheet({
 
   useEffect(() => {
     if (!open) return;
-    setViewMode(readSheetInfoView());
     setKindFilter("all");
     setSearch("");
     setSortKey("net");
     setSortAsc(false);
   }, [open, payload?.dateKey]);
-
-  const changeViewMode = (mode: ViewMode) => {
-    setViewMode(mode);
-    writeSheetInfoView(mode);
-  };
 
   const allItems = useMemo(() => {
     if (!payload) return [] as DaySaleListItem[];
@@ -130,14 +113,20 @@ export function RevenueDaySalesSheet({
   const productCount = allItems.filter((i) => i.kind === "product").length;
   const serviceCount = allItems.filter((i) => i.kind === "service").length;
 
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(key);
+      setSortAsc(key === "name" || key === "kind");
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         maximizable
-        className={cn(
-          "z-50 flex w-full flex-col gap-0 overflow-hidden p-0",
-          viewMode === "table" ? "sm:max-w-4xl" : "sm:max-w-lg",
-        )}
+        className="z-50 flex w-full flex-col gap-0 overflow-hidden p-0"
       >
         <SheetHeader className="shrink-0 space-y-1 border-b px-6 py-4 pr-20 text-left">
           <SheetTitle className="capitalize">Vendas neste dia</SheetTitle>
@@ -213,75 +202,6 @@ export function RevenueDaySalesSheet({
                 className="h-9 pl-8"
               />
             </div>
-            <Select
-              value={sortKey}
-              onValueChange={(v) => setSortKey(v as SortKey)}
-            >
-              <SelectTrigger className="h-9 w-[9.5rem]">
-                <SelectValue placeholder="Ordenar" />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-9 shrink-0"
-              title={sortAsc ? "Crescente" : "Decrescente"}
-              onClick={() => setSortAsc((v) => !v)}
-            >
-              {sortAsc ? (
-                <ArrowUpAZ className="size-4" />
-              ) : (
-                <ArrowDownAZ className="size-4" />
-              )}
-            </Button>
-            <div
-              className="inline-flex rounded-full bg-muted p-1"
-              role="tablist"
-              aria-label="Formato da lista"
-            >
-              <Button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "cards"}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-7 rounded-full px-2.5 shadow-none",
-                  viewMode === "cards"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground",
-                )}
-                onClick={() => changeViewMode("cards")}
-              >
-                <LayoutGrid className="size-3.5" />
-                Cards
-              </Button>
-              <Button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "table"}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-7 rounded-full px-2.5 shadow-none",
-                  viewMode === "table"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground",
-                )}
-                onClick={() => changeViewMode("table")}
-              >
-                <List className="size-3.5" />
-                Tabela
-              </Button>
-            </div>
           </div>
         </div>
 
@@ -347,19 +267,60 @@ export function RevenueDaySalesSheet({
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Tipo</th>
-                    <th className="px-3 py-2 font-medium">Nome</th>
-                    <th className="px-3 py-2 font-medium text-right">Qtd</th>
-                    <th className="px-3 py-2 font-medium text-right">
-                      Preço unit.
-                    </th>
-                    <th className="px-3 py-2 font-medium text-right">
-                      Total bruto
-                    </th>
-                    <th className="px-3 py-2 font-medium text-right">Taxa</th>
-                    <th className="px-3 py-2 font-medium text-right">
-                      Total líquido
-                    </th>
+                    <SortableTableHead
+                      label="Tipo"
+                      column="kind"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                    />
+                    <SortableTableHead
+                      label="Nome"
+                      column="name"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                    />
+                    <SortableTableHead
+                      label="Qtd"
+                      column="quantity"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTableHead
+                      label="Preço unit."
+                      column="unitPrice"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTableHead
+                      label="Total bruto"
+                      column="gross"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTableHead
+                      label="Taxa"
+                      column="tax"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                    <SortableTableHead
+                      label="Total líquido"
+                      column="net"
+                      sortKey={sortKey}
+                      sortAsc={sortAsc}
+                      onSort={handleSort}
+                      align="right"
+                    />
                   </tr>
                 </thead>
                 <tbody>

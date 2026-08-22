@@ -2,7 +2,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SearchSelect } from "@/components/ui/search-select";
 import {
   Select,
   SelectContent,
@@ -10,42 +9,73 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
+import { orderedYmdRange } from "@/lib/monthYmdRange";
+import { categoryGroupLabel } from "@/lib/vendasRealizadasResumo";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
-import type { FluxoBoletoRow } from "@/types/expenseSeries";
+import type { RevenueEntry } from "@/types/revenue";
 import {
   serviceDailySaleDisplayAmount,
   serviceDailySaleTitle,
   type ServiceDailySaleCalendarRow,
 } from "@/types/serviceDailySale";
-import { ArrowDownAZ, ArrowUpDown, FilterX } from "lucide-react";
-import { useMemo, useState } from "react";
+import { FilterX } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 export type VendasListKindFilter = "all" | "product" | "service";
-export type VendasListStatusFilter = "all" | "pending" | "paid";
-export type VendasListSort =
-  | "date_desc"
-  | "date_asc"
-  | "amount_desc"
-  | "amount_asc"
-  | "description_asc";
+export type VendasListGroupMode = "product" | "product_day";
+
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+type TablePageSize = (typeof PAGE_SIZE_OPTIONS)[number];
+
+type SortKey =
+  | "date"
+  | "description"
+  | "kind"
+  | "category"
+  | "quantity"
+  | "amount";
 
 type UnifiedRow = {
   key: string;
   kind: "product" | "service";
+  groupId: string;
   dateYmd: string;
+  dateYmdEnd: string;
   description: string;
   categoryLabel: string;
   categoryId: string | null;
-  status: "pending" | "paid" | "sync";
   amount: number;
   quantity: number | null;
-  boleto?: FluxoBoletoRow;
+  revenueEntryId?: string;
   service?: ServiceDailySaleCalendarRow;
 };
+
+function formatQty(q: number | null): string {
+  if (q == null) return "—";
+  return q.toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+}
+
+function parseQuantity(raw: number | null | undefined): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function revenueGroupId(entry: RevenueEntry): string {
+  if (entry.entry_mode === "product_sale" && entry.product_id) {
+    return `product:${entry.product_id}`;
+  }
+  if (entry.entry_mode === "recipe_sale" && entry.recipe_id) {
+    return `recipe:${entry.recipe_id}`;
+  }
+  return `manual:${entry.title.trim().toLowerCase() || entry.id}`;
+}
 
 function formatDateBr(ymd: string): string {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
@@ -53,104 +83,167 @@ function formatDateBr(ymd: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("pt-BR");
 }
 
-function statusLabel(status: UnifiedRow["status"]): string {
-  if (status === "paid") return "Recebido";
-  if (status === "pending") return "Pendente";
-  return "EPOC";
+function formatDateCell(row: UnifiedRow): string {
+  if (row.dateYmd === row.dateYmdEnd) return formatDateBr(row.dateYmd);
+  return `${formatDateBr(row.dateYmd)} – ${formatDateBr(row.dateYmdEnd)}`;
+}
+
+function productGroupKey(row: UnifiedRow): string {
+  return row.groupId;
+}
+
+function groupVendasRows(
+  rows: UnifiedRow[],
+  mode: VendasListGroupMode,
+): UnifiedRow[] {
+  const buckets = new Map<string, UnifiedRow[]>();
+  for (const row of rows) {
+    const key =
+      mode === "product_day"
+        ? `${productGroupKey(row)}:${row.dateYmd}`
+        : productGroupKey(row);
+    const list = buckets.get(key);
+    if (list) list.push(row);
+    else buckets.set(key, [row]);
+  }
+
+  const grouped: UnifiedRow[] = [];
+  for (const [key, list] of buckets) {
+    const first = list[0];
+    if (list.length === 1) {
+      grouped.push({ ...first, key });
+      continue;
+    }
+    const dates = list.map((r) => r.dateYmd).sort();
+    const qtyParts = list
+      .map((r) => r.quantity)
+      .filter((q): q is number => q != null);
+    grouped.push({
+      ...first,
+      key,
+      dateYmd: dates[0],
+      dateYmdEnd: dates[dates.length - 1],
+      amount: list.reduce((s, r) => s + r.amount, 0),
+      quantity: qtyParts.length > 0 ? qtyParts.reduce((s, q) => s + q, 0) : null,
+      revenueEntryId: list.length === 1 ? first.revenueEntryId : undefined,
+      service: list.length === 1 ? first.service : undefined,
+    });
+  }
+  return grouped;
+}
+
+function compareRows(a: UnifiedRow, b: UnifiedRow, sortKey: SortKey): number {
+  switch (sortKey) {
+    case "date":
+      return (
+        a.dateYmdEnd.localeCompare(b.dateYmdEnd) ||
+        a.dateYmd.localeCompare(b.dateYmd) ||
+        a.description.localeCompare(b.description, "pt-BR")
+      );
+    case "description":
+      return a.description.localeCompare(b.description, "pt-BR");
+    case "kind":
+      return a.kind.localeCompare(b.kind);
+    case "category":
+      return a.categoryLabel.localeCompare(b.categoryLabel, "pt-BR");
+    case "quantity":
+      return (a.quantity ?? -1) - (b.quantity ?? -1);
+    case "amount":
+      return a.amount - b.amount;
+    default:
+      return 0;
+  }
 }
 
 type Props = {
-  boletos: FluxoBoletoRow[];
+  revenueEntries: RevenueEntry[];
   serviceSales: ServiceDailySaleCalendarRow[];
   categories: CompanyCategory[];
   categoriesById: Map<string, CompanyCategory>;
   loading: boolean;
   emptyMessage: string;
   formatCurrency: (v: number) => string;
-  pageSize: number;
-  onSelectBoleto: (b: FluxoBoletoRow) => void;
+  onSelectRevenueEntry: (id: string) => void;
+  dateFrom: string;
+  dateTo: string;
+  monthBounds: { min: string; max: string };
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
 };
 
 export function VendasRealizadasListTable({
-  boletos,
+  revenueEntries,
   serviceSales,
-  categories,
   categoriesById,
   loading,
   emptyMessage,
   formatCurrency,
-  pageSize,
-  onSelectBoleto,
+  onSelectRevenueEntry,
+  dateFrom,
+  dateTo,
+  monthBounds,
+  onDateFromChange,
+  onDateToChange,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [kind, setKind] = useState<VendasListKindFilter>("all");
-  const [status, setStatus] = useState<VendasListStatusFilter>("all");
-  const [categoryId, setCategoryId] = useState<string>("all");
-  const [sort, setSort] = useState<VendasListSort>("date_desc");
+  const [groupMode, setGroupMode] = useState<VendasListGroupMode>("product_day");
+  const [sortKey, setSortKey] = useState<SortKey>("date");
+  const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<TablePageSize>(20);
 
-  const revenueCategories = useMemo(
-    () =>
-      categories
-        .filter((c) => c.natureza === "RECEITA")
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
-    [categories],
-  );
+  useEffect(() => {
+    setPage(1);
+  }, [dateFrom, dateTo]);
 
   const allRows = useMemo((): UnifiedRow[] => {
-    const productRows: UnifiedRow[] = boletos.map((b) => {
-      const amount =
-        b.status === "paid" && b.paid_amount != null
-          ? Number(b.paid_amount)
-          : Number(b.amount);
+    const productRows: UnifiedRow[] = revenueEntries.map((e) => {
+      const dateYmd = e.entry_date.slice(0, 10);
       return {
-        key: `b-${b.id}`,
+        key: `r-${e.id}`,
         kind: "product" as const,
-        dateYmd: b.due_date.slice(0, 10),
-        description: formatBoletoFluxoDescription(b),
-        categoryLabel: formatBoletoCategoryLabel(b, categoriesById),
-        categoryId: b.company_category_id ?? null,
-        status: b.status === "paid" ? ("paid" as const) : ("pending" as const),
-        amount,
-        quantity: null,
-        boleto: b,
+        groupId: revenueGroupId(e),
+        dateYmd,
+        dateYmdEnd: dateYmd,
+        description: e.title?.trim() || "Produto",
+        categoryLabel: categoryGroupLabel(e.subcategory_id, categoriesById),
+        categoryId: e.subcategory_id ?? e.category_id ?? null,
+        amount: Number(e.net_amount) || 0,
+        quantity: parseQuantity(e.quantity),
+        revenueEntryId: e.id,
       };
     });
 
-    const serviceRows: UnifiedRow[] = serviceSales.map((s) => ({
-      key: `s-${s.id}`,
-      kind: "service" as const,
-      dateYmd: s.sale_date.slice(0, 10),
-      description: serviceDailySaleTitle(s),
-      categoryLabel: "Serviços",
-      categoryId: null,
-      status: "sync" as const,
-      amount: serviceDailySaleDisplayAmount(s),
-      quantity: Number(s.quantity) || 0,
-      service: s,
-    }));
+    const serviceRows: UnifiedRow[] = serviceSales.map((s) => {
+      const dateYmd = s.sale_date.slice(0, 10);
+      return {
+        key: `s-${s.id}`,
+        kind: "service" as const,
+        groupId: `s:${s.service?.id ?? s.id}`,
+        dateYmd,
+        dateYmdEnd: dateYmd,
+        description: serviceDailySaleTitle(s),
+        categoryLabel: "Serviços",
+        categoryId: null,
+        amount: serviceDailySaleDisplayAmount(s),
+        quantity: parseQuantity(s.quantity),
+        service: s,
+      };
+    });
 
     return [...productRows, ...serviceRows];
-  }, [boletos, serviceSales, categoriesById]);
+  }, [revenueEntries, serviceSales, categoriesById]);
 
   const filteredSorted = useMemo(() => {
     const term = search.trim().toLowerCase();
-    let rows = allRows.filter((r) => {
+    const fromDate = dateFrom.trim() || monthBounds.min;
+    const toDate = dateTo.trim() || monthBounds.max;
+    const { gte, lte } = orderedYmdRange(fromDate, toDate);
+    const filtered = allRows.filter((r) => {
       if (kind !== "all" && r.kind !== kind) return false;
-      if (status !== "all") {
-        if (r.kind === "service") return false;
-        if (r.status !== status) return false;
-      }
-      if (categoryId === "services") {
-        if (r.kind !== "service") return false;
-      } else if (categoryId !== "all") {
-        if (r.categoryId !== categoryId) return false;
-      }
-      if (dateFrom && r.dateYmd < dateFrom) return false;
-      if (dateTo && r.dateYmd > dateTo) return false;
+      if (gte && r.dateYmd < gte) return false;
+      if (lte && r.dateYmd > lte) return false;
       if (term) {
         const hay = `${r.description} ${r.categoryLabel}`.toLowerCase();
         if (!hay.includes(term)) return false;
@@ -158,31 +251,13 @@ export function VendasRealizadasListTable({
       return true;
     });
 
-    rows = rows.slice().sort((a, b) => {
-      switch (sort) {
-        case "date_asc":
-          return (
-            a.dateYmd.localeCompare(b.dateYmd) ||
-            a.description.localeCompare(b.description, "pt-BR")
-          );
-        case "date_desc":
-          return (
-            b.dateYmd.localeCompare(a.dateYmd) ||
-            a.description.localeCompare(b.description, "pt-BR")
-          );
-        case "amount_asc":
-          return a.amount - b.amount;
-        case "amount_desc":
-          return b.amount - a.amount;
-        case "description_asc":
-          return a.description.localeCompare(b.description, "pt-BR");
-        default:
-          return 0;
-      }
+    const grouped = groupVendasRows(filtered, groupMode);
+    return grouped.slice().sort((a, b) => {
+      const cmp = compareRows(a, b, sortKey);
+      if (cmp !== 0) return sortAsc ? cmp : -cmp;
+      return a.description.localeCompare(b.description, "pt-BR");
     });
-
-    return rows;
-  }, [allRows, search, kind, status, categoryId, dateFrom, dateTo, sort]);
+  }, [allRows, search, kind, dateFrom, dateTo, monthBounds, groupMode, sortKey, sortAsc]);
 
   const totalAmount = useMemo(
     () => filteredSorted.reduce((s, r) => s + r.amount, 0),
@@ -196,30 +271,39 @@ export function VendasRealizadasListTable({
     safePage * pageSize,
   );
 
+  const dateRangeIsCustom =
+    dateFrom !== monthBounds.min || dateTo !== monthBounds.max;
   const hasActiveFilters =
     search.trim() !== "" ||
-    dateFrom !== "" ||
-    dateTo !== "" ||
+    dateRangeIsCustom ||
     kind !== "all" ||
-    status !== "all" ||
-    categoryId !== "all" ||
-    sort !== "date_desc";
+    groupMode !== "product_day";
 
   const clearFilters = () => {
     setSearch("");
-    setDateFrom("");
-    setDateTo("");
+    onDateFromChange(monthBounds.min);
+    onDateToChange(monthBounds.max);
     setKind("all");
-    setStatus("all");
-    setCategoryId("all");
-    setSort("date_desc");
+    setGroupMode("product_day");
+    setSortKey("date");
+    setSortAsc(false);
+    setPage(1);
+  };
+
+  const handleSort = (column: SortKey) => {
+    if (sortKey === column) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(column);
+      setSortAsc(column === "description" || column === "category");
+    }
     setPage(1);
   };
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[12rem] flex-1 space-y-1.5">
           <Label htmlFor="vendas-list-search">Busca</Label>
           <Input
             id="vendas-list-search"
@@ -232,27 +316,35 @@ export function VendasRealizadasListTable({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="vendas-list-from">De</Label>
+          <Label htmlFor="vendas-list-from">Data de início</Label>
           <Input
             id="vendas-list-from"
             type="date"
+            aria-label="Data de início"
+            title="Data de início"
             value={dateFrom}
+            max={dateTo || undefined}
             onChange={(e) => {
-              setDateFrom(e.target.value);
+              onDateFromChange(e.target.value || monthBounds.min);
               setPage(1);
             }}
+            className="w-auto"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="vendas-list-to">Até</Label>
+          <Label htmlFor="vendas-list-to">Data de fim</Label>
           <Input
             id="vendas-list-to"
             type="date"
+            aria-label="Data de fim"
+            title="Data de fim"
             value={dateTo}
+            min={dateFrom || undefined}
             onChange={(e) => {
-              setDateTo(e.target.value);
+              onDateToChange(e.target.value || monthBounds.max);
               setPage(1);
             }}
+            className="w-auto"
           />
         </div>
         <div className="space-y-1.5">
@@ -264,7 +356,7 @@ export function VendasRealizadasListTable({
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-[9.5rem]">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
@@ -275,93 +367,39 @@ export function VendasRealizadasListTable({
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>Status</Label>
+          <Label>Agrupamento</Label>
           <Select
-            value={status}
+            value={groupMode}
             onValueChange={(v) => {
-              setStatus(v as VendasListStatusFilter);
+              setGroupMode(v as VendasListGroupMode);
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Status" />
+            <SelectTrigger className="w-[13rem]">
+              <SelectValue placeholder="Agrupamento" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="pending">Pendente</SelectItem>
-              <SelectItem value="paid">Recebido</SelectItem>
+              <SelectItem value="product">Por período</SelectItem>
+              <SelectItem value="product_day">Diário</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
-          <Label>Categoria</Label>
-          <SearchSelect
-            value={categoryId}
-            onValueChange={(v) => {
-              setCategoryId(v);
-              setPage(1);
-            }}
-            options={revenueCategories.map((c) => ({
-              value: c.id,
-              label: c.name,
-            }))}
-            leadingOptions={[
-              { value: "all", label: "Todas" },
-              { value: "services", label: "Serviços (EPOC)" },
-            ]}
-            placeholder="Categoria"
-            searchPlaceholder="Buscar categoria…"
-            emptyMessage="Nenhuma categoria encontrada."
-          />
-        </div>
-        <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
-          <Label>Ordenação</Label>
-          <Select
-            value={sort}
-            onValueChange={(v) => {
-              setSort(v as VendasListSort);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Ordenar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="date_desc">
-                <span className="inline-flex items-center gap-1.5">
-                  <ArrowUpDown className="size-3.5" /> Data (mais recente)
-                </span>
-              </SelectItem>
-              <SelectItem value="date_asc">Data (mais antiga)</SelectItem>
-              <SelectItem value="amount_desc">Valor (maior)</SelectItem>
-              <SelectItem value="amount_asc">Valor (menor)</SelectItem>
-              <SelectItem value="description_asc">
-                <span className="inline-flex items-center gap-1.5">
-                  <ArrowDownAZ className="size-3.5" /> Descrição A–Z
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-end sm:col-span-2 xl:col-span-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            disabled={!hasActiveFilters}
-            onClick={clearFilters}
-          >
-            <FilterX className="mr-2 size-4" />
-            Limpar filtros
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!hasActiveFilters}
+          onClick={clearFilters}
+        >
+          <FilterX className="mr-2 size-4" />
+          Limpar
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <p>
           {loading
             ? "A carregar…"
-            : `${filteredSorted.length} registo(s)${
+            : `${filteredSorted.length} registro(s)${
                 hasActiveFilters ? " (filtrados)" : ""
               }`}
         </p>
@@ -378,7 +416,9 @@ export function VendasRealizadasListTable({
         </p>
       ) : filteredSorted.length === 0 ? (
         <p className="text-muted-foreground py-8 text-center text-sm">
-          {allRows.length === 0 ? emptyMessage : "Nenhum registo com estes filtros."}
+          {allRows.length === 0
+            ? emptyMessage
+            : "Nenhum registro com estes filtros."}
         </p>
       ) : (
         <>
@@ -386,24 +426,61 @@ export function VendasRealizadasListTable({
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="px-3 py-2.5 font-medium">Data</th>
-                  <th className="px-3 py-2.5 font-medium">Descrição</th>
-                  <th className="px-3 py-2.5 font-medium">Tipo</th>
-                  <th className="px-3 py-2.5 font-medium">Categoria</th>
-                  <th className="px-3 py-2.5 font-medium">Status</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Qtde</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Valor</th>
+                  <SortableTableHead
+                    label="Data"
+                    column="date"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                  />
+                  <SortableTableHead
+                    label="Descrição"
+                    column="description"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                  />
+                  <SortableTableHead
+                    label="Tipo"
+                    column="kind"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                  />
+                  <SortableTableHead
+                    label="Categoria"
+                    column="category"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                  />
+                  <SortableTableHead
+                    label="Qtde"
+                    column="quantity"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                    align="right"
+                  />
+                  <SortableTableHead
+                    label="Valor"
+                    column="amount"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={handleSort}
+                    align="right"
+                  />
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((r) => {
-                  const clickable = r.kind === "product" && r.boleto;
+                  const clickable = Boolean(r.revenueEntryId);
                   const rowClass = cn(
                     "border-b last:border-0 transition-colors",
                     clickable && "cursor-pointer hover:bg-muted/40",
                   );
                   const onActivate = () => {
-                    if (r.boleto) onSelectBoleto(r.boleto);
+                    if (r.revenueEntryId) onSelectRevenueEntry(r.revenueEntryId);
                   };
                   return (
                     <tr
@@ -424,7 +501,7 @@ export function VendasRealizadasListTable({
                       role={clickable ? "button" : undefined}
                     >
                       <td className="px-3 py-2.5 whitespace-nowrap tabular-nums text-muted-foreground">
-                        {formatDateBr(r.dateYmd)}
+                        {formatDateCell(r)}
                       </td>
                       <td className="px-3 py-2.5 font-medium">
                         <span className="line-clamp-2">{r.description}</span>
@@ -444,25 +521,8 @@ export function VendasRealizadasListTable({
                       <td className="px-3 py-2.5 text-muted-foreground">
                         {r.categoryLabel}
                       </td>
-                      <td className="px-3 py-2.5">
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            r.status === "paid" &&
-                              "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-                            r.status === "pending" &&
-                              "bg-amber-500/15 text-amber-800 dark:text-amber-200",
-                            r.status === "sync" &&
-                              "bg-sky-500/15 text-sky-800 dark:text-sky-200",
-                          )}
-                        >
-                          {statusLabel(r.status)}
-                        </Badge>
-                      </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                        {r.quantity != null
-                          ? r.quantity.toLocaleString("pt-BR")
-                          : "—"}
+                        {formatQty(r.quantity)}
                       </td>
                       <td
                         className={cn(
@@ -497,7 +557,35 @@ export function VendasRealizadasListTable({
                 </>
               ) : null}
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="vendas-list-page-size" className="sr-only">
+                  Itens por página
+                </Label>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(Number(v) as TablePageSize);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger
+                    id="vendas-list-page-size"
+                    size="sm"
+                    className="w-[8.5rem]"
+                    aria-label="Itens por página"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size} por página
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 variant="outline"

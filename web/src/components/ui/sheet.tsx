@@ -124,18 +124,20 @@ function SheetContent({
         className={cn(
           "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition-[max-width,width] ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500 px-4",
           side === "right" &&
-            "inset-y-0 right-0 h-full min-h-0 w-3/4 overflow-y-auto border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-lg",
+            "inset-y-0 right-0 h-full min-h-0 w-full overflow-y-auto border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
           side === "left" &&
-            "inset-y-0 left-0 h-full min-h-0 w-3/4 overflow-y-auto border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+            "inset-y-0 left-0 h-full min-h-0 w-full overflow-y-auto border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
           side === "top" &&
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className,
+          (side === "right" || side === "left") &&
+            "md:w-[70vw] md:!max-w-[70vw]",
           maximizable &&
             maximized &&
             (side === "right" || side === "left") &&
-            "w-full sm:!max-w-[min(100vw-1rem,90rem)]"
+            "md:!w-[min(100vw-1rem,90rem)] md:!max-w-[min(100vw-1rem,90rem)]"
         )}
         onOpenAutoFocus={(event) => {
           setMaximized(readSheetMaximized())

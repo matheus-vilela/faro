@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DreClassifySheet } from "@/components/dre/DreClassifySheet";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
+import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
@@ -80,7 +81,46 @@ export function DreSemCategoriaTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const allIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  type DreSortKey =
+    | "due"
+    | "description"
+    | "flow"
+    | "origin"
+    | "status"
+    | "amount"
+    | "legacy";
+
+  const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
+    DreSemCategoriaBoleto,
+    DreSortKey
+  >(rows, "due", (a, b, key) => {
+    switch (key) {
+      case "due":
+        return a.due_date.localeCompare(b.due_date);
+      case "description":
+        return formatBoletoFluxoDescription(a).localeCompare(
+          formatBoletoFluxoDescription(b),
+          "pt-BR",
+        );
+      case "flow":
+        return Number(isBoletoPayable(a)) - Number(isBoletoPayable(b));
+      case "origin":
+        return origemLabel(a).localeCompare(origemLabel(b), "pt-BR");
+      case "status":
+        return a.status.localeCompare(b.status);
+      case "amount":
+        return Number(a.amount) - Number(b.amount);
+      case "legacy":
+        return formatBoletoCategoryLabel(a, categoriesById).localeCompare(
+          formatBoletoCategoryLabel(b, categoriesById),
+          "pt-BR",
+        );
+      default:
+        return 0;
+    }
+  });
+
+  const allIds = useMemo(() => sorted.map((r) => r.id), [sorted]);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   const toggleAll = (checked: boolean) => {
@@ -149,18 +189,68 @@ export function DreSemCategoriaTable({
                   aria-label="Selecionar todos"
                 />
               </th>
-              <th className="px-4 py-3">Vencimento</th>
-              <th className="px-4 py-3">Descrição</th>
-              <th className="px-4 py-3">Fluxo</th>
-              <th className="px-4 py-3">Origem</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Valor</th>
-              <th className="px-4 py-3">Legado</th>
+              <SortableTableHead
+                label="Vencimento"
+                column="due"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Descrição"
+                column="description"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Fluxo"
+                column="flow"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Origem"
+                column="origin"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Status"
+                column="status"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Valor"
+                column="amount"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                align="right"
+                className="px-4 py-3"
+              />
+              <SortableTableHead
+                label="Legado"
+                column="legacy"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3"
+              />
               <th className="px-4 py-3 w-[9.5rem] whitespace-nowrap" />
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => {
+            {sorted.map((b) => {
               const link = actionLink(b);
               const legacyLabel =
                 b.category && !b.company_category_id

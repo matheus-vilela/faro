@@ -919,7 +919,7 @@ export function ExpenseDetailSheet({
       <Sheet open={!!expenseId} onOpenChange={handleSheetOpenChange}>
         <SheetContent
           className={cn(
-            "w-full overflow-y-auto sm:!max-w-[min(100vw-1rem,90rem)]",
+            "w-full overflow-y-auto",
             elevated && "z-[70]",
           )}
           overlayClassName={elevated ? "z-[70]" : undefined}

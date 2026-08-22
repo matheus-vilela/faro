@@ -1,17 +1,11 @@
+import { type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -20,17 +14,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   formatIsoDateBr,
   formatMoneyPtBr,
   formatNumberPtBr,
 } from "@/lib/formatMoneyPtBr";
+import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 import { nestedRelation } from "@/types/acquirer";
-import { ArrowDownAZ, ArrowUpAZ, Receipt } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { FilterX, Receipt } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -94,15 +89,6 @@ type SortKey =
   | "ticket_medio"
   | "total";
 
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "faturamento_date", label: "Dia" },
-  { value: "produtos", label: "Total produtos" },
-  { value: "servicos", label: "Total serviços" },
-  { value: "quantity", label: "Qtd. transações" },
-  { value: "ticket_medio", label: "Ticket médio" },
-  { value: "total", label: "Total" },
-];
-
 function asRecord(v: unknown): Record<string, unknown> | null {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     return v as Record<string, unknown>;
@@ -126,60 +112,24 @@ function moneyFromMaybePtBr(raw: string | number | null | undefined): string {
   return raw;
 }
 
-function SortableTh({
-  label,
-  column,
-  sortKey,
-  sortAsc,
-  onSort,
-  align = "left",
-}: {
-  label: string;
-  column: SortKey;
-  sortKey: SortKey;
-  sortAsc: boolean;
-  onSort: (key: SortKey) => void;
-  align?: "left" | "right";
-}) {
-  const active = sortKey === column;
-  return (
-    <th
-      className={cn(
-        "px-3 py-2.5 font-medium",
-        align === "right" && "text-right",
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
-          align === "right" && "flex-row-reverse",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        {label}
-        {active ? (
-          sortAsc ? (
-            <ArrowUpAZ className="size-3.5 opacity-70" />
-          ) : (
-            <ArrowDownAZ className="size-3.5 opacity-70" />
-          )
-        ) : null}
-      </button>
-    </th>
-  );
-}
-
 export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
 
+  const now = new Date();
+  const [period, setPeriod] = useState<MonthYear>({
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  });
+  const [dateFrom, setDateFrom] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).min,
+  );
+  const [dateTo, setDateTo] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).max,
+  );
   const [rows, setRows] = useState<FaturamentoRow[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [minTotal, setMinTotal] = useState("");
   const [maxTotal, setMaxTotal] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("faturamento_date");
@@ -189,6 +139,31 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
   const [detail, setDetail] = useState<FaturamentoRow | null>(null);
   const [payments, setPayments] = useState<PaymentLine[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const monthBounds = useMemo(
+    () => monthYmdBounds(period.month, period.year),
+    [period.month, period.year],
+  );
+  const dateRangeIsCustom =
+    dateFrom !== monthBounds.min || dateTo !== monthBounds.max;
+  const hasFilters =
+    dateRangeIsCustom || minTotal.trim() !== "" || maxTotal.trim() !== "";
+
+  const applyPeriod = (next: MonthYear) => {
+    const bounds = monthYmdBounds(next.month, next.year);
+    setPeriod(next);
+    setDateFrom(bounds.min);
+    setDateTo(bounds.max);
+    setPage(1);
+  };
+
+  const clearFilters = () => {
+    setDateFrom(monthBounds.min);
+    setDateTo(monthBounds.max);
+    setMinTotal("");
+    setMaxTotal("");
+    setPage(1);
+  };
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -209,6 +184,9 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
     setLoading(true);
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
+    const fromDate = dateFrom.trim() || monthBounds.min;
+    const toDate = dateTo.trim() || monthBounds.max;
+    const { gte, lte } = orderedYmdRange(fromDate, toDate);
     let q = supabase
       .from("epoc_faturamento_daily")
       .select(
@@ -216,16 +194,15 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
         { count: "exact" },
       )
       .eq("company_id", companyId)
+      .gte("faturamento_date", gte)
+      .lte("faturamento_date", lte)
       .order(sortKey, { ascending: sortAsc })
       .range(from, to);
-    if (dateFrom) q = q.gte("faturamento_date", dateFrom);
-    if (dateTo) q = q.lte("faturamento_date", dateTo);
     const minN = parseFloat(minTotal.replace(",", "."));
     const maxN = parseFloat(maxTotal.replace(",", "."));
     if (Number.isFinite(minN)) q = q.gte("total", minN);
     if (Number.isFinite(maxN)) q = q.lte("total", maxN);
     const { data, error, count: c } = await q;
-    console.log("LOAD => ", data);
     setLoading(false);
     if (error) {
       toast.error(error.message);
@@ -233,19 +210,21 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
     }
     setRows((data ?? []) as FaturamentoRow[]);
     setCount(c ?? 0);
-  }, [companyId, page, dateFrom, dateTo, minTotal, maxTotal, sortKey, sortAsc]);
+  }, [
+    companyId,
+    page,
+    dateFrom,
+    dateTo,
+    monthBounds,
+    minTotal,
+    maxTotal,
+    sortKey,
+    sortAsc,
+  ]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [dateFrom, dateTo, minTotal, maxTotal]);
-
-  useEffect(() => {
-    console.log(rows);
-  }, [rows]);
 
   const openDetail = async (row: FaturamentoRow) => {
     setDetail(row);
@@ -273,114 +252,86 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
   const servicos = asTabela5Grupo(ps?.servicos);
   const fiscal = asFiscalLines(detail?.fiscal_json);
 
-  const hasFilters = !!(dateFrom || dateTo || minTotal || maxTotal);
-
   const body = (
     <>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="fat-from">De</Label>
-          <Input
-            id="fat-from"
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="w-auto"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="fat-to">Até</Label>
-          <Input
-            id="fat-to"
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="w-auto"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="fat-min-total">Total mín.</Label>
-          <Input
-            id="fat-min-total"
-            inputMode="decimal"
-            placeholder="0,00"
-            value={minTotal}
-            onChange={(e) => setMinTotal(e.target.value)}
-            className="w-28"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="fat-max-total">Total máx.</Label>
-          <Input
-            id="fat-max-total"
-            inputMode="decimal"
-            placeholder="0,00"
-            value={maxTotal}
-            onChange={(e) => setMaxTotal(e.target.value)}
-            className="w-28"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Ordenar por</Label>
-          <div className="flex items-center gap-1.5">
-            <Select
-              value={sortKey}
-              onValueChange={(v) => {
-                setSortKey(v as SortKey);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 w-[10.5rem]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-9 shrink-0"
-              title={sortAsc ? "Crescente" : "Decrescente"}
-              onClick={() => {
-                setSortAsc((v) => !v);
-                setPage(1);
-              }}
-            >
-              {sortAsc ? (
-                <ArrowUpAZ className="size-4" />
-              ) : (
-                <ArrowDownAZ className="size-4" />
-              )}
-            </Button>
-          </div>
-        </div>
-        {hasFilters ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setDateFrom("");
-              setDateTo("");
-              setMinTotal("");
-              setMaxTotal("");
-            }}
-          >
-            Limpar filtros
-          </Button>
-        ) : null}
-        <Button type="button" variant="outline" size="sm" asChild>
+      <div className="flex flex-wrap items-center gap-2">
+        <ReferencePeriodCard
+          value={period}
+          onChange={applyPeriod}
+          description="Mês da lista"
+          className="rounded-lg p-1.5"
+          compact
+          monthSelectorClassName="shrink-0 [&_button]:h-8 [&_button]:w-8 [&_span]:min-w-36 [&_span]:text-sm [&_span]:font-semibold"
+        />
+        <Input
+          id="fat-from"
+          type="date"
+          aria-label="Data de início"
+          title="Data de início"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e) => {
+            setDateFrom(e.target.value || monthBounds.min);
+            setPage(1);
+          }}
+          className="h-8 w-[9.5rem]"
+        />
+        <Input
+          id="fat-to"
+          type="date"
+          aria-label="Data de fim"
+          title="Data de fim"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e) => {
+            setDateTo(e.target.value || monthBounds.max);
+            setPage(1);
+          }}
+          className="h-8 w-[9.5rem]"
+        />
+        <Input
+          id="fat-min-total"
+          inputMode="decimal"
+          aria-label="Total mínimo"
+          title="Total mínimo"
+          placeholder="Total mín."
+          value={minTotal}
+          onChange={(e) => {
+            setMinTotal(e.target.value);
+            setPage(1);
+          }}
+          className="h-8 w-28"
+        />
+        <Input
+          id="fat-max-total"
+          inputMode="decimal"
+          aria-label="Total máximo"
+          title="Total máximo"
+          placeholder="Total máx."
+          value={maxTotal}
+          onChange={(e) => {
+            setMaxTotal(e.target.value);
+            setPage(1);
+          }}
+          className="h-8 w-28"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8"
+          disabled={!hasFilters}
+          onClick={clearFilters}
+        >
+          <FilterX className="mr-1 size-3.5" />
+          Limpar
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-8" asChild>
           <Link to="/app/configuracoes/formas-de-pagamento">
             Formas de pagamento
           </Link>
         </Button>
-        <Button type="button" variant="outline" size="sm" asChild>
+        <Button type="button" variant="outline" size="sm" className="h-8" asChild>
           <Link to="/app/configuracoes/adquirentes">Adquirentes</Link>
         </Button>
       </div>
@@ -398,14 +349,14 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
               <table className="w-full min-w-[780px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50 text-left text-xs">
-                    <SortableTh
+                    <SortableTableHead
                       label="Dia"
                       column="faturamento_date"
                       sortKey={sortKey}
                       sortAsc={sortAsc}
                       onSort={handleSort}
                     />
-                    <SortableTh
+                    <SortableTableHead
                       label="Total produtos"
                       column="produtos"
                       sortKey={sortKey}
@@ -413,7 +364,7 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
                       onSort={handleSort}
                       align="right"
                     />
-                    <SortableTh
+                    <SortableTableHead
                       label="Total serviços"
                       column="servicos"
                       sortKey={sortKey}
@@ -421,7 +372,7 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
                       onSort={handleSort}
                       align="right"
                     />
-                    <SortableTh
+                    <SortableTableHead
                       label="Qtd. transações"
                       column="quantity"
                       sortKey={sortKey}
@@ -429,7 +380,7 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
                       onSort={handleSort}
                       align="right"
                     />
-                    <SortableTh
+                    <SortableTableHead
                       label="Ticket médio"
                       column="ticket_medio"
                       sortKey={sortKey}
@@ -437,7 +388,7 @@ export function FaturamentoEpoc({ embedded = false }: { embedded?: boolean }) {
                       onSort={handleSort}
                       align="right"
                     />
-                    <SortableTh
+                    <SortableTableHead
                       label="Total"
                       column="total"
                       sortKey={sortKey}

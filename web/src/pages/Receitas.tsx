@@ -1043,7 +1043,7 @@ export function Receitas() {
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" asChild>
-              <Link to="/app/vendas-realizadas?tab=faturamento">
+              <Link to="/app/vendas-realizadas/faturamento">
                 Ver faturamento
               </Link>
             </Button>

@@ -1,0 +1,10 @@
+---
+description: Tabelas ordenáveis e sheets em 70% no desktop
+alwaysApply: true
+---
+
+# Tabelas e sheets
+
+- Toda tabela de dados deve ter cabeçalhos clicáveis para ordenar asc/desc. Use `SortableTableHead` (`@/components/ui/sortable-table-head`) e, em listas em memória, `useClientTableSort`.
+- Sheets laterais abrem em tela cheia no celular e com **70% da largura** a partir de `md`. Não force `sm:max-w-*` para estreitar o sheet — a largura padrão do `SheetContent` já aplica isso.
+- Se um sheet tiver visualização tabela e card: **cards só no celular**, **tabela nos demais**. Use `useSheetListView`. Não mostre o toggle de formato.

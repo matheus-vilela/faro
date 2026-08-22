@@ -32,7 +32,7 @@ import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSl
 import { ContasAPagar } from "@/pages/ContasAPagar";
 import { ConciliacaoBancaria } from "@/pages/ConciliacaoBancaria";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
-import { VendasRealizadasFluxo } from "@/pages/VendasRealizadasFluxo";
+import { VendasRealizadasCalendario, VendasRealizadasFaturamento, VendasRealizadasFluxo, VendasRealizadasIndex, VendasRealizadasMargens } from "@/pages/VendasRealizadasFluxo";
 import { ConfiguracoesAdquirentes } from "@/pages/ConfiguracoesAdquirentes";
 import { FormasPagamento } from "@/pages/FormasPagamento";
 import { Fornecedores } from "@/pages/Fornecedores";
@@ -139,7 +139,12 @@ function AuthenticatedLayout() {
             element={<Navigate to="/app/vendas" replace />}
           />
           <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
-          <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>} />
+          <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>}>
+            <Route index element={<VendasRealizadasIndex />} />
+            <Route path="calendario" element={<VendasRealizadasCalendario />} />
+            <Route path="faturamento" element={<VendasRealizadasFaturamento />} />
+            <Route path="margens" element={<VendasRealizadasMargens />} />
+          </Route>
           <Route
             path="conciliacao-bancaria"
             element={
@@ -152,7 +157,7 @@ function AuthenticatedLayout() {
           />
           <Route
             path="faturamento"
-            element={<Navigate to="/app/vendas-realizadas?tab=faturamento" replace />}
+            element={<Navigate to="/app/vendas-realizadas/faturamento" replace />}
           />
           <Route
             path="formas-de-pagamento"
@@ -162,7 +167,7 @@ function AuthenticatedLayout() {
           />
           <Route
             path="cmv-margens"
-            element={<Navigate to="/app/vendas-realizadas?tab=margens" replace />}
+            element={<Navigate to="/app/vendas-realizadas/margens" replace />}
           />
           <Route
             path="fluxo-de-caixa"

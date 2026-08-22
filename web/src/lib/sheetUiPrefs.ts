@@ -27,12 +27,6 @@ export function writeSheetMaximized(value: boolean): void {
 }
 
 export function readSheetInfoView(isMobile = isSheetMobileViewport()): SheetInfoView {
-  try {
-    const stored = localStorage.getItem(INFO_VIEW_KEY);
-    if (stored === "table" || stored === "cards") return stored;
-  } catch {
-    /* ignore */
-  }
   return isMobile ? "cards" : "table";
 }
 

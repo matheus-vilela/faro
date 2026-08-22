@@ -16,6 +16,8 @@ import {
   resolvePayableSituation,
   sortPayablesByDueDate,
 } from "@/lib/payableListViews";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
+import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { resolveReceiptExpenseId } from "@/lib/payableBoletoReceipt";
 import type { PayableReceiptExpense } from "@/lib/payableBoletoReceipt";
 import { cn } from "@/lib/utils";
@@ -43,6 +45,44 @@ export function PayableByDueDateView({
   onSelect: (b: FluxoBoletoRow) => void;
 }) {
   const rows = useMemo(() => sortPayablesByDueDate(boletos), [boletos]);
+  type DueSortKey =
+    | "due"
+    | "supplier"
+    | "category"
+    | "origin"
+    | "situation"
+    | "amount";
+  const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
+    FluxoBoletoRow,
+    DueSortKey
+  >(rows, "due", (a, b, key) => {
+    switch (key) {
+      case "due":
+        return a.due_date.localeCompare(b.due_date);
+      case "supplier":
+        return boletoSupplierLabel(a).localeCompare(
+          boletoSupplierLabel(b),
+          "pt-BR",
+        );
+      case "category":
+        return formatCategoryPathBullet(a, categoriesById).localeCompare(
+          formatCategoryPathBullet(b, categoriesById),
+          "pt-BR",
+        );
+      case "origin":
+        return resolvePayableOrigin(a, expenseById).localeCompare(
+          resolvePayableOrigin(b, expenseById),
+        );
+      case "situation":
+        return resolvePayableSituation(a, todayYmd).localeCompare(
+          resolvePayableSituation(b, todayYmd),
+        );
+      case "amount":
+        return Number(a.amount) - Number(b.amount);
+      default:
+        return 0;
+    }
+  });
 
   if (loading) {
     return <p className="text-muted-foreground">Carregando...</p>;
@@ -62,16 +102,59 @@ export function PayableByDueDateView({
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="pb-2 pr-3 font-semibold">Vencimento</th>
-                <th className="pb-2 pr-3 font-semibold">Fornecedor</th>
-                <th className="pb-2 pr-3 font-semibold">Categoria</th>
-                <th className="pb-2 pr-3 font-semibold">Origem</th>
-                <th className="pb-2 pr-3 font-semibold">Situação</th>
-                <th className="pb-2 text-right font-semibold">Valor</th>
+                <SortableTableHead
+                  label="Vencimento"
+                  column="due"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
+                <SortableTableHead
+                  label="Fornecedor"
+                  column="supplier"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
+                <SortableTableHead
+                  label="Categoria"
+                  column="category"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
+                <SortableTableHead
+                  label="Origem"
+                  column="origin"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
+                <SortableTableHead
+                  label="Situação"
+                  column="situation"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
+                <SortableTableHead
+                  label="Valor"
+                  column="amount"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  align="right"
+                  className="pb-2 font-semibold"
+                />
               </tr>
             </thead>
             <tbody>
-              {rows.map((b) => {
+              {sorted.map((b) => {
                 const dueCell = formatDueDateCell(b.due_date, todayYmd);
                 const situation = resolvePayableSituation(b, todayYmd);
                 const origin = resolvePayableOrigin(b, expenseById);

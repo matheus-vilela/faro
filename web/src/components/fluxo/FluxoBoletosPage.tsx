@@ -45,6 +45,7 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatCompetenceLabel, localDateYmd } from "@/lib/boletoPayment";
+import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
 import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
@@ -187,6 +188,12 @@ export function FluxoBoletosPage({
     month: now.getMonth() + 1,
     year: now.getFullYear(),
   });
+  const [listDateFrom, setListDateFrom] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).min,
+  );
+  const [listDateTo, setListDateTo] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).max,
+  );
   const [calendarBoletos, setCalendarBoletos] = useState<FluxoBoletoRow[]>([]);
   const [calendarRevenueEntries, setCalendarRevenueEntries] = useState<
     RevenueEntry[]
@@ -199,8 +206,26 @@ export function FluxoBoletosPage({
   >([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const isReceivableFlow = flowType === "receivable";
+  const competenceMonthBounds = useMemo(
+    () => monthYmdBounds(period.month, period.year),
+    [period.month, period.year],
+  );
+  const listDateRange = useMemo(() => {
+    const fromDate = listDateFrom.trim() || competenceMonthBounds.min;
+    const toDate = listDateTo.trim() || competenceMonthBounds.max;
+    return orderedYmdRange(fromDate, toDate);
+  }, [listDateFrom, listDateTo, competenceMonthBounds]);
+  const applyPeriod = (next: MonthYear) => {
+    const bounds = monthYmdBounds(next.month, next.year);
+    setPeriod(next);
+    setListDateFrom(bounds.min);
+    setListDateTo(bounds.max);
+  };
 
   const [boletosList, setBoletosList] = useState<FluxoBoletoRow[]>([]);
+  const [listRevenueEntries, setListRevenueEntries] = useState<RevenueEntry[]>(
+    [],
+  );
   const [boletosMonthFiltered, setBoletosMonthFiltered] = useState<
     FluxoBoletoRow[]
   >([]);
@@ -358,9 +383,8 @@ export function FluxoBoletosPage({
       setMonthServiceSales([]);
       return;
     }
-    const { start, end } = getMonthRange(period.month, period.year);
-    const startYmd = start.slice(0, 10);
-    const endYmd = end.slice(0, 10);
+    const startYmd = listDateRange.gte;
+    const endYmd = listDateRange.lte;
     try {
       const data = await fetchAllInRange<ServiceDailySaleDbRow>(
         supabase
@@ -376,16 +400,23 @@ export function FluxoBoletosPage({
       console.error(e);
       setMonthServiceSales([]);
     }
-  }, [companyId, period.month, period.year, isReceivableFlow]);
+  }, [companyId, isReceivableFlow, listDateRange]);
 
   const fetchBoletosList = useCallback(async () => {
     if (!companyId) return;
     setLoadingList(true);
-    const { start, end } = getMonthRange(period.month, period.year);
-    const startYmd = start.slice(0, 10);
-    const endYmd = end.slice(0, 10);
+    const monthRange = getMonthRange(period.month, period.year);
+    const startYmd =
+      flowType === "receivable"
+        ? listDateRange.gte
+        : monthRange.start.slice(0, 10);
+    const endYmd =
+      flowType === "receivable"
+        ? listDateRange.lte
+        : monthRange.end.slice(0, 10);
     try {
       if (flowType === "payable") {
+        setListRevenueEntries([]);
         const merged = await fetchMergedPayableBoletosInRange(
           companyId,
           startYmd,
@@ -401,30 +432,38 @@ export function FluxoBoletosPage({
         setBoletosList(filtered.slice(pageStart, pageStart + PAGE_SIZE));
       } else {
         setBoletosMonthFiltered([]);
-        // Recebíveis: carrega o mês inteiro; filtros/ordenação/paginação na tabela.
-        const data = await fetchAllInRange<FluxoBoletoRow>(
+        setBoletosList([]);
+        const data = await fetchAllInRange<RevenueEntry>(
           supabase
-            .from("boletos")
+            .from("revenue_entries")
             .select("*")
             .eq("company_id", companyId)
-            .eq("flow_type", flowType)
-            .eq("exclude_from_fluxo", false)
-            .gte("due_date", startYmd)
-            .lte("due_date", endYmd)
-            .order("due_date", { ascending: true }),
+            .gte("entry_date", startYmd)
+            .lte("entry_date", endYmd)
+            .order("entry_date", { ascending: true })
+            .order("created_at", { ascending: true }),
         );
-        setBoletosList(data);
+        setListRevenueEntries(data);
         setBoletosListCount(data.length);
       }
     } catch (e) {
       console.error(e);
       toast.error("Não foi possível carregar a lista.");
       setBoletosList([]);
+      setListRevenueEntries([]);
       setBoletosMonthFiltered([]);
       setBoletosListCount(0);
     }
     setLoadingList(false);
-  }, [companyId, period.month, period.year, flowType, debouncedSearch, boletosPage]);
+  }, [
+    companyId,
+    period.month,
+    period.year,
+    flowType,
+    debouncedSearch,
+    boletosPage,
+    listDateRange,
+  ]);
 
   const fetchPayableTotals = useCallback(async () => {
     if (!companyId || isReceivableFlow) {
@@ -466,7 +505,7 @@ export function FluxoBoletosPage({
 
   useEffect(() => {
     queueMicrotask(() => setBoletosPage(1));
-  }, [debouncedSearch, period.month, period.year]);
+  }, [debouncedSearch, period.month, period.year, listDateFrom, listDateTo]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1060,7 +1099,7 @@ export function FluxoBoletosPage({
 
       <ReferencePeriodCard
         value={period}
-        onChange={setPeriod}
+        onChange={isReceivableFlow ? applyPeriod : setPeriod}
         description={periodDescription}
       />
 
@@ -1231,15 +1270,19 @@ export function FluxoBoletosPage({
 
           <CardContent>
             <VendasRealizadasListTable
-              boletos={boletosList}
+              revenueEntries={listRevenueEntries}
               serviceSales={monthServiceSales}
               categories={companyCategories}
               categoriesById={categoriesById}
               loading={loadingList}
               emptyMessage={emptyListMessage}
               formatCurrency={formatCurrency}
-              pageSize={PAGE_SIZE}
-              onSelectBoleto={setBoletoResumo}
+              onSelectRevenueEntry={setDetailRevenueId}
+              dateFrom={listDateFrom}
+              dateTo={listDateTo}
+              monthBounds={competenceMonthBounds}
+              onDateFromChange={setListDateFrom}
+              onDateToChange={setListDateTo}
             />
           </CardContent>
         </Card>

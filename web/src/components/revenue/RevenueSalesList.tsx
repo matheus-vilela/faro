@@ -9,6 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
+import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { tipoBadge } from "@/lib/companyCategoryLabels";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
@@ -295,6 +297,56 @@ function RevenueSalesListView({
   entryModeLabels: Record<string, string>;
   onSelectEntry: (id: string) => void;
 }) {
+  type SalesSortKey =
+    | "date"
+    | "title"
+    | "origin"
+    | "type"
+    | "category"
+    | "gross"
+    | "tax"
+    | "net";
+
+  const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
+    RevenueEntry,
+    SalesSortKey
+  >(rows, "date", (a, b, key) => {
+    const ctxA = buildRowContext(
+      a,
+      categoriesById,
+      categoryPathLabel,
+      productNameById,
+      recipeNameById,
+    );
+    const ctxB = buildRowContext(
+      b,
+      categoriesById,
+      categoryPathLabel,
+      productNameById,
+      recipeNameById,
+    );
+    switch (key) {
+      case "date":
+        return a.entry_date.localeCompare(b.entry_date);
+      case "title":
+        return a.title.localeCompare(b.title, "pt-BR");
+      case "origin":
+        return a.entry_mode.localeCompare(b.entry_mode);
+      case "type":
+        return a.revenue_type.localeCompare(b.revenue_type);
+      case "category":
+        return ctxA.catLabel.localeCompare(ctxB.catLabel, "pt-BR");
+      case "gross":
+        return Number(a.gross_amount) - Number(b.gross_amount);
+      case "tax":
+        return Number(a.tax_amount) - Number(b.tax_amount);
+      case "net":
+        return Number(a.net_amount) - Number(b.net_amount);
+      default:
+        return 0;
+    }
+  });
+
   if (viewMode === "table") {
     return (
       <div className="w-full overflow-x-auto rounded-xl border border-border">
@@ -311,18 +363,77 @@ function RevenueSalesListView({
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-muted/40 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <th className="px-4 py-3 font-semibold">Data</th>
-              <th className="px-4 py-3 font-semibold">Título</th>
-              <th className="px-4 py-3 font-semibold">Origem</th>
-              <th className="px-4 py-3 font-semibold">Tipo</th>
-              <th className="px-4 py-3 font-semibold">Categoria</th>
-              <th className="px-4 py-3 text-right font-semibold">Bruto</th>
-              <th className="px-4 py-3 text-right font-semibold">Taxa</th>
-              <th className="px-4 py-3 text-right font-semibold">Líquido</th>
+              <SortableTableHead
+                label="Data"
+                column="date"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Título"
+                column="title"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Origem"
+                column="origin"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Tipo"
+                column="type"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Categoria"
+                column="category"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Bruto"
+                column="gross"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                align="right"
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Taxa"
+                column="tax"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                align="right"
+                className="px-4 py-3 font-semibold"
+              />
+              <SortableTableHead
+                label="Líquido"
+                column="net"
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={onSort}
+                align="right"
+                className="px-4 py-3 font-semibold"
+              />
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {sorted.map((r) => {
               const ctx = buildRowContext(
                 r,
                 categoriesById,
