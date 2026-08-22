@@ -33,6 +33,25 @@ export function dedupeParsedTransactions(
   return out;
 }
 
+/** Remove movimentos cuja chave já existe na conta (outros imports). */
+export function filterNewParsedTransactions(
+  txs: ParsedBankTransaction[],
+  companyBankAccountId: string,
+  existingKeys: ReadonlySet<string>,
+): { fresh: ParsedBankTransaction[]; skippedCount: number } {
+  const fresh: ParsedBankTransaction[] = [];
+  let skippedCount = 0;
+  for (const tx of txs) {
+    const key = buildDedupeKey(tx, companyBankAccountId);
+    if (existingKeys.has(key)) {
+      skippedCount += 1;
+      continue;
+    }
+    fresh.push(tx);
+  }
+  return { fresh, skippedCount };
+}
+
 export function filterDebits(
   txs: ParsedBankTransaction[],
 ): ParsedBankTransaction[] {

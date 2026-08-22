@@ -26,6 +26,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -40,14 +51,21 @@ import { useCompany } from "@/contexts/CompanyContext";
 import {
   boletoReferenceDate,
   confirmReconciliation,
+  fetchAccountStatementLines,
+  fetchBoletosByIds,
   fetchBoletosForRecon,
-  fetchImportLines,
   fetchLatestImport,
   fetchReconciledBoletoIds,
+  fetchReconciliationsForLines,
+  ignoreStatementLine,
+  isIgnoredReconLine,
   isPendingReconLine,
+  isReconciledReconLine,
   markLineCreatedPayable,
+  restoreIgnoredStatementLine,
   searchBoletosForAssociate,
   suggestLaunchFromStatementHistory,
+  undoBankReconciliation,
   uploadAndImportStatement,
 } from "@/lib/bankReconciliation/bankReconciliationApi";
 import type { LaunchMemorySuggestion } from "@/lib/bankReconciliation/suggestLaunchFromHistory";
@@ -70,16 +88,18 @@ import {
   ArrowLeftRight,
   Check,
   ChevronDown,
-  Landmark,
-  Loader2,
-  Plus,
-  Upload,
+  EyeOff,
+  FilePlus,
   HelpCircle,
   Hourglass,
-  FilePlus,
+  Landmark,
   Link2,
+  Loader2,
   Percent,
+  Plus,
   TrendingUp,
+  Undo2,
+  Upload,
 } from "lucide-react";
 import {
   useCallback,
@@ -158,12 +178,22 @@ export function BankReconciliationPanel({
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [lines, setLines] = useState<BankStatementLine[]>([]);
+  const [reconciledLines, setReconciledLines] = useState<BankStatementLine[]>(
+    [],
+  );
+  const [ignoredLines, setIgnoredLines] = useState<BankStatementLine[]>([]);
   const [boletos, setBoletos] = useState<Boleto[]>([]);
+  const [reconBoletoByLineId, setReconBoletoByLineId] = useState<
+    Map<string, Boleto>
+  >(new Map());
   const [reconciledBoletoIds, setReconciledBoletoIds] = useState<Set<string>>(
     new Set(),
   );
   const [doneKeys, setDoneKeys] = useState<Record<string, string>>({});
   const [fileLabel, setFileLabel] = useState<string | null>(null);
+  const [listTab, setListTab] = useState<"pending" | "done" | "ignored">(
+    "pending",
+  );
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewPair, setReviewPair] = useState<MatchPairSuggestion | null>(null);
@@ -189,6 +219,11 @@ export function BankReconciliationPanel({
   );
   const [associateBoletos, setAssociateBoletos] = useState<Boleto[]>([]);
   const [associateLoading, setAssociateLoading] = useState(false);
+  const [undoTarget, setUndoTarget] = useState<{
+    line: BankStatementLine;
+    boleto: Boleto | null;
+  } | null>(null);
+  const [deleteCreatedLaunch, setDeleteCreatedLaunch] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     if (!companyId) return;
@@ -221,39 +256,69 @@ export function BankReconciliationPanel({
   const reloadMatchData = useCallback(async () => {
     if (!companyId || !accountId) {
       setLines([]);
+      setReconciledLines([]);
+      setIgnoredLines([]);
       setBoletos([]);
+      setReconBoletoByLineId(new Map());
       return;
     }
     setLoading(true);
     try {
-      const imp = await fetchLatestImport(companyId, accountId);
-      if (!imp) {
-        setLines([]);
+      const [imp, accountLines] = await Promise.all([
+        fetchLatestImport(companyId, accountId),
+        fetchAccountStatementLines(companyId, accountId),
+      ]);
+      setFileLabel(imp?.file_name ?? null);
+      const pending = accountLines.filter(isPendingReconLine);
+      const reconciled = accountLines.filter(isReconciledReconLine);
+      const ignored = accountLines.filter(isIgnoredReconLine);
+      setLines(pending);
+      setReconciledLines(reconciled);
+      setIgnoredLines(ignored);
+
+      if (pending.length === 0 && reconciled.length === 0) {
         setBoletos([]);
-        setFileLabel(null);
+        setReconBoletoByLineId(new Map());
+        setReconciledBoletoIds(new Set());
         return;
       }
-      setFileLabel(imp.file_name);
-      const allLines = await fetchImportLines(imp.id);
-      setLines(allLines);
+
+      const reconMap = await fetchReconciliationsForLines(
+        companyId,
+        reconciled.map((l) => l.id),
+      );
+      const reconBoletoIds = [...reconMap.values()].map((r) => r.boletoId);
+
       const periodStart =
-        imp.period_start ??
-        allLines[0]?.posted_at ??
+        pending[0]?.posted_at ??
+        reconciled[0]?.posted_at ??
         new Date().toISOString().slice(0, 10);
       const periodEnd =
-        imp.period_end ??
-        allLines[allLines.length - 1]?.posted_at ??
+        pending[pending.length - 1]?.posted_at ??
+        reconciled[reconciled.length - 1]?.posted_at ??
         periodStart;
       const pays = await fetchBoletosForRecon(
         companyId,
         periodStart,
         periodEnd,
       );
-      setBoletos(pays);
+      const extraBoletos = await fetchBoletosByIds(
+        companyId,
+        reconBoletoIds.filter((id) => !pays.some((b) => b.id === id)),
+      );
+      const allBoletos = [...pays, ...extraBoletos];
+      setBoletos(allBoletos);
+      const boletoById = new Map(allBoletos.map((b) => [b.id, b]));
+      const linked = new Map<string, Boleto>();
+      for (const [lineId, recon] of reconMap) {
+        const boleto = boletoById.get(recon.boletoId);
+        if (boleto) linked.set(lineId, boleto);
+      }
+      setReconBoletoByLineId(linked);
       setReconciledBoletoIds(
         await fetchReconciledBoletoIds(
           companyId,
-          pays.map((b) => b.id),
+          allBoletos.map((b) => b.id),
         ),
       );
     } catch (e) {
@@ -272,6 +337,12 @@ export function BankReconciliationPanel({
     () => lines.filter((l) => isPendingReconLine(l)),
     [lines],
   );
+
+  const bankLineCount = pendingLines.length + reconciledLines.length;
+  const concilPct =
+    bankLineCount === 0
+      ? 0
+      : Math.round((reconciledLines.length / bankLineCount) * 100);
 
   const matchResult = useMemo(() => {
     const unmatchedLines = pendingLines.filter(
@@ -356,23 +427,34 @@ export function BankReconciliationPanel({
   }, [matchResult, lineById, boletoById, doneKeys]);
 
   const pendingRows = rows.filter((r) => !r.done);
-  const matchedCount = rows.length - pendingRows.length;
-  const totalMov = rows.length || 1;
-  const concilPct = Math.round((matchedCount / totalMov) * 100);
   const safePairs = pendingRows.filter(
     (r): r is UiPairRow & { kind: "forte" } => r.kind === "forte",
   );
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const listLength =
+    listTab === "pending"
+      ? rows.length
+      : listTab === "done"
+        ? reconciledLines.length
+        : ignoredLines.length;
+  const totalPages = Math.max(1, Math.ceil(listLength / PAGE_SIZE));
   const safeListPage = Math.min(listPage, totalPages);
   const pageRows = rows.slice(
+    (safeListPage - 1) * PAGE_SIZE,
+    safeListPage * PAGE_SIZE,
+  );
+  const pageReconciled = reconciledLines.slice(
+    (safeListPage - 1) * PAGE_SIZE,
+    safeListPage * PAGE_SIZE,
+  );
+  const pageIgnored = ignoredLines.slice(
     (safeListPage - 1) * PAGE_SIZE,
     safeListPage * PAGE_SIZE,
   );
 
   useEffect(() => {
     setListPage(1);
-  }, [accountId, fileLabel]);
+  }, [accountId, fileLabel, listTab]);
 
   useEffect(() => {
     if (listPage > totalPages) setListPage(totalPages);
@@ -407,12 +489,19 @@ export function BankReconciliationPanel({
       });
       setDoneKeys({});
       setListPage(1);
-      if (
-        imported.ofxLedgerApplied &&
-        imported.ofxLedgerAmount != null
-      ) {
+      const { insertedCount, skippedCount, ofxLedgerApplied, ofxLedgerAmount } =
+        imported;
+      if (insertedCount === 0 && skippedCount === 0) {
+        toast.message("Nenhum movimento no arquivo.");
+      } else if (insertedCount === 0) {
+        toast.message("Este extrato já estava importado.");
+      } else if (skippedCount > 0) {
         toast.success(
-          `Extrato importado. Saldo da conta atualizado para ${formatCurrency(imported.ofxLedgerAmount)}.`,
+          `${insertedCount} movimento${insertedCount === 1 ? "" : "s"} novo${insertedCount === 1 ? "" : "s"}, ${skippedCount} já estavam no Faro.`,
+        );
+      } else if (ofxLedgerApplied && ofxLedgerAmount != null) {
+        toast.success(
+          `Extrato importado. Saldo da conta atualizado para ${formatCurrency(ofxLedgerAmount)}.`,
         );
       } else {
         toast.success("Extrato importado.");
@@ -530,6 +619,10 @@ export function BankReconciliationPanel({
     intent: "entry" | "transfer" | "receivable",
   ) => {
     if (!companyId) return;
+    if (line.status !== "unmatched") {
+      toast.error("Este movimento já foi conciliado ou lançado.");
+      return;
+    }
     setConfirming(true);
     try {
       const preferFlow: "payable" | "receivable" =
@@ -625,6 +718,95 @@ export function BankReconciliationPanel({
     }
   };
 
+  const handleIgnoreLine = async (line: BankStatementLine) => {
+    if (!companyId) return;
+    setConfirming(true);
+    try {
+      await ignoreStatementLine({
+        companyId,
+        statementLineId: line.id,
+      });
+      setDoneKeys((s) => ({
+        ...s,
+        [`sobanco:${line.id}`]: "Ignorado",
+        [`line:${line.id}`]: "1",
+      }));
+      toast.success("Movimento ignorado. Restaure em Ignorados se foi engano.");
+      await reloadMatchData();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível ignorar.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const handleRestoreIgnored = async (line: BankStatementLine) => {
+    if (!companyId) return;
+    setConfirming(true);
+    try {
+      await restoreIgnoredStatementLine({
+        companyId,
+        statementLineId: line.id,
+      });
+      setDoneKeys((s) => {
+        const next = { ...s };
+        delete next[`sobanco:${line.id}`];
+        delete next[`line:${line.id}`];
+        return next;
+      });
+      toast.success("Movimento restaurado. Ele voltou para a fila.");
+      setListTab("pending");
+      await reloadMatchData();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível restaurar.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const openUndo = (line: BankStatementLine) => {
+    setUndoTarget({
+      line,
+      boleto: reconBoletoByLineId.get(line.id) ?? null,
+    });
+    setDeleteCreatedLaunch(false);
+  };
+
+  const handleUndoRecon = async () => {
+    if (!companyId || !undoTarget) return;
+    const deleteCreated =
+      deleteCreatedLaunch && undoTarget.line.status === "created_payable";
+    setConfirming(true);
+    try {
+      await undoBankReconciliation({
+        companyId,
+        statementLineId: undoTarget.line.id,
+        deleteCreatedLaunch: deleteCreated,
+      });
+      toast.success(
+        deleteCreated
+          ? "Lançamento removido da conciliação e do Faro."
+          : "Conciliação desfeita. O movimento voltou para a fila.",
+      );
+      setUndoTarget(null);
+      setDeleteCreatedLaunch(false);
+      await reloadMatchData();
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível desfazer.",
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   const createDefaultFlow =
     createIntent === "receivable"
       ? "receivable"
@@ -649,9 +831,9 @@ export function BankReconciliationPanel({
       : (createMemory?.destBankAccountId ?? "");
 
   const insight =
-    pendingRows.length === 0 && rows.length > 0
+    pendingRows.length === 0 && bankLineCount > 0
       ? "Conciliação fechada. Cada movimento do banco tem um lançamento no Faro."
-      : lines.length === 0
+      : bankLineCount === 0
         ? "Suba um extrato CSV ou OFX para cruzar com as contas a pagar e a receber."
         : `Cruzei o extrato com os lançamentos. ${safePairs.length} correspondência(s) forte(s) pronta(s) para confirmar.`;
 
@@ -683,25 +865,25 @@ export function BankReconciliationPanel({
                 Conciliado
               </p>
               <p className="text-sm font-bold tabular-nums text-emerald-500">
-                {rows.length === 0 ? "—" : `${concilPct}%`}
+                {bankLineCount === 0 ? "—" : `${concilPct}%`}
               </p>
             </div>
             <div
               className="h-2 w-full overflow-hidden rounded-full bg-muted"
               role="progressbar"
-              aria-valuenow={rows.length === 0 ? 0 : concilPct}
+              aria-valuenow={bankLineCount === 0 ? 0 : concilPct}
               aria-valuemin={0}
               aria-valuemax={100}
             >
               <div
                 className="h-full rounded-full bg-emerald-500 transition-[width]"
                 style={{
-                  width: `${rows.length === 0 ? 0 : Math.min(100, concilPct)}%`,
+                  width: `${bankLineCount === 0 ? 0 : Math.min(100, concilPct)}%`,
                 }}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {matchedCount} de {rows.length} movimentos
+              {reconciledLines.length} de {bankLineCount} movimentos
             </p>
           </div>
 
@@ -815,10 +997,41 @@ export function BankReconciliationPanel({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold sm:text-lg">
-          Conciliar lançamentos ↔ banco
-        </h2>
-        {safePairs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-semibold sm:text-lg">
+            Conciliar lançamentos ↔ banco
+          </h2>
+          <div className="flex rounded-lg border border-border p-0.5">
+            <Button
+              type="button"
+              size="sm"
+              variant={listTab === "pending" ? "secondary" : "ghost"}
+              className="h-7 px-2.5 text-xs"
+              onClick={() => setListTab("pending")}
+            >
+              A conciliar ({pendingRows.length})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={listTab === "done" ? "secondary" : "ghost"}
+              className="h-7 px-2.5 text-xs"
+              onClick={() => setListTab("done")}
+            >
+              Conciliados ({reconciledLines.length})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={listTab === "ignored" ? "secondary" : "ghost"}
+              className="h-7 px-2.5 text-xs"
+              onClick={() => setListTab("ignored")}
+            >
+              Ignorados ({ignoredLines.length})
+            </Button>
+          </div>
+        </div>
+        {listTab === "pending" && safePairs.length > 0 && (
           <Button
             type="button"
             onClick={() => void handleBulkConfirm()}
@@ -841,6 +1054,59 @@ export function BankReconciliationPanel({
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
+      ) : listTab === "ignored" ? (
+        ignoredLines.length === 0 ? (
+          <Card>
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              Nenhum movimento ignorado. Eles não voltam ao reenviar o extrato —
+              restaure aqui se foi engano.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {pageIgnored.map((line) => (
+              <IgnoredRow
+                key={line.id}
+                line={line}
+                confirming={confirming}
+                onRestore={() => void handleRestoreIgnored(line)}
+              />
+            ))}
+            <Pagination
+              page={safeListPage}
+              totalCount={ignoredLines.length}
+              onPageChange={setListPage}
+            />
+          </div>
+        )
+      ) : listTab === "done" ? (
+        reconciledLines.length === 0 ? (
+          <Card>
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              Nenhum movimento conciliado ainda.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {pageReconciled.map((line) => {
+              const boleto = reconBoletoByLineId.get(line.id) ?? null;
+              return (
+                <ReconciledRow
+                  key={line.id}
+                  line={line}
+                  boleto={boleto}
+                  confirming={confirming}
+                  onUndo={() => openUndo(line)}
+                />
+              );
+            })}
+            <Pagination
+              page={safeListPage}
+              totalCount={reconciledLines.length}
+              onPageChange={setListPage}
+            />
+          </div>
+        )
       ) : pendingRows.length === 0 && rows.length > 0 ? (
         <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
@@ -851,10 +1117,26 @@ export function BankReconciliationPanel({
             </p>
           </CardContent>
         </Card>
+      ) : pendingRows.length === 0 && bankLineCount > 0 ? (
+        <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+            <Check className="h-10 w-10 text-emerald-600" />
+            <p className="text-lg font-semibold">Extrato batido</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              Tudo que entrou e saiu do banco está lançado no Faro. Veja em
+              Conciliados se precisar desfazer
+              {ignoredLines.length > 0
+                ? ", ou em Ignorados para restaurar um movimento."
+                : "."}
+            </p>
+          </CardContent>
+        </Card>
       ) : rows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhum movimento para conciliar. Suba um extrato CSV ou OFX.
+            {ignoredLines.length > 0
+              ? "Nada na fila. Há movimentos em Ignorados — restaure se quiser conciliar."
+              : "Nenhum movimento para conciliar. Suba um extrato CSV ou OFX."}
           </CardContent>
         </Card>
       ) : (
@@ -892,6 +1174,10 @@ export function BankReconciliationPanel({
               onAssociate={() => {
                 const line = lineFromRow(row);
                 if (line) openAssociate(line);
+              }}
+              onIgnore={() => {
+                const line = lineFromRow(row);
+                if (line) void handleIgnoreLine(line);
               }}
               onAwait={() => {
                 if (row.kind === "sofaro") {
@@ -1092,6 +1378,53 @@ export function BankReconciliationPanel({
           setAccountId(account.id);
         }}
       />
+
+      <AlertDialog
+        open={undoTarget != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUndoTarget(null);
+            setDeleteCreatedLaunch(false);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desfazer conciliação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O movimento do banco volta para a fila. A conta no Faro volta a
+              em aberto.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {undoTarget?.line.status === "created_payable" ? (
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={deleteCreatedLaunch}
+                onCheckedChange={(checked) => setDeleteCreatedLaunch(checked)}
+                className="mt-0.5"
+              />
+              <span>
+                Excluir também o lançamento criado nesta conciliação.
+              </span>
+            </label>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirming}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={confirming}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleUndoRecon();
+              }}
+            >
+              {deleteCreatedLaunch &&
+              undoTarget?.line.status === "created_payable"
+                ? "Excluir lançamento"
+                : "Desfazer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 
@@ -1110,6 +1443,7 @@ function RevisarMenu({
   onLaunchTransfer,
   onLaunchReceivable,
   onAssociate,
+  onIgnore,
 }: {
   confirming: boolean;
   showInterest: boolean;
@@ -1118,6 +1452,7 @@ function RevisarMenu({
   onLaunchTransfer: () => void;
   onLaunchReceivable: () => void;
   onAssociate: () => void;
+  onIgnore: () => void;
 }) {
   return (
     <DropdownMenu>
@@ -1153,6 +1488,11 @@ function RevisarMenu({
           <Link2 className="h-4 w-4" />
           Buscar e associar a um lançamento
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onIgnore}>
+          <EyeOff className="h-4 w-4" />
+          Ignorar movimento do banco
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1166,6 +1506,7 @@ function ReconRow({
   onLaunchTransfer,
   onLaunchReceivable,
   onAssociate,
+  onIgnore,
   onAwait,
   confirming,
 }: {
@@ -1176,6 +1517,7 @@ function ReconRow({
   onLaunchTransfer: () => void;
   onLaunchReceivable: () => void;
   onAssociate: () => void;
+  onIgnore: () => void;
   onAwait: () => void;
   confirming: boolean;
 }) {
@@ -1196,6 +1538,7 @@ function ReconRow({
       onLaunchTransfer={onLaunchTransfer}
       onLaunchReceivable={onLaunchReceivable}
       onAssociate={onAssociate}
+      onIgnore={onIgnore}
     />
   );
 
@@ -1328,6 +1671,101 @@ function ReconRow({
       {right}
       <div className="flex self-center justify-end sm:min-w-[168px]">
         {actions}
+      </div>
+    </div>
+  );
+}
+
+function ReconciledRow({
+  line,
+  boleto,
+  confirming,
+  onUndo,
+}: {
+  line: BankStatementLine;
+  boleto: Boleto | null;
+  confirming: boolean;
+  onUndo: () => void;
+}) {
+  const created = line.status === "created_payable";
+  return (
+    <div className="grid items-stretch gap-2 rounded-xl border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
+      {boleto ? (
+        <SideCard
+          title={boletoReconTitle(boleto)}
+          sub={boletoSideSub(boleto, boletoReferenceDate(boleto))}
+          amount={Number(boleto.amount)}
+        />
+      ) : (
+        <div className="flex h-full min-w-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-2.5 text-xs text-muted-foreground">
+          lançamento não encontrado
+        </div>
+      )}
+      <div
+        className="mx-auto flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-full bg-emerald-500/15 text-sm font-bold text-emerald-600"
+        aria-hidden
+      >
+        ✓
+      </div>
+      <SideCard
+        title={line.description || "Movimento"}
+        sub={`${formatDateShort(line.posted_at)}${
+          line.direction === "credit" ? " · entrada" : " · saída"
+        }${created ? " · lançado aqui" : ""}`}
+        amount={Number(line.amount)}
+      />
+      <div className="flex self-center justify-end sm:min-w-[168px]">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={confirming}
+          onClick={onUndo}
+        >
+          <Undo2 className="mr-1 h-3.5 w-3.5" />
+          Desfazer
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function IgnoredRow({
+  line,
+  confirming,
+  onRestore,
+}: {
+  line: BankStatementLine;
+  confirming: boolean;
+  onRestore: () => void;
+}) {
+  return (
+    <div className="grid items-stretch gap-2 rounded-xl border bg-card p-3 opacity-80 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
+      <div className="flex h-full min-w-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 px-3 py-2.5 text-xs text-muted-foreground">
+        ignorado no Faro
+      </div>
+      <div
+        className="mx-auto flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-hidden
+      >
+        <EyeOff className="h-4 w-4" />
+      </div>
+      <SideCard
+        title={line.description || "Movimento"}
+        sub={`${formatDateShort(line.posted_at)}${
+          line.direction === "credit" ? " · entrada" : " · saída"
+        }`}
+        amount={Number(line.amount)}
+      />
+      <div className="flex self-center justify-end sm:min-w-[168px]">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={confirming}
+          onClick={onRestore}
+        >
+          <Undo2 className="mr-1 h-3.5 w-3.5" />
+          Restaurar
+        </Button>
       </div>
     </div>
   );

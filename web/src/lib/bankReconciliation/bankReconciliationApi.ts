@@ -1,4 +1,9 @@
-import { buildDedupeKey, dedupeParsedTransactions } from "@/lib/bankReconciliation/dedupe";
+import { undoPayBoleto } from "@/lib/boletoPaymentApi";
+import {
+  buildDedupeKey,
+  dedupeParsedTransactions,
+  filterNewParsedTransactions,
+} from "@/lib/bankReconciliation/dedupe";
 import { parseCsv } from "@/lib/bankReconciliation/parseCsv";
 import { parseOfx, parseOfxLedgerBalance } from "@/lib/bankReconciliation/parseOfx";
 import {
@@ -23,6 +28,13 @@ import type {
 } from "@/types/bankReconciliation";
 import type { Boleto, BoletoEntryKind, BoletoFlowType } from "@/types/expense";
 import { isBoletoPayable } from "@/types/expense";
+import {
+  isIgnoredReconLine,
+  isPendingReconLine,
+  isReconciledReconLine,
+} from "@/lib/bankReconciliation/reconLineStatus";
+
+export { isIgnoredReconLine, isPendingReconLine, isReconciledReconLine };
 
 const BUCKET = "bank-statements";
 
@@ -74,18 +86,35 @@ async function applyOfxLedgerToAccount(params: {
   return true;
 }
 
+export type StatementImportResult = {
+  importRow: BankStatementImport | null;
+  lines: BankStatementLine[];
+  insertedCount: number;
+  skippedCount: number;
+  ofxLedgerApplied: boolean;
+  ofxLedgerAmount: number | null;
+};
+
+async function fetchExistingDedupeKeys(
+  companyBankAccountId: string,
+): Promise<Set<string>> {
+  const rows = await fetchAllInRange<{ dedupe_key: string }>(
+    supabase
+      .from("bank_statement_lines")
+      .select("dedupe_key")
+      .eq("company_bank_account_id", companyBankAccountId)
+      .order("id", { ascending: true }),
+  );
+  return new Set(rows.map((r) => r.dedupe_key));
+}
+
 export async function uploadAndImportStatement(params: {
   companyId: string;
   companyBankAccountId: string;
   file: File;
   userId: string | null;
   csvMapping?: BankCsvColumnMapping | null;
-}): Promise<{
-  importRow: BankStatementImport;
-  lines: BankStatementLine[];
-  ofxLedgerApplied: boolean;
-  ofxLedgerAmount: number | null;
-}> {
+}): Promise<StatementImportResult> {
   const { companyId, companyBankAccountId, file, userId, csvMapping } = params;
   const format = detectFormat(file.name);
   const content = await file.text();
@@ -95,9 +124,42 @@ export async function uploadAndImportStatement(params: {
   );
   const ofxLedger =
     format === "ofx" ? parseOfxLedgerBalance(content) : null;
+  const existingKeys = await fetchExistingDedupeKeys(companyBankAccountId);
+  const { fresh, skippedCount } = filterNewParsedTransactions(
+    parsed,
+    companyBankAccountId,
+    existingKeys,
+  );
+
+  const applyLedger = async (): Promise<{
+    ofxLedgerApplied: boolean;
+    ofxLedgerAmount: number | null;
+  }> => {
+    if (!ofxLedger) {
+      return { ofxLedgerApplied: false, ofxLedgerAmount: null };
+    }
+    const ledgerAsOf = ofxLedger.asOfYmd ?? fresh[0]?.postedAt ?? parsed[0]?.postedAt ?? null;
+    const ofxLedgerApplied = await applyOfxLedgerToAccount({
+      companyBankAccountId,
+      amount: ofxLedger.amount,
+      asOfYmd: ledgerAsOf,
+    });
+    return { ofxLedgerApplied, ofxLedgerAmount: ofxLedger.amount };
+  };
+
+  if (fresh.length === 0) {
+    const ledger = await applyLedger();
+    return {
+      importRow: null,
+      lines: [],
+      insertedCount: 0,
+      skippedCount,
+      ...ledger,
+    };
+  }
 
   const stamp = Date.now();
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+  const safeName = file.name.replace(/[^\w.-]+/g, "_");
   const storagePath = `${companyId}/${companyBankAccountId}/${stamp}_${safeName}`;
 
   const { error: upErr } = await supabase.storage
@@ -108,7 +170,7 @@ export async function uploadAndImportStatement(params: {
     });
   if (upErr) throw upErr;
 
-  const dates = parsed.map((p) => p.postedAt).sort();
+  const dates = fresh.map((p) => p.postedAt).sort();
   const periodStart = dates[0] ?? null;
   const periodEnd = dates[dates.length - 1] ?? null;
   const ledgerAsOf = ofxLedger?.asOfYmd ?? periodEnd;
@@ -124,7 +186,7 @@ export async function uploadAndImportStatement(params: {
       period_start: periodStart,
       period_end: periodEnd,
       status: "ready",
-      row_count: parsed.length,
+      row_count: fresh.length,
       ledger_balance: ofxLedger?.amount ?? null,
       ledger_balance_as_of: ofxLedger ? ledgerAsOf : null,
       created_by: userId,
@@ -142,22 +204,10 @@ export async function uploadAndImportStatement(params: {
     });
   }
 
-  const resultMeta = {
-    ofxLedgerApplied,
-    ofxLedgerAmount: ofxLedger?.amount ?? null,
-  };
-
-  if (parsed.length === 0) {
-    return {
-      importRow: importRow as BankStatementImport,
-      lines: [],
-      ...resultMeta,
-    };
-  }
-
-  const lineRows = parsed.map((tx) => ({
+  const lineRows = fresh.map((tx) => ({
     import_id: importRow.id,
     company_id: companyId,
+    company_bank_account_id: companyBankAccountId,
     posted_at: tx.postedAt,
     amount: tx.amount,
     direction: tx.direction,
@@ -172,12 +222,18 @@ export async function uploadAndImportStatement(params: {
     .from("bank_statement_lines")
     .insert(lineRows)
     .select("*");
-  if (lineErr) throw lineErr;
+  if (lineErr) {
+    await supabase.from("bank_statement_imports").delete().eq("id", importRow.id);
+    throw lineErr;
+  }
 
   return {
     importRow: importRow as BankStatementImport,
     lines: (lines ?? []) as BankStatementLine[],
-    ...resultMeta,
+    insertedCount: (lines ?? []).length,
+    skippedCount,
+    ofxLedgerApplied,
+    ofxLedgerAmount: ofxLedger?.amount ?? null,
   };
 }
 
@@ -210,11 +266,65 @@ export async function fetchImportLines(
   return (data ?? []) as BankStatementLine[];
 }
 
-export function isPendingReconLine(
-  line: Pick<BankStatementLine, "status" | "direction">,
-): boolean {
-  if (line.status === "unmatched") return true;
-  return line.direction === "credit" && line.status === "ignored";
+/** Linhas da conta em todos os imports (pendentes, conciliadas e ignoradas). */
+export async function fetchAccountStatementLines(
+  companyId: string,
+  companyBankAccountId: string,
+): Promise<BankStatementLine[]> {
+  return (await fetchAllInRange(
+    supabase
+      .from("bank_statement_lines")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("company_bank_account_id", companyBankAccountId)
+      .in("status", ["unmatched", "matched", "created_payable", "ignored"])
+      .order("posted_at", { ascending: true })
+      .order("id", { ascending: true }),
+  )) as BankStatementLine[];
+}
+
+export async function fetchBoletosByIds(
+  companyId: string,
+  boletoIds: string[],
+): Promise<Boleto[]> {
+  if (boletoIds.length === 0) return [];
+  const wanted = [...new Set(boletoIds)];
+  const rows = await fetchAllInRange(
+    supabase
+      .from("boletos")
+      .select("*, supplier:suppliers(id, name)")
+      .eq("company_id", companyId)
+      .in("id", wanted)
+      .order("id", { ascending: true }),
+  );
+  return rows as Boleto[];
+}
+
+export async function fetchReconciliationsForLines(
+  companyId: string,
+  statementLineIds: string[],
+): Promise<Map<string, { boletoId: string; matchKind: BankMatchKind }>> {
+  const out = new Map<string, { boletoId: string; matchKind: BankMatchKind }>();
+  if (statementLineIds.length === 0) return out;
+  const rows = await fetchAllInRange<{
+    statement_line_id: string;
+    boleto_id: string;
+    match_kind: BankMatchKind;
+  }>(
+    supabase
+      .from("bank_reconciliations")
+      .select("statement_line_id, boleto_id, match_kind")
+      .eq("company_id", companyId)
+      .in("statement_line_id", statementLineIds)
+      .order("id", { ascending: true }),
+  );
+  for (const row of rows) {
+    out.set(row.statement_line_id, {
+      boletoId: row.boleto_id,
+      matchKind: row.match_kind,
+    });
+  }
+  return out;
 }
 
 export async function fetchBoletosForRecon(
@@ -296,6 +406,17 @@ export async function confirmReconciliation(params: {
     .single();
   if (fetchErr) throw fetchErr;
 
+  const { data: lineRow, error: lineFetchErr } = await supabase
+    .from("bank_statement_lines")
+    .select("id, status")
+    .eq("id", statementLineId)
+    .eq("company_id", companyId)
+    .single();
+  if (lineFetchErr) throw lineFetchErr;
+  if (!lineRow || lineRow.status !== "unmatched") {
+    throw new Error("Este movimento já foi conciliado ou lançado.");
+  }
+
   const original = Number(boleto.amount) || 0;
   const paidAmount = computePaidAmount(original, interestAmount, discountAmount);
   const competenceDate =
@@ -367,6 +488,17 @@ export async function markLineCreatedPayable(params: {
     paymentDate,
     statementDirection,
   } = params;
+
+  const { data: lineRow, error: lineFetchErr } = await supabase
+    .from("bank_statement_lines")
+    .select("id, status")
+    .eq("id", statementLineId)
+    .eq("company_id", companyId)
+    .single();
+  if (lineFetchErr) throw lineFetchErr;
+  if (!lineRow || lineRow.status !== "unmatched") {
+    throw new Error("Este movimento já foi conciliado ou lançado.");
+  }
 
   const { data: boleto, error: fetchErr } = await supabase
     .from("boletos")
@@ -578,4 +710,227 @@ export async function fetchReconciledBoletoIds(
       .map((r) => r.boleto_id as string)
       .filter((id) => wanted.has(id)),
   );
+}
+
+export async function ignoreStatementLine(params: {
+  companyId: string;
+  statementLineId: string;
+}): Promise<void> {
+  const { data: line, error: fetchErr } = await supabase
+    .from("bank_statement_lines")
+    .select("id, status")
+    .eq("id", params.statementLineId)
+    .eq("company_id", params.companyId)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (!line || line.status !== "unmatched") {
+    throw new Error("Só é possível ignorar um movimento ainda não conciliado.");
+  }
+
+  const { error } = await supabase
+    .from("bank_statement_lines")
+    .update({ status: "ignored" })
+    .eq("id", params.statementLineId)
+    .eq("company_id", params.companyId)
+    .eq("status", "unmatched");
+  if (error) throw error;
+}
+
+export async function restoreIgnoredStatementLine(params: {
+  companyId: string;
+  statementLineId: string;
+}): Promise<void> {
+  const { data: line, error: fetchErr } = await supabase
+    .from("bank_statement_lines")
+    .select("id, status")
+    .eq("id", params.statementLineId)
+    .eq("company_id", params.companyId)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (!line || line.status !== "ignored") {
+    throw new Error("Só é possível restaurar um movimento ignorado.");
+  }
+
+  const { error } = await supabase
+    .from("bank_statement_lines")
+    .update({ status: "unmatched" })
+    .eq("id", params.statementLineId)
+    .eq("company_id", params.companyId)
+    .eq("status", "ignored");
+  if (error) throw error;
+}
+
+async function unlinkLineReconciliation(params: {
+  companyId: string;
+  statementLineId: string;
+}): Promise<void> {
+  const { error: reconErr } = await supabase
+    .from("bank_reconciliations")
+    .delete()
+    .eq("company_id", params.companyId)
+    .eq("statement_line_id", params.statementLineId);
+  if (reconErr) throw reconErr;
+
+  const { error: lineErr } = await supabase
+    .from("bank_statement_lines")
+    .update({ status: "unmatched" })
+    .eq("id", params.statementLineId)
+    .eq("company_id", params.companyId);
+  if (lineErr) throw lineErr;
+}
+
+async function loadTransferGroup(
+  companyId: string,
+  boleto: Boleto,
+): Promise<Boleto[]> {
+  if (boleto.entry_kind !== "transfer" || !boleto.transfer_group_id) {
+    return [boleto];
+  }
+  const { data, error } = await supabase
+    .from("boletos")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("transfer_group_id", boleto.transfer_group_id)
+    .eq("entry_kind", "transfer");
+  if (error) throw error;
+  const rows = (data ?? []) as Boleto[];
+  return rows.length > 0 ? rows : [boleto];
+}
+
+async function reopenReceivableGroup(
+  companyId: string,
+  boletos: Boleto[],
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  for (const row of boletos) {
+    if (row.status !== "paid") continue;
+    const keepBank = row.entry_kind === "transfer";
+    const { error } = await supabase
+      .from("boletos")
+      .update({
+        status: "pending",
+        paid_at: null,
+        competence_date: null,
+        interest_amount: 0,
+        discount_amount: 0,
+        paid_amount: null,
+        company_bank_account_id: keepBank ? row.company_bank_account_id : null,
+        updated_at: updatedAt,
+      })
+      .eq("id", row.id)
+      .eq("company_id", companyId);
+    if (error) throw error;
+  }
+}
+
+async function deleteCreatedLaunchBoletos(params: {
+  companyId: string;
+  boleto: Boleto;
+}): Promise<void> {
+  const group = await loadTransferGroup(params.companyId, params.boleto);
+  const expenseIds = [
+    ...new Set(group.map((b) => b.expense_id).filter((id): id is string => !!id)),
+  ];
+  const ids = group.map((b) => b.id);
+
+  const { error: delErr } = await supabase
+    .from("boletos")
+    .delete()
+    .eq("company_id", params.companyId)
+    .in("id", ids);
+  if (delErr) throw delErr;
+
+  for (const expenseId of expenseIds) {
+    const { count, error: countErr } = await supabase
+      .from("boletos")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", params.companyId)
+      .eq("expense_id", expenseId);
+    if (countErr) throw countErr;
+    if ((count ?? 0) > 0) continue;
+
+    const { data: expense, error: expFetchErr } = await supabase
+      .from("expenses")
+      .select("id, type, expense_source")
+      .eq("id", expenseId)
+      .eq("company_id", params.companyId)
+      .maybeSingle();
+    if (expFetchErr) throw expFetchErr;
+    if (
+      !expense ||
+      expense.type !== "recibo" ||
+      expense.expense_source !== "manual"
+    ) {
+      continue;
+    }
+    const { error: expDelErr } = await supabase
+      .from("expenses")
+      .delete()
+      .eq("id", expenseId)
+      .eq("company_id", params.companyId);
+    if (expDelErr) throw expDelErr;
+  }
+}
+
+export async function undoBankReconciliation(params: {
+  companyId: string;
+  statementLineId: string;
+  deleteCreatedLaunch?: boolean;
+}): Promise<void> {
+  const { companyId, statementLineId, deleteCreatedLaunch = false } = params;
+
+  const { data: line, error: lineErr } = await supabase
+    .from("bank_statement_lines")
+    .select("*")
+    .eq("id", statementLineId)
+    .eq("company_id", companyId)
+    .single();
+  if (lineErr) throw lineErr;
+  if (!line || !isReconciledReconLine(line as BankStatementLine)) {
+    throw new Error("Este movimento não está conciliado.");
+  }
+
+  const { data: recon, error: reconErr } = await supabase
+    .from("bank_reconciliations")
+    .select("boleto_id")
+    .eq("company_id", companyId)
+    .eq("statement_line_id", statementLineId)
+    .maybeSingle();
+  if (reconErr) throw reconErr;
+
+  const boletoId = recon?.boleto_id as string | undefined;
+  let boleto: Boleto | null = null;
+  if (boletoId) {
+    const { data, error } = await supabase
+      .from("boletos")
+      .select("*")
+      .eq("id", boletoId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (error) throw error;
+    boleto = (data as Boleto | null) ?? null;
+  }
+
+  const shouldDelete =
+    deleteCreatedLaunch && line.status === "created_payable" && boleto;
+
+  if (shouldDelete && boleto) {
+    await unlinkLineReconciliation({ companyId, statementLineId });
+    await deleteCreatedLaunchBoletos({ companyId, boleto });
+    return;
+  }
+
+  if (boleto && isBoletoPayable(boleto) && boleto.status === "paid") {
+    await undoPayBoleto({ boletoId: boleto.id, companyId });
+    return;
+  }
+
+  if (boleto) {
+    const group = await loadTransferGroup(companyId, boleto);
+    await unlinkLineReconciliation({ companyId, statementLineId });
+    await reopenReceivableGroup(companyId, group);
+    return;
+  }
+
+  await unlinkLineReconciliation({ companyId, statementLineId });
 }
