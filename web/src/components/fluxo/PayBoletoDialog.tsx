@@ -1,5 +1,6 @@
 import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -20,10 +21,13 @@ import {
 import {
   computePaidAmount,
   competenceDateFromMonthInput,
+  isValidPartialPayAmount,
   localDateYmd,
   monthInputFromYmd,
   parseNonNegativeAmount,
+  remainderAmount,
 } from "@/lib/boletoPayment";
+import { splitPayBoleto } from "@/lib/boletoPaymentApi";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { isProjectedBoleto } from "@/lib/expenseSeriesProjection";
 import { supabase } from "@/lib/supabase";
@@ -40,6 +44,8 @@ interface PayBoletoDialogProps {
   boleto: Boleto | null;
   companyId: string;
   supplierName?: string | null;
+  /** Abre já no modo de pagamento parcial. */
+  initialPartial?: boolean;
   onSuccess: (updated: Boleto) => void;
 }
 
@@ -63,6 +69,7 @@ export function PayBoletoDialog({
   boleto,
   companyId,
   supplierName,
+  initialPartial = false,
   onSuccess,
 }: PayBoletoDialogProps) {
   const [paymentDate, setPaymentDate] = useState("");
@@ -73,13 +80,21 @@ export function PayBoletoDialog({
   const [bankAccounts, setBankAccounts] = useState<CompanyBankAccount[]>([]);
   const [createBankOpen, setCreateBankOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [partial, setPartial] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [remainderDueDate, setRemainderDueDate] = useState("");
 
+  const allowPartial = !!boleto && !isBoletoTransfer(boleto);
   const originalAmount = boleto?.amount ?? 0;
+  const payAmountNum = parseNonNegativeAmount(payAmount);
   const interestNum = parseNonNegativeAmount(interest);
   const discountNum = parseNonNegativeAmount(discount);
+  const faceAmount = partial ? payAmountNum : originalAmount;
+  const remaining = remainderAmount(originalAmount, payAmountNum);
+  const partialValid = isValidPartialPayAmount(originalAmount, payAmountNum);
   const finalAmount = useMemo(
-    () => computePaidAmount(originalAmount, interestNum, discountNum),
-    [originalAmount, interestNum, discountNum],
+    () => computePaidAmount(faceAmount, interestNum, discountNum),
+    [faceAmount, interestNum, discountNum],
   );
 
   const loadBankAccounts = useCallback(async () => {
@@ -104,8 +119,11 @@ export function PayBoletoDialog({
     setBankAccountId(boleto.company_bank_account_id ?? "");
     setInterest("0");
     setDiscount("0");
+    setPartial(allowPartial && initialPartial);
+    setPayAmount("");
+    setRemainderDueDate("");
     void loadBankAccounts();
-  }, [open, boleto, loadBankAccounts]);
+  }, [open, boleto, loadBankAccounts, allowPartial, initialPartial]);
 
   const canSubmit =
     !!boleto &&
@@ -115,7 +133,9 @@ export function PayBoletoDialog({
     bankAccountId !== "" &&
     bankAccountId !== "__create__" &&
     finalAmount > 0 &&
-    !submitting;
+    !submitting &&
+    (!partial ||
+      (partialValid && remainderDueDate.trim() !== ""));
 
   const handleBankAccountChange = (value: string) => {
     if (value === "__create__") {
@@ -142,6 +162,37 @@ export function PayBoletoDialog({
 
     setSubmitting(true);
     const paidAt = paymentDate.trim().slice(0, 10);
+
+    if (partial && allowPartial) {
+      try {
+        const result = await splitPayBoleto({
+          boletoId: boleto.id,
+          companyId,
+          payAmount: payAmountNum,
+          paidAt,
+          competenceDate,
+          bankAccountId,
+          interestAmount: interestNum,
+          discountAmount: discountNum,
+          remainderDueDate: remainderDueDate.trim().slice(0, 10),
+        });
+        setSubmitting(false);
+        onOpenChange(false);
+        onSuccess(result.paid);
+        toast.success(
+          `Pagamento parcial registrado. Saldo de ${formatCurrency(result.remainder.amount)} com vencimento em ${formatDate(result.remainder.due_date)}.`,
+        );
+      } catch (err) {
+        setSubmitting(false);
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Não foi possível registrar o pagamento parcial.",
+        );
+      }
+      return;
+    }
+
     const updatedAt = new Date().toISOString();
     const primaryUpdate = {
       status: "paid" as const,
@@ -223,7 +274,7 @@ export function PayBoletoDialog({
       >
         <DialogContent
           overlayClassName="z-[80]"
-          className="z-[80] sm:max-w-lg"
+          className="z-[80] sm:max-w-lg max-h-[90vh] overflow-y-auto"
           onPointerDownOutside={(e) => submitting && e.preventDefault()}
           onEscapeKeyDown={(e) => submitting && e.preventDefault()}
         >
@@ -231,12 +282,16 @@ export function PayBoletoDialog({
             <DialogTitle>
               {boleto && isBoletoTransfer(boleto)
                 ? "Quitar transferência"
-                : "Registrar pagamento"}
+                : partial
+                  ? "Pagamento parcial"
+                  : "Registrar pagamento"}
             </DialogTitle>
             <DialogDescription>
               {boleto && isBoletoTransfer(boleto)
                 ? "Ao confirmar, a saída e a entrada da transferência serão quitadas."
-                : "Informe os dados do pagamento desta conta a pagar."}
+                : partial
+                  ? "A parte paga é quitada e o saldo vira uma nova conta com o vencimento informado."
+                  : "Informe os dados do pagamento desta conta a pagar."}
             </DialogDescription>
           </DialogHeader>
 
@@ -277,6 +332,65 @@ export function PayBoletoDialog({
                   />
                 </div>
               </div>
+
+              {allowPartial && (
+                <div className="space-y-3 rounded-lg border p-3">
+                  <label
+                    htmlFor="partial-pay"
+                    className="flex items-start gap-2 cursor-pointer"
+                  >
+                    <Checkbox
+                      id="partial-pay"
+                      checked={partial}
+                      onCheckedChange={setPartial}
+                      className="mt-0.5"
+                    />
+                    <span className="text-sm">
+                      <span className="font-medium">Pagar apenas uma parte</span>
+                      <span className="block text-muted-foreground text-xs mt-0.5">
+                        O valor restante vira uma nova conta com outro vencimento.
+                      </span>
+                    </span>
+                  </label>
+                  {partial && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="pay-amount">Valor a pagar (R$)</Label>
+                        <Input
+                          id="pay-amount"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={payAmount}
+                          onChange={(e) => setPayAmount(e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="remainder-due">
+                          Vencimento do saldo
+                        </Label>
+                        <Input
+                          id="remainder-due"
+                          type="date"
+                          value={remainderDueDate}
+                          onChange={(e) => setRemainderDueDate(e.target.value)}
+                        />
+                      </div>
+                      {partialValid ? (
+                        <p className="sm:col-span-2 text-xs text-muted-foreground">
+                          Saldo restante: {formatCurrency(remaining)}
+                        </p>
+                      ) : (
+                        <p className="sm:col-span-2 text-xs text-destructive">
+                          Informe um valor maior que zero e menor que{" "}
+                          {formatCurrency(originalAmount)}.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <Label>Conta usada para pagar</Label>
@@ -349,9 +463,11 @@ export function PayBoletoDialog({
 
               <div className="rounded-lg border px-3 py-3 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Valor original</span>
+                  <span className="text-muted-foreground">
+                    {partial ? "Valor desta parte" : "Valor original"}
+                  </span>
                   <span className="font-medium tabular-nums">
-                    {formatCurrency(originalAmount)}
+                    {formatCurrency(faceAmount)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 border-t pt-2">
@@ -387,7 +503,11 @@ export function PayBoletoDialog({
               disabled={!canSubmit}
               onClick={() => void handleSubmit()}
             >
-              {submitting ? "Registrando..." : "Confirmar pagamento"}
+              {submitting
+                ? "Registrando..."
+                : partial
+                  ? "Confirmar pagamento parcial"
+                  : "Confirmar pagamento"}
             </Button>
           </DialogFooter>
         </DialogContent>

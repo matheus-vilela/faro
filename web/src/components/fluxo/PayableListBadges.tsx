@@ -73,3 +73,17 @@ export function PayableOriginBadge({
     </Badge>
   );
 }
+
+export function PayableRemainderBadge({ className }: { className?: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "border-violet-600/30 bg-violet-500/10 text-violet-900 dark:text-violet-100 font-medium",
+        className,
+      )}
+    >
+      Saldo restante
+    </Badge>
+  );
+}

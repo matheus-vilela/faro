@@ -47,3 +47,21 @@ export function computePaidAmount(
   const d = Number.isFinite(discount) ? discount : 0;
   return Math.round((base + j - d) * 100) / 100;
 }
+
+export function roundMoney(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+/** Valor restante após um pagamento parcial da face da conta. */
+export function remainderAmount(original: number, payAmount: number): number {
+  return roundMoney(roundMoney(original) - roundMoney(payAmount));
+}
+
+export function isValidPartialPayAmount(
+  original: number,
+  payAmount: number,
+): boolean {
+  const pay = roundMoney(payAmount);
+  const rem = remainderAmount(original, pay);
+  return pay > 0 && rem > 0;
+}

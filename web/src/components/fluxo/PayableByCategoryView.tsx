@@ -1,5 +1,6 @@
 import {
   PayableOriginBadge,
+  PayableRemainderBadge,
   PayableSituationBadge,
 } from "@/components/fluxo/PayableListBadges";
 import {
@@ -161,6 +162,9 @@ export function PayableByCategoryView({
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                   <PayableOriginBadge origin={origin} />
+                                  {b.split_from_boleto_id ? (
+                                    <PayableRemainderBadge />
+                                  ) : null}
                                   <span className="text-sm text-muted-foreground">
                                     Vence {formatDueDateShort(b.due_date)}
                                   </span>

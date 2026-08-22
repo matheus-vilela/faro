@@ -157,6 +157,8 @@ export interface Boleto {
   discount_amount?: number
   /** Valor efetivamente pago (original + juros - desconto). */
   paid_amount?: number | null
+  /** Boleto de origem quando este lançamento é o saldo de um pagamento parcial. */
+  split_from_boleto_id?: string | null
   created_at: string
   updated_at: string
 }
