@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { companyCategoryDisplayName } from "./companyCategoryLabels";
+import {
+  companyCategoryDisplayName,
+  isSelectablePurchaseDespesaLeaf,
+} from "./companyCategoryLabels";
 import { ptBrUi } from "./ptBrUiStrings";
 import type { CompanyCategory } from "@/types/category";
 
@@ -51,5 +54,30 @@ describe("companyCategoryDisplayName", () => {
         }),
       ),
     ).toBe("Vendas de produtos");
+  });
+});
+
+describe("isSelectablePurchaseDespesaLeaf", () => {
+  it("aceita despesa variável e folha CMV (Alimentos) na compra", () => {
+    expect(
+      isSelectablePurchaseDespesaLeaf(
+        cat({
+          name: "Limpeza",
+          natureza: "DESPESA",
+          tipo: "VARIAVEL",
+          papel_receita_dre: null,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isSelectablePurchaseDespesaLeaf(
+        cat({
+          name: "Alimentos",
+          natureza: "DESPESA",
+          tipo: "CMV",
+          papel_receita_dre: null,
+        }),
+      ),
+    ).toBe(true);
   });
 });

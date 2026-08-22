@@ -42,6 +42,7 @@ export function PayableByCategoryView({
   emptyMessage,
   formatCurrency,
   onSelect,
+  itemsByExpenseId,
 }: {
   boletos: FluxoBoletoRow[];
   categoriesById: Map<string, CompanyCategory>;
@@ -51,10 +52,11 @@ export function PayableByCategoryView({
   emptyMessage: string;
   formatCurrency: (v: number) => string;
   onSelect: (b: FluxoBoletoRow) => void;
+  itemsByExpenseId?: Map<string, Array<{ company_category_id?: string | null }>>;
 }) {
   const groups = useMemo(
-    () => groupPayablesByCategory(boletos, categoriesById),
-    [boletos, categoriesById],
+    () => groupPayablesByCategory(boletos, categoriesById, itemsByExpenseId),
+    [boletos, categoriesById, itemsByExpenseId],
   );
 
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());

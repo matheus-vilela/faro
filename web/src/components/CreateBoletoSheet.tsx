@@ -1,6 +1,7 @@
 import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
 import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
+import { ExpenseItemsInlineTable } from "@/components/expenses/ExpenseItemsInlineTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,8 +39,9 @@ import {
   type CompanyBankAccount,
 } from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
-import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoFlowType, ExpenseItem, PaymentType } from "@/types/expense";
 import type { Supplier } from "@/types/supplier";
+import type { Product } from "@/types/product";
 import type {
   ExpenseSeriesType,
   RecurrenceFrequency,
@@ -256,6 +258,8 @@ export function CreateBoletoSheet({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+  const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
+  const [expenseProducts, setExpenseProducts] = useState<Product[]>([]);
   const supplierSelectOptions = useMemo(
     () => suppliers.map(supplierSearchOption),
     [suppliers],
@@ -376,6 +380,33 @@ export function CreateBoletoSheet({
     void loadSuppliers();
   }, [open, companyId, expenseId, effectiveFlow, loadSuppliers]);
 
+  const loadLinkedExpense = useCallback(async () => {
+    if (!open || !companyId || !expenseId) {
+      setExpenseItems([]);
+      setExpenseProducts([]);
+      return;
+    }
+    const [{ data: itemRows }, { data: prodRows }] = await Promise.all([
+      supabase
+        .from("expense_items")
+        .select("*, products (id, name, current_quantity, min_quantity, unit)")
+        .eq("company_id", companyId)
+        .eq("expense_id", expenseId)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+    ]);
+    setExpenseItems((itemRows as ExpenseItem[]) ?? []);
+    setExpenseProducts((prodRows as Product[]) ?? []);
+  }, [open, companyId, expenseId]);
+
+  useEffect(() => {
+    void loadLinkedExpense();
+  }, [loadLinkedExpense]);
+
   const loadBankAccounts = useCallback(async () => {
     if (!companyId) return;
     const { data, error } = await supabase
@@ -461,7 +492,7 @@ export function CreateBoletoSheet({
 
   const canSubmitStandard =
     !isTransfer &&
-    companyCategoryId.trim() !== "" &&
+    (Boolean(expenseId) || companyCategoryId.trim() !== "") &&
     !categoriesLoading &&
     description.trim() !== "" &&
     emissionDate.trim() !== "" &&
@@ -636,7 +667,7 @@ export function CreateBoletoSheet({
 
     const payload: Record<string, unknown> = {
       company_id: companyId,
-      company_category_id: companyCategoryId,
+      company_category_id: companyCategoryId || null,
       category: null,
       description: description.trim(),
       emission_date: emissionDate,
@@ -881,7 +912,9 @@ export function CreateBoletoSheet({
             )}
             {!isTransfer && (
               <div>
-                <Label>Categoria</Label>
+                <Label>
+                  {expenseId ? "Categoria da conta (fallback)" : "Categoria"}
+                </Label>
                 <BoletoCategoryPicker
                   companyId={companyId}
                   value={companyCategoryId}
@@ -890,12 +923,36 @@ export function CreateBoletoSheet({
                   loading={categoriesLoading}
                   categoryNatureza={categoryNatureza}
                   onReload={() => loadCategories({ selectDefault: false })}
+                  allowClear={Boolean(expenseId)}
                 />
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Busque, escolha ou crie uma categoria sem sair desta tela.
+                  {expenseId
+                    ? "Usada nas linhas da nota sem categoria. O DRE rateia pelos itens classificados."
+                    : "Busque, escolha ou crie uma categoria sem sair desta tela."}
                 </p>
               </div>
             )}
+            {expenseId && expenseItems.length > 0 ? (
+              <ExpenseItemsInlineTable
+                items={expenseItems}
+                canEdit
+                companyId={companyId}
+                products={expenseProducts}
+                deferProductCreation={false}
+                highlightMissingVinculo={false}
+                onSaved={(created) => {
+                  if (created) {
+                    setExpenseProducts((prev) => {
+                      if (prev.some((p) => p.id === created.id)) return prev;
+                      return [...prev, created].sort((a, b) =>
+                        a.name.localeCompare(b.name, "pt-BR"),
+                      );
+                    });
+                  }
+                  void loadLinkedExpense();
+                }}
+              />
+            ) : null}
             {requiresPaymentDetails && !expenseId && (
               <div>
                 <Label>Fornecedor</Label>

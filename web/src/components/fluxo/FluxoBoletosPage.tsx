@@ -56,6 +56,11 @@ import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import { fetchPayableReceiptContext } from "@/lib/fetchPayableReceiptContext";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  groupRateioItemsByExpenseId,
+  type RateioLine,
+} from "@/lib/dre/rateioBoletoByItems";
 import {
   EMPTY_PAYABLE_RECEIPT_CONTEXT,
   isBoletoPendingMerchandiseReceipt,
@@ -266,6 +271,9 @@ export function FluxoBoletosPage({
   );
   const [payableReceiptContext, setPayableReceiptContext] =
     useState<PayableReceiptContext>(EMPTY_PAYABLE_RECEIPT_CONTEXT);
+  const [rateioItemsByExpenseId, setRateioItemsByExpenseId] = useState<
+    Map<string, RateioLine[]>
+  >(() => new Map());
   const [bankAccountsById, setBankAccountsById] = useState<
     Map<string, CompanyBankAccount>
   >(new Map());
@@ -560,9 +568,10 @@ export function FluxoBoletosPage({
 
   useEffect(() => {
     if (!companyId || flowType !== "payable") {
-      queueMicrotask(() =>
-        setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT),
-      );
+      queueMicrotask(() => {
+        setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
+        setRateioItemsByExpenseId(new Map());
+      });
       return;
     }
     const byKey = new Map<string, FluxoBoletoRow>();
@@ -577,6 +586,15 @@ export function FluxoBoletosPage({
       .catch((error) => {
         console.error(error);
         setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
+      });
+    const expenseIds = [...byKey.values()]
+      .map((b) => b.expense_id)
+      .filter((id): id is string => Boolean(id));
+    void fetchExpenseItemsForRateio(companyId, expenseIds)
+      .then((items) => setRateioItemsByExpenseId(groupRateioItemsByExpenseId(items)))
+      .catch((error) => {
+        console.error(error);
+        setRateioItemsByExpenseId(new Map());
       });
   }, [companyId, flowType, calendarBoletos, boletosMonthFiltered]);
 
@@ -1328,6 +1346,7 @@ export function FluxoBoletosPage({
               emptyMessage={emptyListMessage}
               formatCurrency={formatCurrency}
               onSelect={setBoletoResumo}
+              itemsByExpenseId={rateioItemsByExpenseId}
             />
           )}
           {listView === "due" && (
@@ -1495,6 +1514,7 @@ export function FluxoBoletosPage({
                       emptyMessage="Nenhum lançamento com vencimento neste dia."
                       formatCurrency={formatCurrency}
                       onSelect={setBoletoResumo}
+                      itemsByExpenseId={rateioItemsByExpenseId}
                     />
                   )}
                   {calendarDayListView === "due" && (

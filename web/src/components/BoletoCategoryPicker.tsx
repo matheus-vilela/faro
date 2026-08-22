@@ -14,6 +14,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SEARCH_SELECT_WIDE_POPOVER_CLASS } from "@/components/ui/search-select";
 import {
   buildChildrenMap,
   categoryPathLabel,
@@ -27,7 +28,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory, TipoCategoria } from "@/types/category";
-import { Check, ChevronsUpDown, Loader2, Plus, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -85,6 +86,10 @@ export function BoletoCategoryPicker({
   onReload,
   disabled,
   categoryNatureza = "DESPESA",
+  excludeTipos,
+  compact = false,
+  allowClear = false,
+  placeholder,
 }: {
   companyId: string;
   value: string;
@@ -95,11 +100,22 @@ export function BoletoCategoryPicker({
   disabled?: boolean;
   /** Natureza das categorias listadas e criadas neste picker. */
   categoryNatureza?: "DESPESA" | "RECEITA";
+  /** Tipos omitidos da lista (ex.: esconder um grupo específico). */
+  excludeTipos?: TipoCategoria[];
+  compact?: boolean;
+  allowClear?: boolean;
+  placeholder?: string;
 }) {
-  const isSelectableLeaf =
-    categoryNatureza === "RECEITA"
-      ? isSelectableReceitaLeaf
-      : isSelectableDespesaLeaf;
+  const excluded = new Set(excludeTipos ?? []);
+  const isSelectableLeaf = (c: CompanyCategory) => {
+    const byNatureza =
+      categoryNatureza === "RECEITA"
+        ? isSelectableReceitaLeaf(c)
+        : isSelectableDespesaLeaf(c);
+    if (!byNatureza) return false;
+    if (excluded.has(c.tipo)) return false;
+    return true;
+  };
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -116,7 +132,10 @@ export function BoletoCategoryPicker({
 
   const parentOptions = useMemo(() => {
     const list = categories.filter(
-      (c) => c.natureza === categoryNatureza && c.ativo !== false,
+      (c) =>
+        c.natureza === categoryNatureza &&
+        c.ativo !== false &&
+        !excluded.has(c.tipo),
     );
     list.sort((a, b) =>
       categoryPathLabel(a.id, byId).localeCompare(
@@ -125,7 +144,7 @@ export function BoletoCategoryPicker({
       ),
     );
     return list;
-  }, [categories, byId, categoryNatureza]);
+  }, [categories, byId, categoryNatureza, excludeTipos]);
 
   const tipoParent = useMemo(
     () => new Map(parentOptions.map((p) => [p.id, p.tipo])),
@@ -305,7 +324,8 @@ export function BoletoCategoryPicker({
             aria-expanded={open}
             disabled={triggerDisabled}
             className={cn(
-              "w-full justify-between font-normal h-9 px-3",
+              "w-full justify-between font-normal px-3",
+              compact ? "h-8 text-xs" : "h-9",
               !value && "text-muted-foreground",
             )}
           >
@@ -313,16 +333,43 @@ export function BoletoCategoryPicker({
               {loading
                 ? "Carregando…"
                 : selectedLabel ||
+                  placeholder ||
                   (categoryNatureza === "RECEITA"
                     ? "Selecione uma categoria de receita"
                     : "Selecione uma categoria de despesa")}
             </span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            {allowClear && value && !triggerDisabled ? (
+              <span
+                role="button"
+                tabIndex={0}
+                className="ml-1 rounded p-0.5 hover:bg-muted"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onValueChange("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onValueChange("");
+                  }
+                }}
+              >
+                <X className="h-3.5 w-3.5 opacity-60" />
+              </span>
+            ) : (
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            )}
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="z-[100] w-[var(--radix-popover-trigger-width)] min-w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
+          className={cn(
+            SEARCH_SELECT_WIDE_POPOVER_CLASS,
+            "p-0",
+          )}
           align="start"
+          collisionPadding={16}
           onWheel={(e) => e.stopPropagation()}
         >
           <div className="flex flex-col gap-2 border-b p-2">
@@ -362,7 +409,7 @@ export function BoletoCategoryPicker({
             ) : (
               groupedFiltered.map((group) => (
                 <div key={group.key} className="px-1 py-1">
-                  <p className="px-2 text-xs font-semibold text-foreground">
+                  <p className="px-2 text-xs font-semibold text-pretty text-foreground">
                     {group.parentLabel}
                   </p>
                   <div className="relative mt-1 ml-2 pl-4 before:absolute before:left-1 before:top-1 before:bottom-1 before:w-px before:bg-border">
@@ -387,7 +434,7 @@ export function BoletoCategoryPicker({
                             value === opt.id ? "opacity-100" : "opacity-0",
                           )}
                         />
-                        <span className="min-w-0 flex-1 truncate">
+                        <span className="min-w-0 flex-1 text-pretty whitespace-normal">
                           {opt.leafLabel}
                         </span>
                       </button>
@@ -402,7 +449,7 @@ export function BoletoCategoryPicker({
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent
-          className="z-[120] sm:max-w-md"
+          className="z-[120] sm:max-w-lg"
           overlayClassName="z-[115]"
           showCloseButton
         >
@@ -446,8 +493,9 @@ export function BoletoCategoryPicker({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  className="z-[130] w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0"
+                  className="z-[130] w-[min(28rem,max(22rem,var(--radix-popover-trigger-width)),calc(100vw-1.5rem))] min-w-[min(22rem,calc(100vw-1.5rem))] p-0"
                   align="start"
+                  collisionPadding={16}
                   onWheel={(e) => e.stopPropagation()}
                 >
                   <div className="border-b p-2">
@@ -492,7 +540,7 @@ export function BoletoCategoryPicker({
                               >
                                 <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
                                 <Check className={cn("h-4 w-4 shrink-0", newParentId === opt.id ? "opacity-100" : "opacity-0")} />
-                                <span className="truncate">
+                                <span className="min-w-0 flex-1 text-pretty whitespace-normal">
                                   {companyCategoryDisplayName(opt)}
                                 </span>
                               </button>

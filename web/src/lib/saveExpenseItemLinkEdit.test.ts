@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   draftToPendingNewProduct,
+  initialDraftFromItem,
   isExpenseItemDraftDirty,
   mergeExpenseItemMetadata,
   stockQuantityForDraft,
@@ -24,6 +25,8 @@ const baseDraft = (): ExpenseItemLinkEditDraft => ({
       secondary_unit_code: "cx",
     },
   ],
+  companyCategoryId: null,
+  productCategoryIds: [],
 });
 
 describe("mergeExpenseItemMetadata", () => {
@@ -56,6 +59,72 @@ describe("isExpenseItemDraftDirty", () => {
     };
     expect(isExpenseItemDraftDirty(a, b)).toBe(false);
     expect(isExpenseItemDraftDirty({ ...a, quantity: 3 }, a)).toBe(true);
+    expect(
+      isExpenseItemDraftDirty({ ...a, companyCategoryId: "cat-1" }, a),
+    ).toBe(true);
+  });
+});
+
+describe("initialDraftFromItem", () => {
+  it("preenche categoria com o default do produto quando a linha está vazia", () => {
+    const draft = initialDraftFromItem(
+      {
+        product_name: "Carne",
+        quantity: 1,
+        unit_value: 10,
+        product_id: "p1",
+        company_category_id: null,
+      },
+      "c1",
+      { productDefaultCategoryId: "cat-default", productCategoryIds: ["g1"] },
+    );
+    expect(draft.companyCategoryId).toBe("cat-default");
+    expect(draft.productCategoryIds).toEqual(["g1"]);
+  });
+
+  it("usa a CMV do cadastro quando não há categoria de compra", () => {
+    const draft = initialDraftFromItem(
+      {
+        product_name: "Peito de frango",
+        quantity: 1,
+        unit_value: 10,
+        product_id: "p1",
+        company_category_id: null,
+      },
+      "c1",
+      { productCmvCategoryId: "cmv-alimentos" },
+    );
+    expect(draft.companyCategoryId).toBe("cmv-alimentos");
+  });
+
+  it("mantém a categoria da linha mesmo com default no produto", () => {
+    const draft = initialDraftFromItem(
+      {
+        product_name: "Carne",
+        quantity: 1,
+        unit_value: 10,
+        product_id: "p1",
+        company_category_id: "cat-line",
+      },
+      "c1",
+      { productDefaultCategoryId: "cat-default" },
+    );
+    expect(draft.companyCategoryId).toBe("cat-line");
+  });
+
+  it("grava categoria na linha sem produto, sem default de cadastro", () => {
+    const draft = initialDraftFromItem(
+      {
+        product_name: "Avulso",
+        quantity: 1,
+        unit_value: 5,
+        company_category_id: "cat-line",
+      },
+      "c1",
+    );
+    expect(draft.mode).toBe("none");
+    expect(draft.companyCategoryId).toBe("cat-line");
+    expect(draft.productCategoryIds).toEqual([]);
   });
 });
 

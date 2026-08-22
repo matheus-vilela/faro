@@ -111,6 +111,10 @@ export type SearchSelectProps = {
   renderOptionLabel?: (option: SearchSelectOption) => ReactNode;
 };
 
+/** Lista mais larga que o trigger — células estreitas de tabela. */
+export const SEARCH_SELECT_WIDE_POPOVER_CLASS =
+  "z-[100] w-[min(28rem,max(22rem,var(--radix-popover-trigger-width)),calc(100vw-1.5rem))] min-w-[min(22rem,calc(100vw-1.5rem))] max-w-[min(28rem,calc(100vw-1.5rem))]";
+
 export function SearchSelect({
   value,
   onValueChange,
@@ -174,11 +178,11 @@ export function SearchSelect({
         onClick={() => pick(option.value)}
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate leading-snug">
+          <span className="block text-pretty leading-snug">
             {renderOptionLabel ? renderOptionLabel(option) : option.label}
           </span>
           {option.description ? (
-            <span className="mt-0.5 block text-xs text-muted-foreground">
+            <span className="mt-0.5 block text-pretty text-xs text-muted-foreground">
               {option.description}
             </span>
           ) : null}
@@ -219,6 +223,7 @@ export function SearchSelect({
       </PopoverTrigger>
       <PopoverContent
         align="start"
+        collisionPadding={16}
         className={cn(
           "w-[var(--radix-popover-trigger-width)] p-0",
           contentClassName,

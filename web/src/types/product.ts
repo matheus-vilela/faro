@@ -14,6 +14,8 @@ export interface Product {
   last_unit_value_stock?: number | null
   /** Legado; CMV na venda usa a folha CMV padrão da empresa. */
   cmv_category_id?: string | null
+  /** Última categoria financeira de compra; pré-preenche novas linhas de NF. */
+  default_expense_category_id?: string | null
   /** Se true, vendas geram lançamento de CMV; se false, não compõe CMV no DRE. */
   composes_cmv?: boolean
   /** Custo médio ponderado (CMV), quando houver entradas valoradas */

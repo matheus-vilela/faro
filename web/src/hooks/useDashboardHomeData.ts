@@ -22,6 +22,11 @@ import {
   buildDreComputedFromMaps,
 } from "@/lib/dre/computeDre";
 import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  expandBoletosToDrePurchaseAmounts,
+  groupRateioItemsByExpenseId,
+} from "@/lib/dre/rateioBoletoByItems";
 import { fetchPurchaseWithoutUtilCount } from "@/lib/onboardingProductRecipeMatch";
 import { addDaysYmd, computePayableTotals } from "@/lib/payableTotals";
 import {
@@ -410,6 +415,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         flow_type: string | null;
         entry_kind: string | null;
         revenue_entry_id: string | null;
+        expense_id: string | null;
       }>;
       const dreBoletos = dreBoletosRaw.filter((b) => {
         if (isBoletoTransfer(b)) return false;
@@ -428,11 +434,22 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           ),
         0,
       );
+      const rateioItems = await fetchExpenseItemsForRateio(
+        companyId,
+        dreBoletos
+          .map((b) => b.expense_id)
+          .filter((id): id is string => Boolean(id)),
+      );
       const categoryTotals = aggregateTotalsByCategory(
-        dreBoletos.map((b) => ({
-          amount: Number(b.amount) || 0,
-          company_category_id: b.company_category_id ?? null,
-        })),
+        expandBoletosToDrePurchaseAmounts(
+          dreBoletos.map((b) => ({
+            amount: Number(b.amount) || 0,
+            expense_id: b.expense_id,
+            company_category_id: b.company_category_id ?? null,
+          })),
+          groupRateioItemsByExpenseId(rateioItems),
+          categoriesById,
+        ),
         categoriesById,
       );
       const computed = buildDreComputedFromMaps(

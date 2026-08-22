@@ -16,6 +16,7 @@ import {
 import { bytesToImageDataUrlSafe, optimizeExpenseImage } from "../_shared/optimizeExpenseImage.ts";
 import { fetchZApiMediaBytes } from "../_shared/zapiMedia.ts";
 import { pickInvoiceUnitRaw } from "../_shared/productImport/consolidateItems.ts";
+import { fetchProductDefaultExpenseCategoryById } from "../_shared/productDefaultExpenseCategory.ts";
 import {
   type ItemWithProductMatch,
   resolveProductMatches,
@@ -402,6 +403,12 @@ async function insertExpense(
   }
 
   const expenseId = exp.id as string;
+  const defaultCategoryByProductId =
+    await fetchProductDefaultExpenseCategoryById(
+      supabase,
+      companyId,
+      items.map((it) => it.productId).filter(Boolean) as string[],
+    );
   for (const it of items) {
     const q = Math.max(0.0001, Number(it.quantity));
     const uv = Math.round(Number(it.unitValue) * 10000) / 10000;
@@ -434,6 +441,8 @@ async function insertExpense(
     }
     if (it.productId) {
       row.product_id = it.productId;
+      const defCat = defaultCategoryByProductId.get(it.productId);
+      if (defCat) row.company_category_id = defCat;
     }
     const { error: ei } = await supabase.from("expense_items").insert(row);
     if (ei) {

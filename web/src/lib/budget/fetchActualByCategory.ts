@@ -3,6 +3,12 @@ import { getMonthYmdRange } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  expandBoletoAmountByItemCategories,
+  groupRateioItemsByExpenseId,
+  omitPurchaseCmvCategoryAmounts,
+} from "@/lib/dre/rateioBoletoByItems";
 import type { BudgetBasis } from "./types";
 
 export type ActualByCategoryResult = {
@@ -35,6 +41,7 @@ type BoletoRow = {
   company_category_id: string | null;
   flow_type: string | null;
   entry_kind?: string | null;
+  expense_id?: string | null;
 };
 
 /**
@@ -53,7 +60,9 @@ export async function fetchActualByCategory(
 
   let query = supabase
     .from("boletos")
-    .select("amount, paid_amount, company_category_id, flow_type, entry_kind")
+    .select(
+      "amount, paid_amount, company_category_id, flow_type, entry_kind, expense_id",
+    )
     .eq("company_id", companyId)
     .or("flow_type.eq.payable,flow_type.is.null")
     .neq("entry_kind", "transfer");
@@ -87,7 +96,14 @@ export async function fetchActualByCategory(
   let semCategoriaCount = 0;
   let semCategoriaTotal = 0;
 
-  for (const b of (bolRes.data ?? []) as BoletoRow[]) {
+  const boletos = (bolRes.data ?? []) as BoletoRow[];
+  const items = await fetchExpenseItemsForRateio(
+    companyId,
+    boletos.map((b) => b.expense_id).filter((id): id is string => Boolean(id)),
+  );
+  const itemsByExpenseId = groupRateioItemsByExpenseId(items);
+
+  for (const b of boletos) {
     // Exclui recebíveis explícitos (já filtrados no query, reforço)
     if (b.flow_type === "receivable") continue;
 
@@ -97,19 +113,32 @@ export async function fetchActualByCategory(
         : Number(b.amount) || 0;
     if (!Number.isFinite(amount) || amount === 0) continue;
 
-    if (!b.company_category_id) {
-      semCategoriaCount += 1;
-      semCategoriaTotal += Math.abs(amount);
-      continue;
-    }
-
-    const cat = categoriesById.get(b.company_category_id);
-    if (!isBudgetActualCategory(cat)) continue;
-
-    byCategoryId.set(
-      b.company_category_id,
-      (byCategoryId.get(b.company_category_id) ?? 0) + amount,
+    const expenseId = b.expense_id?.trim() || null;
+    const slices = omitPurchaseCmvCategoryAmounts(
+      expandBoletoAmountByItemCategories(
+        {
+          amount,
+          expense_id: expenseId,
+          company_category_id: b.company_category_id,
+        },
+        expenseId ? (itemsByExpenseId.get(expenseId) ?? []) : [],
+      ),
+      categoriesById,
     );
+
+    for (const slice of slices) {
+      if (!slice.company_category_id) {
+        semCategoriaCount += 1;
+        semCategoriaTotal += Math.abs(slice.amount);
+        continue;
+      }
+      const cat = categoriesById.get(slice.company_category_id);
+      if (!isBudgetActualCategory(cat)) continue;
+      byCategoryId.set(
+        slice.company_category_id,
+        (byCategoryId.get(slice.company_category_id) ?? 0) + slice.amount,
+      );
+    }
   }
 
   const salesCmv = (revRes.data ?? []).reduce(

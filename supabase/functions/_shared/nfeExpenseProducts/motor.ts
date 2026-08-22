@@ -17,6 +17,7 @@ import {
 } from "../productImport/consolidateItems.ts";
 import { loadNfeMotorExtractContext } from "./extractFromStoredContext.ts";
 import { catalogRegistrationNameFromNfeLine } from "./newProductCatalogFromNfe.ts";
+import { fetchProductDefaultExpenseCategoryById, preferredPurchaseCategoryId } from "../productDefaultExpenseCategory.ts";
 import { upsertProductSupplierCode } from "../productImport/productSupplierCodes.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import { reconcileNfeFinancials } from "./financialReconciliation.ts";
@@ -207,7 +208,7 @@ export async function runNfeExpenseProductMotor(
 
   const { data: expenseItemRows } = await supabase
     .from("expense_items")
-    .select("id, product_id, import_score_reasons_json")
+    .select("id, product_id, import_score_reasons_json, company_category_id")
     .eq("expense_id", expenseId)
     .order("created_at", { ascending: true });
 
@@ -403,6 +404,7 @@ export async function runNfeExpenseProductMotor(
 
   /** Nomes de catálogo para exibir em `expense_items.product_name` após vínculo (paridade com dev-preview). */
   const catalogNameById = new Map<string, string>();
+  const defaultCategoryByProductId = new Map<string, string>();
   if (mode === "apply") {
     const candidateIds = new Set<string>();
     const minAuto = DEFAULT_IMPORT_MATCH_THRESHOLDS.autoMatchMinScore;
@@ -427,13 +429,20 @@ export async function runNfeExpenseProductMotor(
     if (candidateIds.size > 0) {
       const { data: prodRows } = await supabase
         .from("products")
-        .select("id, name")
+        .select("id, name, default_expense_category_id, cmv_category_id")
         .eq("company_id", companyId)
         .in("id", [...candidateIds]);
       for (const r of prodRows ?? []) {
         const id = String((r as { id?: string }).id ?? "").trim();
         const nm = String((r as { name?: string }).name ?? "").trim();
+        const cat = preferredPurchaseCategoryId(
+          r as {
+            default_expense_category_id?: string | null;
+            cmv_category_id?: string | null;
+          },
+        );
         if (id && nm) catalogNameById.set(id, nm);
+        if (id && cat) defaultCategoryByProductId.set(id, cat);
       }
     }
   }
@@ -442,6 +451,12 @@ export async function runNfeExpenseProductMotor(
     const lineItem = matchResult.items[i] as ItemWithProductMatch | undefined;
     const pm = lineItem?.productMatch;
     const expenseItemId = expenseItemIds[i] ?? "";
+    const eiRow = (expenseItemRows ?? [])[i] as {
+      id?: string;
+      product_id?: string | null;
+      import_score_reasons_json?: unknown;
+      company_category_id?: string | null;
+    } | undefined;
     const xml_line_identity = ctx.xml_line_identities[i] ?? `nItem:${i + 1}:cProd:x`;
     if (!expenseItemId) {
       linesOut.push({
@@ -623,6 +638,23 @@ export async function runNfeExpenseProductMotor(
       };
 
       if (productId) updateRow.product_id = productId;
+      const existingCategory = String(
+        (eiRow as { company_category_id?: string | null } | undefined)
+          ?.company_category_id ?? "",
+      ).trim();
+      if (productId && !existingCategory) {
+        if (!defaultCategoryByProductId.has(productId)) {
+          const extra = await fetchProductDefaultExpenseCategoryById(
+            supabase,
+            companyId,
+            [productId],
+          );
+          const cat = extra.get(productId);
+          if (cat) defaultCategoryByProductId.set(productId, cat);
+        }
+        const defCat = defaultCategoryByProductId.get(productId);
+        if (defCat) updateRow.company_category_id = defCat;
+      }
       if (pm?.stockQuantity != null) updateRow.stock_quantity = pm.stockQuantity;
       if (stockAppliedOnCreate) {
         updateRow.stock_added = true;

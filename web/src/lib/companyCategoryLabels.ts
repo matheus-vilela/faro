@@ -87,6 +87,11 @@ export function isSelectableDespesaLeaf(c: CompanyCategory): boolean {
   return natureza === "DESPESA" && ativa;
 }
 
+/** Folha de despesa na linha da nota (inclui CMV para alimento; a DRE ignora CMV na compra). */
+export function isSelectablePurchaseDespesaLeaf(c: CompanyCategory): boolean {
+  return isSelectableDespesaLeaf(c);
+}
+
 export function isSelectableReceitaLeaf(c: CompanyCategory): boolean {
   const natureza = c.natureza ?? "DESPESA";
   const ativa = c.ativo !== false;

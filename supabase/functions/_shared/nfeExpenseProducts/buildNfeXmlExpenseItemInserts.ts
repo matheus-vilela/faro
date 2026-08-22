@@ -16,6 +16,7 @@ import {
 } from "../productImport/consolidateItems.ts";
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
 import { catalogRegistrationNameFromNfeLine } from "./newProductCatalogFromNfe.ts";
+import { fetchProductDefaultExpenseCategoryById, preferredPurchaseCategoryId } from "../productDefaultExpenseCategory.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import {
   createProductAutoWhenNoReviewQueue,
@@ -73,6 +74,7 @@ export async function buildNfeXmlExpenseItemInserts(
   );
 
   const catalogNameById = new Map<string, string>();
+  const defaultCategoryByProductId = new Map<string, string>();
   const candidateIds = new Set<string>();
   const minAuto = DEFAULT_IMPORT_MATCH_THRESHOLDS.autoMatchMinScore;
   for (let j = 0; j < items.length; j += 1) {
@@ -96,13 +98,20 @@ export async function buildNfeXmlExpenseItemInserts(
   if (candidateIds.size > 0) {
     const { data: prodRows } = await supabase
       .from("products")
-      .select("id, name")
+      .select("id, name, default_expense_category_id, cmv_category_id")
       .eq("company_id", companyId)
       .in("id", [...candidateIds]);
     for (const r of prodRows ?? []) {
       const id = String((r as { id?: string }).id ?? "").trim();
       const nm = String((r as { name?: string }).name ?? "").trim();
+      const cat = preferredPurchaseCategoryId(
+        r as {
+          default_expense_category_id?: string | null;
+          cmv_category_id?: string | null;
+        },
+      );
       if (id && nm) catalogNameById.set(id, nm);
+      if (id && cat) defaultCategoryByProductId.set(id, cat);
     }
   }
 
@@ -308,7 +317,20 @@ export async function buildNfeXmlExpenseItemInserts(
       match_decision_reason: pm?.matchReason ?? null,
     };
 
-    if (productId) insertRow.product_id = productId;
+    if (productId) {
+      insertRow.product_id = productId;
+      if (!defaultCategoryByProductId.has(productId)) {
+        const extra = await fetchProductDefaultExpenseCategoryById(
+          supabase,
+          companyId,
+          [productId],
+        );
+        const cat = extra.get(productId);
+        if (cat) defaultCategoryByProductId.set(productId, cat);
+      }
+      const defCat = defaultCategoryByProductId.get(productId);
+      if (defCat) insertRow.company_category_id = defCat;
+    }
     if (pm?.stockQuantity != null) insertRow.stock_quantity = pm.stockQuantity;
     if (pm?.conversionFactorApplied != null) {
       insertRow.conversion_factor_applied = pm.conversionFactorApplied;
