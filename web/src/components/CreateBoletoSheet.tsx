@@ -702,7 +702,10 @@ export function CreateBoletoSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-xl">
+      <SheetContent
+        maximizable
+        className="overflow-y-auto w-[70vw] sm:!max-w-[70vw]"
+      >
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />

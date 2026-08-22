@@ -344,7 +344,11 @@ export function EditBoletoSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent className="z-[70] overflow-y-auto sm:max-w-xl" overlayClassName="z-[70]">
+        <SheetContent
+          maximizable
+          className="z-[70] overflow-y-auto w-[70vw] sm:!max-w-[70vw]"
+          overlayClassName="z-[70]"
+        >
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Pencil className="h-5 w-5" />
