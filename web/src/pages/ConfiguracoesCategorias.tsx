@@ -44,7 +44,6 @@ import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import {
   buildChildrenMap,
   categoryPathLabel,
-  companyCategoryDisplayName,
   TIPO_LABEL,
 } from "@/lib/companyCategoryLabels";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
@@ -218,10 +217,7 @@ export function ConfiguracoesCategorias() {
         key,
         label: value.label,
         items: value.items.sort((a, b) =>
-          companyCategoryDisplayName(a).localeCompare(
-            companyCategoryDisplayName(b),
-            "pt-BR",
-          ),
+          a.name.localeCompare(b.name, "pt-BR"),
         ),
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
@@ -272,7 +268,7 @@ export function ConfiguracoesCategorias() {
     setEditing(row);
     setFormKind("edicao");
     setSelectedId(row.id);
-    setFormName(companyCategoryDisplayName(row));
+    setFormName(row.name);
     setFormNatureza(row.natureza);
     setFormTipo(row.tipo);
     setFormParentId(row.parent_id ?? "ROOT");
@@ -472,9 +468,7 @@ export function ConfiguracoesCategorias() {
               className="relative z-[1] min-w-0 flex-1 text-left"
               onClick={() => openEdit(node)}
             >
-              <p className="truncate text-sm font-medium">
-                {companyCategoryDisplayName(node)}
-              </p>
+              <p className="truncate text-sm font-medium">{node.name}</p>
             </button>
             {node.ativo === false ? (
               <Badge variant="destructive" className="shrink-0 text-[10px]">
@@ -791,9 +785,7 @@ export function ConfiguracoesCategorias() {
                           : formParentId
                             ? (() => {
                                 const p = byId.get(formParentId);
-                                return p
-                                  ? companyCategoryDisplayName(p)
-                                  : "Selecione";
+                                return p ? p.name : "Selecione";
                               })()
                             : "Selecione"}
                       </span>
@@ -877,9 +869,7 @@ export function ConfiguracoesCategorias() {
                                       : "opacity-0",
                                   )}
                                 />
-                                <span className="truncate">
-                                  {companyCategoryDisplayName(opt)}
-                                </span>
+                                <span className="truncate">{opt.name}</span>
                               </button>
                             ))}
                           </div>

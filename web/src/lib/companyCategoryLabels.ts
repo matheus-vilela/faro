@@ -1,25 +1,35 @@
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import type { CompanyCategory, NaturezaCategoria, TipoCategoria } from "@/types/category";
 
+function foldCategoryName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+const DEFAULT_DEDUCAO_NAME_FOLDED =
+  "deducoes da receita / despesas sobre vendas";
+
 /**
- * Nome exibido em listagens e caminhos; o texto no banco pode vir com encoding
- * ruim em seeds antigos para a folha padrão de deduções da receita.
+ * Nome exibido em listagens e caminhos.
+ * Só substitui o texto do banco quando ainda é a folha padrão de dedução
+ * (com ou sem acento). Nome personalizado, inclusive em categoria padrão,
+ * aparece como foi salvo.
  */
 export function companyCategoryDisplayName(cat: CompanyCategory): string {
   const isDeducaoOpReceita =
     cat.papel_receita_dre === "DEDUCAO" &&
     cat.natureza === "RECEITA" &&
     cat.tipo === "OPERACIONAL";
-  if (!isDeducaoOpReceita) return cat.name;
-
-  if (cat.padrao_sistema) {
+  if (
+    isDeducaoOpReceita &&
+    foldCategoryName(cat.name) === DEFAULT_DEDUCAO_NAME_FOLDED
+  ) {
     return ptBrUi.dre.deducoesReceitaLabel;
   }
-
-  if (/da receita\s*\/\s*despesas sobre vendas/i.test(cat.name)) {
-    return ptBrUi.dre.deducoesReceitaLabel;
-  }
-
   return cat.name;
 }
 
