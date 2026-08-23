@@ -1,5 +1,4 @@
 import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
-import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductUnitPickerWithConversion } from "@/components/products/ProductUnitPickerWithConversion";
 import {
   AlertDialog,
@@ -12,11 +11,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,7 +46,6 @@ import {
 } from "@/lib/saveExpenseItemLinkEdit";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
-import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import type { ExpenseItem } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
@@ -175,14 +168,12 @@ function ExpenseItemReadOnlyTable({
   partialQtyByItemId,
   receivedItemIds,
   categoriesById,
-  productCategoryNamesByProductId,
 }: {
   items: ExpenseItem[];
   notDeliveredIds: Set<string>;
   partialQtyByItemId: Record<string, number | null>;
   receivedItemIds: Set<string>;
   categoriesById: Map<string, CompanyCategory>;
-  productCategoryNamesByProductId: Map<string, string[]>;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -194,7 +185,6 @@ function ExpenseItemReadOnlyTable({
             <th className={TH}>Recebimento</th>
             <th className={TH}>NCM</th>
             <th className={TH}>Categoria</th>
-            <th className={TH}>Grupo</th>
             <th className={cn(TH, "text-right")}>Qtd</th>
             <th className={cn(TH, "text-right")}>Valor un.</th>
             <th className={cn(TH, "text-right")}>Subtotal</th>
@@ -259,12 +249,6 @@ function ExpenseItemReadOnlyTable({
                     ? categoryPathLabel(it.company_category_id, categoriesById)
                     : "—"}
                 </td>
-                <td className="p-2">
-                  {(it.product_id
-                    ? productCategoryNamesByProductId.get(it.product_id)
-                    : null
-                  )?.join(", ") || "—"}
-                </td>
                 <td className="p-2 text-right tabular-nums">
                   {formatQty(Number(it.quantity))}
                   {it.invoice_unit?.trim() ? ` ${it.invoice_unit.trim()}` : ""}
@@ -303,9 +287,6 @@ function ExpenseItemInlineRow({
   companyCategories,
   categoriesLoading,
   onReloadCategories,
-  productCatalogCategories,
-  onReloadProductCatalogCategories,
-  productCategoryIdsByProductId,
 }: {
   item: ExpenseItem;
   itemId: string;
@@ -329,9 +310,6 @@ function ExpenseItemInlineRow({
   companyCategories: CompanyCategory[];
   categoriesLoading: boolean;
   onReloadCategories: () => void | Promise<void>;
-  productCatalogCategories: CompanyProductCategory[];
-  onReloadProductCatalogCategories: () => void | Promise<void>;
-  productCategoryIdsByProductId: Map<string, string[]>;
 }) {
   const unitOptions = useMemo(() => getSystemProductUnitSelectOptions(), []);
   const vinculoKind =
@@ -401,7 +379,6 @@ function ExpenseItemInlineRow({
         mode: "none",
         productId: null,
         conversions: [],
-        productCategoryIds: [],
       });
       return;
     }
@@ -424,8 +401,6 @@ function ExpenseItemInlineRow({
         productDefaultCategoryId: product?.default_expense_category_id,
         productCmvCategoryId: product?.cmv_category_id,
       }),
-      productCategoryIds:
-        productCategoryIdsByProductId.get(value) ?? [],
     });
   };
 
@@ -576,46 +551,6 @@ function ExpenseItemInlineRow({
           placeholder="Categoria"
         />
       </td>
-      <td className={cn(TD, "min-w-[11rem]")}>
-        {draft.mode === "none" ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="block">
-                <ProductCategoryTagsField
-                  companyId={companyId}
-                  categories={productCatalogCategories}
-                  selectedIds={[]}
-                  onChange={() => undefined}
-                  onCategoriesChange={() => undefined}
-                  disabled
-                  compact
-                  label=""
-                  hint=""
-                  placeholder="Grupo"
-                />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs">
-              Vincule um produto para definir o grupo de mercadoria.
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <ProductCategoryTagsField
-            companyId={companyId}
-            categories={productCatalogCategories}
-            selectedIds={draft.productCategoryIds}
-            onChange={(ids) =>
-              onDraftChange({ ...draft, productCategoryIds: ids })
-            }
-            onCategoriesChange={() => void onReloadProductCatalogCategories()}
-            disabled={locked}
-            compact
-            label=""
-            hint=""
-            placeholder="Grupo"
-          />
-        )}
-      </td>
 
       <td className={cn(TD, "w-24")}>
         <Input
@@ -701,15 +636,9 @@ export function ExpenseItemsInlineTable({
     [],
   );
   const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [productCatalogCategories, setProductCatalogCategories] = useState<
-    CompanyProductCategory[]
-  >([]);
-  const [productCategoryIdsByProductId, setProductCategoryIdsByProductId] =
-    useState<Map<string, string[]>>(() => new Map());
   const [classifReady, setClassifReady] = useState(false);
   const itemIdsKey = items.map((it) => it.id).join(",");
   const hydratedIdsRef = useRef<Set<string>>(new Set());
-  const productIdsKey = products.map((p) => p.id).join(",");
 
   const productById = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
@@ -733,17 +662,6 @@ export function ExpenseItemsInlineTable({
     () => new Map(companyCategories.map((c) => [c.id, c])),
     [companyCategories],
   );
-  const productCategoryNamesByProductId = useMemo(() => {
-    const byCat = new Map(productCatalogCategories.map((c) => [c.id, c.name]));
-    const out = new Map<string, string[]>();
-    for (const [productId, ids] of productCategoryIdsByProductId) {
-      out.set(
-        productId,
-        ids.map((id) => byCat.get(id)).filter((n): n is string => !!n),
-      );
-    }
-    return out;
-  }, [productCatalogCategories, productCategoryIdsByProductId]);
 
   const loadCompanyCategories = useCallback(async () => {
     const { data } = await supabase
@@ -755,52 +673,12 @@ export function ExpenseItemsInlineTable({
     setCompanyCategories((data as CompanyCategory[]) ?? []);
   }, [companyId]);
 
-  const loadProductCatalogCategories = useCallback(async () => {
-    const { data } = await supabase
-      .from("company_product_categories")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
-    setProductCatalogCategories((data as CompanyProductCategory[]) ?? []);
-  }, [companyId]);
-
-  const loadProductAssignments = useCallback(async () => {
-    const ids = products.map((p) => p.id);
-    if (ids.length === 0) {
-      setProductCategoryIdsByProductId(new Map());
-      return;
-    }
-    const map = new Map<string, string[]>();
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
-      const { data } = await supabase
-        .from("product_category_assignments")
-        .select("product_id, category_id")
-        .eq("company_id", companyId)
-        .in("product_id", chunk);
-      for (const row of data ?? []) {
-        const pid = String((row as { product_id?: string }).product_id ?? "");
-        const cid = String((row as { category_id?: string }).category_id ?? "");
-        if (!pid || !cid) continue;
-        const list = map.get(pid) ?? [];
-        list.push(cid);
-        map.set(pid, list);
-      }
-    }
-    setProductCategoryIdsByProductId(map);
-  }, [companyId, productIdsKey, products]);
-
   useEffect(() => {
     let cancelled = false;
     setClassifReady(false);
     setCategoriesLoading(true);
     void (async () => {
-      await Promise.all([
-        loadCompanyCategories(),
-        loadProductCatalogCategories(),
-        loadProductAssignments(),
-      ]);
+      await loadCompanyCategories();
       if (!cancelled) {
         setCategoriesLoading(false);
         setClassifReady(true);
@@ -809,12 +687,7 @@ export function ExpenseItemsInlineTable({
     return () => {
       cancelled = true;
     };
-  }, [
-    companyId,
-    loadCompanyCategories,
-    loadProductCatalogCategories,
-    loadProductAssignments,
-  ]);
+  }, [companyId, loadCompanyCategories]);
 
   useEffect(() => {
     hydratedIdsRef.current = new Set();
@@ -836,9 +709,6 @@ export function ExpenseItemsInlineTable({
       const initial = initialDraftFromItem(it, companyId, {
         productDefaultCategoryId: product?.default_expense_category_id,
         productCmvCategoryId: product?.cmv_category_id,
-        productCategoryIds: it.product_id
-          ? (productCategoryIdsByProductId.get(it.product_id) ?? [])
-          : [],
       });
       setRows((prev) => ({
         ...prev,
@@ -851,7 +721,6 @@ export function ExpenseItemsInlineTable({
     companyId,
     items,
     productById,
-    productCategoryIdsByProductId,
   ]);
 
   const handleDraftChange = useCallback(
@@ -928,7 +797,6 @@ export function ExpenseItemsInlineTable({
       return next;
     });
     setConfirmId(null);
-    void loadProductAssignments();
     onSaved(result.createdProduct);
   };
 
@@ -941,7 +809,7 @@ export function ExpenseItemsInlineTable({
       </p>
       {canEdit ? (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[92rem] text-sm">
+          <table className="w-full min-w-[80rem] text-sm">
             <thead>
               <tr className="bg-muted/50">
                 <th className={TH}>Produto</th>
@@ -950,7 +818,6 @@ export function ExpenseItemsInlineTable({
                 <th className={TH}>Unidade da NF × estoque</th>
                 <th className={TH}>NCM</th>
                 <th className={TH}>Categoria</th>
-                <th className={TH}>Grupo</th>
                 <th className={cn(TH, "text-center")}>Qtd</th>
                 <th className={cn(TH, "text-center")}>Valor un.</th>
                 <th className={cn(TH, "text-right")}>Subtotal</th>
@@ -967,7 +834,7 @@ export function ExpenseItemsInlineTable({
                   return (
                     <tr key={it.id ?? i} className="border-t">
                       <td
-                        colSpan={11}
+                        colSpan={10}
                         className="px-3 py-3 text-muted-foreground"
                       >
                         Carregando…
@@ -1003,11 +870,6 @@ export function ExpenseItemsInlineTable({
                     companyCategories={companyCategories}
                     categoriesLoading={categoriesLoading}
                     onReloadCategories={() => void loadCompanyCategories()}
-                    productCatalogCategories={productCatalogCategories}
-                    onReloadProductCatalogCategories={() =>
-                      void loadProductCatalogCategories()
-                    }
-                    productCategoryIdsByProductId={productCategoryIdsByProductId}
                   />
                 );
               })}
@@ -1021,7 +883,6 @@ export function ExpenseItemsInlineTable({
           partialQtyByItemId={partialQtyByItemId}
           receivedItemIds={receivedIds}
           categoriesById={categoriesById}
-          productCategoryNamesByProductId={productCategoryNamesByProductId}
         />
       )}
 

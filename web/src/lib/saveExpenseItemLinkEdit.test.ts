@@ -26,7 +26,6 @@ const baseDraft = (): ExpenseItemLinkEditDraft => ({
     },
   ],
   companyCategoryId: null,
-  productCategoryIds: [],
 });
 
 describe("mergeExpenseItemMetadata", () => {
@@ -76,10 +75,9 @@ describe("initialDraftFromItem", () => {
         company_category_id: null,
       },
       "c1",
-      { productDefaultCategoryId: "cat-default", productCategoryIds: ["g1"] },
+      { productDefaultCategoryId: "cat-default" },
     );
     expect(draft.companyCategoryId).toBe("cat-default");
-    expect(draft.productCategoryIds).toEqual(["g1"]);
   });
 
   it("usa a CMV do cadastro quando não há categoria de compra", () => {
@@ -124,7 +122,6 @@ describe("initialDraftFromItem", () => {
     );
     expect(draft.mode).toBe("none");
     expect(draft.companyCategoryId).toBe("cat-line");
-    expect(draft.productCategoryIds).toEqual([]);
   });
 });
 

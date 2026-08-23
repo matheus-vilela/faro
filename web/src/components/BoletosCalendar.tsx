@@ -5,6 +5,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { calendarDayTotals } from "@/lib/boletosCalendarDayTotals";
 import { buildCalendarCells } from "@/lib/boletosCalendarGrid";
 import { cn } from "@/lib/utils";
 import type { Boleto } from "@/types/expense";
@@ -24,43 +25,6 @@ function groupByDueDate(boletos: Boleto[]): Map<string, Boleto[]> {
     arr.sort((a, b) => a.amount - b.amount);
   }
   return m;
-}
-
-function dayTotals(
-  items: Boleto[],
-  options?: {
-    splitPayableByReceipt?: (b: Boleto) => boolean;
-    onlyScheduledPayables?: (b: Boleto) => boolean;
-  },
-): {
-  payable: number;
-  receivable: number;
-  payableReady: number;
-  payablePendingReceipt: number;
-} {
-  let payable = 0;
-  let receivable = 0;
-  let payableReady = 0;
-  let payablePendingReceipt = 0;
-
-  for (const b of items) {
-    if (isBoletoPayable(b)) {
-      if (options?.onlyScheduledPayables && !options.onlyScheduledPayables(b)) {
-        continue;
-      }
-      payable += b.amount;
-      if (options?.splitPayableByReceipt) {
-        if (options.splitPayableByReceipt(b)) payableReady += b.amount;
-        else payablePendingReceipt += b.amount;
-      } else {
-        payableReady += b.amount;
-      }
-    } else {
-      receivable += b.amount;
-    }
-  }
-
-  return { payable, receivable, payableReady, payablePendingReceipt };
 }
 
 function dateKey(y: number, m: number, d: number): string {
@@ -116,11 +80,11 @@ interface BoletosCalendarProps {
   viewMode?: BoletosCalendarViewMode;
   /** Quando definido, separa saídas entre valores a pagar e valores a confirmar (recebimento). */
   isPayableReadyToPay?: (b: Boleto) => boolean;
-  /** Limita totais de saída a contas ainda agendadas (pendentes/projetadas). */
+  /** Totais de saída ainda agendadas (pendentes/projetadas). Contas pagas entram no bloco Pago. */
   onlyScheduledPayables?: (b: Boleto) => boolean;
 }
 
-type CalendarDayValueTone = "payable" | "pendingReceipt" | "receivable";
+type CalendarDayValueTone = "payable" | "pendingReceipt" | "receivable" | "paid";
 
 function CalendarDayValueBucket({
   label,
@@ -158,6 +122,12 @@ function CalendarDayValueBucket({
       label: "text-emerald-800 dark:text-emerald-300",
       amount: "text-emerald-700 dark:text-emerald-400",
       prefix: "+",
+    },
+    paid: {
+      wrap: "border-emerald-600/35 bg-emerald-500/12 shadow-[inset_4px_0_0_0] shadow-emerald-600 dark:bg-emerald-500/15",
+      label: "text-emerald-800 dark:text-emerald-300",
+      amount: "text-emerald-700 dark:text-emerald-400",
+      prefix: "−",
     },
   };
 
@@ -241,11 +211,16 @@ export function BoletosCalendar({
 
                 const dateStr = dateKey(cell.year, cell.month, cell.day);
                 const list = byDay.get(dateStr) ?? [];
-                const { payable, receivable, payableReady, payablePendingReceipt } =
-                  dayTotals(list, {
-                    splitPayableByReceipt: isPayableReadyToPay,
-                    onlyScheduledPayables,
-                  });
+                const {
+                  payable,
+                  receivable,
+                  payableReady,
+                  payablePendingReceipt,
+                  paid,
+                } = calendarDayTotals(list, {
+                  splitPayableByReceipt: isPayableReadyToPay,
+                  onlyScheduledPayables,
+                });
                 const today = isToday(cell.year, cell.month, cell.day);
                 const isWeekend = (() => {
                   return false;
@@ -261,6 +236,9 @@ export function BoletosCalendar({
                 };
 
                 const hasAny = list.length > 0;
+                const showPaidPayables =
+                  paid > 0 &&
+                  (viewMode === "all" || viewMode === "payable");
                 const showSplitPayables =
                   splitPayableTotals &&
                   (viewMode === "all" || viewMode === "payable") &&
@@ -284,6 +262,11 @@ export function BoletosCalendar({
                         payablePendingReceipt === 0 &&
                         payableReady > 0 &&
                         "bg-destructive/[0.04] dark:bg-destructive/[0.06]",
+                      !isAdjacent &&
+                        payablePendingReceipt === 0 &&
+                        payableReady === 0 &&
+                        paid > 0 &&
+                        "bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06]",
                       !isAdjacent && isWeekend && "bg-muted/20",
                       isAdjacent &&
                         "border-dashed border-border/80 bg-muted/45 bg-[repeating-linear-gradient(-45deg,transparent,transparent_6px,hsl(var(--muted)/0.35)_6px,hsl(var(--muted)/0.35)_7px)]",
@@ -382,7 +365,9 @@ export function BoletosCalendar({
                             <div
                               className={cn(
                                 "flex w-full flex-col",
-                                showSplitPayables ? "gap-1.5" : "gap-1",
+                                showSplitPayables || showPaidPayables
+                                  ? "gap-1.5"
+                                  : "gap-1",
                               )}
                             >
                               {receivable > 0 &&
@@ -433,6 +418,16 @@ export function BoletosCalendar({
                                     muted={isAdjacent}
                                   />
                                 ))}
+                              {showPaidPayables && (
+                                <CalendarDayValueBucket
+                                  label="Pago"
+                                  amount={paid}
+                                  tone="paid"
+                                  formatCurrency={formatCurrency}
+                                  title="Contas já pagas neste vencimento"
+                                  muted={isAdjacent}
+                                />
+                              )}
                             </div>
                             <Button
                               type="button"

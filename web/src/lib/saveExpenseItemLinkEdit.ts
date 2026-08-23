@@ -30,8 +30,6 @@ export type ExpenseItemLinkEditDraft = {
   conversions: ProductUnitConversionDraft[];
   /** Categoria financeira desta linha. */
   companyCategoryId: string | null;
-  /** Grupos de mercadoria do produto (tags). */
-  productCategoryIds: string[];
 };
 
 export function mergeExpenseItemMetadata(
@@ -76,7 +74,6 @@ export function expenseItemDraftSignature(
     quantity: Number(draft.quantity),
     unitValue: Number(draft.unitValue),
     companyCategoryId: draft.companyCategoryId ?? null,
-    productCategoryIds: [...draft.productCategoryIds].sort(),
     conversions: draft.conversions.map((c) => [
       Number(c.primary_qty),
       String(c.primary_unit_code).trim().toLowerCase(),
@@ -157,32 +154,6 @@ async function applyExpenseItemStockIn(it: {
         ? Number(it.unit_value)
         : null,
   });
-}
-
-async function persistProductCategoryAssignments(
-  companyId: string,
-  productId: string,
-  categoryIds: string[],
-): Promise<{ error?: string }> {
-  const unique = [...new Set(categoryIds.map((id) => id.trim()).filter(Boolean))];
-  const { error: delErr } = await supabase
-    .from("product_category_assignments")
-    .delete()
-    .eq("company_id", companyId)
-    .eq("product_id", productId);
-  if (delErr) return { error: delErr.message };
-  if (unique.length === 0) return {};
-  const { error: insErr } = await supabase
-    .from("product_category_assignments")
-    .insert(
-      unique.map((category_id) => ({
-        company_id: companyId,
-        product_id: productId,
-        category_id,
-      })),
-    );
-  if (insErr) return { error: insErr.message };
-  return {};
 }
 
 async function upsertInvoiceAlias(
@@ -440,12 +411,6 @@ export async function saveExpenseItemLinkEdit(args: {
         .eq("id", productId)
         .eq("company_id", args.companyId);
     }
-    const groups = await persistProductCategoryAssignments(
-      args.companyId,
-      productId,
-      args.draft.productCategoryIds,
-    );
-    if (groups.error) return { error: groups.error, createdProduct };
   }
 
   return { createdProduct };
@@ -493,7 +458,6 @@ export function initialDraftFromItem(
   opts?: {
     productDefaultCategoryId?: string | null;
     productCmvCategoryId?: string | null;
-    productCategoryIds?: string[];
   },
 ): ExpenseItemLinkEditDraft {
   const companyCategoryId = resolvePrefillCompanyCategoryId({
@@ -501,7 +465,6 @@ export function initialDraftFromItem(
     productDefaultCategoryId: opts?.productDefaultCategoryId,
     productCmvCategoryId: opts?.productCmvCategoryId,
   });
-  const productCategoryIds = opts?.productCategoryIds ?? [];
   const pending = parsePendingNewProduct(item.metadata_json);
   if (pending && !item.product_id) {
     return {
@@ -520,7 +483,6 @@ export function initialDraftFromItem(
         secondary_unit_code: c.secondary_unit_code,
       })),
       companyCategoryId,
-      productCategoryIds,
     };
   }
   if (item.product_id) {
@@ -534,7 +496,6 @@ export function initialDraftFromItem(
       unitValue: Number(item.unit_value),
       conversions: [],
       companyCategoryId,
-      productCategoryIds,
     };
   }
   return {
@@ -547,6 +508,5 @@ export function initialDraftFromItem(
     unitValue: Number(item.unit_value),
     conversions: [],
     companyCategoryId,
-    productCategoryIds,
   };
 }
