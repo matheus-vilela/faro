@@ -16,6 +16,7 @@ import {
 } from "@/components/monthClosing/MonthClosingChecklist";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import {
   Accordion,
   AccordionContent,
@@ -224,6 +225,22 @@ export function Dre() {
             : "Quanto sobrou no período — por vencimento dos lançamentos (competência)."
         }
         icon={pageTab === "orcamento" ? Target : BarChart3}
+        action={
+          <ExportButton
+            reportId={
+              pageTab === "orcamento"
+                ? "budget"
+                : mainView === "sem-categoria"
+                  ? "dre_uncategorized"
+                  : "dre"
+            }
+            initialFilters={{
+              month: period.month,
+              year: period.year,
+              dreView: mainView === "resumo" ? "resumo" : "linhas",
+            }}
+          />
+        }
       />
 
       <div

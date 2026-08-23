@@ -85,6 +85,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/desenvolvimento", label: "Administrador" },
     { prefix: "/app/orcamento", label: "DRE" },
     { prefix: "/app/dre", label: "DRE" },
+    { prefix: "/app/relatorios", label: "Relatórios" },
   ];
 
   for (const { prefix, label } of underApp) {

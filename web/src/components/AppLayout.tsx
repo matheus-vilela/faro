@@ -35,11 +35,13 @@ import {
 } from "@/lib/permissions";
 import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { REPORTS_PERMISSIONS } from "@/lib/reports/catalog";
 import {
   ArrowLeftRight,
   BarChart3,
   Building2,
   ConciergeBell,
+  FileDown,
   FlaskConical,
   Landmark,
   LayoutDashboard,
@@ -152,6 +154,13 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           url: "/app/dre",
           icon: BarChart3,
           permission: "dre",
+        },
+        {
+          title: "Relatórios",
+          url: "/app/relatorios",
+          icon: FileDown,
+          permission: "contas_a_pagar",
+          permissions: REPORTS_PERMISSIONS,
         },
       ],
     },

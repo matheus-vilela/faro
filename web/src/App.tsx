@@ -26,6 +26,7 @@ import { Receitas } from "@/pages/Receitas";
 import { Desenvolvimento } from "@/pages/Desenvolvimento";
 import { DesenvolvimentoFornecedoresGlobais } from "@/pages/DesenvolvimentoFornecedoresGlobais";
 import { Dre } from "@/pages/Dre";
+import { Relatorios } from "@/pages/Relatorios";
 import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { MeuDesempenho } from "@/pages/MeuDesempenho";
 import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSlug";
@@ -43,6 +44,7 @@ import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { Produtos } from "@/pages/Produtos";
 import { Servicos } from "@/pages/Servicos";
 import { NOTAS_RECEBIMENTO_PERMISSIONS } from "@/lib/permissions";
+import { REPORTS_PERMISSIONS } from "@/lib/reports/catalog";
 import { CertificadoOnboardingPublic } from "@/pages/CertificadoOnboardingPublic";
 import { ContagemEstoquePublic } from "@/pages/ContagemEstoquePublic";
 import { RedirectChecklistSlug } from "@/pages/RedirectChecklistSlug";
@@ -216,6 +218,14 @@ function AuthenticatedLayout() {
             element={<Navigate to="/app/dre?tab=orcamento" replace />}
           />
           <Route path="dre" element={<PermissionRouteGuard permission="dre"><Dre /></PermissionRouteGuard>} />
+          <Route
+            path="relatorios"
+            element={
+              <PermissionRouteGuard permissions={REPORTS_PERMISSIONS}>
+                <Relatorios />
+              </PermissionRouteGuard>
+            }
+          />
           <Route path="configuracoes" element={<PermissionRouteGuard permissions={["configuracoes", "integracoes"]}><ConfiguracoesLayout /></PermissionRouteGuard>}>
             <Route index element={<Navigate to="usuarios" replace />} />
             <Route

@@ -15,6 +15,7 @@ import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +85,7 @@ import {
   computePayableTotals,
   EMPTY_PAYABLE_TOTALS,
   formatPayableMonthName,
+  getMonthYmdRange,
   getPayableTotalsFetchRange,
   type PayableTotals,
 } from "@/lib/payableTotals";
@@ -1243,19 +1245,43 @@ export function FluxoBoletosPage({
     </Button>
   );
 
+  const { startYmd, endYmd } = getMonthYmdRange(period.month, period.year);
+  const exportButton = currentCompany?.id ? (
+    <ExportButton
+      reportId={isReceivableFlow ? "receivables_open" : "payables_open"}
+      allowedReportIds={
+        isReceivableFlow
+          ? ["receivables_open", "receipts_made", "financial_movement"]
+          : ["payables_open", "payables_overdue", "payments_made", "financial_movement"]
+      }
+      lockReport={false}
+      initialFilters={{
+        dateFrom: startYmd,
+        dateTo: endYmd,
+        month: period.month,
+        year: period.year,
+        search: boletosSearch,
+      }}
+    />
+  ) : null;
+
+  const headerActions = (
+    <HeaderExportActions exportSlot={exportButton} primary={addButton} />
+  );
+
   const body = (
     <>
       {embedded ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">{description}</p>
-          {addButton}
+          {headerActions}
         </div>
       ) : (
         <PageHeader
           title={title}
           description={description}
           icon={PageIcon}
-          action={addButton}
+          action={headerActions}
         />
       )}
 

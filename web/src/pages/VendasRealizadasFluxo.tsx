@@ -2,6 +2,7 @@ import { VENDAS_REALIZADAS_FLUXO_CONFIG } from "@/components/fluxo/fluxoBoletosC
 import { FluxoBoletosPage } from "@/components/fluxo/FluxoBoletosPage";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import { VendasRealizadasResumo } from "@/components/revenue/VendasRealizadasResumo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -79,6 +80,12 @@ export function VendasRealizadasFluxo() {
     setSearchParams(next === "resumo" ? {} : { tab: next }, { replace: true });
   };
   const tabToggle = <VendasRealizadasTabToggle value={tab} onChange={setTab} />;
+  const reportId =
+    tab === "faturamento"
+      ? ("epoc_billing" as const)
+      : tab === "margens"
+        ? ("cmv_margins" as const)
+        : ("sales_summary" as const);
 
   if (tab === "calendario") {
     return (
@@ -101,6 +108,7 @@ export function VendasRealizadasFluxo() {
               : "Panorama das vendas do período e comparação com o intervalo anterior."
         }
         icon={TrendingUp}
+        action={<ExportButton reportId={reportId} />}
       />
       {tabToggle}
       {tab === "faturamento" ? (

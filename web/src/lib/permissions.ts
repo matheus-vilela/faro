@@ -87,6 +87,7 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   ) {
     return "vendas_realizadas";
   }
+  if (path.startsWith("/app/relatorios")) return "contas_a_pagar";
   if (path.startsWith("/app/orcamento")) return "dre";
   if (path.startsWith("/app/dre")) return "dre";
   if (path.startsWith("/app/alertas")) return "alertas";
