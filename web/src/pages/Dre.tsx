@@ -217,7 +217,7 @@ export function Dre() {
   return (
     <PageShell>
       <PageHeader
-        title={pageTab === "orcamento" ? "Orçamento" : "Resultado"}
+        title={pageTab === "orcamento" ? "Orçamento" : "DRE"}
         description={
           pageTab === "orcamento"
             ? "Meta de custo por categoria versus o que já foi gasto no mês — não é o lucro do DRE."
@@ -233,7 +233,7 @@ export function Dre() {
       >
         {(
           [
-            { value: "resultado" as const, label: "Resultado", icon: BarChart3 },
+            { value: "resultado" as const, label: "DRE", icon: BarChart3 },
             { value: "orcamento" as const, label: "Orçamento", icon: Target },
           ] as const
         ).map((opt) => {

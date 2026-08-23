@@ -148,7 +148,7 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           permissions: ["contas_a_pagar", "vendas_realizadas"],
         },
         {
-          title: "Resultado",
+          title: "DRE",
           url: "/app/dre",
           icon: BarChart3,
           permission: "dre",

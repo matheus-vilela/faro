@@ -83,8 +83,8 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/integracoes", label: "Integrações" },
     { prefix: "/app/desenvolvimento/fornecedores", label: "Fornecedores globais" },
     { prefix: "/app/desenvolvimento", label: "Administrador" },
-    { prefix: "/app/orcamento", label: "Resultado" },
-    { prefix: "/app/dre", label: "Resultado" },
+    { prefix: "/app/orcamento", label: "DRE" },
+    { prefix: "/app/dre", label: "DRE" },
   ];
 
   for (const { prefix, label } of underApp) {
