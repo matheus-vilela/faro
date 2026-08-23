@@ -97,7 +97,6 @@ import {
   Loader2,
   Percent,
   Plus,
-  TrendingUp,
   Undo2,
   Upload,
 } from "lucide-react";
@@ -205,9 +204,9 @@ export function BankReconciliationPanel({
   const [createFromLine, setCreateFromLine] = useState<BankStatementLine | null>(
     null,
   );
-  const [createIntent, setCreateIntent] = useState<
-    "entry" | "transfer" | "receivable"
-  >("entry");
+  const [createIntent, setCreateIntent] = useState<"entry" | "transfer">(
+    "entry",
+  );
   const [createMemory, setCreateMemory] =
     useState<LaunchMemorySuggestion | null>(null);
   const [createBankOpen, setCreateBankOpen] = useState(false);
@@ -297,11 +296,11 @@ export function BankReconciliationPanel({
         pending[pending.length - 1]?.posted_at ??
         reconciled[reconciled.length - 1]?.posted_at ??
         periodStart;
-      const pays = await fetchBoletosForRecon(
+      const pays = (await fetchBoletosForRecon(
         companyId,
         periodStart,
         periodEnd,
-      );
+      )).filter(isBoletoPayable);
       const extraBoletos = await fetchBoletosByIds(
         companyId,
         reconBoletoIds.filter((id) => !pays.some((b) => b.id === id)),
@@ -334,7 +333,8 @@ export function BankReconciliationPanel({
   }, [reloadMatchData]);
 
   const pendingLines = useMemo(
-    () => lines.filter((l) => isPendingReconLine(l)),
+    () =>
+      lines.filter((l) => isPendingReconLine(l) && l.direction === "debit"),
     [lines],
   );
 
@@ -349,6 +349,7 @@ export function BankReconciliationPanel({
       (l) => !doneKeys[`line:${l.id}`],
     );
     const availableBoletos = boletos.filter((b) => {
+      if (!isBoletoPayable(b)) return false;
       if (reconciledBoletoIds.has(b.id)) return false;
       if (doneKeys[`boleto:${b.id}`]) return false;
       return true;
@@ -369,16 +370,10 @@ export function BankReconciliationPanel({
     });
 
     return buildMatchResultByDirection({
-      debitLines: unmatchedLines
-        .filter((l) => l.direction === "debit")
-        .map(toMatchLine),
-      creditLines: unmatchedLines
-        .filter((l) => l.direction === "credit")
-        .map(toMatchLine),
-      payables: availableBoletos.filter(isBoletoPayable).map(toMatchBoleto),
-      receivables: availableBoletos
-        .filter((b) => !isBoletoPayable(b))
-        .map(toMatchBoleto),
+      debitLines: unmatchedLines.map(toMatchLine),
+      creditLines: [],
+      payables: availableBoletos.map(toMatchBoleto),
+      receivables: [],
     });
   }, [pendingLines, boletos, doneKeys, reconciledBoletoIds]);
 
@@ -616,7 +611,7 @@ export function BankReconciliationPanel({
 
   const openCreateFromLine = async (
     line: BankStatementLine,
-    intent: "entry" | "transfer" | "receivable",
+    intent: "entry" | "transfer",
   ) => {
     if (!companyId) return;
     if (line.status !== "unmatched") {
@@ -625,15 +620,11 @@ export function BankReconciliationPanel({
     }
     setConfirming(true);
     try {
-      const preferFlow: "payable" | "receivable" =
-        intent === "receivable" || line.direction === "credit"
-          ? "receivable"
-          : "payable";
       const memory = await suggestLaunchFromStatementHistory({
         companyId,
         bankDescription: line.description,
         preferEntryKind: intent === "transfer" ? "transfer" : "standard",
-        preferFlowType: intent === "transfer" ? undefined : preferFlow,
+        preferFlowType: intent === "transfer" ? undefined : "payable",
       });
       setCreateFromLine(line);
       setCreateIntent(intent);
@@ -655,12 +646,10 @@ export function BankReconciliationPanel({
       if (!companyId || !associateLine) return;
       setAssociateLoading(true);
       try {
-        const flow =
-          associateLine.direction === "credit" ? "receivable" : "payable";
         const found = await searchBoletosForAssociate({
           companyId,
           query,
-          flowType: flow,
+          flowType: "payable",
           excludeIds: [...reconciledBoletoIds],
         });
         setAssociateBoletos(found);
@@ -807,14 +796,7 @@ export function BankReconciliationPanel({
     }
   };
 
-  const createDefaultFlow =
-    createIntent === "receivable"
-      ? "receivable"
-      : createIntent === "entry"
-        ? createFromLine?.direction === "credit"
-          ? "receivable"
-          : "payable"
-        : "payable";
+  const createDefaultFlow = "payable" as const;
   const createLaunchType: BoletoLaunchType =
     createIntent === "transfer" ? "transfer" : "single";
   const createOriginAccount =
@@ -834,7 +816,7 @@ export function BankReconciliationPanel({
     pendingRows.length === 0 && bankLineCount > 0
       ? "Conciliação fechada. Cada movimento do banco tem um lançamento no Faro."
       : bankLineCount === 0
-        ? "Suba um extrato CSV ou OFX para cruzar com as contas a pagar e a receber."
+        ? "Suba um extrato CSV ou OFX para cruzar com as contas a pagar."
         : `Cruzei o extrato com os lançamentos. ${safePairs.length} correspondência(s) forte(s) pronta(s) para confirmar.`;
 
   const body = (
@@ -1113,7 +1095,7 @@ export function BankReconciliationPanel({
             <Check className="h-10 w-10 text-emerald-600" />
             <p className="text-lg font-semibold">Extrato batido</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Tudo que entrou e saiu do banco está lançado no Faro.
+              Tudo que saiu do banco está lançado no Faro.
             </p>
           </CardContent>
         </Card>
@@ -1123,7 +1105,7 @@ export function BankReconciliationPanel({
             <Check className="h-10 w-10 text-emerald-600" />
             <p className="text-lg font-semibold">Extrato batido</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Tudo que entrou e saiu do banco está lançado no Faro. Veja em
+              Tudo que saiu do banco está lançado no Faro. Veja em
               Conciliados se precisar desfazer
               {ignoredLines.length > 0
                 ? ", ou em Ignorados para restaurar um movimento."
@@ -1166,10 +1148,6 @@ export function BankReconciliationPanel({
               onLaunchTransfer={() => {
                 const line = lineFromRow(row);
                 if (line) void openCreateFromLine(line, "transfer");
-              }}
-              onLaunchReceivable={() => {
-                const line = lineFromRow(row);
-                if (line) void openCreateFromLine(line, "receivable");
               }}
               onAssociate={() => {
                 const line = lineFromRow(row);
@@ -1441,7 +1419,6 @@ function RevisarMenu({
   onReviewInterest,
   onLaunchEntry,
   onLaunchTransfer,
-  onLaunchReceivable,
   onAssociate,
   onIgnore,
 }: {
@@ -1450,7 +1427,6 @@ function RevisarMenu({
   onReviewInterest: () => void;
   onLaunchEntry: () => void;
   onLaunchTransfer: () => void;
-  onLaunchReceivable: () => void;
   onAssociate: () => void;
   onIgnore: () => void;
 }) {
@@ -1480,10 +1456,6 @@ function RevisarMenu({
           <ArrowLeftRight className="h-4 w-4" />
           Adicionar como transferência
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={onLaunchReceivable}>
-          <TrendingUp className="h-4 w-4" />
-          Adicionar como conta a receber
-        </DropdownMenuItem>
         <DropdownMenuItem onClick={onAssociate}>
           <Link2 className="h-4 w-4" />
           Buscar e associar a um lançamento
@@ -1504,7 +1476,6 @@ function ReconRow({
   onReviewInterest,
   onLaunchEntry,
   onLaunchTransfer,
-  onLaunchReceivable,
   onAssociate,
   onIgnore,
   onAwait,
@@ -1515,7 +1486,6 @@ function ReconRow({
   onReviewInterest: () => void;
   onLaunchEntry: () => void;
   onLaunchTransfer: () => void;
-  onLaunchReceivable: () => void;
   onAssociate: () => void;
   onIgnore: () => void;
   onAwait: () => void;
@@ -1536,7 +1506,6 @@ function ReconRow({
       onReviewInterest={onReviewInterest}
       onLaunchEntry={onLaunchEntry}
       onLaunchTransfer={onLaunchTransfer}
-      onLaunchReceivable={onLaunchReceivable}
       onAssociate={onAssociate}
       onIgnore={onIgnore}
     />

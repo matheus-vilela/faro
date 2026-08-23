@@ -344,10 +344,10 @@ export async function fetchBoletosForRecon(
       `and(status.eq.pending,due_date.gte.${start},due_date.lte.${end}),and(status.eq.paid,paid_at.gte.${start},paid_at.lte.${end})`,
     );
   if (error) throw error;
-  return (data ?? []) as Boleto[];
+  return ((data ?? []) as Boleto[]).filter(isBoletoPayable);
 }
 
-/** @deprecated Use fetchBoletosForRecon — a conciliação agora inclui pagar e receber. */
+/** @deprecated Use fetchBoletosForRecon — a conciliação é só contas a pagar. */
 export async function fetchPayableBoletosForRecon(
   companyId: string,
   periodStart: string,
