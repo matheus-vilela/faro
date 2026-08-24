@@ -11,4 +11,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    // jspdf optional peer deps (html(), SVG, sanitization). The app only uses
+    // autoTable; Rolldown fails the build if these unresolved imports stay in-graph.
+    rollupOptions: {
+      external: ["html2canvas", "canvg", "dompurify"],
+    },
+  },
 })
