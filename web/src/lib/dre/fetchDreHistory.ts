@@ -6,6 +6,11 @@ import {
 } from "@/lib/dre/computeDre";
 import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
 import { shiftMonth } from "@/lib/dre/dreInsight";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  expandBoletosToDrePurchaseAmounts,
+  groupRateioItemsByExpenseId,
+} from "@/lib/dre/rateioBoletoByItems";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import { isBoletoPayable } from "@/types/expense";
@@ -37,6 +42,7 @@ type BolRow = {
   flow_type: string | null;
   company_category_id: string | null;
   revenue_entry_id: string | null;
+  expense_id: string | null;
 };
 
 type RevRow = {
@@ -80,7 +86,7 @@ export async function fetchDreHistory(
     supabase
       .from("boletos")
       .select(
-        "amount, due_date, flow_type, company_category_id, revenue_entry_id",
+        "amount, due_date, flow_type, company_category_id, revenue_entry_id, expense_id",
       )
       .eq("company_id", companyId)
       .gte("due_date", startDate)
@@ -99,6 +105,11 @@ export async function fetchDreHistory(
 
   const boletos = (bolRes.data ?? []) as BolRow[];
   const revs = (revRes.data ?? []) as RevRow[];
+  const items = await fetchExpenseItemsForRateio(
+    companyId,
+    boletos.map((b) => b.expense_id).filter((id): id is string => Boolean(id)),
+  );
+  const itemsByExpenseId = groupRateioItemsByExpenseId(items);
 
   const bolByPeriod = new Map<string, BolRow[]>();
   for (const b of boletos) {
@@ -132,10 +143,15 @@ export async function fetchDreHistory(
       return cat ? mapCategoryToDreBucket(cat) !== "CMV" : true;
     });
     const totals = aggregateTotalsByCategory(
-      filtered.map((b) => ({
-        amount: Number(b.amount),
-        company_category_id: b.company_category_id,
-      })),
+      expandBoletosToDrePurchaseAmounts(
+        filtered.map((b) => ({
+          amount: Number(b.amount),
+          expense_id: b.expense_id,
+          company_category_id: b.company_category_id,
+        })),
+        itemsByExpenseId,
+        categoriesById,
+      ),
       categoriesById,
     );
     const computed = buildDreComputedFromMaps(

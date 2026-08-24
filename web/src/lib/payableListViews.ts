@@ -1,4 +1,9 @@
 import {
+  MIXED_ITEM_CATEGORY_KEY,
+  MIXED_ITEM_CATEGORY_LABEL,
+  boletoHasMultipleItemCategories,
+} from "@/lib/dre/rateioBoletoByItems";
+import {
   BOLETO_CATEGORY_LABELS,
   BOLETO_CATEGORY_ORDER,
   formatBoletoCategoryLabel,
@@ -222,6 +227,10 @@ function resolveCategoryGroupForBoleto(
 export function groupPayablesByCategory(
   boletos: FluxoBoletoRow[],
   byId: Map<string, CompanyCategory>,
+  itemsByExpenseId?: Map<
+    string,
+    Array<{ company_category_id?: string | null }>
+  >,
 ): PayableCategoryGroup[] {
   const groupMap = new Map<
     string,
@@ -239,7 +248,29 @@ export function groupPayablesByCategory(
   >();
 
   for (const b of boletos) {
-    const resolved = resolveCategoryGroupForBoleto(b, byId);
+    const expenseId = b.expense_id?.trim();
+    const itemCats = expenseId ? itemsByExpenseId?.get(expenseId) : undefined;
+    const mixed =
+      itemCats != null &&
+      boletoHasMultipleItemCategories(
+        itemCats.map((it) => ({
+          expense_id: expenseId ?? "",
+          quantity: 1,
+          unit_value: 1,
+          company_category_id: it.company_category_id,
+        })),
+      );
+    const resolved = mixed
+      ? {
+          groupKey: MIXED_ITEM_CATEGORY_KEY,
+          groupName: MIXED_ITEM_CATEGORY_LABEL,
+          tipo: null as TipoCategoria | null,
+          sortOrder: 10_000,
+          subgroupKey: MIXED_ITEM_CATEGORY_KEY,
+          subgroupLabel: MIXED_ITEM_CATEGORY_LABEL,
+          subgroupSortOrder: 0,
+        }
+      : resolveCategoryGroupForBoleto(b, byId);
     const {
       groupKey,
       groupName,

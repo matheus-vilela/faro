@@ -2,6 +2,7 @@ import { VENDAS_REALIZADAS_FLUXO_CONFIG } from "@/components/fluxo/fluxoBoletosC
 import { FluxoBoletosPage } from "@/components/fluxo/FluxoBoletosPage";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import { VendasRealizadasResumo } from "@/components/revenue/VendasRealizadasResumo";
 import { cn } from "@/lib/utils";
 import { CmvMargens } from "@/pages/CmvMargens";
@@ -67,6 +68,13 @@ function activeVendasItem(pathname: string) {
 export function VendasRealizadasFluxo() {
   const { pathname } = useLocation();
   const active = activeVendasItem(pathname);
+  const reportId =
+    pathname.includes("/faturamento")
+      ? ("epoc_billing" as const)
+      : pathname.includes("/margens")
+        ? ("cmv_margins" as const)
+        : ("sales_summary" as const);
+  const showHeaderExport = !pathname.includes("/calendario");
 
   return (
     <PageShell className="h-full space-y-6">
@@ -74,6 +82,7 @@ export function VendasRealizadasFluxo() {
         title="Vendas realizadas"
         description={active.description}
         icon={TrendingUp}
+        action={showHeaderExport ? <ExportButton reportId={reportId} /> : undefined}
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">

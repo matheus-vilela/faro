@@ -3,6 +3,12 @@ import { shiftMonth } from "@/lib/dre/dreInsight";
 import { getMonthYmdRange } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  expandBoletoAmountByItemCategories,
+  groupRateioItemsByExpenseId,
+  omitPurchaseCmvCategoryAmounts,
+} from "@/lib/dre/rateioBoletoByItems";
 import { isBudgetActualCategory } from "./fetchActualByCategory";
 import type { BudgetBasis } from "./types";
 
@@ -30,7 +36,7 @@ export async function fetchActualAvg3Months(
   let query = supabase
     .from("boletos")
     .select(
-      "amount, paid_amount, company_category_id, due_date, paid_at, status, flow_type, entry_kind",
+      "amount, paid_amount, company_category_id, due_date, paid_at, status, flow_type, entry_kind, expense_id",
     )
     .eq("company_id", companyId)
     .or("flow_type.eq.payable,flow_type.is.null")
@@ -48,19 +54,23 @@ export async function fetchActualAvg3Months(
   const { data, error } = await query;
   if (error) throw error;
 
+  const rows = data ?? [];
+  const items = await fetchExpenseItemsForRateio(
+    companyId,
+    rows
+      .map((row) => row.expense_id as string | null)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const itemsByExpenseId = groupRateioItemsByExpenseId(items);
+
   const sums = new Map<string, number>();
   const monthKeys = new Set(
     months.map((m) => `${m.year}-${String(m.month).padStart(2, "0")}`),
   );
 
-  for (const row of data ?? []) {
+  for (const row of rows) {
     if (row.flow_type === "receivable") continue;
     if (row.entry_kind === "transfer") continue;
-    const catId = row.company_category_id as string | null;
-    if (!catId) continue;
-
-    const cat = categoriesById.get(catId);
-    if (!isBudgetActualCategory(cat)) continue;
 
     let ymd: string | null = null;
     if (basis === "competencia") {
@@ -76,7 +86,28 @@ export async function fetchActualAvg3Months(
       basis === "caixa"
         ? Number(row.paid_amount ?? row.amount) || 0
         : Number(row.amount) || 0;
-    sums.set(catId, (sums.get(catId) ?? 0) + amount);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+
+    const expenseId = (row.expense_id as string | null)?.trim() || null;
+    const slices = omitPurchaseCmvCategoryAmounts(
+      expandBoletoAmountByItemCategories(
+        {
+          amount,
+          expense_id: expenseId,
+          company_category_id: (row.company_category_id as string | null) ?? null,
+        },
+        expenseId ? (itemsByExpenseId.get(expenseId) ?? []) : [],
+      ),
+      categoriesById,
+    );
+
+    for (const slice of slices) {
+      const catId = slice.company_category_id;
+      if (!catId) continue;
+      const cat = categoriesById.get(catId);
+      if (!isBudgetActualCategory(cat)) continue;
+      sums.set(catId, (sums.get(catId) ?? 0) + slice.amount);
+    }
   }
 
   const avg = new Map<string, number>();

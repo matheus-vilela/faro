@@ -6,6 +6,7 @@ import { CashFlowProjectionChart } from "@/components/cashFlowSimulation/CashFlo
 import { CashFlowScenarioToolbar } from "@/components/cashFlowSimulation/CashFlowScenarioToolbar";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -52,6 +53,18 @@ export function FluxoDeCaixa() {
         title="Fluxo de caixa"
         icon={ArrowLeftRight}
         description="Simule entradas e saídas conhecidas e veja se terá caixa nas próximas semanas."
+        action={
+          <ExportButton
+            reportId="cash_flow_summary"
+            allowedReportIds={["cash_flow_summary", "cash_flow_by_category"]}
+            lockReport={false}
+            initialFilters={{
+              scenario: prefs.scenario,
+              horizonWeeks: prefs.horizonWeeks,
+              openingBalance: prefs.openingBalance,
+            }}
+          />
+        }
       />
 
       <CashFlowScenarioToolbar

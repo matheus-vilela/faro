@@ -1,6 +1,8 @@
 import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
+import { BoletoCategoryRateioFields } from "@/components/BoletoCategoryRateioFields";
 import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
+import { ExpenseItemsInlineTable } from "@/components/expenses/ExpenseItemsInlineTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +25,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  createReciboExpense,
+  initialRateioLines,
+  primaryCategoryIdFromRateio,
+  replaceExpenseItemsForRateio,
+  scaleRateioLines,
+  validateRateioDraft,
+  type RateioDraftLine,
+} from "@/lib/boletoCategoryRateio";
 import { localDateYmd } from "@/lib/boletoPayment";
 import {
   buildChildrenMap,
@@ -38,14 +49,15 @@ import {
   type CompanyBankAccount,
 } from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
-import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoFlowType, ExpenseItem, PaymentType } from "@/types/expense";
 import type { Supplier } from "@/types/supplier";
+import type { Product } from "@/types/product";
 import type {
   ExpenseSeriesType,
   RecurrenceFrequency,
 } from "@/types/expenseSeries";
 import { FileText, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 /** Opções do select "Tipo de lançamento" (série + transferência). */
@@ -256,6 +268,13 @@ export function CreateBoletoSheet({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+  const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
+  const [expenseProducts, setExpenseProducts] = useState<Product[]>([]);
+  const [rateioEnabled, setRateioEnabled] = useState(false);
+  const [rateioLines, setRateioLines] = useState<RateioDraftLine[]>(() =>
+    initialRateioLines(""),
+  );
+  const prevRateioTotalRef = useRef(0);
   const supplierSelectOptions = useMemo(
     () => suppliers.map(supplierSearchOption),
     [suppliers],
@@ -289,6 +308,9 @@ export function CreateBoletoSheet({
     if (defaultDescription?.trim()) {
       setDescription(defaultDescription.trim());
     }
+    setRateioEnabled(false);
+    setRateioLines(initialRateioLines(""));
+    prevRateioTotalRef.current = 0;
   }, [
     open,
     defaultDueDate,
@@ -310,6 +332,12 @@ export function CreateBoletoSheet({
   const requiresPaymentDetails = effectiveFlow === "payable" && !isTransfer;
   const categoryNatureza =
     effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
+  const allowRateio = !expenseId && !isTransfer;
+  const amountNum = parseFloat(amount);
+  const rateioValidation =
+    allowRateio && rateioEnabled
+      ? validateRateioDraft(rateioLines, amountNum)
+      : { ok: true as const };
 
   const loadCategories = useCallback(
     async (opts?: { selectDefault?: boolean }) => {
@@ -375,6 +403,33 @@ export function CreateBoletoSheet({
     if (!open || !companyId || expenseId || effectiveFlow !== "payable") return;
     void loadSuppliers();
   }, [open, companyId, expenseId, effectiveFlow, loadSuppliers]);
+
+  const loadLinkedExpense = useCallback(async () => {
+    if (!open || !companyId || !expenseId) {
+      setExpenseItems([]);
+      setExpenseProducts([]);
+      return;
+    }
+    const [{ data: itemRows }, { data: prodRows }] = await Promise.all([
+      supabase
+        .from("expense_items")
+        .select("*, products (id, name, current_quantity, min_quantity, unit)")
+        .eq("company_id", companyId)
+        .eq("expense_id", expenseId)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("products")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+    ]);
+    setExpenseItems((itemRows as ExpenseItem[]) ?? []);
+    setExpenseProducts((prodRows as Product[]) ?? []);
+  }, [open, companyId, expenseId]);
+
+  useEffect(() => {
+    void loadLinkedExpense();
+  }, [loadLinkedExpense]);
 
   const loadBankAccounts = useCallback(async () => {
     if (!companyId) return;
@@ -447,6 +502,19 @@ export function CreateBoletoSheet({
     setDestBankAccountId(value);
   };
 
+  useEffect(() => {
+    if (!allowRateio || !rateioEnabled) {
+      prevRateioTotalRef.current = Number.isFinite(amountNum) ? amountNum : 0;
+      return;
+    }
+    const total = Number.isFinite(amountNum) && amountNum > 0 ? amountNum : 0;
+    const prev = prevRateioTotalRef.current;
+    if (prev > 0 && total > 0 && prev !== total) {
+      setRateioLines((lines) => scaleRateioLines(lines, total));
+    }
+    prevRateioTotalRef.current = total;
+  }, [allowRateio, rateioEnabled, amountNum]);
+
   const canSubmitTransfer =
     isTransfer &&
     description.trim() !== "" &&
@@ -461,7 +529,10 @@ export function CreateBoletoSheet({
 
   const canSubmitStandard =
     !isTransfer &&
-    companyCategoryId.trim() !== "" &&
+    (Boolean(expenseId) ||
+      (allowRateio && rateioEnabled
+        ? rateioValidation.ok
+        : companyCategoryId.trim() !== "")) &&
     !categoriesLoading &&
     description.trim() !== "" &&
     emissionDate.trim() !== "" &&
@@ -496,6 +567,9 @@ export function CreateBoletoSheet({
     setLaunchType("single");
     setOriginBankAccountId("");
     setDestBankAccountId("");
+    setRateioEnabled(false);
+    setRateioLines(initialRateioLines(""));
+    prevRateioTotalRef.current = 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -583,10 +657,25 @@ export function CreateBoletoSheet({
       resolvedSupplierId = (expRow?.supplier_id as string | null) ?? null;
     }
 
+    const amountNumSubmit = parseFloat(amount);
+    const useRateio = allowRateio && rateioEnabled;
+    if (useRateio) {
+      const check = validateRateioDraft(rateioLines, amountNumSubmit);
+      if (!check.ok) {
+        setLoading(false);
+        toast.error(check.message);
+        return;
+      }
+    }
+    const resolvedCategoryId = useRateio
+      ? primaryCategoryIdFromRateio(rateioLines)
+      : companyCategoryId.trim() || null;
+
+    const needsRecibo = !expenseId && (seriesType !== "single" || useRateio);
+
     if (
       !linkedExpenseId &&
-      effectiveFlow === "payable" &&
-      seriesType !== "single"
+      needsRecibo
     ) {
       const installments =
         seriesType === "installment" ? parseInt(installmentCount, 10) : null;
@@ -595,48 +684,42 @@ export function CreateBoletoSheet({
         toast.error("Informe pelo menos 2 parcelas.");
         return;
       }
-      const { data: expRow, error: expErr } = await supabase
-        .from("expenses")
-        .insert({
-          company_id: companyId,
-          created_by: user?.id ?? null,
-          type: "recibo",
-          display_name: description.trim(),
-          status: "approved",
-          expense_source: "manual",
-          reference_date: dueDate,
-          document_total: parseFloat(amount),
-          series_type: seriesType,
-          recurrence_frequency:
-            seriesType === "recurring" ? recurrenceFrequency : null,
-          installment_count: installments,
-          recurrence_status: seriesType === "recurring" ? "active" : null,
-          series_anchor_due_date: dueDate,
-          supplier_id: selectedSupplier?.id ?? null,
-          supplier_name: selectedSupplier?.name ?? null,
-          supplier_document: selectedSupplier?.document ?? null,
-        })
-        .select("id")
-        .single();
-      if (expErr) {
+      try {
+        linkedExpenseId = await createReciboExpense({
+          companyId,
+          userId: user?.id ?? null,
+          description: description.trim(),
+          dueDate,
+          amount: amountNumSubmit,
+          supplierId: selectedSupplier?.id ?? null,
+          supplierName: selectedSupplier?.name ?? null,
+          supplierDocument: selectedSupplier?.document ?? null,
+          seriesType,
+          recurrenceFrequency,
+          installmentCount: installments,
+        });
+        await replaceExpenseItemsForRateio({
+          companyId,
+          expenseId: linkedExpenseId,
+          lines: useRateio ? rateioLines : null,
+          categories: companyCategories,
+          stubProductName: description.trim(),
+          stubUnitValue: amountNumSubmit,
+        });
+      } catch (err) {
         setLoading(false);
-        toast.error(expErr.message ?? "Não foi possível criar a série.");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Não foi possível criar o recibo do lançamento.",
+        );
         return;
       }
-      linkedExpenseId = expRow.id;
-      await supabase.from("expense_items").insert({
-        company_id: companyId,
-        expense_id: expRow.id,
-        product_name: description.trim(),
-        quantity: 1,
-        unit_value: parseFloat(amount),
-        stock_added: false,
-      });
     }
 
     const payload: Record<string, unknown> = {
       company_id: companyId,
-      company_category_id: companyCategoryId,
+      company_category_id: resolvedCategoryId,
       category: null,
       description: description.trim(),
       emission_date: emissionDate,
@@ -702,7 +785,10 @@ export function CreateBoletoSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-xl">
+      <SheetContent
+        maximizable
+        className="overflow-y-auto w-[70vw] sm:!max-w-[70vw]"
+      >
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
@@ -877,22 +963,103 @@ export function CreateBoletoSheet({
               </div>
             )}
             {!isTransfer && (
-              <div>
-                <Label>Categoria</Label>
-                <BoletoCategoryPicker
-                  companyId={companyId}
-                  value={companyCategoryId}
-                  onValueChange={setCompanyCategoryId}
-                  categories={companyCategories}
-                  loading={categoriesLoading}
-                  categoryNatureza={categoryNatureza}
-                  onReload={() => loadCategories({ selectDefault: false })}
-                />
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Busque, escolha ou crie uma categoria sem sair desta tela.
-                </p>
+              <div className="space-y-3">
+                {allowRateio ? (
+                  <>
+                    {!rateioEnabled ? (
+                      <div>
+                        <Label>Categoria</Label>
+                        <BoletoCategoryPicker
+                          companyId={companyId}
+                          value={companyCategoryId}
+                          onValueChange={setCompanyCategoryId}
+                          categories={companyCategories}
+                          loading={categoriesLoading}
+                          categoryNatureza={categoryNatureza}
+                          onReload={() => loadCategories({ selectDefault: false })}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          Busque, escolha ou crie uma categoria sem sair desta
+                          tela.
+                        </p>
+                      </div>
+                    ) : null}
+                    <BoletoCategoryRateioFields
+                      companyId={companyId}
+                      categories={companyCategories}
+                      loading={categoriesLoading}
+                      onReload={() => loadCategories({ selectDefault: false })}
+                      categoryNatureza={categoryNatureza}
+                      totalAmount={Number.isFinite(amountNum) ? amountNum : 0}
+                      enabled={rateioEnabled}
+                      onEnabledChange={(next) => {
+                        setRateioEnabled(next);
+                        if (next) {
+                          setRateioLines(initialRateioLines(companyCategoryId));
+                          prevRateioTotalRef.current =
+                            Number.isFinite(amountNum) && amountNum > 0
+                              ? amountNum
+                              : 0;
+                        } else {
+                          const first = rateioLines.find((l) => l.categoryId);
+                          if (first?.categoryId) {
+                            setCompanyCategoryId(first.categoryId);
+                          }
+                        }
+                      }}
+                      lines={rateioLines}
+                      onLinesChange={setRateioLines}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <Label>
+                        {expenseId
+                          ? "Categoria da conta (fallback)"
+                          : "Categoria"}
+                      </Label>
+                      <BoletoCategoryPicker
+                        companyId={companyId}
+                        value={companyCategoryId}
+                        onValueChange={setCompanyCategoryId}
+                        categories={companyCategories}
+                        loading={categoriesLoading}
+                        categoryNatureza={categoryNatureza}
+                        onReload={() => loadCategories({ selectDefault: false })}
+                        allowClear={Boolean(expenseId)}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        {expenseId
+                          ? "Usada nas linhas da nota sem categoria. O DRE rateia pelos itens classificados."
+                          : "Busque, escolha ou crie uma categoria sem sair desta tela."}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
+            {expenseId && expenseItems.length > 0 ? (
+              <ExpenseItemsInlineTable
+                items={expenseItems}
+                canEdit
+                companyId={companyId}
+                products={expenseProducts}
+                deferProductCreation={false}
+                highlightMissingVinculo={false}
+                onSaved={(created) => {
+                  if (created) {
+                    setExpenseProducts((prev) => {
+                      if (prev.some((p) => p.id === created.id)) return prev;
+                      return [...prev, created].sort((a, b) =>
+                        a.name.localeCompare(b.name, "pt-BR"),
+                      );
+                    });
+                  }
+                  void loadLinkedExpense();
+                }}
+              />
+            ) : null}
             {requiresPaymentDetails && !expenseId && (
               <div>
                 <Label>Fornecedor</Label>

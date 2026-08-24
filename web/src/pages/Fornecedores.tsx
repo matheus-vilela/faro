@@ -1,6 +1,7 @@
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import {
@@ -587,14 +588,24 @@ export function Fornecedores() {
         icon={Truck}
         className="shrink-0"
         action={
-          <Button
-            type="button"
-            onClick={() => setSupplierSheetOpen(true)}
-            className="h-10 w-full shrink-0 sm:w-auto"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Novo fornecedor
-          </Button>
+          <HeaderExportActions
+            exportSlot={
+              <ExportButton
+                reportId="suppliers"
+                initialFilters={{ search: suppliersSearch }}
+              />
+            }
+            primary={
+              <Button
+                type="button"
+                onClick={() => setSupplierSheetOpen(true)}
+                className="h-10 w-full shrink-0 sm:w-auto"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Novo fornecedor
+              </Button>
+            }
+          />
         }
       />
 

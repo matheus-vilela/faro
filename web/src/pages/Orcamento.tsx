@@ -293,7 +293,7 @@ export function OrcamentoPanel({
                     to="/app/dre?view=sem-categoria&from=orcamento"
                     className="font-medium text-orange-800 underline underline-offset-2 dark:text-orange-200"
                   >
-                    Resultado → Sem categoria
+                    DRE → Sem categoria
                   </Link>
                   .
                 </p>

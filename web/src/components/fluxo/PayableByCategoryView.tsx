@@ -1,5 +1,6 @@
 import {
   PayableOriginBadge,
+  PayableRemainderBadge,
   PayableSituationBadge,
 } from "@/components/fluxo/PayableListBadges";
 import {
@@ -41,6 +42,7 @@ export function PayableByCategoryView({
   emptyMessage,
   formatCurrency,
   onSelect,
+  itemsByExpenseId,
 }: {
   boletos: FluxoBoletoRow[];
   categoriesById: Map<string, CompanyCategory>;
@@ -50,10 +52,11 @@ export function PayableByCategoryView({
   emptyMessage: string;
   formatCurrency: (v: number) => string;
   onSelect: (b: FluxoBoletoRow) => void;
+  itemsByExpenseId?: Map<string, Array<{ company_category_id?: string | null }>>;
 }) {
   const groups = useMemo(
-    () => groupPayablesByCategory(boletos, categoriesById),
-    [boletos, categoriesById],
+    () => groupPayablesByCategory(boletos, categoriesById, itemsByExpenseId),
+    [boletos, categoriesById, itemsByExpenseId],
   );
 
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
@@ -161,6 +164,9 @@ export function PayableByCategoryView({
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                   <PayableOriginBadge origin={origin} />
+                                  {b.split_from_boleto_id ? (
+                                    <PayableRemainderBadge />
+                                  ) : null}
                                   <span className="text-sm text-muted-foreground">
                                     Vence {formatDueDateShort(b.due_date)}
                                   </span>

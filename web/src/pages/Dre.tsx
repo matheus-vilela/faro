@@ -16,6 +16,7 @@ import {
 } from "@/components/monthClosing/MonthClosingChecklist";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import {
   Accordion,
   AccordionContent,
@@ -217,13 +218,29 @@ export function Dre() {
   return (
     <PageShell>
       <PageHeader
-        title={pageTab === "orcamento" ? "Orçamento" : "Resultado"}
+        title={pageTab === "orcamento" ? "Orçamento" : "DRE"}
         description={
           pageTab === "orcamento"
             ? "Meta de custo por categoria versus o que já foi gasto no mês — não é o lucro do DRE."
             : "Quanto sobrou no período — por vencimento dos lançamentos (competência)."
         }
         icon={pageTab === "orcamento" ? Target : BarChart3}
+        action={
+          <ExportButton
+            reportId={
+              pageTab === "orcamento"
+                ? "budget"
+                : mainView === "sem-categoria"
+                  ? "dre_uncategorized"
+                  : "dre"
+            }
+            initialFilters={{
+              month: period.month,
+              year: period.year,
+              dreView: mainView === "resumo" ? "resumo" : "linhas",
+            }}
+          />
+        }
       />
 
       <div
@@ -233,7 +250,7 @@ export function Dre() {
       >
         {(
           [
-            { value: "resultado" as const, label: "Resultado", icon: BarChart3 },
+            { value: "resultado" as const, label: "DRE", icon: BarChart3 },
             { value: "orcamento" as const, label: "Orçamento", icon: Target },
           ] as const
         ).map((opt) => {

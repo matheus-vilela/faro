@@ -13,6 +13,7 @@ import {
 import { isNfeBonificationCfop } from "./nfeCfopBonification.ts";
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
 import { createProductWithStockIn } from "./createProductWithStockIn.ts";
+import { fetchProductDefaultExpenseCategoryById } from "./productDefaultExpenseCategory.ts";
 import { buildNewProductCatalogFromNfeLine } from "./productImport/buildPackUnitConversionsFromLabel.ts";
 import { canonicalProductName } from "./productImport/canonicalName.ts";
 import { catalogMatchNameKey } from "./productImport/llmCatalogCandidates.ts";
@@ -1346,6 +1347,13 @@ export async function persistStagingInterpretExpenseAndBoletos(
     financial_reconciliation_json: financialReconciliation,
   };
 
+  const defaultCategoryByProductId =
+    await fetchProductDefaultExpenseCategoryById(
+      admin,
+      companyId,
+      [...productIdByLineIndex.values()],
+    );
+
   const itemRows = produtos.map((line, i) => {
     const q = Math.max(0.0001, Number(line.quantidade) || 0);
     const uv = Math.round((Number(line.valor_unitario) || 0) * 100) / 100;
@@ -1364,6 +1372,8 @@ export async function persistStagingInterpretExpenseAndBoletos(
       if (stockAppliedByLineIndex?.has(i)) {
         row.stock_added = true;
       }
+      const defCat = defaultCategoryByProductId.get(pid);
+      if (defCat) row.company_category_id = defCat;
     }
     const u =
       line.unidade_comercial != null

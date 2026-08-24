@@ -42,6 +42,7 @@ export interface BankStatementLine {
   id: string;
   import_id: string;
   company_id: string;
+  company_bank_account_id: string;
   posted_at: string;
   amount: number;
   direction: BankStatementLineDirection;

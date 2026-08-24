@@ -5,6 +5,7 @@ import { ExpenseImportAttentionPanel } from "@/components/expenses/ExpenseImport
 import { type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { NotasRecebimentoListRow, NOTAS_RECEBIMENTO_LIST_GRID } from "@/components/recebimento/NotasRecebimentoListRow";
 import { RecebimentoReviewPanel } from "@/components/recebimento/RecebimentoReviewPanel";
@@ -70,6 +71,7 @@ import {
   type RecebimentoListKind,
 } from "@/lib/notasRecebimentoListFilters";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
+import { getMonthYmdRange } from "@/lib/payableTotals";
 import { maskCpfCnpj } from "@/lib/masks";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
@@ -1344,6 +1346,8 @@ export function Despesas() {
     );
   };
 
+  const expenseExportRange = getMonthYmdRange(period.month, period.year);
+
   return (
     <PageShell className="flex min-h-0 flex-1 flex-col gap-4 pb-0">
       <PageHeader
@@ -1356,14 +1360,30 @@ export function Despesas() {
         icon={PackageCheck}
         className="shrink-0"
         action={
-          <Button
-            type="button"
-            onClick={() => setExpenseSheetOpen(true)}
-            className="h-10 w-full shrink-0 sm:w-auto"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Nova nota fiscal
-          </Button>
+          <HeaderExportActions
+            exportSlot={
+              <ExportButton
+                reportId="expenses"
+                initialFilters={{
+                  dateFrom: expenseExportRange.startYmd,
+                  dateTo: expenseExportRange.endYmd,
+                  month: period.month,
+                  year: period.year,
+                  search: expensesSearch,
+                }}
+              />
+            }
+            primary={
+              <Button
+                type="button"
+                onClick={() => setExpenseSheetOpen(true)}
+                className="h-10 w-full shrink-0 sm:w-auto"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Nova nota fiscal
+              </Button>
+            }
+          />
         }
       />
 

@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
+import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import {
   Select,
   SelectContent,
@@ -346,15 +347,29 @@ export function EstoqueMovimentacoesPanel({
             empresa. Use os filtros para refinar a lista e os totais.
           </CardDescription>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          className="shrink-0"
-          onClick={() => setRegisterSheetOpen(true)}
-        >
-          <Plus className="mr-1.5 h-4 w-4" />
-          Registrar movimentação
-        </Button>
+        <HeaderExportActions
+          exportSlot={
+            <ExportButton
+              reportId="stock_movements"
+              initialFilters={{
+                dateFrom,
+                dateTo,
+                movementDirection: directionFilter,
+              }}
+            />
+          }
+          primary={
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setRegisterSheetOpen(true)}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Registrar movimentação
+            </Button>
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {!loading ? (

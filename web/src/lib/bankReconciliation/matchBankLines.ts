@@ -195,17 +195,14 @@ export function buildMatchResult(
   return { pairs, sobancoLineIds, sofaroBoletoIds };
 }
 
+/** Só débito × conta a pagar. Créditos do extrato e contas a receber ficam de fora. */
 export function buildMatchResultByDirection(params: {
   debitLines: MatchStatementLine[];
   creditLines: MatchStatementLine[];
   payables: MatchBoletoCandidate[];
   receivables: MatchBoletoCandidate[];
 }): MatchResult {
-  const debit = buildMatchResult(params.debitLines, params.payables);
-  const credit = buildMatchResult(params.creditLines, params.receivables);
-  return {
-    pairs: [...debit.pairs, ...credit.pairs],
-    sobancoLineIds: [...debit.sobancoLineIds, ...credit.sobancoLineIds],
-    sofaroBoletoIds: [...debit.sofaroBoletoIds, ...credit.sofaroBoletoIds],
-  };
+  void params.creditLines;
+  void params.receivables;
+  return buildMatchResult(params.debitLines, params.payables);
 }

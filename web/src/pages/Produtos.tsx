@@ -10,6 +10,7 @@ import { EstoqueFichasPendentesPanel } from "@/components/estoque/EstoqueFichasP
 import { EstoqueVincularComprasPanel } from "@/components/estoque/EstoqueVincularComprasPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { ExportButton } from "@/components/reports/ExportButton";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { ProductBulkEditDialog } from "@/components/products/ProductBulkEditDialog";
@@ -65,12 +66,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -105,7 +100,6 @@ import {
   buildNextConversionsAfterHubChange,
   computeStockQuantityAfterHubChange,
 } from "@/lib/companyUnits/stockHubUnitChange";
-import { runStockExportDownload } from "@/lib/exportProductStockExcel";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
 import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
@@ -139,10 +133,8 @@ import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   AlertTriangle,
   ChefHat,
-  ChevronDown,
   ClipboardList,
   Coins,
-  Download,
   FileSpreadsheet,
   History,
   LayoutGrid,
@@ -464,7 +456,6 @@ export function Produtos() {
   const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(
     () => lowStockOnly || purchasesFilter != null,
   );
-  const [stockExportLoading, setStockExportLoading] = useState(false);
   const canBulkEditCatalog = useHasPermission("produtos");
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
     () => new Set(),
@@ -1544,57 +1535,6 @@ export function Produtos() {
     setLowStockCount(count ?? 0);
   }, [currentCompany?.id]);
 
-  const handleStockExport = useCallback(
-    async (mode: "filtered" | "all") => {
-      if (!currentCompany?.id) return;
-      setStockExportLoading(true);
-      try {
-        const n = await runStockExportDownload(
-          currentCompany.id,
-          (currentCompany.name ?? "empresa").replace(/\s+/g, "_"),
-          {
-            search: debouncedSearch,
-            filterCategoryId,
-            filterActive,
-            filterComposesCmv,
-            filterUpdatedPreset,
-            filterUpdatedFrom,
-            filterUpdatedTo,
-            filterStockAlert,
-            lowStockOnly,
-          },
-          mode,
-        );
-        if (n === 0) {
-          toast.message("Nenhum produto encontrado para exportar.");
-        } else {
-          toast.success(
-            n === 1
-              ? "Planilha exportada (1 produto)."
-              : `Planilha exportada (${n} produtos).`,
-          );
-        }
-      } catch (e) {
-        console.error(e);
-        toast.error("Não foi possível exportar o estoque.");
-      } finally {
-        setStockExportLoading(false);
-      }
-    },
-    [
-      currentCompany,
-      debouncedSearch,
-      filterCategoryId,
-      filterActive,
-      filterComposesCmv,
-      filterUpdatedPreset,
-      filterUpdatedFrom,
-      filterUpdatedTo,
-      filterStockAlert,
-      lowStockOnly,
-    ],
-  );
-
   useEffect(() => {
     setProductsPage(1);
   }, [
@@ -2368,35 +2308,22 @@ export function Produtos() {
                 </CardDescription>
               </div>
               {currentCompany?.id ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={stockExportLoading}
-                      className="shrink-0 gap-1.5"
-                    >
-                      <Download className="h-4 w-4" />
-                      {stockExportLoading ? "Exportando…" : "Exportar Excel"}
-                      <ChevronDown className="h-4 w-4 opacity-70" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuItem
-                      onClick={() => void handleStockExport("filtered")}
-                      disabled={stockExportLoading}
-                    >
-                      Com filtros atuais
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => void handleStockExport("all")}
-                      disabled={stockExportLoading}
-                    >
-                      Todos os produtos
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ExportButton
+                  reportId="stock_catalog"
+                  allowedReportIds={["stock_catalog", "stock_movements"]}
+                  lockReport={false}
+                  stockFilters={{
+                    search: debouncedSearch,
+                    filterCategoryId,
+                    filterActive,
+                    filterComposesCmv,
+                    filterUpdatedPreset,
+                    filterUpdatedFrom,
+                    filterUpdatedTo,
+                    filterStockAlert,
+                    lowStockOnly,
+                  }}
+                />
               ) : null}
             </CardHeader>
             <CardContent>

@@ -6,6 +6,7 @@ import {
   sanitizeCatalogProductName,
 } from "@/lib/productImport/canonicalName";
 import { roundHubQuantityForStock } from "@/lib/productQuantityInput";
+import { resolvePrefillCompanyCategoryId } from "@/lib/dre/rateioBoletoByItems";
 import { toProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import {
   persistProductUnitConversions,
@@ -27,6 +28,8 @@ export type ExpenseItemLinkEditDraft = {
   quantity: number;
   unitValue: number;
   conversions: ProductUnitConversionDraft[];
+  /** Categoria financeira desta linha. */
+  companyCategoryId: string | null;
 };
 
 export function mergeExpenseItemMetadata(
@@ -70,6 +73,7 @@ export function expenseItemDraftSignature(
     invoiceUnit: (draft.invoiceUnit ?? "").trim().toLowerCase(),
     quantity: Number(draft.quantity),
     unitValue: Number(draft.unitValue),
+    companyCategoryId: draft.companyCategoryId ?? null,
     conversions: draft.conversions.map((c) => [
       Number(c.primary_qty),
       String(c.primary_unit_code).trim().toLowerCase(),
@@ -173,11 +177,38 @@ async function upsertInvoiceAlias(
   }
 }
 
+async function loadCategoryTipo(
+  companyId: string,
+  categoryId: string | null,
+): Promise<string | null> {
+  const id = categoryId?.trim();
+  if (!id) return null;
+  const { data } = await supabase
+    .from("company_categories")
+    .select("tipo")
+    .eq("company_id", companyId)
+    .eq("id", id)
+    .maybeSingle();
+  return (data as { tipo?: string } | null)?.tipo ?? null;
+}
+
+function productCategoryMemoryPatch(
+  categoryId: string,
+  tipo: string | null,
+): { default_expense_category_id: string; cmv_category_id?: string } {
+  return {
+    default_expense_category_id: categoryId,
+    ...(tipo === "CMV" ? { cmv_category_id: categoryId } : {}),
+  };
+}
+
 async function createCatalogProduct(args: {
   companyId: string;
   pending: PendingNewProductMeta;
   unitValue: number;
   invoiceUnit: string | null;
+  defaultExpenseCategoryId: string | null;
+  categoryTipo: string | null;
 }): Promise<{ product: Product } | { error: string }> {
   const catalogName =
     sanitizeCatalogProductName(args.pending.name) || args.pending.name;
@@ -209,6 +240,12 @@ async function createCatalogProduct(args: {
         args.pending.canonical_name ??
         (canonicalProductName(catalogName) || null),
       ncm: args.pending.ncm ?? null,
+      ...(args.defaultExpenseCategoryId
+        ? productCategoryMemoryPatch(
+            args.defaultExpenseCategoryId,
+            args.categoryTipo,
+          )
+        : {}),
       unit_conversions: toProductUnitConversionsJson(toPersist),
       ...(sameUnit && args.unitValue >= 0
         ? {
@@ -241,6 +278,9 @@ export async function saveExpenseItemLinkEdit(args: {
   let createdProduct: Product | undefined;
   let hubUnit = "un";
   let conversions = args.draft.conversions;
+  const categoryTipo = args.draft.companyCategoryId
+    ? await loadCategoryTipo(args.companyId, args.draft.companyCategoryId)
+    : null;
 
   if (args.draft.mode === "create") {
     pending = draftToPendingNewProduct(args.draft);
@@ -254,6 +294,8 @@ export async function saveExpenseItemLinkEdit(args: {
         pending,
         unitValue: args.draft.unitValue,
         invoiceUnit: args.draft.invoiceUnit,
+        defaultExpenseCategoryId: args.draft.companyCategoryId,
+        categoryTipo,
       });
       if ("error" in created) return created;
       productId = created.product.id;
@@ -335,6 +377,7 @@ export async function saveExpenseItemLinkEdit(args: {
       import_pending_resolution: false,
       metadata_json: mergeExpenseItemMetadata(args.item.metadata_json, pending),
       stock_added: !!(productId && hadStock),
+      company_category_id: args.draft.companyCategoryId || null,
     })
     .eq("id", args.item.id);
 
@@ -356,6 +399,18 @@ export async function saveExpenseItemLinkEdit(args: {
       args.item.product_name,
       productId,
     );
+    if (args.draft.companyCategoryId) {
+      await supabase
+        .from("products")
+        .update(
+          productCategoryMemoryPatch(
+            args.draft.companyCategoryId,
+            categoryTipo,
+          ),
+        )
+        .eq("id", productId)
+        .eq("company_id", args.companyId);
+    }
   }
 
   return { createdProduct };
@@ -400,7 +455,16 @@ async function loadProductUnit(
 export function initialDraftFromItem(
   item: ExpenseItem,
   companyId: string,
+  opts?: {
+    productDefaultCategoryId?: string | null;
+    productCmvCategoryId?: string | null;
+  },
 ): ExpenseItemLinkEditDraft {
+  const companyCategoryId = resolvePrefillCompanyCategoryId({
+    itemCategoryId: item.company_category_id,
+    productDefaultCategoryId: opts?.productDefaultCategoryId,
+    productCmvCategoryId: opts?.productCmvCategoryId,
+  });
   const pending = parsePendingNewProduct(item.metadata_json);
   if (pending && !item.product_id) {
     return {
@@ -418,6 +482,7 @@ export function initialDraftFromItem(
         secondary_qty: c.secondary_qty,
         secondary_unit_code: c.secondary_unit_code,
       })),
+      companyCategoryId,
     };
   }
   if (item.product_id) {
@@ -430,6 +495,7 @@ export function initialDraftFromItem(
       quantity: Number(item.quantity),
       unitValue: Number(item.unit_value),
       conversions: [],
+      companyCategoryId,
     };
   }
   return {
@@ -441,5 +507,6 @@ export function initialDraftFromItem(
     quantity: Number(item.quantity),
     unitValue: Number(item.unit_value),
     conversions: [],
+    companyCategoryId,
   };
 }

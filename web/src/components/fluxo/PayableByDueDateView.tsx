@@ -1,5 +1,6 @@
 import {
   PayableOriginBadge,
+  PayableRemainderBadge,
   PayableSituationBadge,
 } from "@/components/fluxo/PayableListBadges";
 import {
@@ -185,7 +186,12 @@ export function PayableByDueDateView({
                       {formatCategoryPathBullet(b, categoriesById)}
                     </td>
                     <td className="py-3 pr-3">
-                      <PayableOriginBadge origin={origin} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <PayableOriginBadge origin={origin} />
+                        {b.split_from_boleto_id ? (
+                          <PayableRemainderBadge />
+                        ) : null}
+                      </div>
                     </td>
                     <td className="py-3 pr-3">
                       <PayableSituationBadge situation={situation} />

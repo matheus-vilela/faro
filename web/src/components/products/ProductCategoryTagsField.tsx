@@ -6,10 +6,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
-import { ChevronDown, Loader2, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, Loader2, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const TAG_PALETTE = [
@@ -36,6 +41,7 @@ interface ProductCategoryTagsFieldProps {
   hint?: string;
   /** Bloco mais baixo, para tabelas / onboarding. */
   compact?: boolean;
+  placeholder?: string;
 }
 
 export function ProductCategoryTagsField({
@@ -48,6 +54,7 @@ export function ProductCategoryTagsField({
   label,
   hint,
   compact = false,
+  placeholder = "Grupo",
 }: ProductCategoryTagsFieldProps) {
   const resolvedLabel =
     label === undefined ? "Categorias de produto" : label;
@@ -123,25 +130,168 @@ export function ProductCategoryTagsField({
     setQuery("");
   };
 
+  const pickerContent = (
+    <PopoverContent
+      className={
+        compact
+          ? "z-[200] flex max-h-[min(22rem,70vh)] w-[min(28rem,max(22rem,var(--radix-popover-trigger-width)),calc(100vw-1.5rem))] min-w-[min(22rem,calc(100vw-1.5rem))] max-w-[min(28rem,calc(100vw-1.5rem))] flex-col gap-0 overflow-hidden p-0"
+          : "z-[200] flex max-h-[min(22rem,70vh)] w-[min(100vw-2rem,22rem)] flex-col gap-0 overflow-hidden p-0"
+      }
+      align="start"
+      sideOffset={6}
+      collisionPadding={16}
+      onOpenAutoFocus={(e) => e.preventDefault()}
+    >
+      <div className="shrink-0 border-b border-border p-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar ou digitar nome novo…"
+          className={cn(compact ? "h-8 text-sm" : "h-10")}
+          disabled={creating}
+        />
+      </div>
+      <div
+        className="min-h-0 max-h-60 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+        onWheel={(e) => e.stopPropagation()}
+      >
+        {available.length === 0 && !canCreate ? (
+          <p className="px-2 py-3 text-center text-sm text-muted-foreground">
+            {q
+              ? "Nada encontrado — crie uma nova abaixo."
+              : "Todas as categorias já foram adicionadas."}
+          </p>
+        ) : (
+          available.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className="flex w-full rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+              onClick={() => {
+                addId(c.id);
+                setOpen(false);
+              }}
+            >
+              {c.name}
+            </button>
+          ))
+        )}
+      </div>
+      {canCreate ? (
+        <div className="shrink-0 border-t border-border p-2">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={creating}
+            onClick={() => void createCategory()}
+          >
+            {creating ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="mr-2 h-4 w-4" />
+            )}
+            Criar &quot;{query.trim()}&quot;
+          </Button>
+        </div>
+      ) : null}
+    </PopoverContent>
+  );
+
+  if (compact) {
+    const first = selectedOrdered[0];
+    const extra = selectedOrdered.length - 1;
+    const allNames = selectedOrdered.map((c) => c.name).join(", ");
+    const trigger = (
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 w-full justify-between gap-1 px-2 font-normal"
+        disabled={disabled}
+      >
+        {selectedOrdered.length === 0 ? (
+          <span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
+            {placeholder}
+          </span>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+            {first ? (
+              <span
+                className={cn(
+                  "inline-flex max-w-full min-w-0 items-center gap-0.5 rounded-full border px-2 py-0.5 text-xs font-medium",
+                  tagClassAt(0),
+                )}
+              >
+                <span className="truncate">{first.name}</span>
+                <span
+                  role="button"
+                  tabIndex={disabled ? -1 : 0}
+                  className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!disabled) removeId(first.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!disabled) removeId(first.id);
+                    }
+                  }}
+                  aria-label={`Remover ${first.name}`}
+                >
+                  <X className="h-3 w-3 shrink-0 opacity-70" />
+                </span>
+              </span>
+            ) : null}
+            {extra > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    +{extra}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  {allNames}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+          </span>
+        )}
+        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    );
+
+    return (
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          if (disabled) return;
+          setOpen(next);
+          if (!next) setQuery("");
+        }}
+      >
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        {pickerContent}
+      </Popover>
+    );
+  }
+
   return (
-    <div className={cn("space-y-2", compact && "space-y-1.5")}>
+    <div className="space-y-2">
       {resolvedLabel.trim() ? <Label>{resolvedLabel}</Label> : null}
       <div
         className={cn(
-          "rounded-2xl border border-border bg-background shadow-sm transition-colors",
-          compact
-            ? "min-h-0 px-2.5 py-1.5"
-            : "min-h-[3rem] px-3 py-2.5",
+          "min-h-[3rem] rounded-2xl border border-border bg-background px-3 py-2.5 shadow-sm transition-colors",
           disabled && "pointer-events-none opacity-60",
         )}
       >
         {selectedOrdered.length === 0 ? (
-          <p
-            className={cn(
-              "text-muted-foreground",
-              compact ? "py-0.5 text-xs" : "py-1 text-sm",
-            )}
-          >
+          <p className="py-1 text-sm text-muted-foreground">
             Nenhuma categoria — use o campo abaixo para adicionar.
           </p>
         ) : (
@@ -177,12 +327,7 @@ export function ProductCategoryTagsField({
           <Button
             type="button"
             variant="outline"
-            className={cn(
-              "w-full justify-between border-dashed font-normal text-muted-foreground hover:text-foreground",
-              compact
-                ? "h-8 rounded-md text-xs"
-                : "h-11 rounded-xl",
-            )}
+            className="h-11 w-full justify-between rounded-xl border-dashed font-normal text-muted-foreground hover:text-foreground"
             disabled={disabled}
           >
             <span className="flex items-center gap-2">
@@ -192,69 +337,11 @@ export function ProductCategoryTagsField({
             <ChevronDown className="h-4 w-4 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent
-          className="z-[200] flex max-h-[min(22rem,70vh)] w-[min(100vw-2rem,22rem)] flex-col gap-0 overflow-hidden p-0"
-          align="start"
-          sideOffset={6}
-          collisionPadding={16}
-          onOpenAutoFocus={(e) => e.preventDefault()}
-        >
-          <div className="shrink-0 border-b border-border p-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar ou digitar nome novo…"
-              className={cn(compact ? "h-8 text-sm" : "h-10")}
-              disabled={creating}
-            />
-          </div>
-          <div
-            className="min-h-0 max-h-60 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
-            onWheel={(e) => e.stopPropagation()}
-          >
-            {available.length === 0 && !canCreate ? (
-              <p className="px-2 py-3 text-center text-sm text-muted-foreground">
-                {q ? "Nada encontrado — crie uma nova abaixo." : "Todas as categorias já foram adicionadas."}
-              </p>
-            ) : (
-              available.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="flex w-full rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
-                  onClick={() => {
-                    addId(c.id);
-                    setOpen(false);
-                  }}
-                >
-                  {c.name}
-                </button>
-              ))
-            )}
-          </div>
-          {canCreate ? (
-            <div className="shrink-0 border-t border-border p-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                disabled={creating}
-                onClick={() => void createCategory()}
-              >
-                {creating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Criar &quot;{query.trim()}&quot;
-              </Button>
-            </div>
-          ) : null}
-        </PopoverContent>
+        {pickerContent}
       </Popover>
 
       {resolvedHint.trim() ? (
-        <p className="text-xs text-muted-foreground leading-relaxed">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           {resolvedHint}
         </p>
       ) : null}

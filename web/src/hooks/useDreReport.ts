@@ -11,6 +11,13 @@ import {
   dreHasMappedMovement,
   dreHasOnlyUnclassified,
 } from "@/lib/dre/dreMovement";
+import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
+import {
+  boletoHasUnclassifiedRemainder,
+  expandBoletosToDrePurchaseAmounts,
+  groupRateioItemsByExpenseId,
+  type RateioLine,
+} from "@/lib/dre/rateioBoletoByItems";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto } from "@/types/expense";
@@ -80,6 +87,9 @@ export function useDreReport(
     UseDreReportState["boletosInPeriod"]
   >([]);
   const [salesCmvInPeriod, setSalesCmvInPeriod] = useState(0);
+  const [rateioItemsByExpenseId, setRateioItemsByExpenseId] = useState<
+    Map<string, RateioLine[]>
+  >(() => new Map());
 
   const load = useCallback(async () => {
     if (!enabled) return;
@@ -87,6 +97,7 @@ export function useDreReport(
       setCategories([]);
       setBoletosInPeriod([]);
       setSalesCmvInPeriod(0);
+      setRateioItemsByExpenseId(new Map());
       setLoading(false);
       setError(null);
       return;
@@ -129,6 +140,7 @@ export function useDreReport(
       setCategories([]);
       setBoletosInPeriod([]);
       setSalesCmvInPeriod(0);
+      setRateioItemsByExpenseId(new Map());
       setLoading(false);
       return;
     }
@@ -137,6 +149,7 @@ export function useDreReport(
       setCategories([]);
       setBoletosInPeriod([]);
       setSalesCmvInPeriod(0);
+      setRateioItemsByExpenseId(new Map());
       setLoading(false);
       return;
     }
@@ -145,12 +158,24 @@ export function useDreReport(
       setCategories([]);
       setBoletosInPeriod([]);
       setSalesCmvInPeriod(0);
+      setRateioItemsByExpenseId(new Map());
       setLoading(false);
       return;
     }
 
     setCategories((catRes.data ?? []) as CompanyCategory[]);
-    setBoletosInPeriod((bolRes.data ?? []) as DreSemCategoriaBoleto[]);
+    const boletos = (bolRes.data ?? []) as DreSemCategoriaBoleto[];
+    setBoletosInPeriod(boletos);
+    const expenseIds = boletos
+      .map((b) => b.expense_id)
+      .filter((id): id is string => Boolean(id));
+    try {
+      const items = await fetchExpenseItemsForRateio(companyId, expenseIds);
+      setRateioItemsByExpenseId(groupRateioItemsByExpenseId(items));
+    } catch (e) {
+      console.error(e);
+      setRateioItemsByExpenseId(new Map());
+    }
     const salesCmv = (revCmvRes.data ?? []).reduce(
       (s, row) => s + Math.max(0, Number((row as { cmv_amount?: number }).cmv_amount) || 0),
       0,
@@ -180,20 +205,34 @@ export function useDreReport(
   }, [boletosInPeriod, categoriesById]);
 
   const boletosSemCategoria = useMemo(() => {
-    return boletosInPeriod.filter(
-      (b) => !isBoletoTransfer(b) && !b.company_category_id,
-    );
-  }, [boletosInPeriod]);
+    return boletosInPeriod.filter((b) => {
+      if (isBoletoTransfer(b)) return false;
+      const items = b.expense_id
+        ? (rateioItemsByExpenseId.get(b.expense_id) ?? [])
+        : [];
+      return boletoHasUnclassifiedRemainder(
+        {
+          amount: Number(b.amount),
+          expense_id: b.expense_id,
+          company_category_id: b.company_category_id ?? null,
+        },
+        items,
+      );
+    });
+  }, [boletosInPeriod, rateioItemsByExpenseId]);
 
   const categoryTotals = useMemo(() => {
-    return aggregateTotalsByCategory(
+    const expanded = expandBoletosToDrePurchaseAmounts(
       boletosForDreAggregation.map((b) => ({
         amount: Number(b.amount),
+        expense_id: b.expense_id,
         company_category_id: b.company_category_id ?? null,
       })),
+      rateioItemsByExpenseId,
       categoriesById,
     );
-  }, [boletosForDreAggregation, categoriesById]);
+    return aggregateTotalsByCategory(expanded, categoriesById);
+  }, [boletosForDreAggregation, categoriesById, rateioItemsByExpenseId]);
 
   const computed = useMemo(() => {
     if (!categories.length && !boletosInPeriod.length && salesCmvInPeriod <= 0) {

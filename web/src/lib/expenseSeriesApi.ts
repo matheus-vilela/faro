@@ -1,4 +1,8 @@
 import {
+  copyExpenseItemsReweighted,
+  reweightExpenseRateioItems,
+} from "@/lib/boletoCategoryRateio";
+import {
   mergeFluxoBoletos,
   normalizeSuppressed,
   parseExpenseSeriesMaster,
@@ -132,6 +136,11 @@ async function syncAnchorBoletoIfAdjustmentMonth(
       amount,
     })
     .eq("id", anchorBoleto.id);
+  await reweightExpenseRateioItems({
+    companyId: anchorBoleto.company_id,
+    expenseId: masterExpenseId,
+    toAmount: amount,
+  });
 }
 
 export async function fetchMergedPayableBoletosInRange(
@@ -271,6 +280,11 @@ export async function materializeSeriesMonth(input: {
         payment_type: input.paymentType,
       })
       .eq("id", input.anchorBoleto.id);
+    await reweightExpenseRateioItems({
+      companyId: input.companyId,
+      expenseId: input.masterExpenseId,
+      toAmount: input.amount,
+    });
     return {
       expenseId: input.masterExpenseId,
       boletoId: input.anchorBoleto.id,
@@ -306,13 +320,12 @@ export async function materializeSeriesMonth(input: {
 
   if (expErr) throw expErr;
 
-  await supabase.from("expense_items").insert({
-    company_id: input.companyId,
-    expense_id: childExp.id,
-    product_name: input.description,
-    quantity: 1,
-    unit_value: input.amount,
-    stock_added: false,
+  await copyExpenseItemsReweighted({
+    companyId: input.companyId,
+    fromExpenseId: input.masterExpenseId,
+    toExpenseId: childExp.id,
+    toAmount: input.amount,
+    fallbackProductName: input.description,
   });
 
   const b = anchorBoleto;

@@ -115,7 +115,7 @@ describe("matchBankLines", () => {
     expect(result.sofaroBoletoIds).toEqual(["b-abc"]);
   });
 
-  it("casa crédito do extrato com conta a receber", () => {
+  it("casa crédito do extrato com conta a receber quando chamado direto", () => {
     const result = buildMatchResult(
       [
         {
@@ -146,7 +146,7 @@ describe("matchBankLines", () => {
     );
   });
 
-  it("casa débitos com pagar e créditos com receber separadamente", () => {
+  it("conciliação por direção só casa débito com conta a pagar", () => {
     const result = buildMatchResultByDirection({
       debitLines: [
         {
@@ -183,10 +183,8 @@ describe("matchBankLines", () => {
         },
       ],
     });
-    expect(result.pairs).toHaveLength(2);
-    expect(result.pairs.map((p) => p.boletoId).sort()).toEqual([
-      "b-pagar",
-      "b-receber",
-    ]);
+    expect(result.pairs).toHaveLength(1);
+    expect(result.pairs[0]?.boletoId).toBe("b-pagar");
+    expect(result.sobancoLineIds).toEqual([]);
   });
 });
