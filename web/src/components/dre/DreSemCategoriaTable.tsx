@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DreClassifySheet } from "@/components/dre/DreClassifySheet";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
 import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
