@@ -1,4 +1,6 @@
+import { isCategoryRateioStubItems } from "@/lib/boletoCategoryRateio";
 import { getNfeExpenseValueBreakdown } from "@/lib/expenseDivergenceUi";
+import { isMerchandiseExpenseType } from "@/lib/payableBoletoReceipt";
 
 export type NotasRecebimentoFilter =
   | "all"
@@ -81,6 +83,28 @@ export function isAwaitingRecebimentoKind(kind: RecebimentoListKind): boolean {
   return recebimentoListSectionFromKind(kind) === "awaiting";
 }
 
+/** NF/romaneio always; recibo only after an explicit recebimento card. */
+export function expenseParticipatesInNotasRecebimento(
+  type: string | null | undefined,
+  kind: RecebimentoListKind,
+): boolean {
+  if (isMerchandiseExpenseType(type)) return true;
+  return kind !== "none";
+}
+
+export function filterIdsParticipatingInNotasRecebimento(
+  expenseIds: string[],
+  typeByExpenseId: Map<string, string>,
+  kindByExpenseId: Map<string, RecebimentoListKind>,
+): string[] {
+  return expenseIds.filter((id) =>
+    expenseParticipatesInNotasRecebimento(
+      typeByExpenseId.get(id),
+      kindByExpenseId.get(id) ?? "none",
+    ),
+  );
+}
+
 export function filterIdsByRecebimentoSection(
   expenseIds: string[],
   kindByExpenseId: Map<string, RecebimentoListKind>,
@@ -115,9 +139,14 @@ export function filterIdsByBoleto(
 }
 
 export function expenseHasUnlinkedProduct(
-  items: Array<{ product_id?: string | null }> | null | undefined,
+  items: Array<{
+    product_id?: string | null;
+    company_category_id?: string | null;
+  }> | null | undefined,
 ): boolean {
-  return (items ?? []).some((it) => !it.product_id);
+  const list = items ?? [];
+  if (isCategoryRateioStubItems(list)) return false;
+  return list.some((it) => !it.product_id);
 }
 
 export function expenseHasValueRisk(input: {

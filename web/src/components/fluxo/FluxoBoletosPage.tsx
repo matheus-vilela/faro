@@ -1780,7 +1780,7 @@ export function FluxoBoletosPage({
         expenseId={expenseDetailId}
         elevated
         onClose={closeExpenseDetail}
-        onRefresh={closeExpenseDetail}
+        onRefresh={refreshAll}
       />
 
       <PayBoletoDialog

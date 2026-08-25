@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   expenseHasUnlinkedProduct,
   expenseHasValueRisk,
+  expenseParticipatesInNotasRecebimento,
   filterIdsByBoleto,
   filterIdsByRecebimento,
   filterIdsByRecebimentoSection,
+  filterIdsParticipatingInNotasRecebimento,
   parseRecebimentoListSection,
   parseRecebimentoListTab,
   recebimentoKindFromRow,
@@ -55,6 +57,36 @@ describe("filterIdsByRecebimento / boleto", () => {
     ).toEqual(["b"]);
   });
 
+  it("keeps merchandise without card and drops finance recibos", () => {
+    expect(
+      expenseParticipatesInNotasRecebimento("nota_fiscal", "none"),
+    ).toBe(true);
+    expect(expenseParticipatesInNotasRecebimento("romaneio", "none")).toBe(
+      true,
+    );
+    expect(expenseParticipatesInNotasRecebimento("recibo", "none")).toBe(
+      false,
+    );
+    expect(expenseParticipatesInNotasRecebimento("recibo", "pending")).toBe(
+      true,
+    );
+    const types = new Map([
+      ["nf", "nota_fiscal"],
+      ["fin", "recibo"],
+      ["opted", "recibo"],
+    ]);
+    const kinds = new Map([
+      ["opted", "pending" as const],
+    ]);
+    expect(
+      filterIdsParticipatingInNotasRecebimento(
+        ["nf", "fin", "opted"],
+        types,
+        kinds,
+      ),
+    ).toEqual(["nf", "opted"]);
+  });
+
   it("parses list section from query", () => {
     expect(parseRecebimentoListTab("received")).toBe("received");
     expect(parseRecebimentoListTab("awaiting")).toBe("awaiting");
@@ -77,6 +109,15 @@ describe("attention helpers", () => {
       expenseHasUnlinkedProduct([{ product_id: "p1" }, { product_id: null }]),
     ).toBe(true);
     expect(expenseHasUnlinkedProduct([{ product_id: "p1" }])).toBe(false);
+  });
+
+  it("ignores category rateio stubs", () => {
+    expect(
+      expenseHasUnlinkedProduct([
+        { product_id: null, company_category_id: "cat-a" },
+        { product_id: null, company_category_id: "cat-b" },
+      ]),
+    ).toBe(false);
   });
 
   it("flags value risk without icms_tot when totals diverge", () => {
