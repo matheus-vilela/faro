@@ -1556,11 +1556,9 @@ function ReconRow({
       <Badge variant="secondary">Conciliado</Badge>
     ) : (
       <div className="flex flex-wrap justify-end gap-2">
-        {isForte ? (
-          <Button size="sm" disabled={confirming} onClick={onConfirm}>
-            Confirmar
-          </Button>
-        ) : null}
+        <Button size="sm" disabled={confirming} onClick={onConfirm}>
+          Confirmar
+        </Button>
         {revisarMenu}
       </div>
     );
@@ -1638,7 +1636,7 @@ function ReconRow({
         )}
       </div>
       {right}
-      <div className="flex self-center justify-end sm:min-w-[168px]">
+      <div className="flex self-center justify-end sm:min-w-[200px]">
         {actions}
       </div>
     </div>

@@ -63,6 +63,7 @@ import {
   expenseHasValueRisk,
   filterIdsByBoleto,
   filterIdsByRecebimentoSection,
+  filterIdsParticipatingInNotasRecebimento,
   parseRecebimentoListSection,
   recebimentoKindFromRow,
   type NotasAtencaoFilter,
@@ -70,6 +71,7 @@ import {
   type NotasOrigemFilter,
   type RecebimentoListKind,
 } from "@/lib/notasRecebimentoListFilters";
+import { isMerchandiseExpenseType } from "@/lib/payableBoletoReceipt";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { getMonthYmdRange } from "@/lib/payableTotals";
 import { maskCpfCnpj } from "@/lib/masks";
@@ -603,18 +605,20 @@ export function Despesas() {
 
     type LightExpenseRow = {
         id: string;
+        type: string;
         document_total?: number | null;
         financial_reconciliation_json?: Record<string, unknown> | null;
         expense_items?: Array<{
           product_id?: string | null;
+          company_category_id?: string | null;
           quantity: number;
           unit_value: number;
         }> | null;
       };
       const lightSelect =
         atencaoFilter === "all"
-          ? "id"
-          : "id, document_total, financial_reconciliation_json, expense_items(product_id, quantity, unit_value)";
+          ? "id, type"
+          : "id, type, document_total, financial_reconciliation_json, expense_items(product_id, company_category_id, quantity, unit_value)";
       const lightRows = await fetchAllInRange<LightExpenseRow>(
         applyListFilters(
           supabase
@@ -655,6 +659,14 @@ export function Despesas() {
           }),
         );
       }
+      const typeByExpenseId = new Map(
+        lightRows.map((r) => [r.id, r.type] as const),
+      );
+      ids = filterIdsParticipatingInNotasRecebimento(
+        ids,
+        typeByExpenseId,
+        kindByExpenseId,
+      );
       if (atencaoFilter !== "all") {
         const byId = new Map(lightRows.map((r) => [r.id, r]));
         ids = ids.filter((id) => {
@@ -784,11 +796,31 @@ export function Despesas() {
         .insert({ company_id: companyId, expense_id: expenseId })
         .select("id")
         .single();
-      setEnsuringRecebimentoExpenseId(null);
       if (error || !data) {
+        const { data: existingRow } = await supabase
+          .from("recebimentos")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("expense_id", expenseId)
+          .maybeSingle();
+        setEnsuringRecebimentoExpenseId(null);
+        if (existingRow?.id) {
+          setRecebimentosByExpenseId((prev) => {
+            const next = new Map(prev);
+            next.set(expenseId, {
+              id: existingRow.id as string,
+              status: "pending",
+              assigned_company_member_id: null,
+              hasPendingReceipt: false,
+            });
+            return next;
+          });
+          return existingRow.id as string;
+        }
         toast.error(error?.message ?? "Não foi possível criar o recebimento.");
         return null;
       }
+      setEnsuringRecebimentoExpenseId(null);
       setRecebimentosByExpenseId((prev) => {
         const next = new Map(prev);
         next.set(expenseId, {
@@ -805,12 +837,21 @@ export function Despesas() {
   );
 
   const openReviewForExpense = async (expenseId: string) => {
+    const existing = recebimentosByExpenseId.get(expenseId);
+    if (!existing) {
+      const exp = expenses.find((e) => e.id === expenseId);
+      if (exp && !isMerchandiseExpenseType(exp.type)) return;
+    }
     const id = await ensureRecebimentoForExpense(expenseId);
     if (id) setReviewRecebimentoId(id);
   };
 
   const openShareForExpense = async (expenseId: string) => {
     const rec = recebimentosByExpenseId.get(expenseId);
+    if (!rec) {
+      const exp = expenses.find((e) => e.id === expenseId);
+      if (exp && !isMerchandiseExpenseType(exp.type)) return;
+    }
     const id = await ensureRecebimentoForExpense(expenseId);
     if (!id) return;
     setShareInitialMemberId(rec?.assigned_company_member_id ?? null);
@@ -986,10 +1027,12 @@ export function Despesas() {
         stock_added: false,
       });
     }
-    await supabase.from("recebimentos").insert({
-      company_id: currentCompany.id,
-      expense_id: exp.id,
-    });
+    if (isMerchandiseExpenseType(type)) {
+      await supabase.from("recebimentos").insert({
+        company_id: currentCompany.id,
+        expense_id: exp.id,
+      });
+    }
     setType("nota_fiscal");
     setSupplierId("");
     setInvoiceNumber("");
@@ -1013,6 +1056,16 @@ export function Despesas() {
     ]);
     setExpenseAttachmentFile(null);
     setExpenseSheetOpen(false);
+    if (!isMerchandiseExpenseType(type)) {
+      toast.success(
+        "Recibo lançado sem conferência de mercadoria.",
+        {
+          description:
+            "Gere um recebimento no detalhe se precisar conferir itens ou estoque.",
+        },
+      );
+      setDetailExpenseId(exp.id);
+    }
     fetchData();
   };
 
@@ -1262,8 +1315,9 @@ export function Despesas() {
       financialReconciliationJson: exp.financial_reconciliation_json ?? null,
     });
     const valueRisk = nfeVal.needsAttention;
-    const unlinkedProducts =
-      exp.expense_items?.filter((it) => !it.product_id).length ?? 0;
+    const unlinkedProducts = expenseHasUnlinkedProduct(exp.expense_items)
+      ? (exp.expense_items?.filter((it) => !it.product_id).length ?? 0)
+      : 0;
     const typeLabel =
       exp.type === "nota_fiscal"
         ? "Nota fiscal"

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   amountFromPercent,
+  filledPayableProductLines,
   initialRateioLines,
   percentOfTotal,
   primaryCategoryIdFromRateio,
   remainingToRateio,
   scaleRateioLines,
+  validatePayableProductDraft,
   validateRateioDraft,
   type RateioDraftLine,
 } from "./boletoCategoryRateio";
@@ -94,5 +96,53 @@ describe("initialRateioLines", () => {
   it("começa com duas linhas", () => {
     expect(initialRateioLines("cat-1")).toHaveLength(2);
     expect(initialRateioLines("cat-1")[0]?.categoryId).toBe("cat-1");
+  });
+});
+
+describe("payable product draft", () => {
+  it("keeps only lines with product and quantity", () => {
+    expect(
+      filledPayableProductLines([
+        {
+          key: "a",
+          productId: "p1",
+          productName: "Arroz",
+          quantity: 2,
+          unitValue: 10,
+        },
+        {
+          key: "b",
+          productId: "",
+          productName: "",
+          quantity: 1,
+          unitValue: 0,
+        },
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("requires at least one linked product", () => {
+    expect(
+      validatePayableProductDraft([
+        {
+          key: "a",
+          productId: "",
+          productName: "",
+          quantity: 1,
+          unitValue: 0,
+        },
+      ]).ok,
+    ).toBe(false);
+    expect(
+      validatePayableProductDraft([
+        {
+          key: "a",
+          productId: "p1",
+          productName: "Arroz",
+          quantity: 1,
+          unitValue: 8.5,
+        },
+      ]),
+    ).toEqual({ ok: true });
   });
 });

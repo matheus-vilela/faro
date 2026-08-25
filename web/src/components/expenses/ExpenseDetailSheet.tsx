@@ -47,6 +47,7 @@ import {
   expenseItemHasVinculo,
 } from "@/lib/expenseItemVinculo";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
+import { isMerchandiseExpenseType } from "@/lib/payableBoletoReceipt";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -62,6 +63,7 @@ import {
   ChevronDown,
   Copy,
   Link2,
+  Loader2,
   PackageCheck,
   Pencil,
   Plus,
@@ -333,6 +335,7 @@ export function ExpenseDetailSheet({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [approvingWhatsapp, setApprovingWhatsapp] = useState(false);
+  const [generatingRecebimento, setGeneratingRecebimento] = useState(false);
   const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
   const [boletoResumo, setBoletoResumo] = useState<Boleto | null>(null);
   const [comprovanteUrl, setComprovanteUrl] = useState<string | null>(null);
@@ -675,6 +678,30 @@ export function ExpenseDetailSheet({
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleGenerateRecebimento = async () => {
+    if (!detailExpense?.id || !companyId) return;
+    if (recebimentoInfo) {
+      onOpenRecebimento?.();
+      return;
+    }
+    setGeneratingRecebimento(true);
+    const { error } = await supabase.from("recebimentos").insert({
+      company_id: companyId,
+      expense_id: detailExpense.id,
+    });
+    setGeneratingRecebimento(false);
+    if (error && error.code !== "23505") {
+      toast.error(error.message ?? "Não foi possível gerar o recebimento.");
+      return;
+    }
+    toast.success(
+      "Recebimento gerado. A conferência aparece em Notas e recebimento.",
+    );
+    await loadExpenseData();
+    onRefresh?.();
+    onOpenRecebimento?.();
   };
 
   const startEdit = () => {
@@ -1045,7 +1072,38 @@ export function ExpenseDetailSheet({
                   )}
                 </div>
               </SheetHeader>
-              {!detailEditMode && onOpenRecebimento && (
+              {!detailEditMode &&
+              !isMerchandiseExpenseType(detailExpense.type) &&
+              !recebimentoInfo ? (
+                <div className="mt-3 flex w-full flex-col gap-3 rounded-lg border border-muted-foreground/25 bg-muted/40 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      Recebimento opcional
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Este lançamento financeiro não exige conferência de
+                      mercadoria. Gere um recebimento só se precisar conferir
+                      itens ou estoque.
+                    </p>
+                  </div>
+                  {(canEditDespesas || isOwner) && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 shrink-0 bg-background shadow-sm"
+                      disabled={generatingRecebimento}
+                      onClick={() => void handleGenerateRecebimento()}
+                    >
+                      {generatingRecebimento ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <PackageCheck className="mr-2 h-4 w-4" />
+                      )}
+                      Gerar recebimento
+                    </Button>
+                  )}
+                </div>
+              ) : !detailEditMode && onOpenRecebimento ? (
                 <div
                   className={cn(
                     "mt-3 flex w-full flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between",
@@ -1098,7 +1156,7 @@ export function ExpenseDetailSheet({
                     ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
               {detailExpense.parent_expense_id && !detailEditMode ? (
                 <p className="mt-3 rounded-md border border-sky-600/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
                   Exceção materializada de um mês da série. Alterações aqui não

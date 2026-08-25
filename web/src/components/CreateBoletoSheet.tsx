@@ -3,6 +3,7 @@ import { BoletoCategoryRateioFields } from "@/components/BoletoCategoryRateioFie
 import { CreateBankAccountSheet } from "@/components/CreateBankAccountSheet";
 import { CreateSupplierSheet } from "@/components/CreateSupplierSheet";
 import { ExpenseItemsInlineTable } from "@/components/expenses/ExpenseItemsInlineTable";
+import { PayableProductDraftFields } from "@/components/PayableProductDraftFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,11 +28,16 @@ import {
 } from "@/components/ui/sheet";
 import {
   createReciboExpense,
+  emptyPayableProductLine,
+  filledPayableProductLines,
   initialRateioLines,
+  insertExpenseItemsForProducts,
   primaryCategoryIdFromRateio,
   replaceExpenseItemsForRateio,
   scaleRateioLines,
+  validatePayableProductDraft,
   validateRateioDraft,
+  type PayableProductDraftLine,
   type RateioDraftLine,
 } from "@/lib/boletoCategoryRateio";
 import { localDateYmd } from "@/lib/boletoPayment";
@@ -274,6 +280,12 @@ export function CreateBoletoSheet({
   const [rateioLines, setRateioLines] = useState<RateioDraftLine[]>(() =>
     initialRateioLines(""),
   );
+  const [productsEnabled, setProductsEnabled] = useState(false);
+  const [productLines, setProductLines] = useState<PayableProductDraftLine[]>(
+    () => [emptyPayableProductLine()],
+  );
+  const [generateRecebimento, setGenerateRecebimento] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const prevRateioTotalRef = useRef(0);
   const supplierSelectOptions = useMemo(
     () => suppliers.map(supplierSearchOption),
@@ -311,6 +323,9 @@ export function CreateBoletoSheet({
     setRateioEnabled(false);
     setRateioLines(initialRateioLines(""));
     prevRateioTotalRef.current = 0;
+    setProductsEnabled(false);
+    setProductLines([emptyPayableProductLine()]);
+    setGenerateRecebimento(false);
   }, [
     open,
     defaultDueDate,
@@ -333,6 +348,10 @@ export function CreateBoletoSheet({
   const categoryNatureza =
     effectiveFlow === "receivable" ? "RECEITA" : "DESPESA";
   const allowRateio = !expenseId && !isTransfer;
+  const allowProducts =
+    !expenseId && !isTransfer && effectiveFlow === "payable";
+  const filledProductLines = filledPayableProductLines(productLines);
+  const hasLinkedProduct = filledProductLines.length > 0;
   const amountNum = parseFloat(amount);
   const rateioValidation =
     allowRateio && rateioEnabled
@@ -430,6 +449,29 @@ export function CreateBoletoSheet({
   useEffect(() => {
     void loadLinkedExpense();
   }, [loadLinkedExpense]);
+
+  const loadCatalogProducts = useCallback(async () => {
+    if (!companyId) return;
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name");
+    if (error) {
+      console.error(error);
+      setCatalogProducts([]);
+      return;
+    }
+    setCatalogProducts((data as Product[]) ?? []);
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!open || !companyId || !allowProducts) {
+      setCatalogProducts([]);
+      return;
+    }
+    void loadCatalogProducts();
+  }, [open, companyId, allowProducts, loadCatalogProducts]);
 
   const loadBankAccounts = useCallback(async () => {
     if (!companyId) return;
@@ -533,6 +575,8 @@ export function CreateBoletoSheet({
       (allowRateio && rateioEnabled
         ? rateioValidation.ok
         : companyCategoryId.trim() !== "")) &&
+    (!productsEnabled ||
+      (allowProducts && validatePayableProductDraft(productLines).ok)) &&
     !categoriesLoading &&
     description.trim() !== "" &&
     emissionDate.trim() !== "" &&
@@ -570,6 +614,9 @@ export function CreateBoletoSheet({
     setRateioEnabled(false);
     setRateioLines(initialRateioLines(""));
     prevRateioTotalRef.current = 0;
+    setProductsEnabled(false);
+    setProductLines([emptyPayableProductLine()]);
+    setGenerateRecebimento(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -659,8 +706,17 @@ export function CreateBoletoSheet({
 
     const amountNumSubmit = parseFloat(amount);
     const useRateio = allowRateio && rateioEnabled;
+    const useProducts = allowProducts && productsEnabled && hasLinkedProduct;
     if (useRateio) {
       const check = validateRateioDraft(rateioLines, amountNumSubmit);
+      if (!check.ok) {
+        setLoading(false);
+        toast.error(check.message);
+        return;
+      }
+    }
+    if (productsEnabled && allowProducts) {
+      const check = validatePayableProductDraft(productLines);
       if (!check.ok) {
         setLoading(false);
         toast.error(check.message);
@@ -671,7 +727,8 @@ export function CreateBoletoSheet({
       ? primaryCategoryIdFromRateio(rateioLines)
       : companyCategoryId.trim() || null;
 
-    const needsRecibo = !expenseId && (seriesType !== "single" || useRateio);
+    const needsRecibo =
+      !expenseId && (seriesType !== "single" || useRateio || useProducts);
 
     if (
       !linkedExpenseId &&
@@ -698,14 +755,30 @@ export function CreateBoletoSheet({
           recurrenceFrequency,
           installmentCount: installments,
         });
-        await replaceExpenseItemsForRateio({
-          companyId,
-          expenseId: linkedExpenseId,
-          lines: useRateio ? rateioLines : null,
-          categories: companyCategories,
-          stubProductName: description.trim(),
-          stubUnitValue: amountNumSubmit,
-        });
+        if (useProducts) {
+          await insertExpenseItemsForProducts({
+            companyId,
+            expenseId: linkedExpenseId,
+            lines: productLines,
+            companyCategoryId: resolvedCategoryId,
+          });
+          if (generateRecebimento) {
+            const { error: recErr } = await supabase.from("recebimentos").insert({
+              company_id: companyId,
+              expense_id: linkedExpenseId,
+            });
+            if (recErr) throw recErr;
+          }
+        } else {
+          await replaceExpenseItemsForRateio({
+            companyId,
+            expenseId: linkedExpenseId,
+            lines: useRateio ? rateioLines : null,
+            categories: companyCategories,
+            stubProductName: description.trim(),
+            stubUnitValue: amountNumSubmit,
+          });
+        }
       } catch (err) {
         setLoading(false);
         toast.error(
@@ -778,7 +851,11 @@ export function CreateBoletoSheet({
     const boleto = data as Boleto;
     resetFormAfterSuccess();
     onOpenChange(false);
-    toast.success("Conta cadastrada com sucesso.");
+    toast.success(
+      generateRecebimento && useProducts
+        ? "Conta cadastrada. O recebimento aparece em Notas e recebimento."
+        : "Conta cadastrada com sucesso.",
+    );
     void syncCompanyAlerts(companyId);
     onSuccess?.(boleto);
   };
@@ -995,6 +1072,9 @@ export function CreateBoletoSheet({
                       onEnabledChange={(next) => {
                         setRateioEnabled(next);
                         if (next) {
+                          setProductsEnabled(false);
+                          setProductLines([emptyPayableProductLine()]);
+                          setGenerateRecebimento(false);
                           setRateioLines(initialRateioLines(companyCategoryId));
                           prevRateioTotalRef.current =
                             Number.isFinite(amountNum) && amountNum > 0
@@ -1037,6 +1117,29 @@ export function CreateBoletoSheet({
                     </div>
                   </>
                 )}
+                {allowProducts ? (
+                  <PayableProductDraftFields
+                    enabled={productsEnabled}
+                    onEnabledChange={(next) => {
+                      setProductsEnabled(next);
+                      if (next) {
+                        setRateioEnabled(false);
+                        setProductLines((prev) =>
+                          prev.length > 0 ? prev : [emptyPayableProductLine()],
+                        );
+                      } else {
+                        setProductLines([emptyPayableProductLine()]);
+                        setGenerateRecebimento(false);
+                      }
+                    }}
+                    lines={productLines}
+                    onLinesChange={setProductLines}
+                    products={catalogProducts}
+                    generateRecebimento={generateRecebimento}
+                    onGenerateRecebimentoChange={setGenerateRecebimento}
+                    hasLinkedProduct={hasLinkedProduct}
+                  />
+                ) : null}
               </div>
             )}
             {expenseId && expenseItems.length > 0 ? (

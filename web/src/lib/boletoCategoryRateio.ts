@@ -27,6 +27,73 @@ export function initialRateioLines(categoryId: string): RateioDraftLine[] {
   return [emptyRateioLine(categoryId, 0), emptyRateioLine("", 0)];
 }
 
+export type PayableProductDraftLine = {
+  key: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitValue: number;
+};
+
+export function emptyPayableProductLine(
+  unitValue = 0,
+): PayableProductDraftLine {
+  return {
+    key: newRateioLineKey(),
+    productId: "",
+    productName: "",
+    quantity: 1,
+    unitValue: roundMoney(unitValue),
+  };
+}
+
+export function filledPayableProductLines(
+  lines: PayableProductDraftLine[],
+): PayableProductDraftLine[] {
+  return lines.filter(
+    (line) =>
+      Boolean(line.productId.trim()) &&
+      line.quantity > 0 &&
+      Number.isFinite(line.unitValue),
+  );
+}
+
+export function validatePayableProductDraft(
+  lines: PayableProductDraftLine[],
+): { ok: true } | { ok: false; message: string } {
+  if (filledPayableProductLines(lines).length === 0) {
+    return {
+      ok: false,
+      message: "Vincule pelo menos um produto ou desligue a opção.",
+    };
+  }
+  if (lines.some((line) => line.productId.trim() && !(line.quantity > 0))) {
+    return { ok: false, message: "Informe a quantidade de cada produto." };
+  }
+  return { ok: true };
+}
+
+export async function insertExpenseItemsForProducts(input: {
+  companyId: string;
+  expenseId: string;
+  lines: PayableProductDraftLine[];
+  companyCategoryId: string | null;
+}): Promise<void> {
+  const rows = filledPayableProductLines(input.lines).map((line) => ({
+    company_id: input.companyId,
+    expense_id: input.expenseId,
+    product_name: line.productName.trim() || "Produto",
+    quantity: line.quantity,
+    unit_value: roundMoney(line.unitValue),
+    product_id: line.productId,
+    stock_added: false,
+    company_category_id: input.companyCategoryId,
+  }));
+  if (rows.length === 0) return;
+  const { error } = await supabase.from("expense_items").insert(rows);
+  if (error) throw error;
+}
+
 export function sumRateioAmounts(lines: RateioDraftLine[]): number {
   return roundMoney(
     lines.reduce((s, line) => s + (Number.isFinite(line.amount) ? line.amount : 0), 0),
@@ -273,6 +340,24 @@ export async function copyExpenseItemsReweighted(input: {
     company_category_id: string | null;
     product_id: string | null;
   }>;
+
+  const productLines = source.filter((row) => Boolean(row.product_id));
+  if (productLines.length > 0) {
+    const { error: insErr } = await supabase.from("expense_items").insert(
+      productLines.map((row) => ({
+        company_id: input.companyId,
+        expense_id: input.toExpenseId,
+        product_name: row.product_name,
+        quantity: Number(row.quantity) || 1,
+        unit_value: roundMoney(Number(row.unit_value)),
+        product_id: row.product_id,
+        stock_added: false,
+        company_category_id: row.company_category_id,
+      })),
+    );
+    if (insErr) throw insErr;
+    return;
+  }
 
   const classified = source.filter(
     (row) => !row.product_id && Boolean(row.company_category_id?.trim()),

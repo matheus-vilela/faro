@@ -8,11 +8,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
-import { isProjectedBoleto } from "@/lib/expenseSeriesProjection";
+import {
+  boletoReconSecondaryLabel,
+  boletoReconTitle,
+} from "@/lib/boletoFluxoDescription";
 import { formatContasCount } from "@/lib/payableTotals";
 import {
-  boletoSupplierLabel,
   categoryTipoIcon,
   formatDueDateShort,
   groupPayablesByCategory,
@@ -26,12 +27,6 @@ import type { CompanyCategory } from "@/types/category";
 import type { FluxoBoletoRow } from "@/types/expenseSeries";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-
-function itemSubtitle(b: FluxoBoletoRow): string | null {
-  if (isProjectedBoleto(b)) return "Lançamento fixo mensal";
-  const supplier = boletoSupplierLabel(b);
-  return supplier !== "—" ? supplier : null;
-}
 
 export function PayableByCategoryView({
   boletos,
@@ -140,7 +135,8 @@ export function PayableByCategoryView({
                             todayYmd,
                           );
                           const origin = resolvePayableOrigin(b, expenseById);
-                          const subtitle = itemSubtitle(b);
+                          const title = boletoReconTitle(b);
+                          const subtitle = boletoReconSecondaryLabel(b);
                           const rowKey =
                             b.id ||
                             `${resolveReceiptExpenseId(b) ?? "x"}-${b.due_date}`;
@@ -153,8 +149,7 @@ export function PayableByCategoryView({
                               >
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate font-semibold text-foreground">
-                                    {formatBoletoFluxoDescription(b) ||
-                                      "Conta a pagar"}
+                                    {title}
                                   </p>
                                   {subtitle ? (
                                     <p className="truncate text-sm text-muted-foreground">
