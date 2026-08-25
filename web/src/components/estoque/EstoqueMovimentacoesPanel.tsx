@@ -132,9 +132,11 @@ function movementLineValue(row: {
 export function EstoqueMovimentacoesPanel({
   companyId,
   onStockChanged,
+  initialClassification = "all",
 }: {
   companyId: string;
   onStockChanged?: () => void;
+  initialClassification?: MovementClassificationFilter;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
@@ -146,7 +148,7 @@ export function EstoqueMovimentacoesPanel({
   const [directionFilter, setDirectionFilter] =
     useState<MovementDirectionFilter>("all");
   const [classificationFilter, setClassificationFilter] =
-    useState<MovementClassificationFilter>("all");
+    useState<MovementClassificationFilter>(initialClassification);
   const [registerSheetOpen, setRegisterSheetOpen] = useState(false);
   const [selectedMovement, setSelectedMovement] = useState<Row | null>(null);
 

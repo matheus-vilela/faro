@@ -2,6 +2,7 @@ import {
   purchasesMetricProductsHref,
   type PurchasesDashboardCounts,
 } from "@/lib/productPurchasesDashboard";
+import { PRODUCT_HOME_PATH } from "@/lib/productStockPaths";
 import type { CompanyAlertKind, CompanyAlertRow } from "@/types/companyAlert";
 
 export type HomeActionTone = "danger" | "warning" | "info" | "amber";
@@ -178,7 +179,7 @@ export function buildHomeActionItems(
           ? "1 ficha pendente"
           : `${input.fichasPendentesCount} fichas pendentes`,
       subtitle: "Candidatos a ficha técnica ou vendas a ligar à receita",
-      primary: { label: "Revisar", href: "/app/produtos?aba=fichas" },
+      primary: { label: "Revisar", href: PRODUCT_HOME_PATH },
     });
   }
 
@@ -192,7 +193,7 @@ export function buildHomeActionItems(
           ? "1 produto sem vínculo"
           : `${input.withoutUtilCount} produtos sem vínculo`,
       subtitle: "Compra só de entrada sem ficha/utilização — afeta a margem",
-      primary: { label: "Resolver", href: "/app/produtos?aba=vinculos" },
+      primary: { label: "Resolver", href: PRODUCT_HOME_PATH },
     });
   }
 

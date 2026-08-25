@@ -586,7 +586,7 @@ function FichasPendentesStep2({
                       Ligar vendas à ficha
                     </Button>
                     <Button type="button" variant="outline" size="sm" asChild>
-                      <Link to="/app/produtos?estoque=receitas">
+                      <Link to="/app/produtos/fichas">
                         Abrir receitas
                       </Link>
                     </Button>

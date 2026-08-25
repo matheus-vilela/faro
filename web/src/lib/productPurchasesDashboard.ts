@@ -1,3 +1,5 @@
+import { PRODUCT_CATALOG_PATH } from "@/lib/productStockPaths";
+
 /** Estoque crítico: saldo ≤ 20% do mínimo configurado. */
 export const CRITICAL_STOCK_RATIO = 0.2;
 
@@ -107,7 +109,7 @@ export function computePurchasesDashboardCounts(
 export function purchasesMetricProductsHref(
   metric: PurchasesDashboardMetric,
 ): string {
-  return `/app/produtos?compras=${metric}`;
+  return `${PRODUCT_CATALOG_PATH}?compras=${metric}`;
 }
 
 export function parsePurchasesMetricParam(

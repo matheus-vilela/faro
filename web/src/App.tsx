@@ -41,7 +41,13 @@ import { Integracoes } from "@/pages/Integracoes";
 import { Landing } from "@/pages/Landing";
 import { Login } from "@/pages/Login";
 import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
+import { ProdutosLegacyRedirect, FichasInboxRedirect } from "@/pages/ProdutosLegacyRedirect";
+import { ProdutosEstoqueLayout } from "@/components/ProdutosEstoqueLayout";
 import { Produtos } from "@/pages/Produtos";
+import { Estoque } from "@/pages/Estoque";
+import { EstoqueContagem } from "@/pages/EstoqueContagem";
+import { EstoqueCompras } from "@/pages/EstoqueCompras";
+import { FichasTecnicas } from "@/pages/FichasTecnicas";
 import { Servicos } from "@/pages/Servicos";
 import { NOTAS_RECEBIMENTO_PERMISSIONS } from "@/lib/permissions";
 import { REPORTS_PERMISSIONS } from "@/lib/reports/catalog";
@@ -186,8 +192,41 @@ function AuthenticatedLayout() {
             element={<Navigate to="/app/contas-a-pagar" replace />}
           />
           <Route path="fornecedores" element={<PermissionRouteGuard permission="fornecedores"><Fornecedores /></PermissionRouteGuard>} />
-          <Route path="produtos" element={<PermissionRouteGuard permission="produtos"><Produtos /></PermissionRouteGuard>} />
-          <Route path="servicos" element={<PermissionRouteGuard permission="produtos"><Servicos /></PermissionRouteGuard>} />
+          <Route
+            path="produtos"
+            element={
+              <PermissionRouteGuard permission="produtos">
+                <ProdutosEstoqueLayout />
+              </PermissionRouteGuard>
+            }
+          >
+            <Route index element={<ProdutosLegacyRedirect />} />
+            <Route path="catalogo" element={<Produtos />} />
+            <Route path="estoque" element={<Estoque />} />
+            <Route path="estoque/compras" element={<EstoqueCompras />} />
+            <Route path="contagem" element={<EstoqueContagem />} />
+            <Route path="fichas" element={<FichasTecnicas />} />
+            <Route path="fichas/pendentes" element={<FichasTecnicas />} />
+            <Route path="fichas/vinculos" element={<FichasTecnicas />} />
+            <Route path="servicos" element={<Servicos />} />
+          </Route>
+          <Route
+            path="estoque/contagem"
+            element={<Navigate to="/app/produtos/contagem" replace />}
+          />
+          <Route
+            path="estoque/compras"
+            element={<Navigate to="/app/produtos/estoque/compras" replace />}
+          />
+          <Route
+            path="estoque"
+            element={<RedirectPreserveSearch to="/app/produtos/estoque" />}
+          />
+          <Route path="fichas" element={<FichasInboxRedirect />} />
+          <Route
+            path="servicos"
+            element={<Navigate to="/app/produtos/servicos" replace />}
+          />
           <Route
             path="recebimento"
             element={<RedirectPreserveSearch to="/app/notas-recebimento" />}

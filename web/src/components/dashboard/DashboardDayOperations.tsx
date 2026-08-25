@@ -691,7 +691,7 @@ export function DashboardDayOperations({
           <SheetFooter className="border-t">
             <Button asChild className="w-full sm:w-auto">
               <Link
-                to="/app/produtos?aba=contagem"
+                to="/app/produtos/contagem"
                 onClick={() => setSheet(null)}
               >
                 Abrir contagem de estoque

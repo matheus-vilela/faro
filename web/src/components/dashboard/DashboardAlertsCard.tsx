@@ -38,6 +38,7 @@ import {
   canonicalProductName,
   normalizeInvoiceProductLabel,
 } from "@/lib/productImport/canonicalName";
+import { productLowStockPath } from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -1059,7 +1060,7 @@ export function DashboardAlertsCard({
             </li>
             <li>
               <Link
-                to="/app/produtos?estoque=baixo"
+                to={productLowStockPath()}
                 className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-3 transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="flex min-w-0 items-center gap-2.5 text-sm font-medium">

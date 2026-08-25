@@ -32,6 +32,7 @@ import { suggestOperationalItemTypeFromName } from "@/lib/itemClassification/sug
 import { suggestProductCatalogCategory } from "@/lib/companyProductCategories/suggestProductCatalogCategory";
 import { instantiateMasterRecipeFromTemplate } from "@/lib/masterRecipeCatalog/instantiateMasterRecipeForCompany";
 import { canonicalProductName } from "@/lib/productImport/canonicalName";
+import { PRODUCT_CATALOG_PATH } from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import type { ItemClassificationOnboardingSnapshot } from "@/types/companySetup";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
@@ -1283,7 +1284,7 @@ export function StepItemClassificationForm({
                     </p>
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       Para vincular ou trocar pastas, abra o{" "}
-                      <Link to="/app/produtos" className="text-primary underline-offset-2 hover:underline">
+                      <Link to={PRODUCT_CATALOG_PATH} className="text-primary underline-offset-2 hover:underline">
                         catálogo de produtos
                       </Link>
                       .

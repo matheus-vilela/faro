@@ -11,6 +11,7 @@ import {
   type PurchasesDashboardCounts,
   type PurchasesDashboardMetric,
 } from "@/lib/productPurchasesDashboard";
+import { PRODUCT_CATALOG_PATH, PRODUCT_HOME_PATH } from "@/lib/productStockPaths";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -251,8 +252,8 @@ export function DashboardPurchasesSection() {
           </p>
         </div>
         <Button variant="outline" size="sm" className="shrink-0" asChild>
-          <Link to="/app/produtos">
-            Produtos e estoque
+          <Link to={PRODUCT_CATALOG_PATH}>
+            Catálogo
             <ArrowRight className="ml-1 h-4 w-4" />
           </Link>
         </Button>
@@ -277,7 +278,7 @@ export function DashboardPurchasesSection() {
             count={withoutUtilCount}
             hint="Compra só entrada sem ficha/utilização"
             loading={false}
-            href="/app/produtos?aba=vinculos"
+            href={PRODUCT_HOME_PATH}
             linkLabel="Vincular"
           />
         ) : null}
@@ -288,7 +289,7 @@ export function DashboardPurchasesSection() {
             count={fichasPendentesCount}
             hint="Candidatos a ficha técnica ou vendas a ligar"
             loading={false}
-            href="/app/produtos?aba=fichas"
+            href={PRODUCT_HOME_PATH}
             linkLabel="Revisar"
           />
         ) : null}

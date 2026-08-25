@@ -121,3 +121,6 @@ verify_jwt = false
 
 [functions.kick-csv-revenue-import-job]
 verify_jwt = true
+
+[functions.correlate-sold-purchased]
+verify_jwt = false

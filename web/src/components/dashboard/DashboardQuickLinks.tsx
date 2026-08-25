@@ -36,8 +36,8 @@ const ITEMS: QuickItem[] = [
   },
   {
     to: "/app/produtos",
-    label: "Estoque",
-    description: "Produtos e saldos",
+    label: "Produtos e estoque",
+    description: "Setup, catálogo e saldos",
     icon: Package,
   },
 ];

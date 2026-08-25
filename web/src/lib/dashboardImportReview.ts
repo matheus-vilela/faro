@@ -123,7 +123,7 @@ export async function dashboardImportReviewEpocRecipeRevertToProduct(
     const messages: Record<string, string> = {
       recipe_not_found: "Não há ficha técnica vinculada a este produto.",
       recipe_has_ingredients:
-        "Esta ficha já tem insumos; ajuste em Produtos → Fichas técnicas.",
+        "Esta ficha já tem insumos; ajuste em Fichas técnicas.",
       recipe_sale_entries_exist:
         "Existem vendas ligadas à ficha; não é possível reverter automaticamente.",
       product_not_found: "Produto não encontrado.",
@@ -137,6 +137,29 @@ export async function dashboardImportReviewEpocRecipeRevertToProduct(
         "Não foi possível converter em produto.",
     };
   }
+  return { ok: true };
+}
+
+export async function dashboardImportReviewMarkTechSheetSaved(
+  client: SupabaseClient,
+  companyId: string,
+  productId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const now = new Date().toISOString();
+  const { error } = await client.from("product_import_dashboard_review").upsert(
+    {
+      company_id: companyId,
+      product_id: productId,
+      review_bucket: "EXIT_NO_ENTRY",
+      resolution: "CONVERTED_TO_TECH_SHEET",
+      payload: { revenue_link: "pending" },
+      notes: "Ficha técnica salva com insumos.",
+      resolved_at: now,
+      updated_at: now,
+    },
+    { onConflict: "company_id,product_id,review_bucket" },
+  );
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 

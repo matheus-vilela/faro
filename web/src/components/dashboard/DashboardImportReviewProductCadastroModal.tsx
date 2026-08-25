@@ -19,6 +19,7 @@ import type { UnitConversionCodeRow } from "@/lib/companyUnits/convert";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import { loadProductUnitConversions } from "@/lib/productUnitConversionsService";
 import { toProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
+import { productHighlightPath } from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import { Loader2 } from "lucide-react";
@@ -259,7 +260,7 @@ export function DashboardImportReviewProductCadastroModal({
               className="h-auto min-w-0 shrink px-0 text-left text-muted-foreground whitespace-normal"
               asChild
             >
-              <Link to={`/app/produtos?highlight=${encodeURIComponent(productId)}`} target="_blank" rel="noreferrer">
+              <Link to={productHighlightPath(productId)} target="_blank" rel="noreferrer">
                 Abrir ficha completa em nova aba
               </Link>
             </Button>

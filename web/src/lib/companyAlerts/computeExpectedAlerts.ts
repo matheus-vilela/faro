@@ -1,4 +1,5 @@
 import { calendarDaysFromTodayToDueDate } from "@/lib/companyAlerts/dueDateWindow";
+import { productHighlightPath } from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import type { ExpectedCompanyAlert } from "@/types/companyAlert";
 import type { Product } from "@/types/product";
@@ -28,7 +29,7 @@ export async function computeExpectedCompanyAlerts(
       severity: "danger",
       title: `Estoque baixo: ${p.name}`,
       message: `${Number(p.current_quantity).toLocaleString("pt-BR")} / ${Number(p.min_quantity).toLocaleString("pt-BR")} ${p.unit}`,
-      link_path: "/app/produtos",
+      link_path: productHighlightPath(p.id),
       payload: {
         product_id: p.id,
         product_name: p.name,

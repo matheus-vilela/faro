@@ -399,33 +399,45 @@ function RecipeIngredientsAddPanel({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
-        <div>
-          <p className="text-sm font-semibold text-foreground">
-            Adicionar produto
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Escolha o insumo, a unidade e quanto entra em cada porção vendida (1
-            unidade da ficha).
-          </p>
-        </div>
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <div>
+        <p className="text-sm font-semibold text-foreground">Consumo na ficha</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Quanto de cada insumo entra em 1 porção vendida.
+        </p>
+      </div>
 
-        <div className="space-y-2">
-          <Label>Produto</Label>
-          <ProductPicker
-            products={pickerProducts}
-            value={draftProductId}
-            onChange={setDraftProductId}
-            placeholder="Selecionar produto"
-            companyId={companyId}
-            enableCreateProduct
-            onProductCreated={onProductCreated}
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2 w-full">
+      <div className="mt-4 space-y-2 rounded-xl border border-dashed border-border bg-muted/25 p-3">
+        <Label>Insumo</Label>
+        <ProductPicker
+          products={pickerProducts}
+          value={draftProductId}
+          onChange={setDraftProductId}
+          placeholder="Selecionar produto"
+          companyId={companyId}
+          enableCreateProduct
+          onProductCreated={onProductCreated}
+        />
+        <div className="grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)_auto] items-end gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="recipe-ing-qty">Qtd</Label>
+            <Input
+              id="recipe-ing-qty"
+              type="text"
+              inputMode="decimal"
+              placeholder="1"
+              value={draftQuantity}
+              onChange={(e) => setDraftQuantity(e.target.value)}
+              disabled={!draftProductId}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addIngredient();
+                }
+              }}
+            />
+          </div>
+          <div className="min-w-0 space-y-1.5">
             <Label>Unidade</Label>
             {draftProductId && draftProduct ? (
               <ProductUnitPickerWithConversion
@@ -442,98 +454,77 @@ function RecipeIngredientsAddPanel({
                 onSecondaryUnitAdded={(code) => setDraftUnitCode(code)}
                 disabled={!draftProductId}
                 placeholder="Unidade"
+                triggerClassName="h-9"
               />
             ) : (
               <Button
                 type="button"
                 variant="outline"
                 disabled
-                className="w-full justify-between font-normal"
+                className="h-9 w-full justify-between font-normal"
               >
                 <span className="text-muted-foreground">Unidade</span>
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
             )}
           </div>
-
-          <div className="space-y-2">
-            <Label>Quantidade por porção</Label>
-            <Input
-              type="text"
-              inputMode="decimal"
-              placeholder="Ex.: 100"
-              value={draftQuantity}
-              onChange={(e) => setDraftQuantity(e.target.value)}
-              disabled={!draftProductId}
-            />
-          </div>
+          <Button
+            type="button"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            aria-label="Adicionar insumo"
+            onClick={addIngredient}
+            disabled={!draftProductId}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
-
-        <Button
-          type="button"
-          className="w-full sm:w-auto"
-          onClick={addIngredient}
-          disabled={!draftProductId}
-        >
-          <Plus className="mr-1.5 h-4 w-4" />
-          Adicionar
-        </Button>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-        <p className="text-sm font-semibold text-foreground">
-          Resumo da ficha técnica
+      {listedIngs.length === 0 ? (
+        <p className="mt-4 rounded-xl border border-dashed border-border/80 px-3 py-6 text-center text-sm text-muted-foreground">
+          Nenhum insumo na ficha ainda.
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Insumos por porção — o lote multiplica pelo rendimento ao baixar
-          estoque.
-        </p>
-
-        {listedIngs.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            Nenhum ingrediente adicionado ainda.
-          </p>
-        ) : (
-          <ul className="mt-4 space-y-2">
-            {ings.map((row, rowIndex) => {
-              if (!row.product_id || !row.unit_code.trim()) return null;
-              const product = productById.get(row.product_id);
-              return (
-                <li
-                  key={`${row.product_id}-${row.unit_code}-${rowIndex}`}
-                  className="flex items-center gap-3 rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5"
+      ) : (
+        <ul className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border">
+          {ings.map((row, rowIndex) => {
+            if (!row.product_id || !row.unit_code.trim()) return null;
+            const product = productById.get(row.product_id);
+            return (
+              <li
+                key={`${row.product_id}-${row.unit_code}-${rowIndex}`}
+                className="flex items-center gap-3 bg-background px-3 py-2.5"
+              >
+                <div className="w-19 shrink-0 text-right">
+                  <p className="tabular-nums text-sm font-semibold leading-tight text-foreground">
+                    {Number(row.quantity).toLocaleString("pt-BR", {
+                      maximumFractionDigits: 6,
+                    })}
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {systemUnitLabel(row.unit_code)}
+                  </p>
+                </div>
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                  {product?.name ?? "—"}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                  aria-label="Remover ingrediente"
+                  onClick={() =>
+                    setIngs((prev) => prev.filter((_, j) => j !== rowIndex))
+                  }
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {product?.name ?? "—"}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      <span className="tabular-nums font-medium text-foreground">
-                        {Number(row.quantity).toLocaleString("pt-BR", {
-                          maximumFractionDigits: 6,
-                        })}
-                      </span>{" "}
-                      · {systemUnitLabel(row.unit_code)}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 shrink-0 text-destructive hover:text-destructive"
-                    aria-label="Remover ingrediente"
-                    onClick={() =>
-                      setIngs((prev) => prev.filter((_, j) => j !== rowIndex))
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

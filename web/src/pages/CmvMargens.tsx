@@ -26,6 +26,11 @@ import {
   type ProductCmvMeta,
 } from "@/lib/cmvMargensResumo";
 import { formatBrl } from "@/lib/dre/formatBrl";
+import {
+  productHighlightPath,
+  PRODUCT_HOME_PATH,
+  RECIPES_PATH,
+} from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -991,17 +996,17 @@ function gapCta(gap: {
 }): { to: string; label: string } {
   if (gap.productId) {
     return {
-      to: `/app/produtos?highlight=${encodeURIComponent(gap.productId)}`,
+      to: productHighlightPath(gap.productId),
       label: "Abrir produto",
     };
   }
   if (gap.recipeId) {
     return {
-      to: "/app/produtos?estoque=receitas",
+      to: RECIPES_PATH,
       label: "Abrir ficha",
     };
   }
-  return { to: "/app/produtos", label: "Abrir produtos" };
+  return { to: PRODUCT_HOME_PATH, label: "Abrir produtos" };
 }
 
 function QualidadePanel({

@@ -1,5 +1,10 @@
 import { ProductUnitPickerWithConversion } from "@/components/products/ProductUnitPickerWithConversion";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,7 +20,8 @@ import {
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import type { ProductRecipeMatchRow } from "@/lib/onboardingProductRecipeMatch";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -166,9 +172,12 @@ export function EstoqueRecipeMatchIngredientConfig({
     onChangeRef.current(config);
   }, [config]);
 
+  const needsConversion =
+    usesAlternateUnit && !hasConversionForSelectedUnit;
+
   if (loading) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/80 bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 rounded-2xl border border-dashed border-border/80 bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Carregando unidades do insumo…
       </div>
@@ -176,38 +185,28 @@ export function EstoqueRecipeMatchIngredientConfig({
   }
 
   return (
-    <div className="space-y-4 rounded-lg border border-sky-500/25 bg-sky-500/5 p-4">
-      <p className="text-sm font-medium text-foreground">
-        Consumo de «{ingredient.name}» na ficha
-      </p>
-      <p className="text-xs text-muted-foreground">
-        Estoque em{" "}
-        <strong className="font-medium text-foreground">
-          {systemUnitLabel(hubUnit)}
-        </strong>
-        . Se a unidade desejada não aparecer na lista, cadastre uma conversão e
-        informe quanto a receita consome por porção.
-      </p>
-
-      <ProductUnitConversionsSection
-        companyId={companyId}
-        stockUnitCode={hubUnit}
-        value={conversions}
-        onChange={(next) => void handleConversionsChange(next)}
-        disabled={savingConversions}
-        sectionClassName="rounded-lg border border-border/60 bg-background/80 p-3"
-      />
-
-      {savingConversions ? (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Salvando conversão…
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <div>
+        <p className="text-sm font-semibold text-foreground">Consumo na ficha</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {ingredient.name} · estoque em {systemUnitLabel(hubUnit)}
         </p>
-      ) : null}
+      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label htmlFor="recipe-match-input-unit">Unidade na ficha</Label>
+      <div className="mt-4 grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] items-end gap-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="recipe-match-consume-qty">Qtd</Label>
+          <Input
+            id="recipe-match-consume-qty"
+            type="text"
+            inputMode="decimal"
+            value={consumeQty}
+            onChange={(e) => setConsumeQty(e.target.value)}
+            aria-invalid={!config.isValid}
+          />
+        </div>
+        <div className="min-w-0 space-y-1.5">
+          <Label htmlFor="recipe-match-input-unit">Unidade</Label>
           <ProductUnitPickerWithConversion
             companyId={companyId}
             stockUnitCode={hubUnit}
@@ -223,40 +222,61 @@ export function EstoqueRecipeMatchIngredientConfig({
             triggerClassName="h-9"
           />
         </div>
-
-        <div className="grid gap-1.5">
-          <Label htmlFor="recipe-match-consume-qty">
-            Quantidade por porção ({systemUnitLabel(inputUnitCode)})
-          </Label>
-          <Input
-            id="recipe-match-consume-qty"
-            type="text"
-            inputMode="decimal"
-            value={consumeQty}
-            onChange={(e) => setConsumeQty(e.target.value)}
-          />
-        </div>
       </div>
 
-      {usesAlternateUnit && !hasConversionForSelectedUnit ? (
-        <p className="text-xs text-amber-800 dark:text-amber-200">
-          Busque a unidade na lista e use «Cadastrar conversão» (ex.: 1{" "}
-          {systemUnitLabel(hubUnit)} = 1000 {systemUnitLabel(inputUnitCode)}).
+      {needsConversion ? (
+        <p className="mt-3 text-xs text-amber-800 dark:text-amber-200">
+          Cadastre a conversão na unidade (ex.: 1 {systemUnitLabel(hubUnit)} ={" "}
+          1000 {systemUnitLabel(inputUnitCode)}).
         </p>
-      ) : null}
-
-      {config.stockQuantityPreview != null && config.isValid ? (
-        <p className="text-xs text-muted-foreground">
-          Equivale a{" "}
-          <strong className="text-foreground">
+      ) : config.stockQuantityPreview != null && config.isValid ? (
+        <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+          Baixa{" "}
+          <strong className="font-medium text-foreground">
             {config.stockQuantityPreview.toLocaleString("pt-BR", {
               maximumFractionDigits: 6,
             })}{" "}
             {systemUnitLabel(hubUnit)}
           </strong>{" "}
-          baixados do estoque por porção vendida.
+          do estoque por porção.
         </p>
-      ) : null}
+      ) : (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Informe quanto entra em 1 porção da ficha.
+        </p>
+      )}
+
+      <Collapsible
+        defaultOpen={needsConversion || conversions.length > 0}
+        className="mt-4 border-t border-border/70 pt-3"
+      >
+        <CollapsibleTrigger
+          className={cn(
+            "group flex w-full items-center justify-between gap-2 text-left text-xs font-medium text-muted-foreground",
+            "hover:text-foreground",
+          )}
+        >
+          Conversões de unidade
+          <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3">
+          <ProductUnitConversionsSection
+            companyId={companyId}
+            stockUnitCode={hubUnit}
+            value={conversions}
+            onChange={(next) => void handleConversionsChange(next)}
+            disabled={savingConversions}
+            compact
+            sectionClassName="rounded-xl border border-border/60 bg-muted/20 p-3"
+          />
+          {savingConversions ? (
+            <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Salvando conversão…
+            </p>
+          ) : null}
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }

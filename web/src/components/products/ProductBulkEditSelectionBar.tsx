@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { BULK_EDIT_MAX_PRODUCTS } from "@/types/productBulkEdit";
-import { ListFilter, Pencil, X } from "lucide-react";
+import { ListFilter, Pencil, Printer, X } from "lucide-react";
 
 export function ProductBulkEditSelectionBar({
   selectedCount,
@@ -10,6 +10,7 @@ export function ProductBulkEditSelectionBar({
   onSelectAllFiltered,
   onClear,
   onEdit,
+  onPrintLabels,
   pageFullySelected,
 }: {
   selectedCount: number;
@@ -19,6 +20,7 @@ export function ProductBulkEditSelectionBar({
   onSelectAllFiltered: () => void;
   onClear: () => void;
   onEdit: () => void;
+  onPrintLabels?: () => void;
   pageFullySelected: boolean;
 }) {
   if (selectedCount === 0) return null;
@@ -73,6 +75,18 @@ export function ProductBulkEditSelectionBar({
             <X className="mr-1 h-3.5 w-3.5" />
             Limpar
           </Button>
+          {onPrintLabels ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={onPrintLabels}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Etiquetas
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"

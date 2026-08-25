@@ -4,6 +4,7 @@ import {
   normalizeProductConversionRowsToPrimaryOne,
   type UnitConversionCodeRow,
 } from "@/lib/companyUnits/convert";
+import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { toProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 
@@ -141,6 +142,144 @@ export function resolveMergeUnitFactor(params: {
     };
   }
   return { kind: "manual" };
+}
+
+export type MergeUnitFactorCandidate = {
+  id: string;
+  factor: number;
+  label: string;
+  detail: string;
+};
+
+function pushFactorCandidate(
+  list: MergeUnitFactorCandidate[],
+  candidate: MergeUnitFactorCandidate,
+) {
+  if (!Number.isFinite(candidate.factor) || candidate.factor <= 0) return;
+  if (list.some((c) => c.id === candidate.id)) return;
+  list.push(candidate);
+}
+
+function formatFactor(n: number): string {
+  return n.toLocaleString("pt-BR", { maximumFractionDigits: 8 });
+}
+
+/**
+ * Caminhos possíveis para converter 1 unidade de estoque do removido
+ * na unidade do produto que permanece. O usuário escolhe qual usar.
+ */
+export function listMergeUnitFactorCandidates(params: {
+  winnerHub: string;
+  winnerConversions: UnitConversionCodeRow[];
+  loserHub: string;
+  loserConversions: UnitConversionCodeRow[];
+  winnerName?: string;
+  loserName?: string;
+}): MergeUnitFactorCandidate[] {
+  const winnerHub = params.winnerHub.trim();
+  const loserHub = params.loserHub.trim();
+  const winnerLabel = systemUnitLabel(winnerHub);
+  const loserLabel = systemUnitLabel(loserHub);
+  const winnerName = params.winnerName?.trim() || "item que permanece";
+  const loserName = params.loserName?.trim() || "item removido";
+  const out: MergeUnitFactorCandidate[] = [];
+
+  if (!winnerHub || !loserHub) return out;
+
+  if (winnerHub.toLowerCase() === loserHub.toLowerCase()) {
+    pushFactorCandidate(out, {
+      id: "same",
+      factor: 1,
+      label: `Mesma unidade (${winnerLabel})`,
+      detail: "As quantidades serão somadas diretamente.",
+    });
+    return out;
+  }
+
+  const wConv = prepareProductConversionsForMerge(
+    winnerHub,
+    params.winnerConversions,
+  );
+  const lConv = prepareProductConversionsForMerge(
+    loserHub,
+    params.loserConversions,
+  );
+
+  const viaWinner = convertQuantityWithHubCodes(
+    1,
+    loserHub,
+    winnerHub,
+    winnerHub,
+    wConv,
+  );
+  if (viaWinner != null && Number.isFinite(viaWinner) && viaWinner > 0) {
+    pushFactorCandidate(out, {
+      id: "direct-winner",
+      factor: viaWinner,
+      label: `Conversão de ${winnerName}`,
+      detail: `1 ${loserLabel} (${loserHub}) = ${formatFactor(viaWinner)} ${winnerLabel} (${winnerHub})`,
+    });
+  }
+
+  const viaLoser = convertQuantityWithHubCodes(
+    1,
+    loserHub,
+    winnerHub,
+    loserHub,
+    lConv,
+  );
+  if (viaLoser != null && Number.isFinite(viaLoser) && viaLoser > 0) {
+    pushFactorCandidate(out, {
+      id: "direct-loser",
+      factor: viaLoser,
+      label: `Conversão de ${loserName}`,
+      detail: `1 ${loserLabel} (${loserHub}) = ${formatFactor(viaLoser)} ${winnerLabel} (${winnerHub})`,
+    });
+  }
+
+  const winnerNorm = winnerHub.toLowerCase();
+  const loserNorm = loserHub.toLowerCase();
+  const bridges = collectBridgeUnitCodes(winnerHub, wConv, loserHub, lConv);
+
+  for (const bridge of bridges) {
+    const bridgeNorm = bridge.trim().toLowerCase();
+    if (bridgeNorm === winnerNorm || bridgeNorm === loserNorm) continue;
+
+    const inBridgePerLoserHub = convertQuantityWithHubCodes(
+      1,
+      loserHub,
+      bridge,
+      loserHub,
+      lConv,
+    );
+    const inBridgePerWinnerHub = convertQuantityWithHubCodes(
+      1,
+      winnerHub,
+      bridge,
+      winnerHub,
+      wConv,
+    );
+    if (
+      inBridgePerLoserHub == null ||
+      inBridgePerWinnerHub == null ||
+      !Number.isFinite(inBridgePerLoserHub) ||
+      !Number.isFinite(inBridgePerWinnerHub) ||
+      inBridgePerWinnerHub <= 0
+    ) {
+      continue;
+    }
+    const factor = inBridgePerLoserHub / inBridgePerWinnerHub;
+    if (!Number.isFinite(factor) || factor <= 0) continue;
+    const bridgeLabel = systemUnitLabel(bridge);
+    pushFactorCandidate(out, {
+      id: `bridge:${bridgeNorm}`,
+      factor,
+      label: `Via ${bridgeLabel} (${bridge})`,
+      detail: `1 ${loserLabel} (${loserHub}) = ${formatFactor(factor)} ${winnerLabel} (${winnerHub})`,
+    });
+  }
+
+  return out;
 }
 
 /** Regras do produto removido expressas na unidade de estoque do que permanece. */

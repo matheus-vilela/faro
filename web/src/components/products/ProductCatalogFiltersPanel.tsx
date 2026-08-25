@@ -18,13 +18,10 @@ import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import { cn } from "@/lib/utils";
 import {
   ChevronDown,
-  LayoutGrid,
-  LayoutList,
   Search,
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import type { ProductCatalogLayout } from "@/components/products/ProductCatalogCard";
 
 const FILTER_ACTIVE_LABELS: Record<"all" | "active" | "inactive", string> = {
   all: "Todos",
@@ -59,51 +56,6 @@ const FILTER_UPDATED_LABELS: Record<
   custom: "Entre datas",
 };
 
-function CatalogViewModeToggle({
-  value,
-  onChange,
-}: {
-  value: ProductCatalogLayout;
-  onChange: (mode: ProductCatalogLayout) => void;
-}) {
-  return (
-    <div
-      className="flex shrink-0 rounded-lg border border-border bg-muted/30 p-0.5"
-      role="group"
-      aria-label="Forma de visualização"
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={cn(
-          "h-9 gap-1.5 px-2.5 sm:h-8",
-          value === "list" && "bg-background shadow-sm",
-        )}
-        aria-pressed={value === "list"}
-        onClick={() => onChange("list")}
-      >
-        <LayoutList className="h-4 w-4" />
-        <span className="hidden sm:inline">Lista</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={cn(
-          "h-9 gap-1.5 px-2.5 sm:h-8",
-          value === "grid" && "bg-background shadow-sm",
-        )}
-        aria-pressed={value === "grid"}
-        onClick={() => onChange("grid")}
-      >
-        <LayoutGrid className="h-4 w-4" />
-        <span className="hidden sm:inline">Grade</span>
-      </Button>
-    </div>
-  );
-}
-
 export function ProductCatalogFiltersPanel({
   open,
   onOpenChange,
@@ -125,8 +77,6 @@ export function ProductCatalogFiltersPanel({
   onFilterUpdatedToChange,
   lowStockOnly,
   companyProductCategories,
-  viewMode,
-  onViewModeChange,
   onClearFilters,
 }: {
   open: boolean;
@@ -153,8 +103,6 @@ export function ProductCatalogFiltersPanel({
   onFilterUpdatedToChange: (value: string) => void;
   lowStockOnly: boolean;
   companyProductCategories: CompanyProductCategory[];
-  viewMode: ProductCatalogLayout;
-  onViewModeChange: (mode: ProductCatalogLayout) => void;
   onClearFilters: () => void;
 }) {
   const advancedFilterCount =
@@ -249,7 +197,6 @@ export function ProductCatalogFiltersPanel({
                 />
               </Button>
             </CollapsibleTrigger>
-            <CatalogViewModeToggle value={viewMode} onChange={onViewModeChange} />
           </div>
         </div>
 

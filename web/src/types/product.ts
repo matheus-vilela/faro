@@ -20,6 +20,10 @@ export interface Product {
   composes_cmv?: boolean
   /** Custo médio ponderado (CMV), quando houver entradas valoradas */
   average_cost?: number | null
+  /** Preço unitário derivado para ordenação da listagem (coluna gerada). */
+  catalog_unit_cost?: number | null
+  /** Valor em estoque derivado para ordenação da listagem (coluna gerada). */
+  catalog_stock_value?: number | null
   /** Código para etiqueta (EAN/Code128) */
   barcode?: string | null
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */

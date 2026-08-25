@@ -40,7 +40,6 @@ import {
   ArrowLeftRight,
   BarChart3,
   Building2,
-  ConciergeBell,
   FileDown,
   FlaskConical,
   Landmark,
@@ -110,12 +109,6 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           title: "Produtos e estoque",
           url: "/app/produtos",
           icon: Package,
-          permission: "produtos",
-        },
-        {
-          title: "Serviços",
-          url: "/app/servicos",
-          icon: ConciergeBell,
           permission: "produtos",
         },
       ],
@@ -243,7 +236,7 @@ export function AppLayout() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={false}>
       <AppLayoutContent />
     </SidebarProvider>
   );

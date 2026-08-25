@@ -549,7 +549,7 @@ export function VendasRealizadasListTable({
                   {" · "}
                   Catálogo em{" "}
                   <Link
-                    to="/app/servicos"
+                    to="/app/produtos/servicos"
                     className="font-medium text-foreground underline-offset-2 hover:underline"
                   >
                     Serviços

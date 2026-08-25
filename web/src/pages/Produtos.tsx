@@ -1,24 +1,15 @@
 import { CreateProductSheet } from "@/components/CreateProductSheet";
-import { EstoqueCmvPanel } from "@/components/estoque/EstoqueCmvPanel";
-import { EstoqueComprasPanel } from "@/components/estoque/EstoqueComprasPanel";
-import { EstoqueContagemPanel } from "@/components/estoque/EstoqueContagemPanel";
-import { EstoqueEtiquetasPanel } from "@/components/estoque/EstoqueEtiquetasPanel";
-import { EstoqueMovimentacoesPanel } from "@/components/estoque/EstoqueMovimentacoesPanel";
-import { EstoquePerdasPanel } from "@/components/estoque/EstoquePerdasPanel";
-import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
-import { EstoqueFichasPendentesPanel } from "@/components/estoque/EstoqueFichasPendentesPanel";
-import { EstoqueVincularComprasPanel } from "@/components/estoque/EstoqueVincularComprasPanel";
 import { PageHeader } from "@/components/PageHeader";
-import { PageShell } from "@/components/PageShell";
 import { ExportButton } from "@/components/reports/ExportButton";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ProductImportSheet } from "@/components/ProductImportSheet";
 import { ProductBulkEditDialog } from "@/components/products/ProductBulkEditDialog";
 import { ProductBulkEditSelectionBar } from "@/components/products/ProductBulkEditSelectionBar";
 import { ProductBulkEditUndoBanner } from "@/components/products/ProductBulkEditUndoBanner";
-import type { ProductCatalogLayout } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogCard } from "@/components/products/ProductCatalogCard";
 import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalogFiltersPanel";
+import { ProductCatalogKpis } from "@/components/products/ProductCatalogKpis";
+import { ProductCatalogTable } from "@/components/products/ProductCatalogTable";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
@@ -86,6 +77,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useSheetListView } from "@/hooks/useSheetListView";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
   convertUnitPriceForProduct,
@@ -110,10 +102,13 @@ import {
   parsePurchasesMetricParam,
   PURCHASES_METRIC_LABELS,
 } from "@/lib/productPurchasesDashboard";
+import { PRODUCT_CATALOG_PATH } from "@/lib/productStockPaths";
 import {
   parseProductStockLots,
   type ProductStockLotEntry,
 } from "@/lib/productStockLots";
+import { fetchCatalogStockKpis, type CatalogStockKpis } from "@/lib/productCatalogValue";
+import { printProductLabels } from "@/lib/printProductLabels";
 import {
   fetchProductTechnicalSheet,
   technicalSheetErrorMessage,
@@ -123,6 +118,12 @@ import {
   loadProductUnitConversions,
   persistProductUnitConversions,
 } from "@/lib/productUnitConversionsService";
+import {
+  applyCatalogProductOrder,
+  nextCatalogSort,
+  sortCatalogProducts,
+  type CatalogSortKey,
+} from "@/lib/productCatalogSort";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -133,23 +134,16 @@ import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   AlertTriangle,
   ChefHat,
-  ClipboardList,
-  Coins,
   FileSpreadsheet,
   History,
-  LayoutGrid,
   Loader2,
   Merge,
   Package,
   Pencil,
   Plus,
   PowerOff,
-  ShoppingCart,
-  SlidersHorizontal,
-  Tag,
   Trash2,
   Truck,
-  UtensilsCrossed,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -167,17 +161,6 @@ const CMV_CATEGORY_TAG_STYLES = [
 
 function cmvCategoryTagClass(index: number) {
   return CMV_CATEGORY_TAG_STYLES[index % CMV_CATEGORY_TAG_STYLES.length];
-}
-
-const CATALOG_VIEW_STORAGE_KEY = "faro:produtos-catalog-view-mode";
-
-function readCatalogViewMode(): ProductCatalogLayout {
-  try {
-    const stored = localStorage.getItem(CATALOG_VIEW_STORAGE_KEY);
-    return stored === "grid" ? "grid" : "list";
-  } catch {
-    return "list";
-  }
 }
 
 function productComposesCmv(p: Pick<Product, "composes_cmv">): boolean {
@@ -418,20 +401,13 @@ export function Produtos() {
   const purchasesFilter = parsePurchasesMetricParam(
     searchParams.get("compras"),
   );
-  const recipeOutputProductId =
-    searchParams.get("recipeOutputProduct")?.trim() || undefined;
   const productHighlightId = searchParams.get("highlight")?.trim() || undefined;
-
-  const clearRecipeOutputProductParam = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    if (!next.has("recipeOutputProduct")) return;
-    next.delete("recipeOutputProduct");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [productsCount, setProductsCount] = useState(0);
   const [productsPage, setProductsPage] = useState(1);
+  const [catalogSortKey, setCatalogSortKey] = useState<CatalogSortKey>("name");
+  const [catalogSortAsc, setCatalogSortAsc] = useState(true);
   const [loading, setLoading] = useState(true);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -451,8 +427,7 @@ export function Produtos() {
   >("all");
   const [filterUpdatedFrom, setFilterUpdatedFrom] = useState("");
   const [filterUpdatedTo, setFilterUpdatedTo] = useState("");
-  const [catalogViewMode, setCatalogViewMode] =
-    useState<ProductCatalogLayout>(readCatalogViewMode);
+  const catalogListView = useSheetListView();
   const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(
     () => lowStockOnly || purchasesFilter != null,
   );
@@ -467,7 +442,12 @@ export function Produtos() {
   const [cmvCategoryOptions, setCmvCategoryOptions] = useState<
     Array<{ id: string; name: string }>
   >([]);
-  const [lowStockCount, setLowStockCount] = useState(0);
+  const [catalogKpis, setCatalogKpis] = useState<CatalogStockKpis>({
+    activeCount: 0,
+    stockValue: 0,
+    belowMinCount: 0,
+    zeroCount: 0,
+  });
   const [productSheetOpen, setProductSheetOpen] = useState(false);
   const [importSheetOpen, setImportSheetOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
@@ -569,19 +549,6 @@ export function Produtos() {
   const [stockProductConversionsLoading, setStockProductConversionsLoading] =
     useState(false);
   const [stockConversionsSaving, setStockConversionsSaving] = useState(false);
-  type EstoqueTab =
-    | "catalogo"
-    | "movimentos"
-    | "cmv"
-    | "contagem"
-    | "compras"
-    | "vinculos"
-    | "etiquetas"
-    | "perdas"
-    | "fichas"
-    | "receitas";
-
-  const [estoqueTab, setEstoqueTab] = useState<EstoqueTab>("catalogo");
 
   const unitSelectOptions = useMemo(
     () => buildProductUnitSelectOptions(stockUnit, customUnitAliasOptions),
@@ -1278,14 +1245,6 @@ export function Produtos() {
     void loadCustomUnitAliasOptions();
   }, [loadCustomUnitAliasOptions]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(CATALOG_VIEW_STORAGE_KEY, catalogViewMode);
-    } catch {
-      /* ignore */
-    }
-  }, [catalogViewMode]);
-
   const loadAssignmentsForProduct = useCallback(async (productId: string) => {
     const { data } = await supabase
       .from("product_category_assignments")
@@ -1360,8 +1319,8 @@ export function Produtos() {
           .from("products")
           .select("*", { count: "exact" })
           .eq("company_id", companyId)
-          .eq("listed_in_product_catalog", true)
-          .order("name");
+          .eq("listed_in_product_catalog", true);
+        q = applyCatalogProductOrder(q, catalogSortKey, catalogSortAsc);
         if (categoryProductIds) {
           q = q.in("id", categoryProductIds);
         }
@@ -1403,8 +1362,10 @@ export function Produtos() {
       let totalCount: number;
       if (purchasesFilter) {
         const all = await fetchAllInRange<Product>(buildBase());
-        const filtered = all.filter((p) =>
-          matchesPurchasesMetric(p, purchasesFilter),
+        const filtered = sortCatalogProducts(
+          all.filter((p) => matchesPurchasesMetric(p, purchasesFilter)),
+          catalogSortKey,
+          catalogSortAsc,
         );
         const from = (productsPage - 1) * PAGE_SIZE;
         rows = filtered.slice(from, from + PAGE_SIZE);
@@ -1511,6 +1472,8 @@ export function Produtos() {
     productsPage,
     lowStockOnly,
     purchasesFilter,
+    catalogSortKey,
+    catalogSortAsc,
   ]);
 
   useEffect(() => {
@@ -1518,21 +1481,10 @@ export function Produtos() {
     setProductsPage(1);
   }, [purchasesFilter]);
 
-  const fetchLowStockCount = useCallback(async () => {
+  const fetchCatalogKpis = useCallback(async () => {
     const companyId = currentCompany?.id;
     if (!companyId) return;
-    const { count, error } = await supabase
-      .from("products")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .eq("stock_below_min_inclusive", true)
-      .or("is_active.is.null,is_active.eq.true");
-    if (error) {
-      console.error(error);
-      setLowStockCount(0);
-      return;
-    }
-    setLowStockCount(count ?? 0);
+    setCatalogKpis(await fetchCatalogStockKpis(companyId));
   }, [currentCompany?.id]);
 
   useEffect(() => {
@@ -1554,25 +1506,8 @@ export function Produtos() {
   }, [fetchProducts]);
 
   useEffect(() => {
-    const est = searchParams.get("estoque");
-    const aba = searchParams.get("aba");
-    const compras = searchParams.get("compras");
-    if (est === "baixo" || compras) {
-      setEstoqueTab("catalogo");
-    } else if (est === "receitas") {
-      setEstoqueTab("receitas");
-    } else if (aba === "contagem") {
-      setEstoqueTab("contagem");
-    } else if (aba === "vinculos") {
-      setEstoqueTab("vinculos");
-    } else if (aba === "fichas") {
-      setEstoqueTab("fichas");
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    void fetchLowStockCount();
-  }, [fetchLowStockCount]);
+    void fetchCatalogKpis();
+  }, [fetchCatalogKpis]);
 
   useEffect(() => {
     if (!stockProduct?.id || !currentCompany?.id) {
@@ -1613,6 +1548,26 @@ export function Produtos() {
       style: "currency",
       currency: "BRL",
     }).format(v);
+
+  const printSelectedLabels = useCallback(async () => {
+    const ids = [...selectedProductIds];
+    if (ids.length === 0) return;
+    const onPage = products.filter((p) => selectedProductIds.has(p.id));
+    const missing = ids.filter((id) => !onPage.some((p) => p.id === id));
+    let extra: Product[] = [];
+    if (missing.length > 0) {
+      const { data, error } = await supabase
+        .from("products")
+        .select("id, name, barcode, sku")
+        .in("id", missing);
+      if (error) {
+        console.error(error);
+      } else {
+        extra = (data ?? []) as Product[];
+      }
+    }
+    printProductLabels([...onPage, ...extra]);
+  }, [products, selectedProductIds]);
 
   const stockPricePresentation = useMemo(
     () => productPriceFields(stockProduct),
@@ -2122,7 +2077,7 @@ export function Produtos() {
     closeStockSheet();
     void loadCompanyProductCategories();
     fetchProducts();
-    void fetchLowStockCount();
+    void fetchCatalogKpis();
     if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
   };
 
@@ -2145,7 +2100,7 @@ export function Produtos() {
     );
     closeStockSheet();
     fetchProducts();
-    void fetchLowStockCount();
+    void fetchCatalogKpis();
     if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
   };
 
@@ -2189,79 +2144,33 @@ export function Produtos() {
   };
 
   return (
-    <PageShell className="min-w-0 space-y-6 sm:space-y-8">
+    <div className="min-w-0 space-y-6">
       <PageHeader
-        title="Produtos e estoque"
-        description={
-          <>
-            <span className="hidden sm:inline">
-              Catálogo, CMV, movimentações, contagem (incluindo link pelo
-              WhatsApp), compras, etiquetas, perdas e fichas técnicas.
-            </span>
-            <span className="sm:hidden">
-              Catálogo, movimentações, contagem, compras e fichas técnicas.
-            </span>
-          </>
-        }
+        title="Catálogo"
+        description="Cadastro de produtos, saldos e valor em estoque."
         icon={Package}
         action={
-          estoqueTab === "catalogo" ? (
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setImportSheetOpen(true)}
-                className="h-10 w-full shrink-0 sm:w-auto"
-              >
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Importar planilha
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setProductSheetOpen(true)}
-                className="h-10 w-full shrink-0 sm:w-auto"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Novo produto
-              </Button>
-            </div>
-          ) : undefined
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setImportSheetOpen(true)}
+              className="h-10 w-full shrink-0 sm:w-auto"
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Importar planilha
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setProductSheetOpen(true)}
+              className="h-10 w-full shrink-0 sm:w-auto"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Novo produto
+            </Button>
+          </div>
         }
       />
-
-      <div className="sticky top-0 z-10 -mx-1 border-b border-border/80 bg-background/95 pb-px backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex gap-0.5 overflow-x-auto scrollbar-thin">
-          {(
-            [
-              ["catalogo", "Catálogo", LayoutGrid],
-              ["movimentos", "Movimentações", SlidersHorizontal],
-              ["cmv", "CMV", Coins],
-              ["contagem", "Contagem", ClipboardList],
-              ["compras", "Compras", ShoppingCart],
-              ["vinculos", "Vincular compras", UtensilsCrossed],
-              ["etiquetas", "Etiquetas", Tag],
-              ["perdas", "Perdas", Trash2],
-              ["fichas", "Fichas pendentes", ChefHat],
-              ["receitas", "Ficha Técnica", ChefHat],
-            ] as const
-          ).map(([id, label, Icon]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setEstoqueTab(id as EstoqueTab)}
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-none border-b-2 px-2.5 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
-                estoqueTab === id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {currentCompany?.id && (
         <>
@@ -2271,6 +2180,7 @@ export function Produtos() {
             companyId={currentCompany.id}
             onSuccess={() => {
               void fetchProducts();
+              void fetchCatalogKpis();
               void syncCompanyAlerts(currentCompany.id);
             }}
           />
@@ -2280,15 +2190,29 @@ export function Produtos() {
             companyId={currentCompany.id}
             onSuccess={() => {
               void fetchProducts();
-              void fetchLowStockCount();
+              void fetchCatalogKpis();
               void syncCompanyAlerts(currentCompany.id);
             }}
           />
         </>
       )}
 
-      {estoqueTab === "catalogo" && (
-        <>
+      <>
+          <ProductCatalogKpis
+            kpis={catalogKpis}
+            formatCurrency={formatCurrency}
+            onBelowMin={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set("estoque", "baixo");
+              setSearchParams(next);
+            }}
+            onZero={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("estoque");
+              setSearchParams(next);
+              setFilterStockAlert("zero");
+            }}
+          />
           <Card>
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
               <div className="min-w-0 space-y-1.5">
@@ -2339,7 +2263,7 @@ export function Produtos() {
                     className="shrink-0"
                     asChild
                   >
-                    <Link to="/app/produtos">Ver todos os produtos</Link>
+                    <Link to={PRODUCT_CATALOG_PATH}>Ver todos os produtos</Link>
                   </Button>
                 </div>
               )}
@@ -2358,7 +2282,7 @@ export function Produtos() {
                     className="shrink-0"
                     asChild
                   >
-                    <Link to="/app/produtos">Ver todos os produtos</Link>
+                    <Link to={PRODUCT_CATALOG_PATH}>Ver todos os produtos</Link>
                   </Button>
                 </div>
               )}
@@ -2383,8 +2307,6 @@ export function Produtos() {
                 onFilterUpdatedToChange={setFilterUpdatedTo}
                 lowStockOnly={lowStockOnly}
                 companyProductCategories={companyProductCategories}
-                viewMode={catalogViewMode}
-                onViewModeChange={setCatalogViewMode}
                 onClearFilters={() => {
                   setSearch("");
                   setFilterActive("active");
@@ -2416,6 +2338,7 @@ export function Produtos() {
                   onSelectAllFiltered={() => void selectAllFilteredProducts()}
                   onClear={() => setSelectedProductIds(new Set())}
                   onEdit={() => setBulkEditDialogOpen(true)}
+                  onPrintLabels={() => void printSelectedLabels()}
                   pageFullySelected={pageFullySelected}
                 />
               ) : null}
@@ -2427,26 +2350,34 @@ export function Produtos() {
                     ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
                     : "Nenhum produto cadastrado"}
                 </p>
+              ) : catalogListView === "table" ? (
+                <ProductCatalogTable
+                  products={products}
+                  formatCurrency={formatCurrency}
+                  onOpen={openStockSheet}
+                  selectable={canBulkEditCatalog}
+                  selectedIds={selectedProductIds}
+                  onToggleSelect={toggleProductSelection}
+                  sortKey={catalogSortKey}
+                  sortAsc={catalogSortAsc}
+                  onSort={(key) => {
+                    const next = nextCatalogSort(
+                      catalogSortKey,
+                      catalogSortAsc,
+                      key,
+                    );
+                    setCatalogSortKey(next.sortKey);
+                    setCatalogSortAsc(next.sortAsc);
+                    setProductsPage(1);
+                  }}
+                />
               ) : (
-                <ul
-                  className={cn(
-                    "list-none p-0 transition-opacity duration-150",
-                    catalogRefreshing && "opacity-80",
-                    catalogViewMode === "grid"
-                      ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
-                      : "space-y-4",
-                  )}
-                >
+                <ul className="list-none space-y-4 p-0 transition-opacity duration-150">
                   {products.map((p) => (
-                    <li
-                      key={p.id}
-                      className={
-                        catalogViewMode === "grid" ? "min-w-0" : undefined
-                      }
-                    >
+                    <li key={p.id}>
                       <ProductCatalogCard
                         product={p}
-                        layout={catalogViewMode}
+                        layout="list"
                         formatCurrency={formatCurrency}
                         onOpen={openStockSheet}
                         operationalType={operationalTypeByProduct[p.id] ?? null}
@@ -2496,7 +2427,7 @@ export function Produtos() {
               if (!o) closeStockSheet();
             }}
           >
-            <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-2xl lg:max-w-3xl">
+            <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0">
               {stockProduct && productSheetView === "summary" && (
                 <>
                   <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
@@ -3341,65 +3272,8 @@ export function Produtos() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-
-          {lowStockCount > 0 && (
-            <Card className="border-destructive/50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-destructive">
-                  <AlertTriangle className="h-5 w-5" />
-                  {lowStockCount} produto(s) com estoque abaixo do mínimo
-                </CardTitle>
-                <CardDescription>
-                  Verifique o recebimento de notas ou ajuste as quantidades
-                  mínimas
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          )}
         </>
-      )}
 
-      {currentCompany?.id && estoqueTab === "movimentos" && (
-        <EstoqueMovimentacoesPanel
-          companyId={currentCompany.id}
-          onStockChanged={() => {
-            void fetchProducts();
-            void fetchLowStockCount();
-          }}
-        />
-      )}
-      {currentCompany?.id && estoqueTab === "cmv" && (
-        <EstoqueCmvPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "contagem" && (
-        <EstoqueContagemPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "compras" && (
-        <EstoqueComprasPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "vinculos" && (
-        <EstoqueVincularComprasPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "etiquetas" && (
-        <EstoqueEtiquetasPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "perdas" && (
-        <EstoquePerdasPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "fichas" && (
-        <EstoqueFichasPendentesPanel companyId={currentCompany.id} />
-      )}
-      {currentCompany?.id && estoqueTab === "receitas" && (
-        <EstoqueReceitasPanel
-          companyId={currentCompany.id}
-          prefillNewRecipeOutputProductId={recipeOutputProductId}
-          onPrefillConsumed={clearRecipeOutputProductParam}
-          onStockChanged={() => {
-            void fetchProducts();
-            void fetchLowStockCount();
-          }}
-        />
-      )}
       <Dialog
         open={bulkUnitApplyDialogOpen}
         onOpenChange={(open) => {
@@ -3482,6 +3356,6 @@ export function Produtos() {
           }}
         />
       ) : null}
-    </PageShell>
+    </div>
   );
 }

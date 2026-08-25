@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMergedUnitConversionsForMerge,
+  listMergeUnitFactorCandidates,
   resolveMergeUnitFactor,
 } from "@/lib/mergeProductUnits";
 
@@ -77,6 +78,35 @@ describe("resolveMergeUnitFactor", () => {
       ],
     });
     expect(r.kind).toBe("manual");
+  });
+});
+
+describe("listMergeUnitFactorCandidates", () => {
+  it("lista caminhos distintos quando há mais de uma proporção", () => {
+    const rows = listMergeUnitFactorCandidates({
+      winnerHub: "l",
+      winnerConversions: [
+        {
+          primary_unit_code: "l",
+          primary_qty: 1,
+          secondary_unit_code: "un",
+          secondary_qty: 1,
+        },
+      ],
+      loserHub: "un",
+      loserConversions: [
+        {
+          primary_unit_code: "un",
+          primary_qty: 1,
+          secondary_unit_code: "l",
+          secondary_qty: 0.3,
+        },
+      ],
+    });
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const factors = rows.map((r) => Number(r.factor.toFixed(6)));
+    expect(factors).toContain(1);
+    expect(factors.some((f) => Math.abs(f - 0.3) < 1e-6)).toBe(true);
   });
 });
 

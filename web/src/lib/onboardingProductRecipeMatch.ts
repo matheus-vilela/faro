@@ -472,7 +472,7 @@ export function recipeMatchCreateErrorMessage(code: string | undefined): string 
     case "ingredients_required":
       return "Adicione pelo menos um insumo à lista antes de criar a ficha.";
     case "recipe_already_exists":
-      return "Este prato já possui ficha técnica. Use «Adicionar à ficha» ou ajuste em Produtos → Receitas.";
+      return "Este prato já possui ficha técnica. Use «Adicionar à ficha» ou ajuste em Fichas técnicas.";
     case "unit_conversion_failed":
       return "Não foi possível converter a unidade de um insumo. Revise as conversões.";
     case "duplicate_ingredient":

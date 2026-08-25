@@ -98,6 +98,7 @@ export function CreateProductSheet({
   const [sku, setSku] = useState('')
   const [unit, setUnit] = useState('un')
   const [minQuantity, setMinQuantity] = useState('')
+  const [currentQuantity, setCurrentQuantity] = useState('')
   const [lastUnitValue, setLastUnitValue] = useState('')
   const [lastUnitValueUnitCode, setLastUnitValueUnitCode] = useState('un')
   const [barcode, setBarcode] = useState('')
@@ -141,6 +142,7 @@ export function CreateProductSheet({
     }
     setSku('')
     setMinQuantity('')
+    setCurrentQuantity('')
     setLastUnitValue('')
     setBarcode('')
     setProductCategoryIds([])
@@ -248,7 +250,7 @@ export function CreateProductSheet({
         sku: finalSku,
         unit,
         min_quantity: parseFloat(minQuantity || '0') || 0,
-        current_quantity: 0,
+        current_quantity: parseFloat(currentQuantity || "0") || 0,
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
         unit_conversions: toProductUnitConversionsJson(toPersistConversions),
@@ -291,6 +293,7 @@ export function CreateProductSheet({
     setUnit(defaultProductStockUnitCode())
     setLastUnitValueUnitCode(defaultProductStockUnitCode())
     setMinQuantity('')
+    setCurrentQuantity('')
     setLastUnitValue('')
     setBarcode('')
     setComposesCmv(true)
@@ -304,7 +307,7 @@ export function CreateProductSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0 shadow-2xl sm:max-w-2xl lg:max-w-3xl">
+      <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0">
         <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
@@ -469,22 +472,37 @@ export function CreateProductSheet({
                 <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                   Quantidades
                 </p>
-                <div>
-                  <Label htmlFor="create-min">Quantidade mínima (alerta)</Label>
-                  <Input
-                    id="create-min"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={minQuantity}
-                    onChange={(e) => setMinQuantity(e.target.value)}
-                    placeholder="0"
-                    className={PRODUCT_SHEET_INPUT}
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Será exibido alerta quando o estoque estiver abaixo deste
-                    valor. O estoque inicial é zero.
-                  </p>
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="create-qty">Estoque inicial</Label>
+                    <Input
+                      id="create-qty"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={currentQuantity}
+                      onChange={(e) => setCurrentQuantity(e.target.value)}
+                      placeholder="0"
+                      className={PRODUCT_SHEET_INPUT}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="create-min">Quantidade mínima (alerta)</Label>
+                    <Input
+                      id="create-min"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={minQuantity}
+                      onChange={(e) => setMinQuantity(e.target.value)}
+                      placeholder="0"
+                      className={PRODUCT_SHEET_INPUT}
+                    />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Será exibido alerta quando o estoque estiver abaixo deste
+                      valor.
+                    </p>
+                  </div>
                 </div>
               </div>
 

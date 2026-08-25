@@ -72,7 +72,12 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   if (path.startsWith("/app/recebimento")) return "recebimento";
   if (path.startsWith("/app/checklists")) return "checklists";
   if (path.startsWith("/app/fornecedores")) return "fornecedores";
-  if (path.startsWith("/app/produtos") || path.startsWith("/app/servicos")) {
+  if (
+    path.startsWith("/app/produtos") ||
+    path.startsWith("/app/estoque") ||
+    path.startsWith("/app/fichas") ||
+    path.startsWith("/app/servicos")
+  ) {
     return "produtos";
   }
   if (path.startsWith("/app/contas-a-pagar") || path.startsWith("/app/boletos")) {

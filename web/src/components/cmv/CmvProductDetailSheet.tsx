@@ -14,6 +14,7 @@ import {
   type CmvProductRow,
 } from "@/lib/cmvMargensResumo";
 import { formatBrl } from "@/lib/dre/formatBrl";
+import { productHighlightPath, PRODUCT_HOME_PATH, RECIPES_PATH } from "@/lib/productStockPaths";
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -55,17 +56,17 @@ function ctaFor(product: CmvProductRow): {
 } {
   if (product.productId) {
     return {
-      to: `/app/produtos?highlight=${encodeURIComponent(product.productId)}`,
+      to: productHighlightPath(product.productId),
       label: "Abrir produto",
     };
   }
   if (product.recipeId) {
     return {
-      to: "/app/produtos?estoque=receitas",
+      to: RECIPES_PATH,
       label: "Abrir ficha",
     };
   }
-  return { to: "/app/produtos", label: "Abrir produtos" };
+  return { to: PRODUCT_HOME_PATH, label: "Abrir produtos" };
 }
 
 export function CmvProductDetailSheet({

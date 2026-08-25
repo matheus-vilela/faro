@@ -1,3 +1,4 @@
+import { MergeFactorChoiceList, MergeProductConversionsEditor } from "@/components/products/MergeProductConversionsEditor";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +17,7 @@ import {
   buildMergedUnitConversionsForMerge,
   convertLoserQuantityToWinner,
   draftsToConversionRows,
+  listMergeUnitFactorCandidates,
   mergedConversionsToJson,
   resolveMergeUnitFactor,
 } from "@/lib/mergeProductUnits";
@@ -168,6 +170,10 @@ export function ProductMergeDialog({
   const [conversionsLoading, setConversionsLoading] = useState(false);
   const [manualLoserQty, setManualLoserQty] = useState("1");
   const [manualWinnerQty, setManualWinnerQty] = useState("1");
+  const [selectedFactorId, setSelectedFactorId] = useState<string | null>(null);
+  const [factorMode, setFactorMode] = useState<"candidate" | "manual">(
+    "candidate",
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -274,6 +280,56 @@ export function ProductMergeDialog({
     });
   }, [winner, loser, winnerConversions, loserConversions]);
 
+  const factorCandidates = useMemo(() => {
+    if (!winner || !loser) return [];
+    return listMergeUnitFactorCandidates({
+      winnerHub: winner.unit,
+      winnerConversions: draftsToConversionRows(winnerConversions),
+      loserHub: loser.unit,
+      loserConversions: draftsToConversionRows(loserConversions),
+      winnerName: winner.name,
+      loserName: loser.name,
+    });
+  }, [winner, loser, winnerConversions, loserConversions]);
+
+  useEffect(() => {
+    if (step !== "confirm" || !winner || !loser || conversionsLoading) return;
+    if (factorMode === "manual") return;
+    if (factorCandidates.length === 0) {
+      setFactorMode("manual");
+      setSelectedFactorId(null);
+      return;
+    }
+    if (
+      selectedFactorId &&
+      factorCandidates.some((c) => c.id === selectedFactorId)
+    ) {
+      return;
+    }
+    if (unitResolution?.kind === "same") {
+      const same = factorCandidates.find((c) => c.id === "same");
+      setSelectedFactorId(same?.id ?? factorCandidates[0]!.id);
+      return;
+    }
+    if (unitResolution?.kind === "auto") {
+      const match = factorCandidates.find(
+        (c) => Math.abs(c.factor - unitResolution.factor) < 1e-6,
+      );
+      setSelectedFactorId(match?.id ?? factorCandidates[0]!.id);
+      return;
+    }
+    setSelectedFactorId(factorCandidates[0]!.id);
+  }, [
+    step,
+    winner,
+    loser,
+    conversionsLoading,
+    factorCandidates,
+    factorMode,
+    selectedFactorId,
+    unitResolution,
+  ]);
+
   const manualFactor = useMemo(() => {
     const a = parseFloat(manualLoserQty.replace(/\s/g, "").replace(",", "."));
     const b = parseFloat(manualWinnerQty.replace(/\s/g, "").replace(",", "."));
@@ -283,12 +339,19 @@ export function ProductMergeDialog({
     return b / a;
   }, [manualLoserQty, manualWinnerQty]);
 
+  const selectedCandidate = useMemo(
+    () => factorCandidates.find((c) => c.id === selectedFactorId) ?? null,
+    [factorCandidates, selectedFactorId],
+  );
+
   const effectiveFactor = useMemo(() => {
+    if (factorMode === "manual") return manualFactor;
+    if (selectedCandidate) return selectedCandidate.factor;
     if (!unitResolution) return null;
     if (unitResolution.kind === "same") return 1;
     if (unitResolution.kind === "auto") return unitResolution.factor;
     return manualFactor;
-  }, [unitResolution, manualFactor]);
+  }, [factorMode, selectedCandidate, unitResolution, manualFactor]);
 
   const stockPreview = useMemo(() => {
     if (!winner || !loser || effectiveFactor == null) return null;
@@ -301,8 +364,7 @@ export function ProductMergeDialog({
     return { loserAdj, total };
   }, [winner, loser, effectiveFactor]);
 
-  const needsManualUnit =
-    unitResolution?.kind === "manual" || unitResolution?.kind === "ambiguous";
+  const needsManualUnit = factorMode === "manual";
 
   const canConfirm =
     !!winner &&
@@ -325,6 +387,8 @@ export function ProductMergeDialog({
     setConversionsLoading(false);
     setManualLoserQty("1");
     setManualWinnerQty("1");
+    setSelectedFactorId(null);
+    setFactorMode("candidate");
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -364,7 +428,7 @@ export function ProductMergeDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Unificar produtos</DialogTitle>
           <DialogDescription>
@@ -461,6 +525,8 @@ export function ProductMergeDialog({
                 setSurvivorIsSource((v) => !v);
                 setManualLoserQty("1");
                 setManualWinnerQty("1");
+                setSelectedFactorId(null);
+                setFactorMode("candidate");
               }}
             >
               <ArrowLeftRight className="mr-2 h-4 w-4" />
@@ -470,79 +536,90 @@ export function ProductMergeDialog({
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Scale className="h-4 w-4 text-muted-foreground" />
-                Conversão de unidades
+                Conversões de cada item
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Veja as regras de cada cadastro, inclua uma nova se faltar, e
+                escolha qual proporção usar na unificação.
+              </p>
               {conversionsLoading ? (
                 <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Analisando conversões…
-                </p>
-              ) : unitResolution?.kind === "same" ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Ambos usam {unitLabel(winner.unit)} como unidade de estoque. As
-                  quantidades serão somadas diretamente.
-                </p>
-              ) : unitResolution?.kind === "auto" ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Proporção calculada via {unitLabel(unitResolution.bridgeUnit)}:{" "}
-                  <span className="font-medium text-foreground">
-                    1 {unitLabel(loser.unit)} ={" "}
-                    {unitResolution.factor.toLocaleString("pt-BR", {
-                      maximumFractionDigits: 8,
-                    })}{" "}
-                    {unitLabel(winner.unit)}
-                  </span>
-                  . Estoque e movimentações do removido serão convertidos para a
-                  unidade padrão do produto que permanece.
+                  Carregando conversões…
                 </p>
               ) : (
-                <div className="mt-3 space-y-3">
-                  {unitResolution?.kind === "ambiguous" ? (
-                    <p className="text-xs text-amber-800 dark:text-amber-200">
-                      Há mais de uma forma de relacionar as unidades. Informe a
-                      proporção que deseja usar.
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Não foi possível calcular a proporção pelas conversões
-                      cadastradas. Informe a equivalência entre as unidades de
-                      estoque.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div className="space-y-1">
-                      <Label htmlFor="merge-manual-loser" className="text-xs">
-                        Quantidade ({loser.unit})
-                      </Label>
-                      <Input
-                        id="merge-manual-loser"
-                        className="w-24"
-                        inputMode="decimal"
-                        value={manualLoserQty}
-                        onChange={(e) => setManualLoserQty(e.target.value)}
-                      />
-                    </div>
-                    <span className="pb-2 text-sm text-muted-foreground">
-                      {unitLabel(loser.unit)} =
-                    </span>
-                    <div className="space-y-1">
-                      <Label htmlFor="merge-manual-winner" className="text-xs">
-                        Quantidade ({winner.unit})
-                      </Label>
-                      <Input
-                        id="merge-manual-winner"
-                        className="w-24"
-                        inputMode="decimal"
-                        value={manualWinnerQty}
-                        onChange={(e) => setManualWinnerQty(e.target.value)}
-                      />
-                    </div>
-                    <span className="pb-2 text-sm text-muted-foreground">
-                      {unitLabel(winner.unit)}
-                    </span>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+                    <MergeProductConversionsEditor
+                      companyId={companyId}
+                      productId={winner.id}
+                      productName={winner.name}
+                      stockUnitCode={winner.unit}
+                      value={winnerConversions}
+                      onChange={setWinnerConversions}
+                    />
+                  </div>
+                  <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-3">
+                    <MergeProductConversionsEditor
+                      companyId={companyId}
+                      productId={loser.id}
+                      productName={loser.name}
+                      stockUnitCode={loser.unit}
+                      value={loserConversions}
+                      onChange={setLoserConversions}
+                    />
                   </div>
                 </div>
               )}
+
+              {!conversionsLoading ? (
+                <div className="mt-4 space-y-3">
+                  <MergeFactorChoiceList
+                    candidates={factorCandidates}
+                    selectedId={selectedFactorId}
+                    onSelect={(id) => {
+                      setFactorMode("candidate");
+                      setSelectedFactorId(id);
+                    }}
+                    manualSelected={factorMode === "manual"}
+                    onSelectManual={() => setFactorMode("manual")}
+                  />
+                  {factorMode === "manual" ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="merge-manual-loser" className="text-xs">
+                          Quantidade ({loser.unit})
+                        </Label>
+                        <Input
+                          id="merge-manual-loser"
+                          className="w-24"
+                          inputMode="decimal"
+                          value={manualLoserQty}
+                          onChange={(e) => setManualLoserQty(e.target.value)}
+                        />
+                      </div>
+                      <span className="pb-2 text-sm text-muted-foreground">
+                        {unitLabel(loser.unit)} =
+                      </span>
+                      <div className="space-y-1">
+                        <Label htmlFor="merge-manual-winner" className="text-xs">
+                          Quantidade ({winner.unit})
+                        </Label>
+                        <Input
+                          id="merge-manual-winner"
+                          className="w-24"
+                          inputMode="decimal"
+                          value={manualWinnerQty}
+                          onChange={(e) => setManualWinnerQty(e.target.value)}
+                        />
+                      </div>
+                      <span className="pb-2 text-sm text-muted-foreground">
+                        {unitLabel(winner.unit)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {stockPreview && effectiveFactor != null ? (
                 <p className="mt-3 rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-muted-foreground">
                   Estoque após unificação:{" "}

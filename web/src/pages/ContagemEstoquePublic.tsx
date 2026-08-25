@@ -79,10 +79,10 @@ function publicCountErrorMessage(code: string | undefined): string {
     return "Esta contagem já foi enviada ou o link expirou.";
   }
   if (code === "listing_required") {
-    return "Esta contagem precisa de uma listagem. Peça um link gerado em Produtos → Contagem (por grupo ou listagem).";
+    return "Esta contagem precisa de uma listagem. Peça um link gerado em Contagem (por grupo ou listagem).";
   }
   if (code === "group_required") {
-    return "Esta contagem precisa de um grupo. Peça um link gerado em Produtos → Contagem.";
+    return "Esta contagem precisa de um grupo. Peça um link gerado em Contagem.";
   }
   if (code === "out_of_band") {
     return "Há itens fora da faixa — confira de novo antes de enviar.";

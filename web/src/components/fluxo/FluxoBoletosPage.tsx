@@ -5,6 +5,7 @@ import {
 } from "@/components/BoletosCalendar";
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
+import { BoletoResumoSheet } from "@/components/fluxo/BoletoResumoSheet";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { EditBoletoSheet } from "@/components/fluxo/EditBoletoSheet";
 import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
@@ -46,7 +47,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { formatCompetenceLabel, localDateYmd } from "@/lib/boletoPayment";
+import { localDateYmd } from "@/lib/boletoPayment";
 import {
   fetchSplitRemainderBoletos,
   undoPayBoleto,
@@ -104,7 +105,7 @@ import type {
 import type { RevenueEntry } from "@/types/revenue";
 import type { ServiceDailySaleCalendarRow } from "@/types/serviceDailySale";
 import type { LucideIcon } from "lucide-react";
-import { CheckCircle2, Copy, FileText, Loader2, PackageSearch, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { Loader2, PackageSearch, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -121,8 +122,6 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   pix: "PIX",
   ted: "TED",
 };
-
-const STATUS_LABELS = { pending: "Pendente", paid: "Pago" };
 
 const SERVICE_SALES_SELECT =
   "id, sale_date, quantity, unit_price, gross_value, discount, surcharge, allocation, service:services(id, code, name)";
@@ -1695,353 +1694,61 @@ export function FluxoBoletosPage({
         />
       )}
 
-      <Sheet
+      <BoletoResumoSheet
+        boleto={boletoResumo}
         open={!!boletoResumo}
         onOpenChange={(o) => {
           if (!o && editBoletoOpen) return;
           if (!o) setBoletoResumo(null);
         }}
-      >
-        <SheetContent
-          className="z-[60] sm:max-w-md"
-          overlayClassName="z-[60]"
-        >
-          {boletoResumo && (
-            <>
-              <SheetHeader>
-                <SheetTitle>Resumo da conta</SheetTitle>
-                <SheetDescription>
-                  {isBoletoPayable(boletoResumo)
-                    ? "Dados para pagamento"
-                    : "Dados do recebimento"}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="space-y-6 py-6">
-                <div>
-                  <p className="font-semibold">
-                    {formatBoletoFluxoDescription(boletoResumo)}
-                  </p>
-                  <p
-                    className={cn(
-                      "text-2xl font-bold mt-1",
-                      isBoletoPayable(boletoResumo)
-                        ? "text-destructive"
-                        : "text-emerald-600 dark:text-emerald-400",
-                    )}
-                  >
-                    {formatCurrency(
-                      boletoResumo.status === "paid" &&
-                        boletoResumo.paid_amount != null
-                        ? boletoResumo.paid_amount
-                        : boletoResumo.amount,
-                    )}
-                  </p>
-                  {boletoResumo.status === "paid" &&
-                    boletoResumo.paid_amount != null &&
-                    boletoResumo.paid_amount !== boletoResumo.amount && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Valor original: {formatCurrency(boletoResumo.amount)}
-                      </p>
-                    )}
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Vencimento: {formatDate(boletoResumo.due_date)}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <Badge
-                      variant="outline"
-                      className={
-                        isBoletoPayable(boletoResumo)
-                          ? "border-destructive/30 bg-destructive/10 text-destructive"
-                          : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
-                      }
-                    >
-                      {isBoletoPayable(boletoResumo)
-                        ? "Conta a pagar"
-                        : "Conta a receber"}
-                    </Badge>
-                    {isBoletoPayable(boletoResumo) && (
-                      <Badge variant="secondary">
-                        {
-                          PAYMENT_TYPE_LABELS[
-                            boletoResumo.payment_type ?? "boleto"
-                          ]
-                        }
-                      </Badge>
-                    )}
-                    {isProjectedBoleto(boletoResumo) ? (
-                      <Badge
-                        variant="outline"
-                        className="border-sky-600/30 bg-sky-500/10 text-sky-900 dark:text-sky-100"
-                      >
-                        Ocorrência projetada
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant={
-                          boletoResumo.status === "paid" ? "default" : "outline"
-                        }
-                      >
-                        {STATUS_LABELS[boletoResumo.status]}
-                      </Badge>
-                    )}
-                    {isBoletoTransfer(boletoResumo) && (
-                      <Badge variant="outline">Transferência</Badge>
-                    )}
-                    {boletoResumo.split_from_boleto_id && (
-                      <Badge
-                        variant="outline"
-                        className="border-violet-600/30 bg-violet-500/10 text-violet-900 dark:text-violet-100"
-                      >
-                        Saldo restante
-                      </Badge>
-                    )}
-                    {fluxoBoletoSupplierLabel(boletoResumo) && (
-                      <span className="text-sm text-muted-foreground">
-                        {fluxoBoletoSupplierLabel(boletoResumo)}
-                      </span>
-                    )}
-                    {boletoResumo.provider && (
-                      <span className="text-sm text-muted-foreground">
-                        {boletoResumo.provider}
-                      </span>
-                    )}
-                  </div>
-                  <Badge variant="outline" className="mt-2">
-                    {isBoletoTransfer(boletoResumo)
-                      ? "Transferência"
-                      : boletoCategoryLabel(boletoResumo)}
-                  </Badge>
-                  {flowType === "payable" &&
-                    boletoPendingMerchandiseReceipt(boletoResumo) && (
-                      <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
-                        <p className="font-medium">Mercadoria ainda não recebida</p>
-                        <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-100/90">
-                          Esta conta está vinculada a uma NF ou romaneio sem
-                          recebimento confirmado. Confirme a mercadoria antes de
-                          pagar.
-                        </p>
-                      </div>
-                    )}
-                  {boletoResumo.status === "paid" &&
-                    isBoletoPayable(boletoResumo) &&
-                    boletoResumo.paid_at && (
-                      <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground space-y-1">
-                        <p>Pago em {formatDate(boletoResumo.paid_at)}</p>
-                        {boletoResumo.competence_date ? (
-                          <p>
-                            Competência:{" "}
-                            {formatCompetenceLabel(boletoResumo.competence_date)}
-                          </p>
-                        ) : null}
-                        {boletoResumo.company_bank_account_id &&
-                        bankAccountsById.get(
-                          boletoResumo.company_bank_account_id,
-                        ) ? (
-                          <p>
-                            Conta:{" "}
-                            {
-                              bankAccountsById.get(
-                                boletoResumo.company_bank_account_id,
-                              )!.name
-                            }
-                          </p>
-                        ) : null}
-                        {boletoResumo.paid_amount != null ? (
-                          <p>
-                            Valor pago:{" "}
-                            {formatCurrency(boletoResumo.paid_amount)}
-                          </p>
-                        ) : null}
-                      </div>
-                    )}
-                </div>
-
-                {boletoResumo.status === "pending" && (
-                  <>
-                    {(boletoResumo.payment_type ?? "boleto") === "boleto" &&
-                      boletoResumo.barcode && (
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <p className="text-sm font-medium">
-                            Código de barras
-                          </p>
-                          <p className="text-sm font-mono break-all">
-                            {boletoResumo.barcode}
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              navigator.clipboard.writeText(
-                                boletoResumo.barcode ?? "",
-                              );
-                              toast.success("Código copiado");
-                            }}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copiar código
-                          </Button>
-                        </div>
-                      )}
-                    {(boletoResumo.payment_type ?? "boleto") === "pix" &&
-                      boletoResumo.pix_key && (
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <p className="text-sm font-medium">Chave PIX</p>
-                          <p className="text-sm font-mono break-all">
-                            {boletoResumo.pix_key}
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              navigator.clipboard.writeText(
-                                boletoResumo.pix_key ?? "",
-                              );
-                              toast.success("Chave copiada");
-                            }}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copiar chave
-                          </Button>
-                        </div>
-                      )}
-                    {(boletoResumo.payment_type ?? "boleto") === "ted" &&
-                      (boletoResumo.bank_name ||
-                        boletoResumo.agency ||
-                        boletoResumo.account) && (
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <p className="text-sm font-medium">Dados bancários</p>
-                          <div className="text-sm space-y-1">
-                            {boletoResumo.bank_name && (
-                              <p>Banco: {boletoResumo.bank_name}</p>
-                            )}
-                            {boletoResumo.bank_code && (
-                              <p>Código: {boletoResumo.bank_code}</p>
-                            )}
-                            {boletoResumo.agency && (
-                              <p>Agência: {boletoResumo.agency}</p>
-                            )}
-                            {boletoResumo.account && (
-                              <p>Conta: {boletoResumo.account}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                  </>
-                )}
-              </div>
-              <div className="flex flex-col gap-2 pt-4">
-                {flowType === "payable" &&
-                  boletoResumo.status === "pending" &&
-                  !isProjectedBoleto(boletoResumo) && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        setEditBoleto(boletoResumo);
-                        setEditBoletoOpen(true);
-                      }}
-                    >
-                      <Pencil className="h-4 w-4 mr-2" />
-                      Editar conta
-                    </Button>
-                  )}
-                {flowType === "payable" &&
-                  (isProjectedBoleto(boletoResumo) ||
-                    !!boletoResumo.series_master_expense_id) && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        const master = resolveSeriesMaster(boletoResumo);
-                        if (!master) {
-                          toast.error("Série não encontrada.");
-                          return;
-                        }
-                        setSeriesEditBoleto(boletoResumo);
-                        setBoletoResumo(null);
-                        setSeriesEditOpen(true);
-                      }}
-                    >
-                      Editar ocorrência / série
-                    </Button>
-                  )}
-                {boletoResumo.status === "pending" &&
-                  !isProjectedBoleto(boletoResumo) && (
-                    <Button
-                      className="w-full"
-                      onClick={() => {
-                        setPayInitialPartial(false);
-                        setMarkPaidDialogOpen(true);
-                      }}
-                    >
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      {isBoletoPayable(boletoResumo)
-                        ? "Marcar como pago"
-                        : "Marcar como recebido"}
-                    </Button>
-                  )}
-                {flowType === "payable" &&
-                  boletoResumo.status === "pending" &&
-                  !isProjectedBoleto(boletoResumo) &&
-                  isBoletoPayable(boletoResumo) &&
-                  !isBoletoTransfer(boletoResumo) && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        setPayInitialPartial(true);
-                        setMarkPaidDialogOpen(true);
-                      }}
-                    >
-                      Pagar parcialmente
-                    </Button>
-                  )}
-                {flowType === "payable" &&
-                  boletoResumo.status === "paid" &&
-                  !isProjectedBoleto(boletoResumo) &&
-                  isBoletoPayable(boletoResumo) && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setUndoPayDialogOpen(true)}
-                    >
-                      <Undo2 className="h-4 w-4 mr-2" />
-                      Desfazer pagamento
-                    </Button>
-                  )}
-                {boletoResumo.expense_id &&
-                  !isProjectedBoleto(boletoResumo) && (
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        setExpenseDetailId(boletoResumo.expense_id)
-                      }
-                    >
-                      <FileText className="h-4 w-4 mr-2" />
-                      Ver nota fiscal
-                    </Button>
-                  )}
-                {canDeleteBoletoResumo && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                    disabled={deletingBoleto}
-                    onClick={() => setDeleteBoletoDialogOpen(true)}
-                  >
-                    {deletingBoleto ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="mr-2 h-4 w-4" />
-                    )}
-                    Excluir conta
-                  </Button>
-                )}
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+        flowType={flowType}
+        formatCurrency={formatCurrency}
+        formatDate={formatDate}
+        categoryLabel={boletoCategoryLabel}
+        bankAccountName={
+          boletoResumo?.company_bank_account_id
+            ? (bankAccountsById.get(boletoResumo.company_bank_account_id)
+                ?.name ?? null)
+            : null
+        }
+        pendingMerchandise={
+          flowType === "payable" &&
+          !!boletoResumo &&
+          boletoPendingMerchandiseReceipt(boletoResumo)
+        }
+        canDelete={canDeleteBoletoResumo}
+        deleting={deletingBoleto}
+        onEdit={() => {
+          if (!boletoResumo) return;
+          setEditBoleto(boletoResumo);
+          setEditBoletoOpen(true);
+        }}
+        onEditSeries={() => {
+          if (!boletoResumo) return;
+          const master = resolveSeriesMaster(boletoResumo);
+          if (!master) {
+            toast.error("Série não encontrada.");
+            return;
+          }
+          setSeriesEditBoleto(boletoResumo);
+          setBoletoResumo(null);
+          setSeriesEditOpen(true);
+        }}
+        onMarkPaid={() => {
+          setPayInitialPartial(false);
+          setMarkPaidDialogOpen(true);
+        }}
+        onPayPartial={() => {
+          setPayInitialPartial(true);
+          setMarkPaidDialogOpen(true);
+        }}
+        onUndoPay={() => setUndoPayDialogOpen(true)}
+        onViewExpense={() => {
+          if (!boletoResumo?.expense_id) return;
+          setExpenseDetailId(boletoResumo.expense_id);
+        }}
+        onDelete={() => setDeleteBoletoDialogOpen(true)}
+      />
 
       <SeriesBoletoActionsSheet
         open={seriesEditOpen}
