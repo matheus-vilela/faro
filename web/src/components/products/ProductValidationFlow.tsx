@@ -1,11 +1,11 @@
-import { ProductSetupInbox } from "@/components/products/ProductSetupInbox";
+import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
+import { ProductSetupInbox } from "@/components/products/ProductSetupInbox";
 import {
   RecipeRow,
   SameItemRow,
   ValidationMatchListHeader,
 } from "@/components/products/ProductValidationCards";
-import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -131,7 +131,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const confirmSameItem = async (suggestionId: string) => {
     const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
     const partnerId = samePick[suggestionId];
-    const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
+    const soldId = soldPick[suggestionId] ?? suggestion?.sold.productId;
     if (!suggestion || !partnerId || !soldId) return;
     setBusy(true);
     const product = await fetchProductById(soldId);
@@ -394,10 +394,9 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
               {result.stats.sameItem} vínculo
               {result.stats.sameItem === 1 ? "" : "s"} compra ↔ venda e{" "}
               {result.stats.recipes} ficha
-              {result.stats.recipes === 1 ? "" : "s"} com 90% ou mais. Os
-              demais ({result.stats.residual.toLocaleString("pt-BR")}) vão
-              para correção, pelos que mais giram. Nada é gravado até você
-              confirmar.
+              {result.stats.recipes === 1 ? "" : "s"} com 90% ou mais. Os demais
+              ({result.stats.residual.toLocaleString("pt-BR")}) vão para
+              correção, pelos que mais giram. Nada é gravado até você confirmar.
             </p>
           </div>
           <Button
@@ -500,8 +499,8 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           <div>
             <h2 className="text-sm font-semibold">Para corrigir</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Abaixo de 90% ou sem par. Ordenado pelo maior volume de venda
-              ou compra.
+              Abaixo de 90% ou sem par. Ordenado pelo maior volume de venda ou
+              compra.
             </p>
           </div>
           <ProductSetupInbox
