@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 type FiscalCardTheme = {
   card: string;
@@ -302,7 +303,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
             {interpretConfirmPhase ? (
               <Button
                 type="button"
@@ -318,9 +319,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
                       await confirmOnboardingFiscalInterpretPhase(companyId);
                     if (res.error) {
                       setInterpretClosing(false);
-                      console.error(
-                        "confirmOnboardingFiscalInterpretPhase",
-                        res.error,
+                      toast.error(
+                        res.error.slice(0, 220) ||
+                          "Não foi possível concluir o onboarding fiscal.",
                       );
                       return;
                     }
@@ -333,7 +334,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
                 ) : (
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
-                Confirmar e fechar
+                Concluir
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
@@ -345,7 +346,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
           </div>
         </div>
 
-        {!interpretConfirmPhase && (
+        {!interpretConfirmPhase && !searchingNotes && (
           <div className={theme.progressTrack}>
             <div
               className={theme.progressFill}

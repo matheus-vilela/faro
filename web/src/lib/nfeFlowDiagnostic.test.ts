@@ -118,12 +118,22 @@ describe("canMarkOnboardingFiscalCompleted", () => {
     ).toBe(false);
   });
 
-  it("fecha só quando a listagem esgotou e tudo foi interpretado", () => {
+  it("fecha a captura quando a listagem esgotou e tudo foi interpretado", () => {
     expect(
       canMarkOnboardingFiscalCompleted({
         listExhausted: true,
         downloaded: 274,
         processed: 274,
+      }),
+    ).toBe(true);
+  });
+
+  it("fecha a captura também sem notas (listagem vazia esgotada)", () => {
+    expect(
+      canMarkOnboardingFiscalCompleted({
+        listExhausted: true,
+        downloaded: 0,
+        processed: 0,
       }),
     ).toBe(true);
   });

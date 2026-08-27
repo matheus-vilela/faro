@@ -387,6 +387,7 @@ export async function onboardingHasActiveWork(
   return { busy: false, cycleId };
 }
 
+/** Fecha a captura do onboarding (`capture_completed`). `completed` fica para o botão Concluir. */
 export async function patchOnboardingCaptureCompleted(
   admin: SupabaseClient,
   companyId: string,

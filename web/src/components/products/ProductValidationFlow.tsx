@@ -15,6 +15,12 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
+  correlationFiscalStepStatus,
+  correlationOnboardingCanStart,
+  correlationPdvStepStatus,
+  type CorrelationOnboardingStepStatus,
+} from "@/lib/correlationOnboardingPrereqs";
+import {
   dashboardImportReviewFinalizeRecipeProductSales,
   dashboardImportReviewMarkTechSheetSaved,
 } from "@/lib/dashboardImportReview";
@@ -22,8 +28,6 @@ import {
   addPurchaseAsRecipeIngredient,
   createProductRecipeMatch,
 } from "@/lib/onboardingProductRecipeMatch";
-import { isOnboardingFiscalFlowCompleted } from "@/lib/onboardingFiscalDashboard";
-import { isOnboardingPdvJsonCompleted } from "@/lib/onboardingPdvDefaults";
 import {
   fetchProductSetupQueue,
   maxTurnoverQty,
@@ -42,12 +46,20 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
 import {
+  AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Circle,
   Loader2,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -69,57 +81,65 @@ function fallbackUnit(unit: string): string {
   return unit && unit !== "—" ? unit : "un";
 }
 
-function correlationPrereqs(
-  onboardingFiscal: unknown,
-  onboardingPdv: unknown,
-  queue: ProductSetupQueue | null,
-) {
-  const fiscalDone = isOnboardingFiscalFlowCompleted(onboardingFiscal);
-  const pdvDone = isOnboardingPdvJsonCompleted(onboardingPdv);
-  const fiscal = onboardingFiscal as { nfes_sync?: number } | null | undefined;
-  const pdv = onboardingPdv as { sales_sync?: number } | null | undefined;
-  const hasNfeProducts =
-    Number(fiscal?.nfes_sync ?? 0) > 0 ||
-    (queue?.purchases.length ?? 0) > 0 ||
-    (queue?.counts.purchases ?? 0) > 0;
-  const hasEpocProducts =
-    Number(pdv?.sales_sync ?? 0) > 0 ||
-    (queue?.soldOnly.length ?? 0) > 0 ||
-    (queue?.counts.sold ?? 0) > 0 ||
-    (queue?.items.some(
-      (item) =>
-        item.kind === "recipe_without_ingredients" ||
-        item.priorityEpoc === true,
-    ) ??
-      false);
-  return {
-    fiscalDone,
-    pdvDone,
-    hasNfeProducts,
-    hasEpocProducts,
-    canStart: fiscalDone && pdvDone && hasNfeProducts && hasEpocProducts,
-  };
+function PrerequisiteStatusIcon({
+  status,
+}: {
+  status: CorrelationOnboardingStepStatus;
+}) {
+  if (status === "success") {
+    return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />;
+  }
+  if (status === "processing") {
+    return (
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-violet-600" />
+    );
+  }
+  if (status === "alert") {
+    return (
+      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+    );
+  }
+  if (status === "error") {
+    return <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />;
+  }
+  return <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />;
 }
 
 function PrerequisiteRow({
-  done,
+  status,
   label,
 }: {
-  done: boolean;
+  status: CorrelationOnboardingStepStatus;
   label: string;
 }) {
+  const done = status === "success";
   return (
     <li className="flex items-center gap-2">
-      {done ? (
-        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-      ) : (
-        <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
-      )}
+      <PrerequisiteStatusIcon status={status} />
       <span className={done ? "text-foreground" : "text-muted-foreground"}>
         {label}
       </span>
     </li>
   );
+}
+
+function correlationGateHeaderIcon(
+  fiscal: CorrelationOnboardingStepStatus,
+  pdv: CorrelationOnboardingStepStatus,
+) {
+  const worst: CorrelationOnboardingStepStatus[] = [fiscal, pdv];
+  if (worst.includes("error")) {
+    return <AlertCircle className="h-8 w-8 text-destructive" />;
+  }
+  if (worst.includes("alert")) {
+    return (
+      <AlertTriangle className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+    );
+  }
+  if (worst.includes("processing")) {
+    return <Loader2 className="h-8 w-8 animate-spin text-violet-600" />;
+  }
+  return <Sparkles className="h-8 w-8 text-muted-foreground" />;
 }
 
 function CorrelationIdleCard({
@@ -147,7 +167,10 @@ function CorrelationIdleCard({
       <div className="mx-auto flex max-w-md flex-col items-center text-center">
         <div className="mb-3">{icon}</div>
         <p className="text-base font-semibold">{title}</p>
-        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        <p
+          className="mt-2 text-sm text-muted-foreground"
+          dangerouslySetInnerHTML={{ __html: description }}
+        />
         {children}
       </div>
     </div>
@@ -155,7 +178,7 @@ function CorrelationIdleCard({
 }
 
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
-  const { currentCompany } = useCompany();
+  const { currentCompany, refetchCompanies } = useCompany();
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -183,14 +206,14 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   }, [loadQueue]);
 
   const startValidation = async () => {
-    const gate = correlationPrereqs(
-      currentCompany?.onboarding_fiscal,
-      currentCompany?.onboarding_pdv,
-      queue,
-    );
-    if (!gate.canStart) {
+    if (
+      !correlationOnboardingCanStart(
+        currentCompany?.onboarding_fiscal,
+        currentCompany?.onboarding_pdv,
+      )
+    ) {
       toast.error(
-        "Finalize o onboarding fiscal e o do PDV, com produtos da nota e do EPOC, para iniciar a correlação.",
+        "Finalize o onboarding fiscal e o do PDV para iniciar a correlação.",
       );
       return;
     }
@@ -415,11 +438,30 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       .map((item) => item.key);
   }, [queue, result, confirmRows, soldPick, samePick, recipePicks]);
 
+  const fiscalStatus = correlationFiscalStepStatus(
+    currentCompany?.onboarding_fiscal,
+  );
+  const pdvStatus = correlationPdvStepStatus(currentCompany?.onboarding_pdv);
+  const canStart = correlationOnboardingCanStart(
+    currentCompany?.onboarding_fiscal,
+    currentCompany?.onboarding_pdv,
+  );
+
+  useEffect(() => {
+    if (canStart) return;
+    const poll = window.setInterval(() => {
+      void refetchCompanies();
+    }, 8_000);
+    return () => window.clearInterval(poll);
+  }, [canStart, refetchCompanies]);
+
   if (loading && !queue) {
     return (
       <CorrelationIdleCard
         tone="muted"
-        icon={<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />}
+        icon={
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        }
         title="Carregando itens"
         description="Buscando produtos da nota e do PDV para a correlação."
       />
@@ -435,39 +477,28 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   }
 
   const pending = queue?.counts.total ?? 0;
-  const gate = correlationPrereqs(
-    currentCompany?.onboarding_fiscal,
-    currentCompany?.onboarding_pdv,
-    queue,
-  );
 
   if (!result && !running) {
-    if (!gate.canStart) {
+    if (!canStart) {
       return (
         <CorrelationIdleCard
-          tone="muted"
-          icon={
-            <Sparkles className="h-8 w-8 text-muted-foreground" />
+          tone={
+            fiscalStatus === "error" || pdvStatus === "error"
+              ? "amber"
+              : "muted"
           }
+          icon={correlationGateHeaderIcon(fiscalStatus, pdvStatus)}
           title="Correlação ainda não disponível"
-          description="Essa etapa cruza produtos da nota fiscal com os vendidos no PDV. Só libera depois do onboarding fiscal e do PDV (EPOC), com produtos das duas importações."
+          description="Essa etapa cruza produtos da nota fiscal com os vendidos no PDV. Libera quando o onboarding fiscal e o do PDV estiverem concluídos."
         >
           <ul className="mt-5 w-full space-y-2 text-left text-sm">
             <PrerequisiteRow
-              done={gate.fiscalDone}
+              status={fiscalStatus}
               label="Onboarding fiscal concluído"
             />
             <PrerequisiteRow
-              done={gate.pdvDone}
-              label="Onboarding do PDV (EPOC) concluído"
-            />
-            <PrerequisiteRow
-              done={gate.hasNfeProducts}
-              label="Produtos importados da nota fiscal"
-            />
-            <PrerequisiteRow
-              done={gate.hasEpocProducts}
-              label="Produtos importados do PDV (EPOC)"
+              status={pdvStatus}
+              label="Onboarding do PDV concluído"
             />
           </ul>
           <Button variant="outline" className="mt-6" asChild>
@@ -497,7 +528,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
         title={`${pending.toLocaleString("pt-BR")} ${
           pending === 1 ? "item pendente" : "itens pendentes"
         } de correlação`}
-        description="A IA cruza o nome de cada item vendido no PDV com todas as compras da nota: o que é o mesmo produto e o que é ficha com insumos. Nada é gravado até você confirmar."
+        description={`Nosso agente cruza os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos e atualizar corretamente o estoque e as movimentações. <br /><br/> Nada é gravado até você confirmar.`}
       >
         <Button
           type="button"
@@ -514,9 +545,11 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     return (
       <CorrelationIdleCard
         tone="muted"
-        icon={<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />}
+        icon={
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        }
         title="Interpretando vendidos e comprados"
-        description="A IA cruza todos os itens do PDV com as compras da nota. Isso pode levar um instante."
+        description="Nosso agente está cruzando os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos. Isso pode levar um instante."
       />
     );
   }

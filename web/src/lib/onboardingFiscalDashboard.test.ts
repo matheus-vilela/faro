@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isOnboardingFiscalDashboardCardVisible,
+  isOnboardingFiscalInterpretConfirmPhase,
   isOnboardingFiscalSearchingNotes,
   onboardingFiscalFoundNotesLabel,
   onboardingFiscalProcessedNotesLabel,
@@ -39,6 +41,48 @@ describe("isOnboardingFiscalSearchingNotes", () => {
     expect(
       isOnboardingFiscalSearchingNotes({
         list_exhausted: false,
+        completed: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("isOnboardingFiscalInterpretConfirmPhase", () => {
+  it("mostra Concluir quando a captura fechou e o utilizador ainda não confirmou", () => {
+    expect(
+      isOnboardingFiscalInterpretConfirmPhase({
+        capture_completed: true,
+        completed: false,
+        sync: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("não mostra Concluir se o onboarding já foi fechado", () => {
+    expect(
+      isOnboardingFiscalInterpretConfirmPhase({
+        capture_completed: true,
+        completed: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("isOnboardingFiscalDashboardCardVisible", () => {
+  it("mantém o card após a captura até o utilizador concluir", () => {
+    expect(
+      isOnboardingFiscalDashboardCardVisible({
+        capture_completed: true,
+        completed: false,
+        sync: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("esconde o card só depois de completed", () => {
+    expect(
+      isOnboardingFiscalDashboardCardVisible({
+        capture_completed: true,
         completed: true,
       }),
     ).toBe(false);

@@ -89,17 +89,16 @@ export type NfeCycleFlowDiagnosticInput = {
   listExhausted?: boolean;
 };
 
-/** Só fecha o card/onboarding quando a janela Focus acabou e tudo foi interpretado. */
+/**
+ * Captura da janela Focus concluída (listagem esgotada e XMLs interpretados).
+ * Não grava `onboarding_fiscal.completed` — o card espera o botão Concluir.
+ */
 export function canMarkOnboardingFiscalCompleted(input: {
   listExhausted: boolean;
   downloaded: number;
   processed: number;
 }): boolean {
-  return (
-    input.listExhausted &&
-    input.downloaded >= 1 &&
-    input.processed >= input.downloaded
-  );
+  return input.listExhausted && input.processed >= input.downloaded;
 }
 
 /** Diagnóstico inicial ao enfileirar (antes do worker processar). */

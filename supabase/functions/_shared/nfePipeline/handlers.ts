@@ -905,7 +905,6 @@ async function handleCloseCycle(
           nfes_sync: processedN,
           nfes_ignored: ignoredN,
         },
-        { markCompleted: true },
       );
       if (patch.error) {
         return { ok: false, error: patch.error, retryAfterMs: 15_000 };
