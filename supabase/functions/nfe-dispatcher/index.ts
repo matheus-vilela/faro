@@ -23,6 +23,14 @@ import { dispatcherCompaniesPerTick } from "../_shared/nfePipeline/env.ts";
 
 const LOG = "[nfe-dispatcher]";
 
+/** Onboarding fiscal ainda aberto → força mode=onboarding no ensure. */
+function nfeModeFromOnboardingFiscal(raw: unknown): "onboarding" | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.completed === true || o.capture_completed === true) return null;
+  return "onboarding";
+}
+
 /** Acorda o worker imediatamente (cron secret); falha é só log. */
 async function wakeNfeWorker(): Promise<void> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")?.replace(/\/+$/, "");
@@ -98,12 +106,19 @@ Deno.serve(async (req) => {
         ? body.window_start_date
         : null;
 
+    const { data: companyRow } = await admin
+      .from("companies")
+      .select("onboarding_fiscal")
+      .eq("id", companyId)
+      .maybeSingle();
+    const fiscalMode = nfeModeFromOnboardingFiscal(companyRow?.onboarding_fiscal);
+
     const { data: state, error: ensErr } = await admin.rpc(
       "nfe_sync_ensure_company",
       {
         p_company_id: companyId,
         p_window_start_date: windowDate,
-        p_mode: null,
+        p_mode: fiscalMode,
         p_wake: body.wake !== false,
       },
     );
@@ -256,6 +271,20 @@ Deno.serve(async (req) => {
       cycle_id: enq.cycleId,
       ...(enq.skipped ? { skipped: enq.skipped } : {}),
     });
+  }
+
+  if (enqueued > 0 || details.some((d) => d.skipped)) {
+    try {
+      // deno-lint-ignore no-explicit-any
+      const ER = (globalThis as any).EdgeRuntime;
+      if (ER && typeof ER.waitUntil === "function") {
+        ER.waitUntil(wakeNfeWorker());
+      } else {
+        void wakeNfeWorker();
+      }
+    } catch {
+      void wakeNfeWorker();
+    }
   }
 
   console.log(LOG, JSON.stringify({

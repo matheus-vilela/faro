@@ -88,3 +88,36 @@ export function onboardingFiscalSefazRetryAt(raw: unknown): string | null {
   const v = o.sefaz_retry_at;
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
+
+/** Listagem Focus/SEFAZ já esgotou as páginas (`list_exhausted`). */
+export function isOnboardingFiscalListExhausted(raw: unknown): boolean {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return false;
+  return o.list_exhausted === true;
+}
+
+/**
+ * Card: ainda a buscar NF-e na SEFAZ (páginas de listagem).
+ * Termina quando `list_exhausted` ou a captura/conclusão fecham.
+ */
+export function isOnboardingFiscalSearchingNotes(raw: unknown): boolean {
+  if (isOnboardingFiscalJsonCompleted(raw)) return false;
+  if (isOnboardingFiscalCaptureCompleted(raw)) return false;
+  if (isOnboardingFiscalSefazUnavailable(raw)) return false;
+  return !isOnboardingFiscalListExhausted(raw);
+}
+
+export function onboardingFiscalFoundNotesLabel(found: number): string {
+  const n = Math.max(0, Math.floor(Number.isFinite(found) ? found : 0));
+  if (n === 1) return "1 nota fiscal encontrada";
+  return `${n} notas fiscais encontradas`;
+}
+
+export function onboardingFiscalProcessedNotesLabel(
+  done: number,
+  max: number,
+): string {
+  const d = Math.max(0, Math.floor(Number.isFinite(done) ? done : 0));
+  const m = Math.max(0, Math.floor(Number.isFinite(max) ? max : 0));
+  return `${d} / ${m} notas processadas, interpretadas`;
+}

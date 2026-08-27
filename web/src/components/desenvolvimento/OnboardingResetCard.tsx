@@ -17,6 +17,7 @@ import {
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   resetCompanyOnboardingForDev,
+  triggerFiscalOnboardingSyncAfterDevReset,
   triggerPdvOnboardingInitialSyncAfterDevReset,
   type DevOnboardingResetTarget,
 } from "@/lib/devOnboardingReset";
@@ -32,7 +33,7 @@ const TARGET_LABELS: Record<
   fiscal: {
     title: "Repor onboarding fiscal?",
     description:
-      "Redefine onboarding_fiscal (sync ativo, completed false, contadores zerados) e remove nfes_recebidas_ultima_versao e nfes_recebidas_ultima_sync_at de focusnfe. O card de NF-e recebidas volta a aparecer no painel para testar o fluxo fiscal do zero.",
+      "Redefine onboarding_fiscal (sync ativo, completed false, contadores zerados), zera o cursor NF-e e inicia de imediato a listagem na SEFAZ. O card de NF-e recebidas volta ao painel.",
   },
   pdv: {
     title: "Repor onboarding PDV?",
@@ -42,7 +43,7 @@ const TARGET_LABELS: Record<
   both: {
     title: "Repor onboarding fiscal e PDV?",
     description:
-      "Repor fiscal e PDV como acima; no PDV também dispara onboarding_initial no EPOC. Inclui limpar o cursor NF-e em focusnfe. Mantém setup.epoc.",
+      "Repor fiscal e PDV como acima: dispara listagem SEFAZ e onboarding_initial no EPOC. Inclui limpar o cursor NF-e. Mantém setup.epoc.",
   },
 };
 
@@ -54,41 +55,58 @@ export function OnboardingResetCard() {
 
   const runReset = async () => {
     if (!currentCompany || !pendingTarget) return;
+    const target = pendingTarget;
+    const companyId = currentCompany.id;
     setResetting(true);
-    const { error } = await resetCompanyOnboardingForDev(
-      currentCompany.id,
-      pendingTarget,
-    );
-    setResetting(false);
-    if (error) {
-      toast.error(error);
-      return;
-    }
-    await refetchCompanies();
-    setPendingTarget(null);
+    try {
+      const { error } = await resetCompanyOnboardingForDev(companyId, target);
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      await refetchCompanies();
+      setPendingTarget(null);
 
-    const touchesPdv =
-      pendingTarget === "pdv" || pendingTarget === "both";
-    if (touchesPdv) {
-      const sync = await triggerPdvOnboardingInitialSyncAfterDevReset(
-        currentCompany.id,
-      );
-      if (sync.started) {
+      const touchesFiscal = target === "fiscal" || target === "both";
+      const touchesPdv = target === "pdv" || target === "both";
+      const started: string[] = [];
+
+      if (touchesFiscal) {
+        const fiscal = await triggerFiscalOnboardingSyncAfterDevReset(companyId);
+        if (fiscal.started) {
+          started.push("SEFAZ");
+        } else {
+          toast.warning(
+            fiscal.error ??
+              "Onboarding fiscal reposto, mas a sincronização SEFAZ não foi iniciada.",
+            { duration: 8000 },
+          );
+        }
+      }
+      if (touchesPdv) {
+        const sync = await triggerPdvOnboardingInitialSyncAfterDevReset(companyId);
+        if (sync.started) {
+          started.push("EPOC");
+        } else {
+          toast.warning(
+            sync.error ??
+              "Onboarding PDV reposto, mas a sincronização EPOC não foi iniciada.",
+            { duration: 8000 },
+          );
+        }
+      }
+
+      if (started.length) {
         toast.success(
-          "Onboarding PDV reposto. Sincronização EPOC iniciada em segundo plano — acompanhe no painel.",
+          `Onboarding reposto. Sincronização ${started.join(" e ")} iniciada em segundo plano — acompanhe no painel.`,
           { duration: 6000 },
         );
-      } else {
-        toast.warning(
-          sync.error ??
-            "Onboarding PDV reposto, mas a sincronização EPOC não foi iniciada.",
-          { duration: 8000 },
-        );
+      } else if (!touchesFiscal && !touchesPdv) {
+        toast.success("Onboarding reposto. Confira os cards no painel.");
       }
-      return;
+    } finally {
+      setResetting(false);
     }
-
-    toast.success("Onboarding reposto. Confira os cards no painel.");
   };
 
   const disabled = !currentCompany || resetting;
@@ -111,8 +129,8 @@ export function OnboardingResetCard() {
             da unidade atual para testar de novo os fluxos exibidos no painel
             (NF-e Focus e vendas EPOC). O reset fiscal também zera o cursor em{" "}
             <code className="rounded bg-muted px-1 text-xs">focusnfe</code>{" "}
-            (versão e última sync de NF-e recebidas). Não reinicia o wizard nem
-            limpa <code className="rounded bg-muted px-1 text-xs">setup.epoc</code>.
+            e dispara a listagem na SEFAZ. Não reinicia o wizard nem limpa{" "}
+            <code className="rounded bg-muted px-1 text-xs">setup.epoc</code>.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">

@@ -15,6 +15,7 @@ import { EpocSyncDayCard } from "@/components/desenvolvimento/EpocSyncDayCard";
 import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
+import { SyncHistoryPurgeCard } from "@/components/desenvolvimento/SyncHistoryPurgeCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -356,6 +357,7 @@ export function Desenvolvimento() {
         <div className="space-y-6">
           <UnitSetupResetCard />
           <OnboardingResetCard />
+          <SyncHistoryPurgeCard />
         </div>
       ) : null}
 

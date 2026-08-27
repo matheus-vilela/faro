@@ -4,6 +4,7 @@ import {
   mergeOnboardingPdv,
 } from "@/lib/onboardingPdvDefaults";
 import { triggerEpocCsvSyncInBackground } from "@/services/epocSyncCsvService";
+import { invokeNfePipelineForCompany } from "@/services/nfePipelineService";
 import { supabase } from "@/lib/supabase";
 
 export type DevOnboardingResetTarget = "fiscal" | "pdv" | "both";
@@ -120,5 +121,49 @@ export async function triggerPdvOnboardingInitialSyncAfterDevReset(
     lockOnboardingPdv: true,
     resetPdvOnboardingCompleted: true,
   });
+  return { started: true };
+}
+
+/**
+ * Repõe nfe_sync_state (cursor 0, mode onboarding) e acorda o dispatcher —
+ * equivalente ao gatilho do wizard após criar a unidade com Focus.
+ */
+export async function triggerFiscalOnboardingSyncAfterDevReset(
+  companyId: string,
+): Promise<{ started: boolean; error?: string }> {
+  const { data, error } = await supabase
+    .from("companies")
+    .select("focusnfe")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error) return { started: false, error: error.message };
+
+  const raw = data?.focusnfe;
+  const focus =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  if (!String(focus.id_empresa ?? "").trim()) {
+    return {
+      started: false,
+      error:
+        "Unidade sem id_empresa Focus. Configure a integração fiscal antes de repor o onboarding.",
+    };
+  }
+
+  const { error: rpcErr } = await supabase.rpc("nfe_sync_reset_onboarding", {
+    p_company_id: companyId,
+  });
+  if (rpcErr) return { started: false, error: rpcErr.message };
+
+  const res = await invokeNfePipelineForCompany({ companyId });
+  if (!res.ok) {
+    return {
+      started: false,
+      error:
+        res.error ||
+        "Onboarding fiscal reposto, mas o pipeline NF-e não foi iniciado.",
+    };
+  }
   return { started: true };
 }

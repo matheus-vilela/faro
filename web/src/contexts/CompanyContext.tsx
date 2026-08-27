@@ -28,6 +28,8 @@ interface OnboardingFiscalMetrics {
   nfes_sync: number;
   nfes_ignored: number;
   completed?: boolean;
+  capture_completed?: boolean;
+  list_exhausted?: boolean;
   sefaz_unavailable?: boolean;
   sefaz_unavailable_at?: string | null;
   sefaz_retry_at?: string | null;

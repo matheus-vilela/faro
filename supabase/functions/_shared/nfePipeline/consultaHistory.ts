@@ -7,7 +7,7 @@ import {
   buildNfeQueuedFlowDiagnostic,
   type NfeFlowDiagnostic,
 } from "../nfeFlowDiagnostic.ts";
-import { enqueueJob, onboardingHasActiveWork } from "./db.ts";
+import { enqueueJob, enqueuePendingInterpretations, onboardingHasActiveWork } from "./db.ts";
 
 const LOG = "[nfe-pipeline]";
 
@@ -24,6 +24,20 @@ export async function upsertQueuedNfeConsultaHistory(
     onboarding: boolean;
   },
 ): Promise<void> {
+  const { data: existing } = await admin
+    .from("nfe_consulta_history")
+    .select("listed_count, downloaded_count, processed_count")
+    .eq("company_id", input.companyId)
+    .eq("exec_id", input.cycleId)
+    .maybeSingle();
+  const listed = Number(existing?.listed_count ?? 0) || 0;
+  const downloaded = Number(existing?.downloaded_count ?? 0) || 0;
+  const processed = Number(existing?.processed_count ?? 0) || 0;
+  // Não zerar um ciclo já em progresso (senão a UI volta a 0/X a cada poll).
+  if (listed > 0 || downloaded > 0 || processed > 0) {
+    return;
+  }
+
   const flowDiagnostic = buildNfeQueuedFlowDiagnostic();
   const { error } = await admin.from("nfe_consulta_history").upsert(
     {
@@ -77,6 +91,18 @@ export async function enqueueSyncCompanyWithQueuedHistory(
     ? await onboardingHasActiveWork(admin, input.companyId)
     : { busy: false, cycleId: null as string | null };
   if (active.busy) {
+    if (active.reason === "pending_interpret") {
+      try {
+        await enqueuePendingInterpretations(admin, input.companyId);
+      } catch (e) {
+        console.warn(
+          LOG,
+          "enqueue_pending_on_skip",
+          input.companyId,
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
     return {
       jobId: null,
       cycleId: active.cycleId,
@@ -207,6 +233,21 @@ export async function recordConsultaHistory(
     const processed = processedRes.count ?? 0;
     const processFailed = processFailedRes.count ?? 0;
 
+    let listExhausted: boolean | undefined;
+    if (onboarding) {
+      const { data: co } = await admin
+        .from("companies")
+        .select("onboarding_fiscal")
+        .eq("id", companyId)
+        .maybeSingle();
+      const fiscal =
+        co?.onboarding_fiscal && typeof co.onboarding_fiscal === "object" &&
+          !Array.isArray(co.onboarding_fiscal)
+          ? (co.onboarding_fiscal as Record<string, unknown>)
+          : {};
+      listExhausted = fiscal.list_exhausted === true;
+    }
+
     const flowDiagnostic =
       opts?.flowDiagnostic ??
       buildNfeCycleFlowDiagnostic({
@@ -219,6 +260,7 @@ export async function recordConsultaHistory(
         processed,
         processFailed,
         ignored,
+        listExhausted,
       });
 
     const { error: insErr } = await admin.from("nfe_consulta_history").upsert(

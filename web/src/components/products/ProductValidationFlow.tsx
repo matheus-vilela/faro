@@ -13,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useCompany } from "@/contexts/CompanyContext";
 import {
   dashboardImportReviewFinalizeRecipeProductSales,
   dashboardImportReviewMarkTechSheetSaved,
@@ -21,6 +22,8 @@ import {
   addPurchaseAsRecipeIngredient,
   createProductRecipeMatch,
 } from "@/lib/onboardingProductRecipeMatch";
+import { isOnboardingFiscalFlowCompleted } from "@/lib/onboardingFiscalDashboard";
+import { isOnboardingPdvJsonCompleted } from "@/lib/onboardingPdvDefaults";
 import {
   fetchProductSetupQueue,
   maxTurnoverQty,
@@ -36,9 +39,16 @@ import type {
   SameItemSuggestion,
 } from "@/lib/productValidation/types";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  Circle,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 async function fetchProductById(productId: string): Promise<Product | null> {
@@ -59,7 +69,93 @@ function fallbackUnit(unit: string): string {
   return unit && unit !== "—" ? unit : "un";
 }
 
+function correlationPrereqs(
+  onboardingFiscal: unknown,
+  onboardingPdv: unknown,
+  queue: ProductSetupQueue | null,
+) {
+  const fiscalDone = isOnboardingFiscalFlowCompleted(onboardingFiscal);
+  const pdvDone = isOnboardingPdvJsonCompleted(onboardingPdv);
+  const fiscal = onboardingFiscal as { nfes_sync?: number } | null | undefined;
+  const pdv = onboardingPdv as { sales_sync?: number } | null | undefined;
+  const hasNfeProducts =
+    Number(fiscal?.nfes_sync ?? 0) > 0 ||
+    (queue?.purchases.length ?? 0) > 0 ||
+    (queue?.counts.purchases ?? 0) > 0;
+  const hasEpocProducts =
+    Number(pdv?.sales_sync ?? 0) > 0 ||
+    (queue?.soldOnly.length ?? 0) > 0 ||
+    (queue?.counts.sold ?? 0) > 0 ||
+    (queue?.items.some(
+      (item) =>
+        item.kind === "recipe_without_ingredients" ||
+        item.priorityEpoc === true,
+    ) ??
+      false);
+  return {
+    fiscalDone,
+    pdvDone,
+    hasNfeProducts,
+    hasEpocProducts,
+    canStart: fiscalDone && pdvDone && hasNfeProducts && hasEpocProducts,
+  };
+}
+
+function PrerequisiteRow({
+  done,
+  label,
+}: {
+  done: boolean;
+  label: string;
+}) {
+  return (
+    <li className="flex items-center gap-2">
+      {done ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+      ) : (
+        <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+      <span className={done ? "text-foreground" : "text-muted-foreground"}>
+        {label}
+      </span>
+    </li>
+  );
+}
+
+function CorrelationIdleCard({
+  tone,
+  icon,
+  title,
+  description,
+  children,
+}: {
+  tone: "amber" | "muted" | "ok";
+  icon: ReactNode;
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "mx-auto w-full max-w-xl rounded-xl border px-6 py-10",
+        tone === "amber" && "border-amber-500/35 bg-amber-500/[0.07]",
+        tone === "muted" && "border-border/80 bg-card",
+        tone === "ok" && "border-border/80 bg-card",
+      )}
+    >
+      <div className="mx-auto flex max-w-md flex-col items-center text-center">
+        <div className="mb-3">{icon}</div>
+        <p className="text-base font-semibold">{title}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
+  const { currentCompany } = useCompany();
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -87,6 +183,17 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   }, [loadQueue]);
 
   const startValidation = async () => {
+    const gate = correlationPrereqs(
+      currentCompany?.onboarding_fiscal,
+      currentCompany?.onboarding_pdv,
+      queue,
+    );
+    if (!gate.canStart) {
+      toast.error(
+        "Finalize o onboarding fiscal e o do PDV, com produtos da nota e do EPOC, para iniciar a correlação.",
+      );
+      return;
+    }
     setRunning(true);
     const next = await loadQueue();
     const correlated = await invokeCorrelateSoldPurchased({
@@ -130,9 +237,10 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
 
   const confirmSameItem = async (suggestionId: string) => {
     const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
+    if (!suggestion) return;
     const partnerId = samePick[suggestionId];
-    const soldId = soldPick[suggestionId] ?? suggestion?.sold.productId;
-    if (!suggestion || !partnerId || !soldId) return;
+    const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
+    if (!partnerId || !soldId) return;
     setBusy(true);
     const product = await fetchProductById(soldId);
     setBusy(false);
@@ -309,10 +417,12 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
 
   if (loading && !queue) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Carregando itens para validar…
-      </div>
+      <CorrelationIdleCard
+        tone="muted"
+        icon={<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />}
+        title="Carregando itens"
+        description="Buscando produtos da nota e do PDV para a correlação."
+      />
     );
   }
 
@@ -325,57 +435,89 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   }
 
   const pending = queue?.counts.total ?? 0;
+  const gate = correlationPrereqs(
+    currentCompany?.onboarding_fiscal,
+    currentCompany?.onboarding_pdv,
+    queue,
+  );
 
   if (!result && !running) {
+    if (!gate.canStart) {
+      return (
+        <CorrelationIdleCard
+          tone="muted"
+          icon={
+            <Sparkles className="h-8 w-8 text-muted-foreground" />
+          }
+          title="Correlação ainda não disponível"
+          description="Essa etapa cruza produtos da nota fiscal com os vendidos no PDV. Só libera depois do onboarding fiscal e do PDV (EPOC), com produtos das duas importações."
+        >
+          <ul className="mt-5 w-full space-y-2 text-left text-sm">
+            <PrerequisiteRow
+              done={gate.fiscalDone}
+              label="Onboarding fiscal concluído"
+            />
+            <PrerequisiteRow
+              done={gate.pdvDone}
+              label="Onboarding do PDV (EPOC) concluído"
+            />
+            <PrerequisiteRow
+              done={gate.hasNfeProducts}
+              label="Produtos importados da nota fiscal"
+            />
+            <PrerequisiteRow
+              done={gate.hasEpocProducts}
+              label="Produtos importados do PDV (EPOC)"
+            />
+          </ul>
+          <Button variant="outline" className="mt-6" asChild>
+            <Link to="/app">Ir ao dashboard</Link>
+          </Button>
+        </CorrelationIdleCard>
+      );
+    }
+
     if (pending === 0) {
       return (
-        <div className="rounded-xl border border-border/80 bg-card p-4">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-            <div>
-              <p className="text-sm font-semibold">Cadastro alinhado</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Novos itens da nota ou do PDV aparecem aqui para validar
-                vínculos pelo nome.
-              </p>
-            </div>
-          </div>
-        </div>
+        <CorrelationIdleCard
+          tone="ok"
+          icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />}
+          title="Cadastro alinhado"
+          description="Novos itens da nota ou do PDV aparecem aqui para validar vínculos pelo nome."
+        />
       );
     }
 
     return (
-      <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.07] p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-800 dark:text-amber-400" />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold">
-                {pending.toLocaleString("pt-BR")}{" "}
-                {pending === 1 ? "item pendente" : "itens pendentes"} de
-                correlação
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                A IA cruza o nome de cada item vendido no PDV com todas as
-                compras da nota: o que é o mesmo produto e o que é ficha com
-                insumos. Nada é gravado até você confirmar.
-              </p>
-            </div>
-          </div>
-          <Button type="button" onClick={() => void startValidation()}>
-            Iniciar validação
-          </Button>
-        </div>
-      </div>
+      <CorrelationIdleCard
+        tone="amber"
+        icon={
+          <Sparkles className="h-8 w-8 text-amber-800 dark:text-amber-400" />
+        }
+        title={`${pending.toLocaleString("pt-BR")} ${
+          pending === 1 ? "item pendente" : "itens pendentes"
+        } de correlação`}
+        description="A IA cruza o nome de cada item vendido no PDV com todas as compras da nota: o que é o mesmo produto e o que é ficha com insumos. Nada é gravado até você confirmar."
+      >
+        <Button
+          type="button"
+          className="mt-6"
+          onClick={() => void startValidation()}
+        >
+          Iniciar validação
+        </Button>
+      </CorrelationIdleCard>
     );
   }
 
   if (running) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-border/80 bg-card p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Interpretando todos os vendidos e comprados com IA…
-      </div>
+      <CorrelationIdleCard
+        tone="muted"
+        icon={<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />}
+        title="Interpretando vendidos e comprados"
+        description="A IA cruza todos os itens do PDV com as compras da nota. Isso pode levar um instante."
+      />
     );
   }
 

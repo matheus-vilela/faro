@@ -78,7 +78,9 @@ export const ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS = 15 * 60 * 1000;
  */
 export const ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS = 15 * 1000;
 
-export function parseOnboardingPdvImportStartedAtMs(raw: unknown): number | null {
+export function parseOnboardingPdvImportStartedAtMs(
+  raw: unknown,
+): number | null {
   const o = onboardingPdvObject(raw);
   const v = o?.import_started_at;
   if (typeof v !== "string" || !v.trim()) return null;
@@ -106,26 +108,31 @@ export function isOnboardingPdvImportStalledMidProgress(raw: unknown): boolean {
 /** Mostrar «Retomar importação» se o job ficou órfão na fila. */
 export function shouldShowOnboardingPdvResumeImportButton(
   raw: unknown,
+  lastUpdateAtMs: number = Date.now(),
   nowMs: number = Date.now(),
 ): boolean {
   if (!isOnboardingPdvProcessingSales(raw)) return false;
   if (isOnboardingPdvConfirmPhase(raw)) return false;
 
+  let lastUpdateMs = lastUpdateAtMs;
+
   // Caso A: sem % ainda (fila/portal) — espera 15 min.
   if (isOnboardingPdvImportAwaitingSalesTotal(raw)) {
-    let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
-    if (startedMs == null && isOnboardingPdvImportActive(raw)) {
-      startedMs = 0;
+    // let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
+    if (lastUpdateMs == null && isOnboardingPdvImportActive(raw)) {
+      lastUpdateMs = 0;
     }
-    if (startedMs == null) return false;
-    return nowMs - startedMs >= ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS;
+    if (lastUpdateMs == null) return false;
+    return nowMs - lastUpdateMs >= ONBOARDING_PDV_RESUME_IMPORT_DELAY_MS;
   }
 
   // Caso B: parou no meio (ex. 20/1431) — a continuação do chunk falhou.
   if (isOnboardingPdvImportStalledMidProgress(raw)) {
-    let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
-    if (startedMs == null) startedMs = 0;
-    return nowMs - startedMs >= ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS;
+    // let startedMs = parseOnboardingPdvImportStartedAtMs(raw);
+    if (lastUpdateMs == null) lastUpdateMs = 0;
+    return (
+      nowMs - lastUpdateMs >= ONBOARDING_PDV_RESUME_STALLED_PROGRESS_DELAY_MS
+    );
   }
 
   return false;
@@ -148,16 +155,12 @@ export function isOnboardingPdvConfirmPhase(raw: unknown): boolean {
 export function isOnboardingPdvPortalFailure(raw: unknown): boolean {
   const o = parseOnboardingPdv(raw);
   if (o.portal_busy) return false;
-  return (
-    o.portal_outcome === "no_tbl_export" || o.portal_outcome === "failed"
-  );
+  return o.portal_outcome === "no_tbl_export" || o.portal_outcome === "failed";
 }
 
 export function isOnboardingPdvImportActive(raw: unknown): boolean {
   const o = parseOnboardingPdv(raw);
-  return (
-    o.import_status === "pending" || o.import_status === "processing"
-  );
+  return o.import_status === "pending" || o.import_status === "processing";
 }
 
 /** Import de vendas em curso (ainda não na fase de confirmação). */
@@ -181,9 +184,7 @@ export function isOnboardingPdvAwaitingEpocSync(raw: unknown): boolean {
   return true;
 }
 
-export function onboardingPdvDashboardProgressPercent(
-  raw: unknown,
-): number {
+export function onboardingPdvDashboardProgressPercent(raw: unknown): number {
   const o = parseOnboardingPdv(raw);
   if (isOnboardingPdvConfirmPhase(raw)) return 100;
   if (o.import_status === "failed") return 0;

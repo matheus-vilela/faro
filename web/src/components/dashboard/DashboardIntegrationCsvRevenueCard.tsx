@@ -66,6 +66,10 @@ export function DashboardIntegrationCsvRevenueCard({
   );
 
   useEffect(() => {
+    setResumeImportClockMs(Date.now());
+  }, [percent]);
+
+  useEffect(() => {
     if (!processingSales || confirmPhase || showResumeImportButton) {
       return;
     }
