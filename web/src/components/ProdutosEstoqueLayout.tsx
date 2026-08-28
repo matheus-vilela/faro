@@ -16,8 +16,8 @@ import {
   ChefHat,
   ClipboardList,
   ConciergeBell,
-  Home,
   Inbox,
+  Link2,
   Package,
   ShoppingCart,
   SlidersHorizontal,
@@ -42,15 +42,15 @@ const STOCK_GROUPS: {
   links: StockLink[];
 }[] = [
   {
-    id: "inicio",
-    label: "Início",
-    description: "Insights e setup",
-    icon: Home,
+    id: "correlacao",
+    label: "Correlação",
+    description: "PDV × notas fiscais",
+    icon: Link2,
     links: [
       {
         to: PRODUCT_HOME_PATH,
-        label: "Início",
-        icon: Home,
+        label: "Correlação",
+        icon: Link2,
         end: true,
       },
     ],
@@ -181,7 +181,7 @@ export function ProdutosEstoqueLayout() {
       <PageHeader
         icon={Package}
         title="Produtos e estoque"
-        description="Visão geral, catálogo, movimentações, contagem, fichas técnicas e serviços."
+        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas técnicas e serviços."
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">

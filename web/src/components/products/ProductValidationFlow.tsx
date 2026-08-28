@@ -1,4 +1,5 @@
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
+import { ProductCorrelationKpis } from "@/components/products/ProductCorrelationKpis";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import { ProductSetupInbox } from "@/components/products/ProductSetupInbox";
 import {
@@ -455,6 +456,17 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     return () => window.clearInterval(poll);
   }, [canStart, refetchCompanies]);
 
+  const pending = queue?.counts.total ?? 0;
+  const showKpis = Boolean(canStart && queue && !queue.error);
+  const wrap = (node: ReactNode) => (
+    <div className="space-y-6">
+      {showKpis && queue ? (
+        <ProductCorrelationKpis counts={queue.counts} />
+      ) : null}
+      {node}
+    </div>
+  );
+
   if (loading && !queue) {
     return (
       <CorrelationIdleCard
@@ -475,8 +487,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       </p>
     );
   }
-
-  const pending = queue?.counts.total ?? 0;
 
   if (!result && !running) {
     if (!canStart) {
@@ -509,17 +519,17 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     }
 
     if (pending === 0) {
-      return (
+      return wrap(
         <CorrelationIdleCard
           tone="ok"
           icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />}
           title="Cadastro alinhado"
-          description="Novos itens da nota ou do PDV aparecem aqui para validar vínculos pelo nome."
-        />
+          description="Novos itens da nota ou do PDV aparecem aqui para correlacionar comprados e vendidos."
+        />,
       );
     }
 
-    return (
+    return wrap(
       <CorrelationIdleCard
         tone="amber"
         icon={
@@ -528,7 +538,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
         title={`${pending.toLocaleString("pt-BR")} ${
           pending === 1 ? "item pendente" : "itens pendentes"
         } de correlação`}
-        description={`Nosso agente cruza os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos e atualizar corretamente o estoque e as movimentações. <br /><br/> Nada é gravado até você confirmar.`}
+        description="Nosso agente cruza os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos e atualizar corretamente o estoque e as movimentações. Nada é gravado até você confirmar."
       >
         <Button
           type="button"
@@ -537,12 +547,12 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
         >
           Iniciar validação
         </Button>
-      </CorrelationIdleCard>
+      </CorrelationIdleCard>,
     );
   }
 
   if (running) {
-    return (
+    return wrap(
       <CorrelationIdleCard
         tone="muted"
         icon={
@@ -550,7 +560,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
         }
         title="Interpretando vendidos e comprados"
         description="Nosso agente está cruzando os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos. Isso pode levar um instante."
-      />
+      />,
     );
   }
 
@@ -559,7 +569,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const hasConfirm = confirmRows.length > 0;
   const hasResidual = residualKeys.length > 0;
 
-  return (
+  return wrap(
     <div className="space-y-6">
       <div className="rounded-xl border border-border/80 bg-card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -756,6 +766,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           ) : null}
         </SheetContent>
       </Sheet>
-    </div>
+    </div>,
   );
 }
