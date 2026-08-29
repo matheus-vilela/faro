@@ -411,15 +411,24 @@ export function Checklists() {
         p_company_member_id: memberId,
       },
     );
-    if (error || !(data as { ok?: boolean })?.ok) {
-      toast.error("Falha ao gerar link.");
+    let row = data as { ok?: boolean; error?: string; slug?: string; token?: string } | string | null;
+    if (typeof row === "string") {
+      try {
+        row = JSON.parse(row) as typeof row;
+      } catch {
+        row = null;
+      }
+    }
+    const payload = row && typeof row === "object" ? row : null;
+    if (error || !payload?.ok) {
+      const detail = error?.message || payload?.error;
+      toast.error(detail ? `Falha ao gerar link: ${detail}` : "Falha ao gerar link.");
       return;
     }
-    const row = data as { slug?: string; token?: string };
     const base = window.location.origin.replace(/\/$/, "");
-    const url = row.slug
-      ? `${base}/k/${row.slug}`
-      : `${base}/checklist/${row.token}`;
+    const url = payload.slug
+      ? `${base}/k/${payload.slug}`
+      : `${base}/checklist/${payload.token}`;
     try {
       await navigator.clipboard.writeText(url);
       toast.success("Link copiado.");
