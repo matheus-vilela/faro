@@ -385,12 +385,19 @@ export function Checklists() {
       .eq("slug", slug)
       .maybeSingle();
     if (error || !data) {
-      toast.error("Template indisponível.");
+      toast.error(
+        error?.message
+          ? `Template indisponível: ${error.message}`
+          : "Template indisponível.",
+      );
       return;
     }
     setTitle((data.title as string) ?? "");
     setDescription((data.description as string) ?? "");
-    const items = (data.items as { title?: string }[]) ?? [];
+    const rawItems = data.items;
+    const items = Array.isArray(rawItems)
+      ? (rawItems as { title?: string }[])
+      : [];
     setItemLines(items.map((i) => i.title ?? "").filter(Boolean).join("\n"));
     setShowPreview(true);
     toast.success("Template aplicado — revise e salve.");
