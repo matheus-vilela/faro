@@ -1,3 +1,4 @@
+import { ChecklistCatalogList } from "@/components/checklist/ChecklistCatalogList";
 import { ChecklistConferenceSection } from "@/components/checklist/ChecklistConferenceSection";
 import { ChecklistHistorySection } from "@/components/checklist/ChecklistHistorySection";
 import { ChecklistNotificationSettingsCard } from "@/components/checklist/ChecklistNotificationSettingsCard";
@@ -31,17 +32,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
-  formatRecurrenceSummary,
   toggleWeekdayBit,
   type ChecklistRecurrenceMeta,
 } from "@/lib/checklistRecurrence";
@@ -54,10 +48,8 @@ import {
   LayoutGrid,
   ListChecks,
   Loader2,
-  Pencil,
   Plus,
   Sparkles,
-  Trash2,
   Trophy,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -96,56 +88,6 @@ function splitItemLines(raw: string): string[] {
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-}
-
-function GenerateLinkButton({
-  assignees,
-  onGenerate,
-}: {
-  assignees: { id: string; name: string }[];
-  onGenerate: (memberId: string) => void;
-}) {
-  if (assignees.length === 0) {
-    return (
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled
-        title="Atribua um operador a este checklist"
-      >
-        Gerar link
-      </Button>
-    );
-  }
-  if (assignees.length === 1) {
-    return (
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => onGenerate(assignees[0]!.id)}
-      >
-        Gerar link
-      </Button>
-    );
-  }
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          Gerar link
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {assignees.map((m) => (
-          <DropdownMenuItem key={m.id} onClick={() => onGenerate(m.id)}>
-            {m.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }
 
 export function Checklists() {
@@ -674,9 +616,10 @@ export function Checklists() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Checklists</CardTitle>
+                <CardTitle className="text-base">Rotinas cadastradas</CardTitle>
                 <CardDescription>
-                  Só operadores ativos entram na atribuição e no WhatsApp.
+                  Quem faz cada checklist e em quais dias. Só operadores
+                  ativos entram na atribuição e no WhatsApp.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -687,48 +630,26 @@ export function Checklists() {
                     Nenhum checklist ainda.
                   </p>
                 ) : (
-                  <ul className="divide-y rounded-md border">
-                    {rows.map((r) => (
-                      <li
-                        key={r.id}
-                        className="flex flex-wrap items-center justify-between gap-2 p-3"
-                      >
-                        <div>
-                          <p className="font-medium">{r.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatRecurrenceSummary(rowToMeta(r))} ·{" "}
-                            {r.active ? "ativo" : "inativo"}
-                          </p>
-                        </div>
-                        <div className="flex gap-1">
-                          <GenerateLinkButton
-                            assignees={assignedByChecklist[r.id] ?? []}
-                            onGenerate={(memberId) =>
-                              void startRunForMember(r.id, memberId)
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void openEdit(r)}
-                            aria-label="Editar"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void remove(r)}
-                            aria-label="Excluir"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  <ChecklistCatalogList
+                    checklists={rows.map((r) => ({
+                      id: r.id,
+                      title: r.title,
+                      active: r.active,
+                      recurrence: rowToMeta(r),
+                    }))}
+                    assignedByChecklist={assignedByChecklist}
+                    onGenerate={(checklistId, memberId) =>
+                      void startRunForMember(checklistId, memberId)
+                    }
+                    onEdit={(id) => {
+                      const r = rows.find((x) => x.id === id);
+                      if (r) void openEdit(r);
+                    }}
+                    onRemove={(id) => {
+                      const r = rows.find((x) => x.id === id);
+                      if (r) void remove(r);
+                    }}
+                  />
                 )}
               </CardContent>
             </Card>
