@@ -174,6 +174,21 @@ async function createChecklistRun(
 
   if (eAsg || !asg) return null;
 
+  const { data: existing } = await supabase
+    .from("checklist_runs")
+    .select("id, token")
+    .eq("company_id", companyId)
+    .eq("checklist_id", checklistId)
+    .eq("company_member_id", companyMemberId)
+    .in("status", ["open", "needs_rework"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.id && existing?.token) {
+    return { token: existing.token as string, runId: existing.id as string };
+  }
+
   const { data: run, error: e3 } = await supabase
     .from("checklist_runs")
     .insert({

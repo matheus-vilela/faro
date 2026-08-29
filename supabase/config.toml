@@ -124,3 +124,7 @@ verify_jwt = true
 
 [functions.correlate-sold-purchased]
 verify_jwt = false
+
+# JWT validado no handler (sessão). Gateway sem JWT para o preflight CORS.
+[functions.notify-checklist-rework]
+verify_jwt = false

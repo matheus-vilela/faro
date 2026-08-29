@@ -27,7 +27,7 @@ export function RedirectChecklistSlug() {
         return;
       }
       if (data == null || data === "") {
-        setErr("Link inválido, expirado ou checklist já enviado.");
+        setErr("Este checklist está em conferência ou já foi enviado.");
         return;
       }
       setToken(String(data));

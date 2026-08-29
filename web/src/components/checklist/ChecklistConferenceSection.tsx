@@ -27,9 +27,11 @@ import {
 } from "@/lib/checklistOperationalTypes";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { CheckCheck, Loader2, RotateCcw } from "lucide-react";
+import { CheckCheck, Copy, Loader2, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+type ShortLinkEmbed = { slug: string } | { slug: string }[] | null;
 
 type RunRow = {
   id: string;
@@ -38,6 +40,7 @@ type RunRow = {
   review_notes: string | null;
   checklists: { title: string } | null;
   company_members: { name: string } | null;
+  checklist_run_short_links?: ShortLinkEmbed;
 };
 
 type ItemRow = {
@@ -61,6 +64,52 @@ function formatSubmittedAt(iso: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function slugFromRun(row: RunRow): string | null {
+  const embed = row.checklist_run_short_links;
+  if (!embed) return null;
+  if (Array.isArray(embed)) return embed[0]?.slug ?? null;
+  return embed.slug ?? null;
+}
+
+function publicRunUrl(slug: string): string {
+  const base = window.location.origin.replace(/\/$/, "");
+  return `${base}/k/${slug}`;
+}
+
+async function copyRunLink(slug: string): Promise<boolean> {
+  const url = publicRunUrl(slug);
+  try {
+    await navigator.clipboard.writeText(url);
+    toast.success("Link copiado.");
+    return true;
+  } catch {
+    toast.message(url);
+    return false;
+  }
+}
+
+function CopyRunLinkButton({
+  slug,
+}: {
+  slug: string | null;
+}) {
+  if (!slug) return null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={(e) => {
+        e.stopPropagation();
+        void copyRunLink(slug);
+      }}
+    >
+      <Copy className="mr-1.5 h-3.5 w-3.5" />
+      Copiar link
+    </Button>
+  );
 }
 
 function formatItemValue(value: Record<string, unknown> | null): string | null {
@@ -176,11 +225,13 @@ function QueueList({
   emptyLabel,
   onOpen,
   emphasized,
+  showLink,
 }: {
   rows: RunRow[];
   emptyLabel: string;
   onOpen: (id: string) => void;
   emphasized?: boolean;
+  showLink?: boolean;
 }) {
   const view = useSheetListView();
   const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
@@ -200,13 +251,16 @@ function QueueList({
     return (
       <ul className="space-y-2">
         {sorted.map((r) => (
-          <li key={r.id}>
+          <li
+            key={r.id}
+            className={cn(
+              "rounded-xl border text-sm",
+              emphasized && "border-primary/40 bg-primary/5",
+            )}
+          >
             <button
               type="button"
-              className={cn(
-                "w-full rounded-xl border px-3 py-3 text-left text-sm transition-colors hover:bg-muted/40",
-                emphasized && "border-primary/40 bg-primary/5",
-              )}
+              className="w-full px-3 py-3 text-left transition-colors hover:bg-muted/40"
               onClick={() => onOpen(r.id)}
             >
               <div className="flex items-start justify-between gap-2">
@@ -221,6 +275,14 @@ function QueueList({
                 {r.company_members?.name ?? "—"} · {formatSubmittedAt(r.submitted_at)}
               </p>
             </button>
+            {showLink ? (
+              <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  {slugFromRun(r) ? `/k/${slugFromRun(r)}` : "Sem link"}
+                </span>
+                <CopyRunLinkButton slug={slugFromRun(r)} />
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -287,14 +349,17 @@ function QueueList({
                 </Badge>
               </td>
               <td className="px-3 py-2.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onOpen(r.id)}
-                >
-                  Conferir
-                </Button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {showLink ? <CopyRunLinkButton slug={slugFromRun(r)} /> : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onOpen(r.id)}
+                  >
+                    Conferir
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}
@@ -341,7 +406,8 @@ export function ChecklistConferenceSection({
         `
         id, status, submitted_at, review_notes,
         checklists ( title ),
-        company_members ( name )
+        company_members ( name ),
+        checklist_run_short_links ( slug )
       `,
       )
       .eq("company_id", companyId)
@@ -403,13 +469,46 @@ export function ChecklistConferenceSection({
       p_notes: notes || null,
     });
     setBusy(false);
-    if (error || !(data as { ok?: boolean })?.ok) {
+    let row = data as
+      | { ok?: boolean; error?: string; slug?: string }
+      | string
+      | null;
+    if (typeof row === "string") {
+      try {
+        row = JSON.parse(row) as { ok?: boolean; error?: string; slug?: string };
+      } catch {
+        row = null;
+      }
+    }
+    const payload = row && typeof row === "object" ? row : null;
+    if (error || !payload?.ok) {
       toast.error("Falha ao salvar conferência.");
       return;
     }
-    toast.success(
-      status === "approved" ? "Checklist aprovado." : "Devolvido para refazer.",
-    );
+    if (status === "approved") {
+      toast.success("Checklist aprovado.");
+    } else {
+      const slug = payload.slug;
+      if (slug) {
+        try {
+          await navigator.clipboard.writeText(publicRunUrl(slug));
+          toast.success("Devolvido para refazer. Link copiado.");
+        } catch {
+          toast.success("Devolvido para refazer.");
+          toast.message(publicRunUrl(slug));
+        }
+      } else {
+        toast.success("Devolvido para refazer.");
+      }
+      void supabase.functions
+        .invoke("notify-checklist-rework", { body: { run_id: active } })
+        .then(({ data: n, error: nErr }) => {
+          const body = n as { ok?: boolean; skipped?: boolean; error?: string } | null;
+          if (nErr || (body && body.ok === false && !body.skipped)) {
+            toast.message("Não foi possível avisar no WhatsApp. Use o link copiado.");
+          }
+        });
+    }
     setActive(null);
     await load();
   };
@@ -467,6 +566,7 @@ export function ChecklistConferenceSection({
               rows={returned}
               emptyLabel="Nenhum checklist devolvido no momento."
               onOpen={(id) => void open(id)}
+              showLink
             />
           )}
         </CardContent>
@@ -490,7 +590,7 @@ export function ChecklistConferenceSection({
                 : ""}
             </SheetDescription>
             {activeRow ? (
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge
                   variant={checklistRunStatusBadgeVariant(
                     String(activeRow.status),
@@ -498,10 +598,18 @@ export function ChecklistConferenceSection({
                 >
                   {checklistRunStatusLabel(String(activeRow.status))}
                 </Badge>
+                {activeRow.status === "needs_rework" ? (
+                  <CopyRunLinkButton slug={slugFromRun(activeRow)} />
+                ) : null}
               </div>
             ) : null}
           </SheetHeader>
           <div className="flex flex-1 flex-col gap-4 px-4 pb-2">
+            {activeRow?.status === "needs_rework" ? (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+                Devolvido para refazer. O operador usa o mesmo link.
+              </p>
+            ) : null}
             {itemsLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Carregando itens…
