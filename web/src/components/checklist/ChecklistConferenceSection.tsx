@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -6,15 +7,33 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { Textarea } from "@/components/ui/textarea";
+import { useClientTableSort } from "@/hooks/useClientTableSort";
+import { useSheetListView } from "@/hooks/useSheetListView";
+import {
+  checklistItemTypeLabel,
+  checklistRunStatusBadgeVariant,
+  checklistRunStatusLabel,
+  type ChecklistRunStatus,
+} from "@/lib/checklistOperationalTypes";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import { CheckCheck, Loader2, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 type RunRow = {
   id: string;
-  status: string;
+  status: ChecklistRunStatus | string;
   submitted_at: string | null;
   review_notes: string | null;
   checklists: { title: string } | null;
@@ -24,17 +43,273 @@ type RunRow = {
 type ItemRow = {
   checklist_item_id: string;
   completed_at: string | null;
-  value: Record<string, unknown>;
+  value: Record<string, unknown> | null;
   evidence_paths: string[];
   is_ok: boolean | null;
   review_flag: string | null;
   checklist_items: { title: string; item_type: string } | null;
 };
 
+type QueueSortKey = "submittedAt" | "checklist" | "member" | "status";
+
+function formatSubmittedAt(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatItemValue(value: Record<string, unknown> | null): string | null {
+  if (!value) return null;
+  if (typeof value.number === "number" && Number.isFinite(value.number)) {
+    return String(value.number);
+  }
+  if (typeof value.text === "string" && value.text.trim()) {
+    return value.text.trim();
+  }
+  if (value.signed === true) return "Assinado";
+  return null;
+}
+
+function compareRuns(a: RunRow, b: RunRow, key: QueueSortKey): number {
+  if (key === "submittedAt") {
+    return (a.submitted_at ?? "").localeCompare(b.submitted_at ?? "");
+  }
+  if (key === "checklist") {
+    return (a.checklists?.title ?? "").localeCompare(
+      b.checklists?.title ?? "",
+      "pt-BR",
+    );
+  }
+  if (key === "member") {
+    return (a.company_members?.name ?? "").localeCompare(
+      b.company_members?.name ?? "",
+      "pt-BR",
+    );
+  }
+  return checklistRunStatusLabel(String(a.status)).localeCompare(
+    checklistRunStatusLabel(String(b.status)),
+    "pt-BR",
+  );
+}
+
+function ChecklistEvidenceThumbs({ paths }: { paths: string[] }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, string> = {};
+      for (const path of paths) {
+        const trimmed = path.trim();
+        if (!trimmed) continue;
+        const { data, error } = await supabase.storage
+          .from("checklist-evidence")
+          .createSignedUrl(trimmed, 3600);
+        if (!cancelled && !error && data?.signedUrl) {
+          next[trimmed] = data.signedUrl;
+        }
+      }
+      if (!cancelled) setUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [paths]);
+
+  if (paths.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {paths.map((path) => {
+        const url = urls[path.trim()];
+        const isImage = /\.(jpe?g|png|webp|gif|heic)$/i.test(path);
+        if (!url) {
+          return (
+            <span
+              key={path}
+              className="text-xs text-muted-foreground"
+            >
+              Evidência…
+            </span>
+          );
+        }
+        if (isImage) {
+          return (
+            <a
+              key={path}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="block"
+            >
+              <img
+                src={url}
+                alt=""
+                className="h-16 w-16 rounded-md border object-cover bg-muted"
+              />
+            </a>
+          );
+        }
+        return (
+          <a
+            key={path}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+          >
+            Abrir evidência
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function QueueList({
+  rows,
+  emptyLabel,
+  onOpen,
+  emphasized,
+}: {
+  rows: RunRow[];
+  emptyLabel: string;
+  onOpen: (id: string) => void;
+  emphasized?: boolean;
+}) {
+  const view = useSheetListView();
+  const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
+    RunRow,
+    QueueSortKey
+  >(rows, "submittedAt", compareRuns);
+
+  if (rows.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
+        {emptyLabel}
+      </p>
+    );
+  }
+
+  if (view === "cards") {
+    return (
+      <ul className="space-y-2">
+        {sorted.map((r) => (
+          <li key={r.id}>
+            <button
+              type="button"
+              className={cn(
+                "w-full rounded-xl border px-3 py-3 text-left text-sm transition-colors hover:bg-muted/40",
+                emphasized && "border-primary/40 bg-primary/5",
+              )}
+              onClick={() => onOpen(r.id)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium leading-snug">
+                  {r.checklists?.title ?? "Checklist"}
+                </p>
+                <Badge variant={checklistRunStatusBadgeVariant(String(r.status))}>
+                  {checklistRunStatusLabel(String(r.status))}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {r.company_members?.name ?? "—"} · {formatSubmittedAt(r.submitted_at)}
+              </p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full min-w-[560px] text-sm">
+        <thead>
+          <tr className="border-b bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+            <SortableTableHead
+              label="Envio (SP)"
+              column="submittedAt"
+              sortKey={sortKey}
+              sortAsc={sortAsc}
+              onSort={onSort}
+            />
+            <SortableTableHead
+              label="Checklist"
+              column="checklist"
+              sortKey={sortKey}
+              sortAsc={sortAsc}
+              onSort={onSort}
+            />
+            <SortableTableHead
+              label="Operador"
+              column="member"
+              sortKey={sortKey}
+              sortAsc={sortAsc}
+              onSort={onSort}
+            />
+            <SortableTableHead
+              label="Status"
+              column="status"
+              sortKey={sortKey}
+              sortAsc={sortAsc}
+              onSort={onSort}
+            />
+            <th className="px-3 py-2.5 font-medium">Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => (
+            <tr
+              key={r.id}
+              className={cn(
+                "border-b border-border/60 last:border-0",
+                emphasized && "bg-primary/5",
+              )}
+            >
+              <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                {formatSubmittedAt(r.submitted_at)}
+              </td>
+              <td className="px-3 py-2.5 font-medium">
+                {r.checklists?.title ?? "—"}
+              </td>
+              <td className="px-3 py-2.5">
+                {r.company_members?.name?.trim() || "—"}
+              </td>
+              <td className="px-3 py-2.5">
+                <Badge variant={checklistRunStatusBadgeVariant(String(r.status))}>
+                  {checklistRunStatusLabel(String(r.status))}
+                </Badge>
+              </td>
+              <td className="px-3 py-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onOpen(r.id)}
+                >
+                  Conferir
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function ChecklistConferenceSection({
   companyId,
+  onPendingCount,
 }: {
   companyId: string;
+  onPendingCount?: (n: number) => void;
 }) {
   const [rows, setRows] = useState<RunRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +317,21 @@ export function ChecklistConferenceSection({
   const [items, setItems] = useState<ItemRow[]>([]);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
+  const awaiting = useMemo(
+    () =>
+      rows.filter(
+        (r) => r.status === "submitted" || r.status === "in_review",
+      ),
+    [rows],
+  );
+  const returned = useMemo(
+    () => rows.filter((r) => r.status === "needs_rework"),
+    [rows],
+  );
+
+  const activeRow = rows.find((r) => r.id === active) ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,24 +347,36 @@ export function ChecklistConferenceSection({
       .eq("company_id", companyId)
       .in("status", ["submitted", "in_review", "needs_rework"])
       .order("submitted_at", { ascending: false })
-      .limit(40);
+      .limit(80);
     setLoading(false);
     if (error) {
-      console.error(error);
+      toast.error(
+        error.message
+          ? `Não foi possível carregar a conferência: ${error.message}`
+          : "Não foi possível carregar a conferência.",
+      );
       setRows([]);
+      onPendingCount?.(0);
       return;
     }
-    setRows((data ?? []) as unknown as RunRow[]);
-  }, [companyId]);
+    const next = (data ?? []) as unknown as RunRow[];
+    setRows(next);
+    onPendingCount?.(
+      next.filter((r) => r.status === "submitted" || r.status === "in_review")
+        .length,
+    );
+  }, [companyId, onPendingCount]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
 
   const open = async (id: string) => {
+    const row = rows.find((r) => r.id === id);
     setActive(id);
-    setNotes("");
-    const { data } = await supabase
+    setNotes(row?.review_notes ?? "");
+    setItemsLoading(true);
+    const { data, error } = await supabase
       .from("checklist_run_items")
       .select(
         `
@@ -83,12 +385,13 @@ export function ChecklistConferenceSection({
       `,
       )
       .eq("run_id", id);
+    setItemsLoading(false);
+    if (error) {
+      toast.error("Não foi possível carregar os itens.");
+      setItems([]);
+      return;
+    }
     setItems((data ?? []) as unknown as ItemRow[]);
-    await supabase.rpc("review_checklist_run", {
-      p_run_id: id,
-      p_status: "in_review",
-      p_notes: null,
-    });
   };
 
   const decide = async (status: "approved" | "needs_rework") => {
@@ -112,64 +415,143 @@ export function ChecklistConferenceSection({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Conferência</CardTitle>
-        <CardDescription>
-          Fila de execuções enviadas — valide evidências e feche a conformidade.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Fila vazia.</p>
-        ) : (
-          <ul className="space-y-2">
-            {rows.map((r) => (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  className="flex w-full justify-between rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted/40"
-                  onClick={() => void open(r.id)}
-                >
-                  <span>
-                    {r.checklists?.title ?? "Checklist"} ·{" "}
-                    {r.company_members?.name ?? "—"}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{r.status}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+    <div className="space-y-6">
+      <Card className="border-primary/30">
+        <CardHeader>
+          <CardTitle className="text-base">
+            Aguardando conferência
+            {awaiting.length > 0 ? (
+              <Badge variant="secondary" className="ml-2 tabular-nums">
+                {awaiting.length}
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            Envios novos para validar. Aprovados saem daqui e vão para o
+            histórico.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
+            </div>
+          ) : (
+            <QueueList
+              rows={awaiting}
+              emptyLabel="Nenhuma execução aguardando conferência."
+              onOpen={(id) => void open(id)}
+              emphasized
+            />
+          )}
+        </CardContent>
+      </Card>
 
-        {active && (
-          <div className="space-y-3 rounded-xl border p-3">
-            <p className="text-sm font-semibold">Itens</p>
-            <ul className="max-h-56 space-y-2 overflow-y-auto">
-              {items.map((it) => (
-                <li key={it.checklist_item_id} className="rounded-lg border p-2 text-sm">
-                  <p className="font-medium">
-                    {it.checklist_items?.title ?? it.checklist_item_id}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {it.checklist_items?.item_type ?? "check"} ·{" "}
-                    {it.completed_at ? "feito" : "pendente"}
-                    {it.evidence_paths?.length
-                      ? ` · ${it.evidence_paths.length} evidência(s)`
-                      : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Devolvidos para refazer
+            {returned.length > 0 ? (
+              <Badge variant="destructive" className="ml-2 tabular-nums">
+                {returned.length}
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            O operador precisa refazer e enviar de novo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? null : (
+            <QueueList
+              rows={returned}
+              emptyLabel="Nenhum checklist devolvido no momento."
+              onOpen={(id) => void open(id)}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Sheet
+        open={active != null}
+        onOpenChange={(openSheet) => {
+          if (!openSheet) setActive(null);
+        }}
+      >
+        <SheetContent className="flex w-full flex-col overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>
+              {activeRow?.checklists?.title ?? "Conferência"}
+            </SheetTitle>
+            <SheetDescription>
+              {activeRow?.company_members?.name ?? "Operador"}
+              {activeRow?.submitted_at
+                ? ` · ${formatSubmittedAt(activeRow.submitted_at)}`
+                : ""}
+            </SheetDescription>
+            {activeRow ? (
+              <div>
+                <Badge
+                  variant={checklistRunStatusBadgeVariant(
+                    String(activeRow.status),
+                  )}
+                >
+                  {checklistRunStatusLabel(String(activeRow.status))}
+                </Badge>
+              </div>
+            ) : null}
+          </SheetHeader>
+          <div className="flex flex-1 flex-col gap-4 px-4 pb-2">
+            {itemsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Carregando itens…
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {items.map((it) => {
+                  const valueText = formatItemValue(it.value);
+                  const flagged =
+                    it.is_ok === false || Boolean(it.review_flag);
+                  return (
+                    <li
+                      key={it.checklist_item_id}
+                      className={cn(
+                        "rounded-lg border p-3 text-sm",
+                        flagged && "border-amber-500/50 bg-amber-500/5",
+                      )}
+                    >
+                      <p className="font-medium">
+                        {it.checklist_items?.title ?? it.checklist_item_id}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {checklistItemTypeLabel(
+                          it.checklist_items?.item_type ?? "check",
+                        )}{" "}
+                        · {it.completed_at ? "feito" : "pendente"}
+                        {valueText ? ` · ${valueText}` : ""}
+                      </p>
+                      <ChecklistEvidenceThumbs
+                        paths={it.evidence_paths ?? []}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             <Textarea
               placeholder="Notas da conferência…"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
+          </div>
+          <SheetFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setActive(null)}
+            >
+              Fechar
+            </Button>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -189,9 +571,9 @@ export function ChecklistConferenceSection({
                 Aprovar
               </Button>
             </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }

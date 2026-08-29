@@ -75,3 +75,45 @@ export function toggleWeekdayBit(mask: number, weekday: number): number {
   const next = mask ^ bit;
   return next === 0 ? mask : next;
 }
+
+/** Meta esperada num dia civil SP (YYYY-MM-DD). Mensal conta 0 (use expectedInYmds). */
+export function expectedOnYmd(
+  meta: ChecklistRecurrenceMeta,
+  ymd: string,
+): number {
+  if (meta.recurrence_kind === "monthly") return 0;
+  const per = meta.daily_executions_per_day ?? 1;
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return 0;
+  const noon = new Date(Date.UTC(y, m - 1, d, 12, 0, 0, 0));
+  const dow = getWeekdaySP(noon);
+  return (meta.weekday_mask & (1 << dow)) !== 0 ? per : 0;
+}
+
+/**
+ * Meta no intervalo. Diária soma os dias; mensal = meses distintos × execuções.
+ * No recorte diário, a cota mensal cai no primeiro dia daquele mês na lista.
+ */
+export function expectedOnYmdInRange(
+  meta: ChecklistRecurrenceMeta,
+  ymd: string,
+  ymdsInRange: string[],
+): number {
+  if (meta.recurrence_kind !== "monthly") {
+    return expectedOnYmd(meta, ymd);
+  }
+  const ym = ymd.slice(0, 7);
+  const first = ymdsInRange.find((d) => d.startsWith(ym));
+  if (first !== ymd) return 0;
+  return meta.monthly_executions ?? 1;
+}
+
+export function expectedInYmds(
+  meta: ChecklistRecurrenceMeta,
+  ymds: string[],
+): number {
+  return ymds.reduce(
+    (sum, ymd) => sum + expectedOnYmdInRange(meta, ymd, ymds),
+    0,
+  );
+}

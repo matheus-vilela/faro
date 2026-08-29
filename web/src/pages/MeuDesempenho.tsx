@@ -8,7 +8,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useTheme } from "@/contexts/ThemeContext";
-import type { StaffScoreAxes } from "@/lib/checklistOperationalTypes";
+import {
+  checklistRunStatusLabel,
+  type StaffScoreAxes,
+} from "@/lib/checklistOperationalTypes";
 import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -117,7 +120,7 @@ export function MeuDesempenho() {
         <CardContent className="space-y-4">
           <div className="rounded-2xl bg-[#0F1623] p-5 text-center text-white">
             <p className="text-xs uppercase tracking-wide text-white/60">
-              Score (30 dias)
+              Nota (30 dias)
             </p>
             <p className="mt-1 text-5xl font-extrabold">{s.score}</p>
             <div className="mt-4 space-y-2 text-left text-sm">
@@ -127,8 +130,8 @@ export function MeuDesempenho() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground">
-            Tom de treinador: use os atrasos e itens incompletos para melhorar o
-            próximo turno — sem punição.
+            Nota = média de Prazo (no horário), Completo (% de itens) e Preciso
+            (sem devolução).
           </p>
           <ul className="space-y-2">
             {(data.runs ?? []).slice(0, 12).map((r) => (
@@ -141,7 +144,7 @@ export function MeuDesempenho() {
                   {r.submitted_at
                     ? new Date(r.submitted_at).toLocaleString("pt-BR")
                     : "—"}{" "}
-                  · {r.status}
+                  · {checklistRunStatusLabel(r.status)}
                   {r.on_time === false ? " · atrasado" : ""}
                 </p>
               </li>

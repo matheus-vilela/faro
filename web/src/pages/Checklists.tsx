@@ -1,14 +1,11 @@
 import { ChecklistConferenceSection } from "@/components/checklist/ChecklistConferenceSection";
 import { ChecklistHistorySection } from "@/components/checklist/ChecklistHistorySection";
 import { ChecklistNotificationSettingsCard } from "@/components/checklist/ChecklistNotificationSettingsCard";
-import { ChecklistPerformanceSection } from "@/components/checklist/ChecklistPerformanceSection";
+import { ChecklistOverviewDashboard } from "@/components/checklist/ChecklistOverviewDashboard";
 import { ChecklistRankingSection } from "@/components/checklist/ChecklistRankingSection";
-import type {
-  ChecklistAssignmentStatRow,
-  ChecklistPerformancePeriod,
-} from "@/components/checklist/checklistPerformanceTypes";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,11 +31,16 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
-  expectedCompletionsRolling,
   formatRecurrenceSummary,
   toggleWeekdayBit,
   type ChecklistRecurrenceMeta,
@@ -96,6 +98,56 @@ function splitItemLines(raw: string): string[] {
     .filter(Boolean);
 }
 
+function GenerateLinkButton({
+  assignees,
+  onGenerate,
+}: {
+  assignees: { id: string; name: string }[];
+  onGenerate: (memberId: string) => void;
+}) {
+  if (assignees.length === 0) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled
+        title="Atribua um operador a este checklist"
+      >
+        Gerar link
+      </Button>
+    );
+  }
+  if (assignees.length === 1) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onGenerate(assignees[0]!.id)}
+      >
+        Gerar link
+      </Button>
+    );
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          Gerar link
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {assignees.map((m) => (
+          <DropdownMenuItem key={m.id} onClick={() => onGenerate(m.id)}>
+            {m.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function Checklists() {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
@@ -103,10 +155,7 @@ export function Checklists() {
   const [rows, setRows] = useState<ChecklistRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<CompanyMember[]>([]);
-  const [stats, setStats] = useState<ChecklistAssignmentStatRow[]>([]);
-  const [loadingStats, setLoadingStats] = useState(false);
-  const [performancePeriod, setPerformancePeriod] =
-    useState<ChecklistPerformancePeriod>("both");
+  const [overviewTick, setOverviewTick] = useState(0);
   const [checklistsTab, setChecklistsTab] = useState<
     "overview" | "historico" | "conferencia" | "ranking"
   >("overview");
@@ -129,6 +178,10 @@ export function Checklists() {
   const [itemLines, setItemLines] = useState("");
   const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [assignedByChecklist, setAssignedByChecklist] = useState<
+    Record<string, { id: string; name: string }[]>
+  >({});
+  const [conferencePending, setConferencePending] = useState(0);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -162,126 +215,53 @@ export function Checklists() {
     setMembers((data ?? []) as CompanyMember[]);
   }, [companyId]);
 
-  const loadStats = useCallback(async () => {
-    if (!companyId) return;
-    setLoadingStats(true);
-    const endMs = Date.now();
-    const nowRef = new Date(endMs);
-    const start7ms = endMs - 7 * 86400000;
-    const start30ms = endMs - 30 * 86400000;
-
-    const { data: cl, error: e1 } = await supabase
-      .from("checklists")
-      .select(
-        "id, title, recurrence_kind, daily_executions_per_day, weekday_mask, monthly_executions",
-      )
-      .eq("company_id", companyId);
-    if (e1 || !cl?.length) {
-      setStats([]);
-      setLoadingStats(false);
+  const loadAssignments = useCallback(async () => {
+    if (!companyId) {
+      setAssignedByChecklist({});
       return;
     }
-
-    const checklistIds = cl.map((c) => c.id);
-
-    const { data: asg, error: e2 } = await supabase
+    const { data } = await supabase
       .from("checklist_assignments")
-      .select("checklist_id, company_member_id, company_members ( id, name )")
-      .in("checklist_id", checklistIds);
-    if (e2) {
-      setLoadingStats(false);
-      return;
-    }
-
-    const { data: runs, error: e3 } = await supabase
-      .from("checklist_runs")
-      .select("checklist_id, company_member_id, submitted_at")
-      .eq("status", "submitted")
-      .in("checklist_id", checklistIds)
-      .not("submitted_at", "is", null);
-
-    if (e3) {
-      setLoadingStats(false);
-      return;
-    }
-
-    const runsList = (runs ?? []) as {
-      checklist_id: string;
-      company_member_id: string;
-      submitted_at: string;
-    }[];
-
-    const countInRange = (
-      cid: string,
-      mid: string,
-      startMs: number,
-    ): number => {
-      return runsList.filter(
-        (r) =>
-          r.checklist_id === cid &&
-          r.company_member_id === mid &&
-          new Date(r.submitted_at).getTime() >= startMs &&
-          new Date(r.submitted_at).getTime() <= endMs,
-      ).length;
-    };
-
-    const byChecklist = new Map(
-      (cl as ChecklistRow[]).map((c) => [c.id, c] as const),
-    );
-    const out: ChecklistAssignmentStatRow[] = [];
-
-    const metaExpected = (row: ChecklistRow, days: number) =>
-      expectedCompletionsRolling(rowToMeta(row), days, nowRef);
-
-    for (const row of asg ?? []) {
+      .select("checklist_id, company_members ( id, name, is_active )")
+      .eq("company_id", companyId);
+    const map: Record<string, { id: string; name: string }[]> = {};
+    for (const row of data ?? []) {
+      const m = row.company_members as
+        | { id?: string; name?: string; is_active?: boolean }
+        | null;
+      if (!m?.id || m.is_active === false) continue;
       const cid = row.checklist_id as string;
-      const mid = row.company_member_id as string;
-      const checklist = byChecklist.get(cid);
-      const m = row.company_members as { name?: string } | null;
-      if (!checklist) continue;
-      const expected7 = metaExpected(checklist, 7);
-      const expected30 = metaExpected(checklist, 30);
-      const actual7 = countInRange(cid, mid, start7ms);
-      const actual30 = countInRange(cid, mid, start30ms);
-      const rate7 =
-        expected7 > 0
-          ? Math.min(100, Math.round((actual7 / expected7) * 100))
-          : 0;
-      const rate30 =
-        expected30 > 0
-          ? Math.min(100, Math.round((actual30 / expected30) * 100))
-          : 0;
-      out.push({
-        key: `${cid}-${mid}`,
-        checklistId: cid,
-        checklistTitle: checklist.title,
-        memberId: mid,
-        memberName: m?.name?.trim() || "Operador",
-        recurrenceSummary: formatRecurrenceSummary(rowToMeta(checklist)),
-        expected7,
-        actual7,
-        rate7,
-        expected30,
-        actual30,
-        rate30,
+      (map[cid] ??= []).push({
+        id: m.id,
+        name: m.name?.trim() || "Operador",
       });
     }
-
-    out.sort((a, b) =>
-      a.checklistTitle.localeCompare(b.checklistTitle, "pt-BR"),
-    );
-    setStats(out);
-    setLoadingStats(false);
+    setAssignedByChecklist(map);
   }, [companyId]);
+
+  const loadConferencePending = useCallback(async () => {
+    if (!companyId) {
+      setConferencePending(0);
+      return;
+    }
+    const { count, error } = await supabase
+      .from("checklist_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .in("status", ["submitted", "in_review"]);
+    if (!error) setConferencePending(count ?? 0);
+  }, [companyId]);
+
+  const handleConferencePending = useCallback((n: number) => {
+    setConferencePending(n);
+  }, []);
 
   useEffect(() => {
     void load();
     void loadMembers();
-  }, [load, loadMembers]);
-
-  useEffect(() => {
-    void loadStats();
-  }, [loadStats, rows.length]);
+    void loadAssignments();
+    void loadConferencePending();
+  }, [load, loadMembers, loadAssignments, loadConferencePending]);
 
   const openCreate = () => {
     setEditing(null);
@@ -564,7 +544,9 @@ export function Checklists() {
       }
       setSheetOpen(false);
       void load();
-      void loadStats();
+      setOverviewTick((n) => n + 1);
+      void loadAssignments();
+      void loadConferencePending();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Erro ao salvar";
       toast.error(msg);
@@ -583,7 +565,8 @@ export function Checklists() {
     }
     toast.success("Checklist excluído.");
     void load();
-    void loadStats();
+    setOverviewTick((n) => n + 1);
+    void loadAssignments();
   };
 
   const dailyTimesOptions = useMemo(
@@ -605,7 +588,7 @@ export function Checklists() {
     <PageShell>
       <PageHeader
         title="Checklists"
-        description="Recorrência diária (dias da semana e quantas execuções em cada um) ou mensal (até 3× por mês). Envie no WhatsApp: 'checklist' e o número para abrir o link para a rotina."
+        description="Rotinas da equipe: quem faz, quando, e conferência dos envios."
         icon={ListChecks}
         action={
           <Button type="button" size="sm" onClick={openCreate}>
@@ -654,6 +637,11 @@ export function Checklists() {
         >
           <ClipboardCheck className="h-4 w-4 shrink-0" />
           Conferência
+          {conferencePending > 0 ? (
+            <Badge variant="secondary" className="tabular-nums">
+              {conferencePending}
+            </Badge>
+          ) : null}
         </button>
         <button
           type="button"
@@ -673,12 +661,12 @@ export function Checklists() {
       <div className="space-y-8 pt-6">
         {checklistsTab === "overview" ? (
           <>
-            <ChecklistPerformanceSection
-              stats={stats}
-              loading={loadingStats}
-              period={performancePeriod}
-              onPeriodChange={setPerformancePeriod}
-            />
+            {companyId ? (
+              <ChecklistOverviewDashboard
+                companyId={companyId}
+                reloadNonce={overviewTick}
+              />
+            ) : null}
 
             {companyId ? (
               <ChecklistNotificationSettingsCard companyId={companyId} />
@@ -688,8 +676,7 @@ export function Checklists() {
               <CardHeader>
                 <CardTitle className="text-base">Checklists</CardTitle>
                 <CardDescription>
-                  Operadores ativos aparecem na atribuição. Apenas números
-                  cadastrados como operadores recebem o fluxo no WhatsApp.
+                  Só operadores ativos entram na atribuição e no WhatsApp.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -714,18 +701,12 @@ export function Checklists() {
                           </p>
                         </div>
                         <div className="flex gap-1">
-                          {members[0] ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                void startRunForMember(r.id, members[0]!.id)
-                              }
-                            >
-                              Gerar link
-                            </Button>
-                          ) : null}
+                          <GenerateLinkButton
+                            assignees={assignedByChecklist[r.id] ?? []}
+                            onGenerate={(memberId) =>
+                              void startRunForMember(r.id, memberId)
+                            }
+                          />
                           <Button
                             type="button"
                             variant="ghost"
@@ -759,14 +740,20 @@ export function Checklists() {
             members={members}
           />
         ) : checklistsTab === "conferencia" && companyId ? (
-          <ChecklistConferenceSection companyId={companyId} />
+          <ChecklistConferenceSection
+            companyId={companyId}
+            onPendingCount={handleConferencePending}
+          />
         ) : checklistsTab === "ranking" && companyId ? (
-          <ChecklistRankingSection companyId={companyId} />
+          <ChecklistRankingSection
+            companyId={companyId}
+            reloadNonce={overviewTick}
+          />
         ) : null}
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
+        <SheetContent className="flex w-full flex-col overflow-y-auto">
           <SheetHeader>
             <SheetTitle>
               {editing ? "Editar checklist" : "Novo checklist"}
