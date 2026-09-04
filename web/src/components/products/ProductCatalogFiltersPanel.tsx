@@ -45,6 +45,11 @@ const FILTER_CMV_LABELS: Record<"all" | "yes" | "no", string> = {
   no: "Não compõe CMV",
 };
 
+const FILTER_STOCK_ONLY_LABELS: Record<"all" | "yes", string> = {
+  all: "Todos",
+  yes: "Somente estoque",
+};
+
 const FILTER_UPDATED_LABELS: Record<
   "all" | "today" | "7d" | "30d" | "custom",
   string
@@ -69,6 +74,8 @@ export function ProductCatalogFiltersPanel({
   onFilterStockAlertChange,
   filterComposesCmv,
   onFilterComposesCmvChange,
+  filterStockOnlyOrigin,
+  onFilterStockOnlyOriginChange,
   filterUpdatedPreset,
   onFilterUpdatedPresetChange,
   filterUpdatedFrom,
@@ -93,6 +100,8 @@ export function ProductCatalogFiltersPanel({
   ) => void;
   filterComposesCmv: "all" | "yes" | "no";
   onFilterComposesCmvChange: (value: "all" | "yes" | "no") => void;
+  filterStockOnlyOrigin: "all" | "yes";
+  onFilterStockOnlyOriginChange: (value: "all" | "yes") => void;
   filterUpdatedPreset: "all" | "today" | "7d" | "30d" | "custom";
   onFilterUpdatedPresetChange: (
     value: "all" | "today" | "7d" | "30d" | "custom",
@@ -110,6 +119,7 @@ export function ProductCatalogFiltersPanel({
     (filterCategoryId !== "all" ? 1 : 0) +
     (filterStockAlert !== "all" || lowStockOnly ? 1 : 0) +
     (filterComposesCmv !== "all" ? 1 : 0) +
+    (filterStockOnlyOrigin !== "all" ? 1 : 0) +
     (filterUpdatedPreset !== "all" ? 1 : 0);
 
   const hasAnyFilter = advancedFilterCount > 0 || search.trim().length > 0;
@@ -147,6 +157,12 @@ export function ProductCatalogFiltersPanel({
     activeFilterChips.push({
       key: "cmv",
       label: FILTER_CMV_LABELS[filterComposesCmv],
+    });
+  }
+  if (filterStockOnlyOrigin !== "all") {
+    activeFilterChips.push({
+      key: "stockOnly",
+      label: FILTER_STOCK_ONLY_LABELS[filterStockOnlyOrigin],
     });
   }
   if (filterUpdatedPreset !== "all") {
@@ -229,8 +245,8 @@ export function ProductCatalogFiltersPanel({
 
         <CollapsibleContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Refine a lista por situação, categoria, alertas de estoque, CMV e
-            data de atualização.
+            Refine a lista por situação, categoria, alertas de estoque, origem
+            (somente estoque), CMV e data de atualização.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             <div className="space-y-1.5">
@@ -300,6 +316,25 @@ export function ProductCatalogFiltersPanel({
                   </SelectContent>
                 </Select>
               )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">
+                Origem
+              </Label>
+              <Select
+                value={filterStockOnlyOrigin}
+                onValueChange={(v) =>
+                  onFilterStockOnlyOriginChange(v as "all" | "yes")
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="yes">Somente estoque</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Compõe CMV</Label>

@@ -35,6 +35,62 @@ function normalizeHeaderLabel(h: string): string {
     .replace(/\s+/g, "");
 }
 
+const COL_PRODUTO_ALIASES = [
+  "produto",
+  "nomedoproduto",
+  "nomeproduto",
+  "descricao",
+];
+const COL_SKU_ALIASES = [
+  "sku",
+  "codigo",
+  "cod",
+  "codproduto",
+  "codigoproduto",
+];
+
+function resolveHeaderCol(normHeaders: string[], aliases: string[]): number {
+  for (const alias of aliases) {
+    const j = normHeaders.indexOf(alias);
+    if (j >= 0) return j;
+  }
+  return -1;
+}
+
+/** SKU/nome das linhas de venda (Total Bruto preenchido, quando a coluna existe). */
+export function extractSoldProdutoKeys(
+  header: string[],
+  rows: string[][],
+): Array<{ sku: string; name: string }> {
+  if (header.length === 0) return [];
+  const norm = header.map(normalizeHeaderLabel);
+  let produtoCol = resolveHeaderCol(norm, COL_PRODUTO_ALIASES);
+  if (produtoCol < 0) {
+    produtoCol = norm.findIndex(
+      (h) => h.includes("produto") || h.includes("descricao"),
+    );
+  }
+  if (produtoCol < 0) return [];
+  let skuCol = resolveHeaderCol(norm, COL_SKU_ALIASES);
+  if (skuCol < 0) {
+    skuCol = norm.findIndex(
+      (h) => h.includes("sku") || h === "codigo" || h.startsWith("cod"),
+    );
+  }
+  const totalIdx = findTotalBrutoColumnIndex(header);
+  const out: Array<{ sku: string; name: string }> = [];
+  for (const row of rows) {
+    if (totalIdx >= 0 && !isTotalBrutoCellFilled(row[totalIdx] ?? "")) continue;
+    const name = (row[produtoCol] ?? "").trim();
+    if (!name) continue;
+    out.push({
+      sku: skuCol >= 0 ? (row[skuCol] ?? "").trim() : "",
+      name,
+    });
+  }
+  return out;
+}
+
 export function findTotalBrutoColumnIndex(headers: string[]): number {
   const want = normalizeHeaderLabel(COL_TOTAL_BRUTO);
   for (let i = 0; i < headers.length; i++) {

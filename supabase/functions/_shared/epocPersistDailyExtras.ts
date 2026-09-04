@@ -1,7 +1,9 @@
 /**
  * Persiste serviços + faturamento diários a partir do HTML do portal EPOC.
+ * Também aplica baixas de variantes (relatório de estoque) quando já ligadas.
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { extractEstoqueSaidaFromAcoesHtml } from "./epocEstoqueCsv.ts";
 import { extractFaturamentoRowsFromAcoesHtml } from "./epocFaturamentoCsv.ts";
 import {
   interpretTabela3FromRows,
@@ -20,7 +22,7 @@ import {
   findVlBrutoColumnIndex,
 } from "./epocVendaServicosCsv.ts";
 
-export type DayExtrasKind = "services" | "faturamento";
+export type DayExtrasKind = "services" | "faturamento" | "estoque";
 
 export type DayExtrasPersistResult = {
   ok: boolean;
@@ -110,16 +112,18 @@ export async function upsertEpocSyncDayStatus(
     products_ok?: boolean;
     services_ok?: boolean;
     faturamento_ok?: boolean;
+    stock_ok?: boolean;
     products_error?: string | null;
     services_error?: string | null;
     faturamento_error?: string | null;
+    stock_error?: string | null;
   },
 ): Promise<void> {
   const now = new Date().toISOString();
   const { data: prev } = await admin
     .from("epoc_sync_day_status")
     .select(
-      "products_ok, services_ok, faturamento_ok, products_error, services_error, faturamento_error",
+      "products_ok, services_ok, faturamento_ok, stock_ok, products_error, services_error, faturamento_error, stock_error",
     )
     .eq("company_id", companyId)
     .eq("sync_date", saleDateIso)
@@ -131,6 +135,7 @@ export async function upsertEpocSyncDayStatus(
     products_ok: patch.products_ok ?? prev?.products_ok ?? false,
     services_ok: patch.services_ok ?? prev?.services_ok ?? false,
     faturamento_ok: patch.faturamento_ok ?? prev?.faturamento_ok ?? false,
+    stock_ok: patch.stock_ok ?? prev?.stock_ok ?? false,
     products_error:
       patch.products_error !== undefined
         ? patch.products_error
@@ -143,6 +148,10 @@ export async function upsertEpocSyncDayStatus(
       patch.faturamento_error !== undefined
         ? patch.faturamento_error
         : (prev?.faturamento_error ?? null),
+    stock_error:
+      patch.stock_error !== undefined
+        ? patch.stock_error
+        : (prev?.stock_error ?? null),
     updated_at: now,
   };
 
@@ -401,6 +410,107 @@ export async function persistFaturamentoFromAcoesHtml(
   return { ok: true, itens: pmCount };
 }
 
+export async function persistEstoqueVariantOutsFromAcoesHtml(
+  admin: SupabaseClient,
+  companyId: string,
+  dataConsultaBr: string,
+  html: string,
+  soldItems: Array<{ sku: string; name: string }> = [],
+): Promise<DayExtrasPersistResult> {
+  const saleDateIso = brDateToIso(dataConsultaBr);
+  if (!saleDateIso) {
+    return { ok: false, error: "Data de estoque inválida" };
+  }
+
+  const extracted = extractEstoqueSaidaFromAcoesHtml(html, dataConsultaBr);
+
+  const { error: delErr } = await admin
+    .from("epoc_day_stock_outs")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("sale_date", saleDateIso);
+  if (delErr) {
+    await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+      stock_ok: false,
+      stock_error: delErr.message,
+    });
+    return { ok: false, error: delErr.message };
+  }
+
+  if (extracted.items.length > 0) {
+    const { error: insErr } = await admin.from("epoc_day_stock_outs").insert(
+      extracted.items.map((it) => ({
+        company_id: companyId,
+        sale_date: saleDateIso,
+        sku: it.sku.trim(),
+        name: it.nome,
+        qty: it.qtde,
+        unit: it.qtde_unidade || null,
+      })),
+    );
+    if (insErr) {
+      await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+        stock_ok: false,
+        stock_error: insErr.message,
+      });
+      return { ok: false, error: insErr.message };
+    }
+  }
+
+  const soldPayload = soldItems.map((s) => ({
+    sku: s.sku,
+    name: s.name,
+  }));
+  const markItems = extracted.items.map((it) => ({
+    sku: it.sku,
+    name: it.nome,
+    unit: it.qtde_unidade || "un",
+  }));
+  const { error: markErr } = await admin.rpc("mark_epoc_stock_only_products", {
+    p_company_id: companyId,
+    p_items: markItems,
+    p_sold: soldPayload,
+  });
+  if (markErr) {
+    console.warn("[epocPersistDailyExtras] mark stock_only", markErr.message);
+  }
+
+  const items = extracted.items.map((it) => ({
+    sku: it.sku,
+    name: it.nome,
+    qty: it.qtde,
+  }));
+
+  const { data, error } = await admin.rpc("apply_epoc_stock_variant_outs", {
+    p_company_id: companyId,
+    p_sale_date: saleDateIso,
+    p_items: items,
+    p_sold: soldPayload,
+  });
+  if (error) {
+    await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+      stock_ok: false,
+      stock_error: error.message,
+    });
+    return { ok: false, error: error.message };
+  }
+
+  const raw = (data ?? {}) as {
+    applied?: number;
+    skipped?: number;
+    already?: number;
+  };
+
+  await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+    stock_ok: true,
+    stock_error: null,
+  });
+  return {
+    ok: true,
+    itens: Number(raw.applied ?? 0) + Number(raw.already ?? 0),
+  };
+}
+
 export async function listEpocSyncGaps(
   admin: SupabaseClient,
   companyId: string,
@@ -408,32 +518,36 @@ export async function listEpocSyncGaps(
 ): Promise<{
   services: string[];
   faturamento: string[];
+  stock: string[];
 }> {
   const { data, error } = await admin
     .from("epoc_sync_day_status")
-    .select("sync_date, services_ok, faturamento_ok")
+    .select("sync_date, products_ok, services_ok, faturamento_ok, stock_ok")
     .eq("company_id", companyId)
-    .or("services_ok.eq.false,faturamento_ok.eq.false")
+    .or("services_ok.eq.false,faturamento_ok.eq.false,stock_ok.eq.false")
     .order("sync_date", { ascending: false })
     .limit(limit);
 
   if (error || !data) {
-    return { services: [], faturamento: [] };
+    return { services: [], faturamento: [], stock: [] };
   }
 
   const services: string[] = [];
   const faturamento: string[] = [];
+  const stock: string[] = [];
   for (const row of data) {
     const iso = String(row.sync_date);
     if (!row.services_ok) services.push(iso);
     if (!row.faturamento_ok) faturamento.push(iso);
+    if (!row.stock_ok && row.products_ok) stock.push(iso);
   }
-  return { services, faturamento };
+  return { services, faturamento, stock };
 }
 
 export function buildPartialSyncSummary(gaps: {
   services: string[];
   faturamento: string[];
+  stock?: string[];
 }): string | null {
   const parts: string[] = [];
   if (gaps.services.length > 0) {
@@ -441,6 +555,9 @@ export function buildPartialSyncSummary(gaps: {
   }
   if (gaps.faturamento.length > 0) {
     parts.push(`faturamento em falta em ${gaps.faturamento.length} dia(s)`);
+  }
+  if ((gaps.stock?.length ?? 0) > 0) {
+    parts.push(`estoque em falta em ${gaps.stock!.length} dia(s)`);
   }
   if (parts.length === 0) return null;
   return `Sync parcial: conseguiu produtos, mas faltam ${parts.join(" e ")}.`;

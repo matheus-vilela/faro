@@ -48,6 +48,7 @@ import { Estoque } from "@/pages/Estoque";
 import { EstoqueContagem } from "@/pages/EstoqueContagem";
 import { EstoqueCompras } from "@/pages/EstoqueCompras";
 import { FichasTecnicas } from "@/pages/FichasTecnicas";
+import { FamiliasVenda } from "@/pages/FamiliasVenda";
 import { Servicos } from "@/pages/Servicos";
 import { NOTAS_RECEBIMENTO_PERMISSIONS } from "@/lib/permissions";
 import { REPORTS_PERMISSIONS } from "@/lib/reports/catalog";
@@ -208,6 +209,7 @@ function AuthenticatedLayout() {
             <Route path="fichas" element={<FichasTecnicas />} />
             <Route path="fichas/pendentes" element={<FichasTecnicas />} />
             <Route path="fichas/vinculos" element={<FichasTecnicas />} />
+            <Route path="familias" element={<FamiliasVenda />} />
             <Route path="servicos" element={<Servicos />} />
           </Route>
           <Route

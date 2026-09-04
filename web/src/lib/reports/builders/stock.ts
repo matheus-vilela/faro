@@ -26,6 +26,7 @@ export async function buildStockCatalogReport(
     filterUpdatedFrom: "",
     filterUpdatedTo: "",
     filterStockAlert: "all",
+    filterStockOnlyOrigin: "all",
     lowStockOnly: false,
   };
   const products = await fetchProductsForStockExport(

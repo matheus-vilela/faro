@@ -48,5 +48,6 @@ export type ProductExportFilterState = {
   filterUpdatedFrom: string;
   filterUpdatedTo: string;
   filterStockAlert: "all" | "zero" | "below_min" | "any";
+  filterStockOnlyOrigin: "all" | "yes";
   lowStockOnly: boolean;
 };

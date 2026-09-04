@@ -15,6 +15,7 @@ export type CatalogProductFilterParams = {
   bounds: { gte?: string; lte?: string } | null;
   lowStockOnly: boolean;
   filterStockAlert: "all" | "zero" | "below_min" | "any";
+  filterStockOnlyOrigin: "all" | "yes";
   purchasesFilter: PurchasesDashboardMetric | null;
 };
 
@@ -57,6 +58,9 @@ function buildCatalogProductsQuery(params: CatalogProductFilterParams) {
     q = q.eq("stock_below_min_positive", true);
   } else if (params.filterStockAlert === "any") {
     q = q.eq("stock_has_alert", true);
+  }
+  if (params.filterStockOnlyOrigin === "yes") {
+    q = q.eq("stock_only_origin", true);
   }
 
   return q;

@@ -86,11 +86,13 @@ export function ProductCatalogTable({
         </thead>
         <tbody>
           {products.map((p) => {
+            const isSaleFamily = p.stock_control_type === "SALE_FAMILY";
             const qNum = Number(p.current_quantity);
             const minNum = Number(p.min_quantity ?? 0);
             const hasAlert =
-              p.stock_has_alert ??
-              (qNum < 0 || qNum <= 0 || (minNum > 0 && qNum <= minNum));
+              !isSaleFamily &&
+              (p.stock_has_alert ??
+                (qNum < 0 || qNum <= 0 || (minNum > 0 && qNum <= minNum)));
             const unitCost = productUnitCost(p);
             const lineValue = productStockValue(p);
             return (
@@ -116,6 +118,18 @@ export function ProductCatalogTable({
                 <td className="px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="font-medium">{p.name}</span>
+                    {isSaleFamily ? (
+                      <span className="text-[0.65rem] text-sky-800 dark:text-sky-200">
+                        Agrupamento
+                      </span>
+                    ) : null}
+                    {!isSaleFamily &&
+                    p.stock_only_origin &&
+                    !p.not_sale_grouping ? (
+                      <span className="text-[0.65rem] text-amber-900 dark:text-amber-100">
+                        Possível agrupamento
+                      </span>
+                    ) : null}
                     {hasAlert ? (
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
                     ) : null}

@@ -14,6 +14,8 @@ import { ProductCategoryTagsField } from "@/components/products/ProductCategoryT
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
 import { ProductRecipeLinksSection } from "@/components/products/ProductRecipeLinksSection";
+import { PossibleSaleFamilyTag } from "@/components/products/ProductSaleFamilySection";
+import { ProductSetupCard } from "@/components/products/ProductSetupCard";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
   PRODUCT_SHEET_INPUT,
@@ -124,6 +126,7 @@ import {
   sortCatalogProducts,
   type CatalogSortKey,
 } from "@/lib/productCatalogSort";
+import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -136,8 +139,8 @@ import {
   ChefHat,
   FileSpreadsheet,
   History,
+  Layers,
   Loader2,
-  Merge,
   Package,
   Pencil,
   Plus,
@@ -421,6 +424,9 @@ export function Produtos() {
   >("all");
   const [filterComposesCmv, setFilterComposesCmv] = useState<
     "all" | "yes" | "no"
+  >("all");
+  const [filterStockOnlyOrigin, setFilterStockOnlyOrigin] = useState<
+    "all" | "yes"
   >("all");
   const [filterUpdatedPreset, setFilterUpdatedPreset] = useState<
     "all" | "today" | "7d" | "30d" | "custom"
@@ -1173,6 +1179,7 @@ export function Produtos() {
         search: debouncedSearch,
         filterActive,
         filterComposesCmv,
+        filterStockOnlyOrigin,
         bounds,
         lowStockOnly,
         filterStockAlert,
@@ -1187,6 +1194,7 @@ export function Produtos() {
     debouncedSearch,
     filterActive,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterStockAlert,
     filterUpdatedFrom,
     filterUpdatedPreset,
@@ -1319,7 +1327,9 @@ export function Produtos() {
           .from("products")
           .select("*", { count: "exact" })
           .eq("company_id", companyId)
-          .eq("listed_in_product_catalog", true);
+          .or(
+            "listed_in_product_catalog.eq.true,stock_control_type.eq.SALE_FAMILY",
+          );
         q = applyCatalogProductOrder(q, catalogSortKey, catalogSortAsc);
         if (categoryProductIds) {
           q = q.in("id", categoryProductIds);
@@ -1337,6 +1347,9 @@ export function Produtos() {
           q = q.or("composes_cmv.is.null,composes_cmv.eq.true");
         } else if (filterComposesCmv === "no") {
           q = q.eq("composes_cmv", false);
+        }
+        if (filterStockOnlyOrigin === "yes") {
+          q = q.eq("stock_only_origin", true);
         }
         if (bounds?.gte) {
           q = q.gte("updated_at", bounds.gte);
@@ -1466,6 +1479,7 @@ export function Produtos() {
     filterCategoryId,
     filterStockAlert,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterUpdatedPreset,
     filterUpdatedFrom,
     filterUpdatedTo,
@@ -1496,6 +1510,7 @@ export function Produtos() {
     filterCategoryId,
     filterStockAlert,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterUpdatedPreset,
     filterUpdatedFrom,
     filterUpdatedTo,
@@ -2245,6 +2260,7 @@ export function Produtos() {
                     filterUpdatedFrom,
                     filterUpdatedTo,
                     filterStockAlert,
+                    filterStockOnlyOrigin,
                     lowStockOnly,
                   }}
                 />
@@ -2299,6 +2315,8 @@ export function Produtos() {
                 onFilterStockAlertChange={setFilterStockAlert}
                 filterComposesCmv={filterComposesCmv}
                 onFilterComposesCmvChange={setFilterComposesCmv}
+                filterStockOnlyOrigin={filterStockOnlyOrigin}
+                onFilterStockOnlyOriginChange={setFilterStockOnlyOrigin}
                 filterUpdatedPreset={filterUpdatedPreset}
                 onFilterUpdatedPresetChange={setFilterUpdatedPreset}
                 filterUpdatedFrom={filterUpdatedFrom}
@@ -2313,6 +2331,7 @@ export function Produtos() {
                   setFilterCategoryId("all");
                   setFilterStockAlert("all");
                   setFilterComposesCmv("all");
+                  setFilterStockOnlyOrigin("all");
                   setFilterUpdatedPreset("all");
                   setFilterUpdatedFrom("");
                   setFilterUpdatedTo("");
@@ -2348,7 +2367,9 @@ export function Produtos() {
                 <p className="text-muted-foreground">
                   {lowStockOnly
                     ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
-                    : "Nenhum produto cadastrado"}
+                    : filterStockOnlyOrigin === "yes"
+                      ? "Nenhum produto marcado como somente estoque. Sincronize um dia no EPOC ou vincule as variantes."
+                      : "Nenhum produto cadastrado"}
                 </p>
               ) : catalogListView === "table" ? (
                 <ProductCatalogTable
@@ -2436,26 +2457,6 @@ export function Produtos() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => setTechnicalSheetOpen(true)}
-                      >
-                        <ChefHat className="h-4 w-4 mr-2" />
-                        {outputTechnicalSheetRecipeId
-                          ? "Editar ficha técnica"
-                          : "É ficha técnica"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setProductMergeOpen(true)}
-                      >
-                        <Merge className="h-4 w-4 mr-2" />
-                        Unificar com outro
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
                         onClick={() => {
                           productSheetViewRef.current = "edit";
                           syncStockFormFromProduct(stockProduct);
@@ -2493,13 +2494,17 @@ export function Produtos() {
                               Ficha técnica
                             </Badge>
                           ) : null}
-                          {stockProduct.is_active === false ? (
-                            <Badge variant="secondary" className="gap-1">
-                              <PowerOff className="h-3 w-3" />
-                              Inativo
+                          {stockProduct.stock_control_type === "SALE_FAMILY" ? (
+                            <Badge
+                              variant="secondary"
+                              className="gap-1 border-sky-500/40 bg-sky-500/10 text-sky-900 dark:text-sky-100"
+                            >
+                              <Layers className="h-3 w-3" />
+                              Agrupamento
                             </Badge>
                           ) : null}
-                          {stockProduct.min_quantity > 0 &&
+                          {stockProduct.stock_control_type !== "SALE_FAMILY" &&
+                          stockProduct.min_quantity > 0 &&
                           stockProduct.current_quantity <=
                             stockProduct.min_quantity ? (
                             <Badge variant="destructive" className="gap-1">
@@ -2516,9 +2521,14 @@ export function Produtos() {
                           para alterar dados, categorias e estoque.
                         </SheetDescription>
                         <div>
-                          <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                            Categorias de produto
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Categorias de produto
+                            </p>
+                            {isPossibleGroupingProduct(stockProduct) ? (
+                              <PossibleSaleFamilyTag className="h-5 px-2 text-[0.65rem]" />
+                            ) : null}
+                          </div>
                           {stockProductCategoryIds.length > 0 ? (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {stockProductCategoryIds
@@ -2550,6 +2560,21 @@ export function Produtos() {
                               Nenhuma categoria — adicione em Editar.
                             </p>
                           )}
+                          <div className="mt-3">
+                            {stockProduct.is_active !== false ? (
+                              <Badge variant="secondary" className="h-7 px-2.5">
+                                Ativo
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="secondary"
+                                className="h-7 gap-1 px-2.5"
+                              >
+                                <PowerOff className="h-3.5 w-3.5" />
+                                Inativo
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2610,20 +2635,17 @@ export function Produtos() {
                   <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
                     {productDetailTab === "resumo" ? (
                       <div className="space-y-4 p-6">
-                        <ProductIdentificationSummary
-                          product={stockProduct}
-                          composesCmv={productComposesCmv(stockProduct)}
-                          operationalTypeLabel={operationalTypeLabel(
-                            operationalTypeByProduct[stockProduct.id] ?? null,
-                          )}
-                          className={SHEET_SECTION}
-                        />
-
-                        <div>
-                          <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                            Estoque e valor
-                          </p>
-                          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
+                          <ProductIdentificationSummary
+                            product={stockProduct}
+                            composesCmv={productComposesCmv(stockProduct)}
+                            operationalTypeLabel={operationalTypeLabel(
+                              operationalTypeByProduct[stockProduct.id] ??
+                                null,
+                            )}
+                            className={cn(SHEET_SECTION, "h-full")}
+                          />
+                          <div className="grid grid-cols-2 gap-3">
                             <div className={SHEET_TILE}>
                               <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Quantidade
@@ -2756,6 +2778,35 @@ export function Produtos() {
                         ) : null}
 
                         {currentCompany?.id ? (
+                          <ProductSetupCard
+                            companyId={currentCompany.id}
+                            productId={stockProduct.id}
+                            productName={stockProduct.name}
+                            stockControlType={stockProduct.stock_control_type}
+                            notSaleGrouping={stockProduct.not_sale_grouping}
+                            hasTechnicalSheet={Boolean(
+                              outputTechnicalSheetRecipeId,
+                            )}
+                            className={SHEET_SECTION}
+                            onOpenTechnicalSheet={() =>
+                              setTechnicalSheetOpen(true)
+                            }
+                            onOpenMerge={() => setProductMergeOpen(true)}
+                            onChanged={() => {
+                              void fetchProducts();
+                              void supabase
+                                .from("products")
+                                .select("*")
+                                .eq("id", stockProduct.id)
+                                .maybeSingle()
+                                .then(({ data }) => {
+                                  if (data) setStockProduct(data as Product);
+                                });
+                            }}
+                          />
+                        ) : null}
+
+                        {currentCompany?.id ? (
                           <ProductRecipeLinksSection
                             companyId={currentCompany.id}
                             productId={stockProduct.id}
@@ -2766,35 +2817,6 @@ export function Produtos() {
                             }}
                           />
                         ) : null}
-
-                        <div
-                          className={cn(
-                            SHEET_SECTION,
-                            "flex flex-wrap items-center justify-between gap-3",
-                          )}
-                        >
-                          <div>
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                              Status
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Visível ao vincular em despesas e notas
-                            </p>
-                          </div>
-                          {stockProduct.is_active !== false ? (
-                            <Badge variant="secondary" className="h-8 px-3">
-                              Ativo
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="secondary"
-                              className="h-8 gap-1 px-3"
-                            >
-                              <PowerOff className="h-3.5 w-3.5" />
-                              Inativo
-                            </Badge>
-                          )}
-                        </div>
 
                         {stockProduct.min_quantity > 0 &&
                           stockProduct.current_quantity <=
@@ -2997,9 +3019,14 @@ export function Produtos() {
                           </div>
                           {currentCompany?.id ? (
                             <div className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Categorias de produto
-                              </p>
+                              <div className="mb-3 flex flex-wrap items-center gap-2">
+                                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Categorias de produto
+                                </p>
+                                {isPossibleGroupingProduct(stockProduct) ? (
+                                  <PossibleSaleFamilyTag className="h-5 px-2 text-[0.65rem]" />
+                                ) : null}
+                              </div>
                               <ProductCategoryTagsField
                                 companyId={currentCompany.id}
                                 categories={companyProductCategories}

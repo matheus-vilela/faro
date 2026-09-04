@@ -448,7 +448,20 @@ export function FluxoBoletosPage({
         ),
       ]);
       setCalendarRevenueEntries(data);
-      setCalendarServiceSales(normalizeServiceDailySales(servicesData));
+      const services = normalizeServiceDailySales(servicesData);
+      setCalendarServiceSales(services);
+      setRevenueCalendarDayList((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: data.filter(
+            (entry) => entry.entry_date.slice(0, 10) === prev.dateKey,
+          ),
+          serviceItems: services.filter(
+            (sale) => sale.sale_date.slice(0, 10) === prev.dateKey,
+          ),
+        };
+      });
     } catch (e) {
       console.error(e);
       toast.error("Não foi possível carregar o calendário de vendas.");
@@ -1683,6 +1696,7 @@ export function FluxoBoletosPage({
           onProductClick={(id) => {
             setDetailRevenueId(id);
           }}
+          onEpocDaySynced={() => void fetchCalendarRevenueEntries()}
         />
       )}
 

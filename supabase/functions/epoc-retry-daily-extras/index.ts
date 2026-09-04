@@ -1,6 +1,6 @@
 /**
- * Rebusca serviços e/ou faturamento EPOC nos dias em falta (`epoc_sync_day_status`).
- * POST { company_id, kinds?: ["services"|"faturamento"], days_iso?: string[] }
+ * Rebusca serviços, faturamento e/ou estoque EPOC nos dias em falta (`epoc_sync_day_status`).
+ * POST { company_id, kinds?: ["services"|"faturamento"|"estoque"], days_iso?: string[] }
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -12,8 +12,13 @@ import {
   performEpocPortalLogin,
 } from "../_shared/epocPortalLoginSession.ts";
 import {
+  epocEstoqueFiltrarAcoesBody,
+  MODULO_REL_ESTOQUE,
+} from "../_shared/epocEstoqueCsv.ts";
+import {
   buildPartialSyncSummary,
   listEpocSyncGaps,
+  persistEstoqueVariantOutsFromAcoesHtml,
   persistFaturamentoFromAcoesHtml,
   persistServicesFromAcoesHtml,
 } from "../_shared/epocPersistDailyExtras.ts";
@@ -146,10 +151,13 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "company_id é obrigatório" }, 400);
   }
 
-  const kindsRaw = Array.isArray(body.kinds) ? body.kinds : ["services", "faturamento"];
+  const kindsRaw = Array.isArray(body.kinds)
+    ? body.kinds
+    : ["services", "faturamento", "estoque"];
   const wantServices = kindsRaw.includes("services");
   const wantFat = kindsRaw.includes("faturamento");
-  if (!wantServices && !wantFat) {
+  const wantStock = kindsRaw.includes("estoque");
+  if (!wantServices && !wantFat && !wantStock) {
     return json({ ok: false, error: "kinds inválido" }, 400);
   }
 
@@ -185,6 +193,7 @@ Deno.serve(async (req) => {
   const gaps = await listEpocSyncGaps(admin, companyId);
   let daysServices = wantServices ? gaps.services : [];
   let daysFat = wantFat ? gaps.faturamento : [];
+  let daysStock = wantStock ? gaps.stock : [];
 
   if (Array.isArray(body.days_iso)) {
     const filter = body.days_iso
@@ -196,11 +205,15 @@ Deno.serve(async (req) => {
       const set = new Set(filter);
       daysServices = daysServices.filter((d) => set.has(d));
       daysFat = daysFat.filter((d) => set.has(d));
+      daysStock = daysStock.filter((d) => set.has(d));
     }
   }
 
   // Processa poucos dias por invocação para caber no idle timeout de 150s.
-  const days = [...new Set([...daysServices, ...daysFat])].slice(0, maxDays);
+  const days = [...new Set([...daysServices, ...daysFat, ...daysStock])].slice(
+    0,
+    maxDays,
+  );
   if (days.length === 0) {
     return json({
       ok: true,
@@ -325,7 +338,11 @@ Deno.serve(async (req) => {
   }
 
   // Pré-carga dos módulos (mesma sequência do sync principal).
-  for (const modulo of [MODULO_REL_VENDA_SERVICOS, MODULO_REL_FATURAMENTO]) {
+  for (const modulo of [
+    MODULO_REL_VENDA_SERVICOS,
+    MODULO_REL_FATURAMENTO,
+    MODULO_REL_ESTOQUE,
+  ]) {
     await postValidador();
     await postAcoes({
       modulo,
@@ -407,6 +424,28 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (wantStock && daysStock.includes(dayIso)) {
+      if (await postValidador()) {
+        const a = await postAcoes(
+          epocEstoqueFiltrarAcoesBody(diaBr, naoMenu, tokenForBody),
+        );
+        if (a.ok) {
+          const p = await persistEstoqueVariantOutsFromAcoesHtml(
+            admin,
+            companyId,
+            diaBr,
+            a.text,
+          );
+          dayDetail.estoque = p;
+          if (p.ok) okCount += 1;
+        } else {
+          dayDetail.estoque = { ok: false, error: "acoes estoque falhou" };
+        }
+      } else {
+        dayDetail.estoque = { ok: false, error: "validador falhou" };
+      }
+    }
+
     details.push(dayDetail);
   }
 
@@ -421,6 +460,7 @@ Deno.serve(async (req) => {
         epoc_partial_sync_summary: summary,
         epoc_partial_sync_missing_services_days: remainingGaps.services,
         epoc_partial_sync_missing_faturamento_days: remainingGaps.faturamento,
+        epoc_partial_sync_missing_stock_days: remainingGaps.stock,
         epoc_partial_sync_at: nowIso,
       },
       updated_at: nowIso,
@@ -429,7 +469,9 @@ Deno.serve(async (req) => {
     .eq("provider", "epoc");
 
   const stillMissing =
-    remainingGaps.services.length + remainingGaps.faturamento.length;
+    remainingGaps.services.length +
+    remainingGaps.faturamento.length +
+    remainingGaps.stock.length;
   // Encadeia enquanto houver gaps. Se okCount=0 (falha transitória no portal),
   // ainda tenta algumas vezes — antes parava na 1.ª falha e o card ficava em 51 dias.
   const maxFailChains = 6;
@@ -454,6 +496,7 @@ Deno.serve(async (req) => {
       ok_count: okCount,
       remaining_services: remainingGaps.services.length,
       remaining_faturamento: remainingGaps.faturamento.length,
+      remaining_stock: remainingGaps.stock.length,
     });
   }
 

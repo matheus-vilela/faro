@@ -1,3 +1,4 @@
+import { platformAccessInviteAction } from "@/lib/platformAccessInvite";
 import {
   DEFAULT_MEMBER_PERMISSIONS,
   parsePermissionKeys,
@@ -138,6 +139,31 @@ export async function addPlatformAccessByEmail(input: {
 }): Promise<{ error?: string }> {
   const email = input.email.trim().toLowerCase();
   if (!email.includes("@")) return { error: "E-mail inválido." };
+
+  const { data: existingRows, error: findErr } = await supabase
+    .from("company_platform_access")
+    .select("id, status, email")
+    .eq("company_id", input.companyId);
+
+  if (findErr) return { error: findErr.message };
+
+  const existing =
+    existingRows?.find(
+      (row) => String(row.email ?? "").trim().toLowerCase() === email,
+    ) ?? null;
+
+  const action = platformAccessInviteAction(existing);
+  if (action === "exists") {
+    return { error: "Este e-mail já está cadastrado nesta empresa." };
+  }
+
+  if (action === "reinvite" && existing) {
+    const { error: delErr } = await supabase
+      .from("company_platform_access")
+      .delete()
+      .eq("id", existing.id);
+    if (delErr) return { error: delErr.message };
+  }
 
   const { error } = await supabase.from("company_platform_access").insert({
     company_id: input.companyId,

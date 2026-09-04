@@ -80,16 +80,20 @@ export function ProductCatalogCard({
   onToggleSelect?: (productId: string) => void;
 }) {
   const isGrid = layout === "grid";
+  const isSaleFamily = p.stock_control_type === "SALE_FAMILY";
   const qNum = Number(p.current_quantity);
   const minNum = Number(p.min_quantity ?? 0);
-  const stockIsNegative = qNum < 0;
-  const stockIsZero = !stockIsNegative && (p.stock_is_zero ?? qNum <= 0);
+  const stockIsNegative = !isSaleFamily && qNum < 0;
+  const stockIsZero =
+    !isSaleFamily && !stockIsNegative && (p.stock_is_zero ?? qNum <= 0);
   const stockBelowMinPositive =
-    p.stock_below_min_positive ??
-    (minNum > 0 && qNum > 0 && qNum <= minNum);
+    !isSaleFamily &&
+    (p.stock_below_min_positive ??
+      (minNum > 0 && qNum > 0 && qNum <= minNum));
   const needsStockHighlight =
-    p.stock_has_alert ??
-    (stockIsNegative || stockIsZero || (minNum > 0 && qNum <= minNum));
+    !isSaleFamily &&
+    (p.stock_has_alert ??
+      (stockIsNegative || stockIsZero || (minNum > 0 && qNum <= minNum)));
   const qtyStr = Number(p.current_quantity).toLocaleString("pt-BR");
   const minStr =
     p.min_quantity > 0
@@ -112,6 +116,22 @@ export function ProductCatalogCard({
 
   const statusBadges = (
     <>
+      {isSaleFamily && (
+        <Badge
+          variant="secondary"
+          className="h-6 gap-1 border-sky-500/40 bg-sky-500/10 px-2 text-[0.7rem] font-normal text-sky-950 dark:text-sky-100"
+        >
+          Agrupamento
+        </Badge>
+      )}
+      {!isSaleFamily && p.stock_only_origin && !p.not_sale_grouping && (
+        <Badge
+          variant="outline"
+          className="h-6 border-amber-600/40 bg-amber-500/10 px-2 text-[0.7rem] font-normal text-amber-950 dark:text-amber-100"
+        >
+          Possível agrupamento
+        </Badge>
+      )}
       {p.is_active === false && (
         <Badge
           variant="secondary"

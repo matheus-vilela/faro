@@ -61,6 +61,9 @@ function buildFilteredQuery(companyId: string, f: ProductExportFilterState) {
   } else if (f.filterStockAlert === "any") {
     q = q.eq("stock_has_alert", true);
   }
+  if (f.filterStockOnlyOrigin === "yes") {
+    q = q.eq("stock_only_origin", true);
+  }
 
   if (f.search.trim()) {
     const term = `%${f.search.trim()}%`;

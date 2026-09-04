@@ -43,7 +43,7 @@ export function triggerEpocDailyExtrasInBackground(opts: {
         },
         body: JSON.stringify({
           company_id: opts.companyId,
-          kinds: ["services", "faturamento"],
+          kinds: ["services", "faturamento", "estoque"],
           max_days: opts.maxDays ?? 3,
           continue_chain: opts.continueChain !== false,
           chain_attempt: opts.chainAttempt ?? 0,

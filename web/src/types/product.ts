@@ -29,8 +29,14 @@ export interface Product {
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
   ean?: string | null
   is_active?: boolean
-  /** false = prato de ficha técnica (oculto na listagem de Produtos). */
+  /** DIRECT | RECIPE_CONTROLLED | COMPOSITE | SERVICE | SALE_FAMILY */
+  stock_control_type?: string | null
+  /** false = prato de ficha ou agrupamento de venda (oculto na listagem de Produtos). */
   listed_in_product_catalog?: boolean
+  /** Saiu só no estoque EPOC — candidato a variante de agrupamento. */
+  stock_only_origin?: boolean
+  /** Usuário informou que o item não é agrupamento de venda. */
+  not_sale_grouping?: boolean
   created_at: string
   updated_at: string
   /** Colunas geradas (migração stock alert) — opcionais até o banco atualizar */

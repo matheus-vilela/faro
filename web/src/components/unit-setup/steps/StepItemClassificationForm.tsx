@@ -32,7 +32,10 @@ import { suggestOperationalItemTypeFromName } from "@/lib/itemClassification/sug
 import { suggestProductCatalogCategory } from "@/lib/companyProductCategories/suggestProductCatalogCategory";
 import { instantiateMasterRecipeFromTemplate } from "@/lib/masterRecipeCatalog/instantiateMasterRecipeForCompany";
 import { canonicalProductName } from "@/lib/productImport/canonicalName";
-import { PRODUCT_CATALOG_PATH } from "@/lib/productStockPaths";
+import {
+  PRODUCT_CATALOG_PATH,
+  SALE_FAMILIES_PATH,
+} from "@/lib/productStockPaths";
 import { supabase } from "@/lib/supabase";
 import type { ItemClassificationOnboardingSnapshot } from "@/types/companySetup";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
@@ -998,6 +1001,16 @@ export function StepItemClassificationForm({
           Revise a sugestão (score) e confirme o tipo. Insumos e itens de operação param de ser
           tratados como receita por engano. O sistema separa <strong>sugestão</strong> e{" "}
           <strong>decisão final</strong> para auditoria.
+        </p>
+        <p className="mt-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Item de cardápio com sabores (Bolinhos) não é ficha: configure em{" "}
+          <Link
+            to={SALE_FAMILIES_PATH}
+            className="text-foreground font-medium underline-offset-2 hover:underline"
+          >
+            Famílias de venda
+          </Link>
+          . A baixa sai do estoque do dia, só na variante que o cliente pediu.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">

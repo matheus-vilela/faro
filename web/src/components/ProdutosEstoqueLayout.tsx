@@ -9,6 +9,7 @@ import {
   RECIPES_PATH,
   RECIPES_PENDING_PATH,
   RECIPES_MATCH_PATH,
+  SALE_FAMILIES_PATH,
   SERVICES_PATH,
 } from "@/lib/productStockPaths";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ import {
   ClipboardList,
   ConciergeBell,
   Inbox,
+  Layers,
   Link2,
   Package,
   ShoppingCart,
@@ -126,6 +128,20 @@ const STOCK_GROUPS: {
     ],
   },
   {
+    id: "familias",
+    label: "Famílias de venda",
+    description: "Cardápio × variantes de estoque",
+    icon: Layers,
+    links: [
+      {
+        to: SALE_FAMILIES_PATH,
+        label: "Famílias de venda",
+        icon: Layers,
+        end: true,
+      },
+    ],
+  },
+  {
     id: "servicos",
     label: "Serviços",
     description: "Cadastro sem estoque",
@@ -181,7 +197,7 @@ export function ProdutosEstoqueLayout() {
       <PageHeader
         icon={Package}
         title="Produtos e estoque"
-        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas técnicas e serviços."
+        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas, famílias de venda e serviços."
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">
