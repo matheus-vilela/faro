@@ -77,6 +77,8 @@ export function stockMovementIsEditable(
 export function stockMovementOriginLabel(
   row: Pick<StockMovementEditRow, "reference_type" | "metadata_json">,
 ): string {
+  const ref = (row.reference_type ?? "").trim().toLowerCase();
+  if (ref === "inventory_count") return "Contagem";
   const mode = stockMovementEditMode(row);
   if (mode === "manual") return "Manual";
   if (mode === "expense") return "Nota fiscal / despesa";

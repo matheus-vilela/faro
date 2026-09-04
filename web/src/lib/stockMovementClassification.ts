@@ -32,7 +32,7 @@ export const MOVEMENT_CLASSIFICATION_FILTER_OPTIONS: {
   { value: "transfer", label: "Transferência" },
   { value: "internal_consumption", label: "Consumo interno" },
   { value: "loss", label: "Perda" },
-  { value: "inventory", label: "Inventário" },
+  { value: "inventory", label: "Contagem" },
   { value: "adjustment", label: "Ajuste" },
   { value: "manual", label: "Manual" },
   { value: "recipe", label: "Receita" },

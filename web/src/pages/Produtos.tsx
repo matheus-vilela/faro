@@ -100,7 +100,7 @@ import {
   parsePurchasesMetricParam,
   PURCHASES_METRIC_LABELS,
 } from "@/lib/productPurchasesDashboard";
-import { PRODUCT_CATALOG_PATH } from "@/lib/productStockPaths";
+import { PRODUCT_CATALOG_PATH, STOCK_COUNT_PATH } from "@/lib/productStockPaths";
 import {
   parseProductStockLots,
   type ProductStockLotEntry,
@@ -2142,6 +2142,16 @@ export function Produtos() {
           </div>
         }
       />
+
+      {currentCompany?.onboarding_stock_unlocked === false ? (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          O saldo do catálogo ainda é provisório até a{" "}
+          <Link to={STOCK_COUNT_PATH} className="font-medium underline underline-offset-2">
+            contagem geral de onboarding
+          </Link>{" "}
+          ser aprovada. Entradas de nota fiscal continuam sendo registradas.
+        </p>
+      ) : null}
 
       {currentCompany?.id && (
         <>

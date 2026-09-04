@@ -52,6 +52,8 @@ export interface Company {
   setup?: Record<string, unknown> | null;
   focus_cnpj_consulta?: Record<string, unknown> | null;
   onboarding_completed?: boolean;
+  /** False enquanto a contagem geral de onboarding não for aprovada. */
+  onboarding_stock_unlocked?: boolean;
   onboarding_fiscal?: OnboardingFiscalMetrics | null;
   onboarding_pdv?: {
     completed?: boolean;

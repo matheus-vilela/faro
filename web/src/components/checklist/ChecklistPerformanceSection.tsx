@@ -33,6 +33,24 @@ function RateRadial({
   actual: number;
   expected: number;
 }) {
+  if (expected <= 0) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col items-center gap-2 py-4">
+        <p className="text-center text-sm font-medium text-foreground">
+          Sem meta neste período
+        </p>
+        <p className="text-center text-xs text-muted-foreground">
+          {windowLabel}
+        </p>
+        {actual > 0 ? (
+          <p className="text-center text-[11px] tabular-nums text-muted-foreground">
+            {actual} envio{actual !== 1 ? "s" : ""} mesmo assim
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   const safe = Math.min(100, Math.max(0, rate));
   const rest = Math.max(0, 100 - safe);
 
@@ -69,7 +87,7 @@ function RateRadial({
         {windowLabel}
       </p>
       <p className="text-center text-[11px] tabular-nums text-muted-foreground">
-        {actual}/{expected} realizados
+        {actual} de {expected} realizados
       </p>
     </div>
   );
@@ -118,23 +136,41 @@ function BothPeriodsRadialBlock({ s }: { s: ChecklistAssignmentStatRow }) {
   );
 }
 
-function SummaryStrip({ stats }: { stats: ChecklistAssignmentStatRow[] }) {
+function SummaryStrip({
+  stats,
+  period,
+}: {
+  stats: ChecklistAssignmentStatRow[];
+  period: ChecklistPerformancePeriod;
+}) {
   if (stats.length === 0) return null;
-  const avg7 = Math.round(
-    stats.reduce((a, s) => a + s.rate7, 0) / stats.length,
-  );
-  const avg30 = Math.round(
-    stats.reduce((a, s) => a + s.rate30, 0) / stats.length,
-  );
+  const withMeta7 = stats.filter((s) => s.expected7 > 0);
+  const withMeta30 = stats.filter((s) => s.expected30 > 0);
+  const avg7 =
+    withMeta7.length > 0
+      ? Math.round(withMeta7.reduce((a, s) => a + s.rate7, 0) / withMeta7.length)
+      : null;
+  const avg30 =
+    withMeta30.length > 0
+      ? Math.round(
+          withMeta30.reduce((a, s) => a + s.rate30, 0) / withMeta30.length,
+        )
+      : null;
+  const show7 = period === "7" || period === "both";
+  const show30 = period === "30" || period === "both";
   return (
     <div className="mb-4 flex flex-wrap gap-3 rounded-lg border border-dashed border-border/80 bg-muted/20 px-3 py-2 text-sm">
-      <span className="text-muted-foreground">Média da equipe (taxa)</span>
-      <Badge variant="secondary" className="tabular-nums">
-        7d: {avg7}%
-      </Badge>
-      <Badge variant="outline" className="tabular-nums">
-        30d: {avg30}%
-      </Badge>
+      <span className="text-muted-foreground">Média da equipe</span>
+      {show7 ? (
+        <Badge variant="secondary" className="tabular-nums">
+          7d: {avg7 == null ? "—" : `${avg7}%`}
+        </Badge>
+      ) : null}
+      {show30 ? (
+        <Badge variant="outline" className="tabular-nums">
+          30d: {avg30 == null ? "—" : `${avg30}%`}
+        </Badge>
+      ) : null}
     </div>
   );
 }
@@ -159,10 +195,11 @@ export function ChecklistPerformanceSection({
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <ListChecks className="h-4 w-4" />
-              Desempenho por operador
+              Atingimento da meta
             </CardTitle>
             <CardDescription className="mt-1 max-w-prose">
-              Atingimento da meta esperada pela recorrência de cada checklist.
+              Quantas vezes o checklist foi feito versus o esperado no período
+              (recorrência).
             </CardDescription>
           </div>
           <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
@@ -189,16 +226,16 @@ export function ChecklistPerformanceSection({
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Carregando desempenho…
+            Carregando atingimento da meta…
           </div>
         ) : stats.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nenhuma atribuição com checklist ativo. Atribua operadores aos
-            checklists para ver a meta e o desempenho.
+            Nenhuma atribuição em checklist ativo. Atribua operadores para ver
+            a meta.
           </p>
         ) : (
           <>
-            <SummaryStrip stats={stats} />
+            <SummaryStrip stats={stats} period={period} />
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {stats.map((s) => (
                 <div

@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SortableTableHead } from "@/components/ui/sortable-table-head";
+import { useClientTableSort } from "@/hooks/useClientTableSort";
+import {
+  CHECKLIST_HISTORY_STATUSES,
+  checklistRunStatusBadgeVariant,
+  checklistRunStatusLabel,
+} from "@/lib/checklistOperationalTypes";
 import {
   spAddCalendarDays,
   spCivilDayBoundsUtc,
@@ -40,6 +48,7 @@ export type HistoryMode = "day" | "last7" | "range";
 type HistoryRow = {
   id: string;
   submitted_at: string;
+  status: string;
   checklist_id: string;
   company_member_id: string;
   checklists: { title: string } | null;
@@ -110,13 +119,14 @@ export function ChecklistHistorySection({
         `
         id,
         submitted_at,
+        status,
         checklist_id,
         company_member_id,
         checklists ( title ),
         company_members ( name )
       `,
       )
-      .eq("status", "submitted")
+      .in("status", [...CHECKLIST_HISTORY_STATUSES])
       .not("submitted_at", "is", null)
       .gte("submitted_at", bounds.startIso)
       .lte("submitted_at", bounds.endIso)
@@ -143,6 +153,35 @@ export function ChecklistHistorySection({
     void queueMicrotask(() => load());
   }, [load]);
 
+  const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
+    HistoryRow,
+    "submittedAt" | "checklist" | "member" | "status"
+  >(
+    rows,
+    "submittedAt",
+    (a, b, key) => {
+      if (key === "submittedAt") {
+        return a.submitted_at.localeCompare(b.submitted_at);
+      }
+      if (key === "checklist") {
+        return (a.checklists?.title ?? "").localeCompare(
+          b.checklists?.title ?? "",
+          "pt-BR",
+        );
+      }
+      if (key === "member") {
+        return (a.company_members?.name ?? "").localeCompare(
+          b.company_members?.name ?? "",
+          "pt-BR",
+        );
+      }
+      return checklistRunStatusLabel(a.status).localeCompare(
+        checklistRunStatusLabel(b.status),
+        "pt-BR",
+      );
+    },
+  );
+
   const modeLabel =
     mode === "day"
       ? "Dia"
@@ -158,9 +197,8 @@ export function ChecklistHistorySection({
           Histórico de execuções
         </CardTitle>
         <CardDescription>
-          Consulte envios concluídos por data (fuso America/Sao_Paulo, mesmo
-          critério da recorrência). Útil para auditar se o checklist foi feito
-          em um dia específico.
+          Envios no período (fuso America/Sao_Paulo). Use para conferir se a
+          rotina foi feita em um dia específico.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -331,7 +369,7 @@ export function ChecklistHistorySection({
           </div>
         ) : rows.length === 0 ? (
           <p className="rounded-md border border-dashed border-border/80 bg-muted/20 px-3 py-6 text-center text-sm text-muted-foreground">
-            Nenhuma execução concluída nesse período
+            Nenhuma execução enviada nesse período
             {filterChecklist !== "all" || filterMember !== "all"
               ? " com os filtros atuais"
               : ""}
@@ -342,13 +380,38 @@ export function ChecklistHistorySection({
             <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs font-medium text-muted-foreground">
-                  <th className="px-3 py-2">Data/hora do envio (SP)</th>
-                  <th className="px-3 py-2">Checklist</th>
-                  <th className="px-3 py-2">Operador</th>
+                  <SortableTableHead
+                    label="Data/hora do envio (SP)"
+                    column="submittedAt"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={onSort}
+                  />
+                  <SortableTableHead
+                    label="Checklist"
+                    column="checklist"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={onSort}
+                  />
+                  <SortableTableHead
+                    label="Operador"
+                    column="member"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={onSort}
+                  />
+                  <SortableTableHead
+                    label="Status"
+                    column="status"
+                    sortKey={sortKey}
+                    sortAsc={sortAsc}
+                    onSort={onSort}
+                  />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {sorted.map((r) => (
                   <tr
                     key={r.id}
                     className="border-b border-border/60 last:border-0"
@@ -362,13 +425,19 @@ export function ChecklistHistorySection({
                     <td className="px-3 py-2.5">
                       {r.company_members?.name?.trim() || "—"}
                     </td>
+                    <td className="px-3 py-2.5">
+                      <Badge
+                        variant={checklistRunStatusBadgeVariant(r.status)}
+                      >
+                        {checklistRunStatusLabel(r.status)}
+                      </Badge>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="border-t bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              {rows.length} envio{rows.length !== 1 ? "s" : ""} · apenas runs
-              com status concluído.
+              {rows.length} envio{rows.length !== 1 ? "s" : ""} no período.
             </p>
           </div>
         )}

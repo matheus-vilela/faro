@@ -5,6 +5,7 @@ import type { StockMovementProductMergeMeta } from "@/types/productMergeAudit";
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  ClipboardList,
   GitMerge,
   Trash2,
   Undo2,
@@ -44,7 +45,23 @@ export function StockMovementTypeBadge({
     );
   }
 
+  const isCount = row.reference_type === "inventory_count";
   const isIn = display.kind === "in";
+
+  if (isCount) {
+    return (
+      <Badge
+        variant="outline"
+        className={cn(
+          "gap-1 border-teal-500/35 bg-teal-500/10 font-normal text-teal-900 dark:text-teal-200",
+          className,
+        )}
+      >
+        <ClipboardList className="h-3 w-3" />
+        {display.label}
+      </Badge>
+    );
+  }
 
   return (
     <Badge

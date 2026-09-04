@@ -64,7 +64,7 @@ type ChecklistMeta = {
 
 type LoadResult = {
   ok: boolean;
-  run?: { status: string; submitted_at: string | null };
+  run?: { status: string; submitted_at: string | null; review_notes?: string | null };
   checklist?: ChecklistMeta;
   items?: ChecklistItemRow[];
   item_completed?: Record<string, string | null>;
@@ -130,7 +130,7 @@ export function ExecutarChecklist() {
     if (!row?.ok) {
       setError(
         row?.error === "already_submitted"
-          ? "Este link já foi utilizado ou o checklist já foi enviado."
+          ? "Este checklist está em conferência ou já foi enviado."
           : "Link inválido ou expirado.",
       );
       setData(null);
@@ -297,6 +297,21 @@ export function ExecutarChecklist() {
           </CardTitle>
           {data?.checklist?.description ? (
             <CardDescription>{data.checklist.description}</CardDescription>
+          ) : null}
+          {data?.run?.status === "needs_rework" ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+              <p className="font-medium">Devolvido para refazer</p>
+              {data.run.review_notes?.trim() ? (
+                <p className="mt-1 text-muted-foreground">
+                  {data.run.review_notes.trim()}
+                </p>
+              ) : (
+                <p className="mt-1 text-muted-foreground">
+                  Corrija o que o gestor apontou e envie de novo neste mesmo
+                  link.
+                </p>
+              )}
+            </div>
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">

@@ -31,6 +31,21 @@ describe("stockMovementTypeDisplay", () => {
       stockMovementTypeDisplay({ type: "out", reference_type: "revenue_entry" }),
     ).toEqual({ kind: "out", label: "Saída" });
   });
+
+  it("identifies inventory count as entrada/saída por contagem", () => {
+    expect(
+      stockMovementTypeDisplay({
+        type: "in",
+        reference_type: "inventory_count",
+      }),
+    ).toEqual({ kind: "in", label: "Entrada por contagem" });
+    expect(
+      stockMovementTypeDisplay({
+        type: "out",
+        reference_type: "inventory_count",
+      }),
+    ).toEqual({ kind: "out", label: "Saída por contagem" });
+  });
 });
 
 describe("stockMovementMergePairDisplay", () => {

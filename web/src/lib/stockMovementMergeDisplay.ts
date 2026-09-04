@@ -30,6 +30,12 @@ export function stockMovementTypeDisplay(row: {
   if (row.reference_type === "product_merge_undo") {
     return { kind: "merge_undo", label: "Desfazer unificação" };
   }
+  if (row.reference_type === "inventory_count") {
+    if (row.type === "in") {
+      return { kind: "in", label: "Entrada por contagem" };
+    }
+    return { kind: "out", label: "Saída por contagem" };
+  }
   if (row.type === "in") return { kind: "in", label: "Entrada" };
   if (isWasteStockMovement(row)) return { kind: "waste", label: "Saída" };
   return { kind: "out", label: "Saída" };
