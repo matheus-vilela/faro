@@ -319,6 +319,7 @@ async function createListingSessionLink(
       company_member_id: auth.companyMemberId,
       assigned_company_member_id: assignedMemberId,
       status: "open",
+      validate_live: false,
       inventory_count_group_id: listing.inventory_count_group_id,
       inventory_count_listing_id: listing.id,
     })
@@ -399,7 +400,7 @@ function formatCountLinksMessage(links: CountLink[]): string {
   }
   lines.push("");
   lines.push(
-    "Se algo ficar fora da faixa, o Faro pede para conferir de novo — sem mostrar o número.",
+    "Conte na unidade que vê na prateleira. O esperado fica oculto — o responsável confere depois.",
   );
   return lines.join("\n");
 }
@@ -594,6 +595,7 @@ export async function sendInventoryCountLink(
       assigned_company_member_id:
         auth.role === "member" ? auth.companyMemberId : null,
       status: "open",
+      validate_live: false,
     })
     .select("id, token")
     .single();
@@ -697,7 +699,7 @@ async function sendListingScopedCountLinks(
     await sendWhatsappMessage(
       auth.senderNormalized,
       withFaroFlowFooter(
-        "Cadastre produtos nas listagens em *Produtos* → *Contagem* antes de contar pelo WhatsApp. Listagens vazias (como Lista principal) não entram na contagem.",
+        "Cadastre produtos nas listagens em *Produtos* → *Contagem* antes de contar pelo WhatsApp. Listagens sem produtos não entram na contagem.",
       ),
       "inventory_grupos_sem_produtos",
       flowId,
