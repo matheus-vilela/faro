@@ -5,18 +5,30 @@ import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
 import type { ReactNode } from "react";
 
-interface ProductIdentificationSummaryProps {
-  product: Product;
-  operationalTypeLabel: string;
-  composesCmv: boolean;
-  className?: string;
-}
-
 function barcodeDigitsOnly(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-function BarcodeDetail({ product }: { product: Product }) {
+function FieldRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+      <p className="pt-0.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <div className="min-w-0 text-sm font-medium leading-snug text-foreground">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BarcodeValue({ product }: { product: Product }) {
   const ean = product.ean?.trim() || null;
   const barcode = product.barcode?.trim() || null;
   const eanDigits = ean ? barcodeDigitsOnly(ean) : "";
@@ -26,83 +38,73 @@ function BarcodeDetail({ product }: { product: Product }) {
     barcodeDigits.length >= 8 &&
     eanDigits === barcodeDigits;
 
+  if (!ean && !barcode) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
   if (ean) {
     return (
-      <span className="block font-mono text-xs font-medium wrap-anywhere text-foreground">
-        <span className="font-sans text-muted-foreground">EAN </span>
-        {ean}
+      <div className="font-mono text-xs">
+        <p>
+          <span className="font-sans text-muted-foreground">EAN </span>
+          {ean}
+        </p>
         {barcode && !codesMatch ? (
-          <span className="mt-0.5 block font-mono text-[0.7rem] font-normal text-muted-foreground">
+          <p className="mt-0.5 text-[0.7rem] font-normal text-muted-foreground">
             {barcode}
-          </span>
+          </p>
         ) : null}
-      </span>
+      </div>
     );
   }
 
-  return (
-    <span className="block font-mono text-xs font-medium wrap-anywhere text-foreground">
-      {barcode || "—"}
-    </span>
-  );
-}
-
-function CompactField({
-  label,
-  children,
-  className,
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      <p className="text-[0.6rem] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-0.5">{children}</div>
-    </div>
-  );
+  return <span className="font-mono text-xs">{barcode}</span>;
 }
 
 export function ProductIdentificationSummary({
   product,
   operationalTypeLabel,
   composesCmv,
-  className = PRODUCT_SHEET_SECTION,
-}: ProductIdentificationSummaryProps) {
+  className,
+}: {
+  product: Product;
+  operationalTypeLabel: string;
+  composesCmv: boolean;
+  className?: string;
+}) {
   const sku = product.sku?.trim();
+  const ncm = product.ncm?.trim();
+  const aliases = product.merged_catalog_names ?? [];
 
   return (
-    <div className={cn(className, "!p-3 sm:!p-3.5")}>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[0.6rem] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className={cn(PRODUCT_SHEET_SECTION, "flex h-full flex-col", className)}>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
           Identificação
         </p>
-        <span className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 py-0.5 text-[0.65rem] text-muted-foreground">
-          <span>{systemUnitLabel(product.unit)}</span>
-          <span className="font-mono text-[0.6rem] opacity-80">({product.unit})</span>
+        <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[0.65rem] text-muted-foreground">
+          {systemUnitLabel(product.unit)}
+          <span className="font-mono opacity-70">({product.unit})</span>
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <CompactField label="SKU">
-          <span className="block font-mono text-xs font-medium wrap-anywhere text-foreground">
-            {sku || "—"}
-          </span>
-        </CompactField>
-        <CompactField label="Código de barras">
-          <BarcodeDetail product={product} />
-        </CompactField>
-        {product.ncm?.trim() ? (
-          <CompactField label="NCM">
-            <span className="block font-mono text-xs font-medium text-foreground">
-              {product.ncm.trim()}
-            </span>
-          </CompactField>
+      <div className="divide-y divide-border/70">
+        <FieldRow label="SKU">
+          {sku ? (
+            <span className="font-mono text-xs">{sku}</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </FieldRow>
+        <FieldRow label="Código">
+          <BarcodeValue product={product} />
+        </FieldRow>
+        {ncm ? (
+          <FieldRow label="NCM">
+            <span className="font-mono text-xs">{ncm}</span>
+          </FieldRow>
         ) : null}
-        <CompactField label="CMV">
+        <FieldRow label="CMV">
           <Badge
             variant="secondary"
             className={cn(
@@ -112,19 +114,17 @@ export function ProductIdentificationSummary({
                 : "text-muted-foreground",
             )}
           >
-            {composesCmv ? "Sim" : "Não"}
+            {composesCmv ? "Compõe" : "Não compõe"}
           </Badge>
-        </CompactField>
-        <CompactField label="Tipo operacional">
-          <span className="block text-xs font-medium leading-snug text-foreground">
-            {operationalTypeLabel}
-          </span>
-        </CompactField>
+        </FieldRow>
+        <FieldRow label="Operação">
+          {operationalTypeLabel}
+        </FieldRow>
       </div>
-      {(product.merged_catalog_names?.length ?? 0) > 0 ? (
-        <p className="mt-2 text-[0.65rem] leading-snug text-muted-foreground">
-          Também reconhecido como:{" "}
-          {product.merged_catalog_names!.join(" · ")}
+
+      {aliases.length > 0 ? (
+        <p className="mt-auto border-t border-border/70 pt-3 text-xs leading-snug text-muted-foreground">
+          Também reconhecido como {aliases.join(" · ")}
         </p>
       ) : null}
     </div>

@@ -125,14 +125,13 @@ export function ProductSaleFamilySection({
           </p>
         ) : info.kind === "variant" ? (
           <p className="mt-1 text-sm text-muted-foreground">
-            Faz parte do agrupamento{" "}
+            Continua sendo produto e faz parte do agrupamento{" "}
             <span className="text-foreground font-medium">
               {info.family?.name}
             </span>
             {info.family?.qty_per_sale != null
               ? ` (${info.family.qty_per_sale} por 1).`
-              : "."}{" "}
-            Não é ficha técnica.
+              : "."}
           </p>
         ) : (
           <p className="mt-1 text-sm text-muted-foreground">

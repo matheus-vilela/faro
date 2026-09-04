@@ -11,7 +11,9 @@ No detalhe, “família” e as ações (tornar, vincular, ficha, unificar) fica
 
 ## Objetivo
 
-No detalhe do produto, o nome visível é **agrupamento**. As ações de configurar o item (tornar agrupamento, vincular, ficha técnica, unificar, não é agrupamento) ficam no **mesmo card**. Identificação à esquerda; estoque e valor em 2×2 à direita. Status no header, abaixo das categorias.
+No detalhe do produto, o nome visível é **agrupamento**. As ações de configurar o item (tornar agrupamento, vincular, ficha técnica, unificar, não é agrupamento) ficam no **mesmo card**. Status no header, abaixo das categorias.
+
+Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; configuração em card próprio; lotes, conversões, unificação e fichas abaixo, sem tiles soltos.
 
 ## Fora de escopo
 
@@ -30,7 +32,7 @@ No detalhe do produto, o nome visível é **agrupamento**. As ações de configu
 ## Comportamento esperado
 
 - Copy no detalhe e na listagem do catálogo: **Agrupamento** / **Possível agrupamento** (não “família”).
-- Card **Configuração** com as ações: tornar agrupamento, vincular a um agrupamento, é ficha técnica, unificar com outro, e **não é um item de agrupamento**.
+- Card **Configuração**: três seletores — **Agrupamento**, **Ficha técnica**, **Unificar com**. Agrupamento = nenhum / este é o agrupamento / ligar a um existente. Ficha abre o editor. Unificar abre o diálogo com o produto escolhido.
 - “Não é agrupamento” grava flag; some a tag **Possível agrupamento**; o próximo sync não a traz de volta.
 - Quem já é agrupamento pode deixar de ser (variantes desvinculam).
 - Header: só **Editar**. Status (ativo/inativo) abaixo de Categorias de produto.
@@ -39,10 +41,12 @@ No detalhe do produto, o nome visível é **agrupamento**. As ações de configu
 ## Critérios de aceite
 
 - [x] Detalhe usa “agrupamento”, não “família”.
-- [x] As quatro ações de configuração + “não é agrupamento” estão no mesmo card.
+- [x] Configuração no resumo: três seletores (agrupamento, ficha, unificar).
 - [x] Marcar “não é agrupamento” some a tag e persiste após recarregar.
 - [x] Sem card Status; ativo/inativo no header abaixo das categorias.
-- [x] Identificação à esquerda; estoque/valor em 2×2 à direita (`md+`).
+- [x] Identificação e estoque/valor em dois cards lado a lado (`lg+`).
+- [x] Aba Resumo extraída em `ProductDetailSummary` + cards próprios.
+- [x] Item ligado a um agrupamento continua produto (ficha, unificar, estoque). O vínculo é extra, não um tipo exclusivo.
 - [ ] Verificar no browser o fluxo principal (não só screenshot).
 
 ## Notas para a IA
@@ -50,3 +54,4 @@ No detalhe do produto, o nome visível é **agrupamento**. As ações de configu
 - Coluna `products.not_sale_grouping`. Código interno pode continuar `sale_family`.
 - Não confundir com categoria financeira (`is_grouping`).
 - Ficha técnica e unificar só mudam de lugar; o comportamento é o mesmo.
+- Variante = produto + vínculo. Não tratar “variante” como papel que substitui o produto.

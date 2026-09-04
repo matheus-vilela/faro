@@ -8,61 +8,32 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SaleFamilyLinkSheet } from "@/components/products/SaleFamilyLinkSheet";
 import {
-  demoteProductFromSaleFamily,
+  fetchSaleFamilyCandidates,
+  linkSaleFamilyVariant,
   listSaleFamilyForProduct,
   promoteProductToSaleFamily,
+  demoteProductFromSaleFamily,
   setProductNotSaleGrouping,
   unlinkSaleFamilyVariant,
   type SaleFamilyInfo,
+  type SaleFamilyProductOption,
 } from "@/lib/productSaleFamily";
+import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import {
-  Ban,
-  ChefHat,
-  Layers,
-  Link2,
-  Loader2,
-  Merge,
-  Plus,
-  Unlink,
-} from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-function SetupActionButton({
-  icon,
-  label,
-  hint,
-  disabled,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  hint: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      disabled={disabled}
-      onClick={onClick}
-      className="h-auto items-start justify-start gap-3 whitespace-normal px-3 py-3 text-left"
-    >
-      <span className="mt-0.5 text-muted-foreground">{icon}</span>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">{label}</span>
-        <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-          {hint}
-        </span>
-      </span>
-    </Button>
-  );
-}
+const NONE = "none";
+const SELF = "self";
+const NOT_GROUPING = "not_grouping";
+const FICHA_NO = "no";
+const FICHA_YES = "yes";
+const MERGE_NONE = "";
 
 export function ProductSetupCard({
   companyId,
@@ -70,6 +41,7 @@ export function ProductSetupCard({
   productName,
   stockControlType,
   notSaleGrouping,
+  possibleGrouping,
   hasTechnicalSheet,
   className,
   onOpenTechnicalSheet,
@@ -81,28 +53,54 @@ export function ProductSetupCard({
   productName?: string;
   stockControlType?: string | null;
   notSaleGrouping?: boolean;
+  possibleGrouping?: boolean;
   hasTechnicalSheet?: boolean;
   className?: string;
   onOpenTechnicalSheet: () => void;
-  onOpenMerge: () => void;
+  onOpenMerge: (partnerId?: string) => void;
   onChanged?: () => void;
 }) {
   const [info, setInfo] = useState<SaleFamilyInfo | null>(null);
+  const [families, setFamilies] = useState<SaleFamilyProductOption[]>([]);
+  const [mergeOptions, setMergeOptions] = useState<
+    Array<{ id: string; name: string; sku: string | null }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmPromote, setConfirmPromote] = useState(false);
   const [confirmDemote, setConfirmDemote] = useState(false);
-  const [confirmNotGrouping, setConfirmNotGrouping] = useState(false);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [linkAsVariant, setLinkAsVariant] = useState(false);
+  const [confirmUnlink, setConfirmUnlink] = useState(false);
+  const [linkMembersOpen, setLinkMembersOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setInfo(await listSaleFamilyForProduct(companyId, productId));
+      const [family, cands, mergeRows] = await Promise.all([
+        listSaleFamilyForProduct(companyId, productId),
+        fetchSaleFamilyCandidates(companyId, []),
+        supabase
+          .from("products")
+          .select("id, name, sku")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .eq("listed_in_product_catalog", true)
+          .neq("id", productId)
+          .order("name")
+          .limit(400),
+      ]);
+      setInfo(family);
+      setFamilies(cands.filter((p) => p.id !== productId));
+      if (mergeRows.error) throw mergeRows.error;
+      setMergeOptions(
+        (mergeRows.data ?? []) as Array<{
+          id: string;
+          name: string;
+          sku: string | null;
+        }>,
+      );
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Falha ao ler o agrupamento.",
+        e instanceof Error ? e.message : "Falha ao ler a configuração.",
       );
       setInfo(null);
     } finally {
@@ -117,19 +115,128 @@ export function ProductSetupCard({
   const kind = info?.kind ?? "none";
   const isRecipe = stockControlType === "RECIPE_CONTROLLED";
   const isFamily = kind === "family" || stockControlType === "SALE_FAMILY";
+  const inGrouping = kind === "variant";
   const dismissed = Boolean(notSaleGrouping) && kind === "none" && !isRecipe;
+  const familyId = info?.family?.id ?? null;
+  const memberCount = info?.members.length ?? 0;
 
-  const unlink = async (variantId: string) => {
+  const groupingValue = isFamily
+    ? SELF
+    : inGrouping && familyId
+      ? familyId
+      : dismissed
+        ? NOT_GROUPING
+        : NONE;
+
+  const groupingLeading = useMemo(() => {
+    const rows = [
+      {
+        value: NONE,
+        label: "Nenhum",
+        description: "Só produto, sem agrupamento",
+      },
+    ];
+    if (possibleGrouping && !dismissed && !isFamily && !inGrouping) {
+      rows.push({
+        value: NOT_GROUPING,
+        label: "Não é agrupamento",
+        description: "Some a tag de possível agrupamento",
+      });
+    }
+    if (dismissed) {
+      rows.push({
+        value: NOT_GROUPING,
+        label: "Não é agrupamento",
+        description: "Sugestão escondida",
+      });
+    }
+    if (!isRecipe && !inGrouping) {
+      rows.push({
+        value: SELF,
+        label: "Este produto é o agrupamento",
+        description: "Venda de cardápio sem baixa neste SKU",
+      });
+    }
+    return rows;
+  }, [possibleGrouping, dismissed, isFamily, inGrouping, isRecipe]);
+
+  const groupingOptions = useMemo(() => {
+    if (isFamily || isRecipe) return [];
+    return families.map((p) => ({
+      value: p.id,
+      label: p.name,
+      description:
+        p.stock_control_type === "SALE_FAMILY"
+          ? p.sku
+            ? `Agrupamento · SKU ${p.sku}`
+            : "Agrupamento"
+          : p.sku
+            ? `SKU ${p.sku} · vira agrupamento ao ligar`
+            : "Vira agrupamento ao ligar",
+      keywords: p.sku ?? "",
+    }));
+  }, [families, isFamily, isRecipe]);
+
+  const applyGrouping = async (next: string) => {
+    if (next === groupingValue || busy) return;
+
+    if (next === SELF) {
+      setConfirmPromote(true);
+      return;
+    }
+    if (next === NONE || next === NOT_GROUPING) {
+      if (isFamily) {
+        setConfirmDemote(true);
+        return;
+      }
+      if (inGrouping) {
+        setConfirmUnlink(true);
+        return;
+      }
+      if (next === NOT_GROUPING && !dismissed) {
+        setBusy(true);
+        try {
+          await setProductNotSaleGrouping(productId, true);
+          toast.success("Marcado: não é agrupamento.");
+          onChanged?.();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Não foi possível salvar.");
+        } finally {
+          setBusy(false);
+        }
+      }
+      if (next === NONE && dismissed) {
+        setBusy(true);
+        try {
+          await setProductNotSaleGrouping(productId, false);
+          toast.success("Pode ser agrupamento de novo.");
+          onChanged?.();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Não foi possível salvar.");
+        } finally {
+          setBusy(false);
+        }
+      }
+      return;
+    }
+
     setBusy(true);
     try {
-      await unlinkSaleFamilyVariant(companyId, variantId);
-      toast.success("Variante desvinculada.");
+      if (inGrouping && familyId && familyId !== next) {
+        await unlinkSaleFamilyVariant(companyId, productId);
+      }
+      await linkSaleFamilyVariant({
+        companyId,
+        familyProductId: next,
+        variantName: productName ?? "Produto",
+        qtyPerSale: 1,
+        variantProductId: productId,
+      });
+      toast.success("Produto ligado ao agrupamento. Continua no cadastro.");
       await load();
       onChanged?.();
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Não foi possível desvincular.",
-      );
+      toast.error(e instanceof Error ? e.message : "Não foi possível vincular.");
     } finally {
       setBusy(false);
     }
@@ -139,16 +246,12 @@ export function ProductSetupCard({
     setBusy(true);
     try {
       await promoteProductToSaleFamily(productId);
-      toast.success(
-        "Este item agora é agrupamento. A venda não baixa estoque.",
-      );
+      toast.success("Este produto agora é o agrupamento. A venda não baixa estoque.");
       setConfirmPromote(false);
       await load();
       onChanged?.();
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Não foi possível promover.",
-      );
+      toast.error(e instanceof Error ? e.message : "Não foi possível promover.");
     } finally {
       setBusy(false);
     }
@@ -158,7 +261,7 @@ export function ProductSetupCard({
     setBusy(true);
     try {
       await demoteProductFromSaleFamily(productId);
-      toast.success("Deixou de ser agrupamento.");
+      toast.success("Deixou de ser agrupamento. Continua sendo produto.");
       setConfirmDemote(false);
       await load();
       onChanged?.();
@@ -171,186 +274,123 @@ export function ProductSetupCard({
     }
   };
 
-  const markNotGrouping = async (value: boolean) => {
+  const unlinkSelf = async () => {
     setBusy(true);
     try {
-      await setProductNotSaleGrouping(productId, value);
-      toast.success(
-        value
-          ? "Marcado como item comum — não é agrupamento."
-          : "Pode ser agrupamento de novo.",
-      );
-      setConfirmNotGrouping(false);
+      await unlinkSaleFamilyVariant(companyId, productId);
+      toast.success("Saiu do agrupamento. Continua sendo produto.");
+      setConfirmUnlink(false);
+      await load();
       onChanged?.();
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Não foi possível salvar.",
-      );
+      toast.error(e instanceof Error ? e.message : "Não foi possível desvincular.");
     } finally {
       setBusy(false);
     }
   };
 
-  const description = isRecipe
-    ? "Este item é ficha técnica. A venda baixa os insumos fixos."
-    : isFamily
-      ? "Item de cardápio. A venda não baixa estoque. As variantes saem pelo relatório de estoque do dia."
-      : kind === "variant"
-        ? `Faz parte do agrupamento ${info?.family?.name ?? ""}. Não é ficha técnica.`
-        : dismissed
-          ? "Marcado como item comum. Não aparece como possível agrupamento."
-          : "Configure se este cadastro é agrupamento de cardápio, ficha técnica, ou o mesmo item que outro produto.";
-
   return (
-    <div className={cn("space-y-4", className)}>
-      <div>
-        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-          Configuração
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-muted-foreground">Carregando configuração…</p>
-      ) : null}
-
-      {isFamily && info && info.members.length > 0 ? (
-        <ul className="space-y-2">
-          {info.members.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+    <div className={cn("space-y-3", className)}>
+      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        Configuração
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="min-w-0 space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Agrupamento</Label>
+          <SearchSelect
+            value={groupingValue}
+            onValueChange={(v) => void applyGrouping(v)}
+            disabled={loading || busy || isRecipe}
+            placeholder="Nenhum"
+            searchPlaceholder="Buscar agrupamento…"
+            leadingOptions={groupingLeading}
+            options={groupingOptions}
+            contentClassName="z-[200]"
+          />
+          {isFamily ? (
+            <button
+              type="button"
+              className="text-xs text-primary underline-offset-2 hover:underline"
+              onClick={() => setLinkMembersOpen(true)}
             >
-              <div>
-                <p className="font-medium">{m.name}</p>
-                <p className="font-mono text-xs text-muted-foreground">
-                  {m.sku || "sem SKU"} · {m.qty_per_sale} por 1
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => void unlink(m.variant_product_id)}
-              >
-                {busy ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Unlink className="size-3.5" />
-                )}
-                Desvincular
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+              {memberCount === 0
+                ? "Ligar produtos"
+                : `${memberCount} produto${memberCount === 1 ? "" : "s"} ligado${memberCount === 1 ? "" : "s"}`}
+            </button>
+          ) : null}
+        </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {isFamily ? (
-          <>
-            <SetupActionButton
-              icon={<Plus className="size-4" />}
-              label="Vincular variante"
-              hint="Liga um item de estoque a este agrupamento"
-              disabled={busy}
-              onClick={() => {
-                setLinkAsVariant(false);
-                setLinkOpen(true);
-              }}
-            />
-            <SetupActionButton
-              icon={<Ban className="size-4" />}
-              label="Deixar de ser agrupamento"
-              hint="Volta a ser item comum. Variantes são desvinculadas."
-              disabled={busy}
-              onClick={() => setConfirmDemote(true)}
-            />
-          </>
-        ) : null}
-
-        {kind === "variant" ? (
-          <SetupActionButton
-            icon={<Unlink className="size-4" />}
-            label="Remover do agrupamento"
-            hint={
-              info?.family?.name
-                ? `Sai de ${info.family.name}`
-                : "Desvincula deste agrupamento"
-            }
-            disabled={busy}
-            onClick={() => void unlink(productId)}
+        <div className="min-w-0 space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Ficha técnica</Label>
+          <SearchSelect
+            value={hasTechnicalSheet ? FICHA_YES : FICHA_NO}
+            onValueChange={(v) => {
+              if (v === FICHA_YES) onOpenTechnicalSheet();
+            }}
+            disabled={loading || busy}
+            placeholder="Não"
+            searchPlaceholder="Filtrar…"
+            options={[
+              {
+                value: FICHA_NO,
+                label: "Não",
+                description: "Não é ficha técnica",
+              },
+              {
+                value: FICHA_YES,
+                label: hasTechnicalSheet ? "Deste produto" : "É ficha técnica",
+                description: hasTechnicalSheet
+                  ? "Abrir para editar"
+                  : "Composição fixa de insumos",
+              },
+            ]}
+            contentClassName="z-[200]"
           />
-        ) : null}
+        </div>
 
-        {kind === "none" && !isRecipe ? (
-          <>
-            <SetupActionButton
-              icon={<Layers className="size-4" />}
-              label="Tornar agrupamento"
-              hint="Venda de cardápio sem baixa neste SKU"
-              disabled={busy}
-              onClick={() => setConfirmPromote(true)}
-            />
-            <SetupActionButton
-              icon={<Link2 className="size-4" />}
-              label="Vincular a um agrupamento"
-              hint="Este item passa a ser variante de outro"
-              disabled={busy}
-              onClick={() => {
-                setLinkAsVariant(true);
-                setLinkOpen(true);
-              }}
-            />
-          </>
-        ) : null}
-
-        <SetupActionButton
-          icon={<ChefHat className="size-4" />}
-          label={hasTechnicalSheet ? "Editar ficha técnica" : "É ficha técnica"}
-          hint="Composição fixa de insumos na venda"
-          disabled={busy}
-          onClick={onOpenTechnicalSheet}
-        />
-        <SetupActionButton
-          icon={<Merge className="size-4" />}
-          label="Unificar com outro"
-          hint="Junta este cadastro com um produto existente"
-          disabled={busy}
-          onClick={onOpenMerge}
-        />
-
-        {kind === "none" && !isRecipe && !dismissed ? (
-          <SetupActionButton
-            icon={<Ban className="size-4" />}
-            label="Não é um item de agrupamento"
-            hint="Some a tag de possível agrupamento"
-            disabled={busy}
-            onClick={() => setConfirmNotGrouping(true)}
+        <div className="min-w-0 space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Unificar com</Label>
+          <SearchSelect
+            value={MERGE_NONE}
+            onValueChange={(v) => {
+              if (v) onOpenMerge(v);
+            }}
+            disabled={loading || busy}
+            placeholder="Escolher produto…"
+            searchPlaceholder="Buscar produto…"
+            leadingOptions={[
+              {
+                value: MERGE_NONE,
+                label: "Nenhum",
+                description: "Não unificar agora",
+              },
+            ]}
+            options={mergeOptions.map((p) => ({
+              value: p.id,
+              label: p.name,
+              description: p.sku ? `SKU ${p.sku}` : undefined,
+              keywords: p.sku ?? "",
+            }))}
+            contentClassName="z-[200]"
           />
-        ) : null}
-
-        {dismissed ? (
-          <SetupActionButton
-            icon={<Ban className="size-4" />}
-            label="Desfazer: pode ser agrupamento"
-            hint="Volta a sugerir possível agrupamento"
-            disabled={busy}
-            onClick={() => void markNotGrouping(false)}
-          />
-        ) : null}
+        </div>
       </div>
+
+      {loading || busy ? (
+        <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          {loading ? "Carregando…" : "Salvando…"}
+        </p>
+      ) : null}
 
       <AlertDialog open={confirmPromote} onOpenChange={setConfirmPromote}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Tornar agrupamento?</AlertDialogTitle>
+            <AlertDialogTitle>Este produto é o agrupamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              {productName ? `«${productName}»` : "Este produto"} deixa de ser
-              item de estoque. As próximas vendas geram receita e{" "}
-              <strong>não baixam</strong> este SKU nem as variantes. A baixa
-              passa a vir do relatório de estoque do dia, só nas variantes
-              ligadas. Isso não é ficha técnica.
+              A venda de {productName ? `«${productName}»` : "este item"} gera
+              receita e <strong>não baixa</strong> estoque. A baixa vem do
+              relatório do dia, nos produtos ligados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -362,7 +402,6 @@ export function ProductSetupCard({
                 void promote();
               }}
             >
-              {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -374,9 +413,8 @@ export function ProductSetupCard({
           <AlertDialogHeader>
             <AlertDialogTitle>Deixar de ser agrupamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              {productName ? `«${productName}»` : "Este produto"} volta a ser
-              item comum. As variantes ligadas serão desvinculadas. A venda
-              volta a baixar este SKU.
+              Volta a ser só produto. Os vínculos são desfeitos e a venda volta
+              a baixar este SKU.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -388,24 +426,19 @@ export function ProductSetupCard({
                 void demote();
               }}
             >
-              {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={confirmNotGrouping}
-        onOpenChange={setConfirmNotGrouping}
-      >
+      <AlertDialog open={confirmUnlink} onOpenChange={setConfirmUnlink}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Não é um item de agrupamento?</AlertDialogTitle>
+            <AlertDialogTitle>Sair do agrupamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              A tag de possível agrupamento some e o sync não a recoloca. Você
-              ainda pode tornar agrupamento ou vincular depois, se mudar de
-              ideia.
+              Continua sendo produto. Só deixa de fazer parte de{" "}
+              {info?.family?.name ?? "este agrupamento"}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -414,10 +447,9 @@ export function ProductSetupCard({
               disabled={busy}
               onClick={(e) => {
                 e.preventDefault();
-                void markNotGrouping(true);
+                void unlinkSelf();
               }}
             >
-              {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -425,12 +457,10 @@ export function ProductSetupCard({
       </AlertDialog>
 
       <SaleFamilyLinkSheet
-        open={linkOpen}
-        onOpenChange={setLinkOpen}
+        open={linkMembersOpen}
+        onOpenChange={setLinkMembersOpen}
         companyId={companyId}
-        familyProductId={kind === "family" ? productId : null}
-        variantProductId={linkAsVariant ? productId : null}
-        variantName={linkAsVariant ? productName : null}
+        familyProductId={isFamily ? productId : null}
         onLinked={() => {
           void load();
           onChanged?.();

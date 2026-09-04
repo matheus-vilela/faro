@@ -142,9 +142,9 @@ export function SaleFamilyLinkSheet({
         <SheetHeader>
           <SheetTitle>Vincular variante</SheetTitle>
           <SheetDescription>
-            Liga um item de estoque a um item de cardápio. A venda do
-            agrupamento não baixa estoque; só a variante sai no relatório do
-            dia.
+            Liga um produto a um item de cardápio. O produto continua no
+            cadastro (estoque, preço, ficha). A venda do agrupamento não baixa
+            estoque; a baixa do dia sai neste produto.
           </SheetDescription>
         </SheetHeader>
         <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
