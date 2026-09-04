@@ -128,7 +128,7 @@ export async function applyEpocStockVariantOuts(params: {
   };
 }
 
-/** Família já marcada, ou item da venda do dia (nunca ficha técnica). */
+/** Agrupamento já marcado, ou item da venda do dia (nunca ficha técnica). */
 export function isSaleFamilyCandidate(
   product: SaleFamilyProductOption,
   saleNameKeys: Set<string>,
@@ -322,7 +322,7 @@ export async function fetchSaleFamilyRows(
     .eq("company_id", companyId)
     .eq("stock_control_type", "SALE_FAMILY")
     .order("name");
-  if (error) throw new Error(rpcError(error, "Não foi possível listar famílias."));
+  if (error) throw new Error(rpcError(error, "Não foi possível listar agrupamentos."));
 
   const { data: members, error: memErr } = await supabase
     .from("product_sale_family_members")

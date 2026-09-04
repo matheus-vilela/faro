@@ -1,15 +1,15 @@
-# Feature: Família de venda × baixa real no estoque (EPOC)
+# Feature: Agrupamento × baixa real no estoque (EPOC)
 
 - **Slug:** `epoc-agrupamento-venda-estoque`
 - **Status:** feita
 - **Área:** cadastro de produtos + import EPOC (venda e estoque)
-- **Nome no produto:** **família de venda** (item de cardápio). Membros = **variantes** (item de estoque). Evitar “agrupamento” na UI — no Faro isso já é categoria financeira (`is_grouping`) e se mistura com ficha.
+- **Nome no produto:** **agrupamento** (item de cardápio). Membros = **variantes** (item de estoque). Código interno continua `sale_family`. Não confundir com categoria financeira (`is_grouping`).
 
-## Ficha técnica ≠ família de venda
+## Ficha técnica ≠ agrupamento
 
 São dois mecanismos. Não misturar.
 
-| | **Ficha técnica** | **Família de venda** |
+| | **Ficha técnica** | **Agrupamento** |
 |---|---|---|
 | Exemplo | `Caipirinha` | `Bolinhos` |
 | O que o cliente pede | Sempre o mesmo prato/drink | Um item de cardápio; o **sabor/variante** ele escolhe na hora |
@@ -20,9 +20,9 @@ São dois mecanismos. Não misturar.
 | Dia B | Caipirinha → **os mesmos** insumos | Vendeu Bolinhos de novo → estoque mostra 3× bolinho de **cupim** → baixa só cupim |
 
 Ficha = composição **obrigatória e estável**.  
-Família = um nome na venda, **N produtos reais** no cadastro; no dia só movimentam as variantes que o cliente pediu.
+Agrupamento = um nome na venda, **N produtos reais** no cadastro; no dia só movimentam as variantes que o cliente pediu.
 
-Pode existir os dois no mesmo estabelecimento: `Caipirinha` (ficha) e `Bolinhos` (família). `Cachaça` só no estoque costuma ser insumo de ficha, não variante de Bolinhos — por isso o vínculo da família é **manual**.
+Pode existir os dois no mesmo estabelecimento: `Caipirinha` (ficha) e `Bolinhos` (agrupamento). `Cachaça` só no estoque costuma ser insumo de ficha, não variante de Bolinhos — por isso o vínculo do agrupamento é **manual**.
 
 ## Problema
 
@@ -34,11 +34,11 @@ A ficha **não resolve**: se `Bolinhos` virasse ficha com 10 sabores, **toda** v
 
 ## Objetivo
 
-`Bolinhos` vira **família de venda**. As 10 (ou N) variantes ficam como produtos de estoque, só vinculadas a ele. Venda de `Bolinhos` = receita e histórico, **sem baixa**. Estoque do dia = baixa só o que saiu (ex. 3 carne). Outro dia pode ser só cupim.
+`Bolinhos` vira **agrupamento**. As 10 (ou N) variantes ficam como produtos de estoque, só vinculadas a ele. Venda de `Bolinhos` = receita e histórico, **sem baixa**. Estoque do dia = baixa só o que saiu (ex. 3 carne). Outro dia pode ser só cupim.
 
 ## Exemplo (dois dias)
 
-Cadastro: família `Bolinhos` com variantes carne, cupim, queijo, … Proporção de cadastro (ex. 1 Bolinhos = 3 bolinhos de um sabor). **Não** explode na venda.
+Cadastro: agrupamento `Bolinhos` com variantes carne, cupim, queijo, … Proporção de cadastro (ex. 1 Bolinhos = 3 bolinhos de um sabor). **Não** explode na venda.
 
 **Dia 1 — cliente pediu carne**
 
@@ -58,11 +58,11 @@ A proporção (3 por 1) é metadado: conferir depois se “1 Bolinhos × 3 ≈ 3
 
 ## Fora de escopo (nesta entrega)
 
-- Transformar família em ficha (`recipe_type` SALE/PREP) ou baixar todas as variantes na venda.
+- Transformar agrupamento em ficha (`recipe_type` SALE/PREP) ou baixar todas as variantes na venda.
 - Inferir sozinho que “só no estoque” = variante (pode ser insumo de ficha, cortesia, perda).
 - Estorno/entrada do relatório de estoque.
 - Recalcular vendas EPOC já importadas.
-- CMV no momento da venda da família (CMV nasce na baixa da variante daquele dia).
+- CMV no momento da venda do agrupamento (CMV nasce na baixa da variante daquele dia).
 
 ## O que já existe e o que é novo
 
@@ -73,15 +73,15 @@ Fatos do código (não inventar outro caminho):
 - Relatório `mod_rel_estoque` **não persiste**. Só a ferramenta de Desenvolvimento lê o HTML.
 - `products.stock_control_type`: `DIRECT` | `RECIPE_CONTROLLED` | `COMPOSITE` | `SERVICE`. EPOC cria como `DIRECT`. `COMPOSITE` **não tem** tabela de componentes.
 - Ficha: `recipes` + `recipe_ingredients` + `output_product_id`. Baixa **sempre** os insumos (`consume_recipe_stock` / `propagate_recipe_stock_on_output_out`). `listed_in_product_catalog = false` esconde o prato.
-- Heurística `epocCsvProductKindClassification` sugere RECIPE para combo/balde — **não cria estrutura**. Não usar isso para família.
+- Heurística `epocCsvProductKindClassification` sugere RECIPE para combo/balde — **não cria estrutura**. Não usar isso para agrupamento.
 - Card Estoque vs vendas: `listEstoqueSemVenda` (SKU ou nome normalizado). Só em memória. Candidatos a variante, não vínculo automático.
 
 | Já existe | Novo |
 |---|---|
-| Ficha = explosão **fixa** na venda | Família = cardápio sem explosão; baixa só o que o estoque do dia trouxe |
+| Ficha = explosão **fixa** na venda | Agrupamento = cardápio sem explosão; baixa só o que o estoque do dia trouxe |
 | `stock_control_type` + `COMPOSITE` sem BOM | Valor novo (ex. `SALE_FAMILY`) + tabela de variantes. Não reusar ficha nem `COMPOSITE` |
-| `product_sale` baixa o SKU vendido | Família: receita **sem** `adjust_product_stock` e sem CMV nesse SKU |
-| Card **Estoque vs vendas** | Ações manuais: cadastrar variante e ligar à família |
+| `product_sale` baixa o SKU vendido | Agrupamento: receita **sem** `adjust_product_stock` e sem CMV nesse SKU |
+| Card **Estoque vs vendas** | Ações manuais: cadastrar variante e ligar ao agrupamento |
 
 ## Modelo proposto
 
@@ -91,7 +91,7 @@ Relação explícita. Sem `parent_id` solto. Sem `recipe_ingredients`.
 
 Preferir valor novo em `stock_control_type` (ex. `SALE_FAMILY`). Alternativa: `is_sale_family boolean` se não quisermos mexer no enum agora.
 
-- `Bolinhos` = família. Não é item de estoque. Existe para casar Codigo/nome da venda e histórico.
+- `Bolinhos` = agrupamento. Não é item de estoque. Existe para casar Codigo/nome da venda e histórico.
 - Fora de listagens de estoque / compra / alerta (`listed_in_product_catalog = false` ou equivalente).
 - **Proibido** `RECIPE_CONTROLLED` / `COMPOSITE` no `Bolinhos`: a venda baixaria insumos fixos ou as 10 variantes.
 
@@ -107,9 +107,9 @@ Preferir valor novo em `stock_control_type` (ex. `SALE_FAMILY`). Alternativa: `i
 
 Regras:
 
-- Variante **não** é família.
-- Família **não** é variante de outra (nesta fase).
-- Uma variante em **no máximo uma** família (simplifica). Reabrir se um SKU servir a dois nomes de cardápio.
+- Variante **não** é agrupamento.
+- Agrupamento **não** é variante de outro (nesta fase).
+- Uma variante em **no máximo um** agrupamento (simplifica). Reabrir se um SKU servir a dois nomes de cardápio.
 - Podem existir 10 variantes cadastradas; no dia **nenhuma, uma ou várias** saem — só as linhas do estoque.
 
 ## Comportamento de importação
@@ -117,7 +117,7 @@ Regras:
 ### Venda de produtos (`product_sale`)
 
 1. Casa pelo **Codigo → sku**. Se Codigo vazio, fallback por nome.
-2. Se o produto é família (`SALE_FAMILY`):
+2. Se o produto é agrupamento (`SALE_FAMILY`):
    - Cria `revenue_entry` (e boletos de receita).
    - **Não** chama `adjust_product_stock`.
    - **Não** gera CMV a partir de Bolinhos.
@@ -131,8 +131,8 @@ Regras:
 Para cada **Saída** do `#tblExport` do dia:
 
 1. Casa por SKU EPOC, senão nome.
-2. Se não existe: cria produto (SKU + nome). Vínculo à família só se o usuário já tiver feito.
-3. Se é **variante de família**: baixa essa variante (`reference_type` ex. `epoc_stock_report`). Não baixa as irmãs.
+2. Se não existe: cria produto (SKU + nome). Vínculo ao agrupamento só se o usuário já tiver feito.
+3. Se é **variante de agrupamento**: baixa essa variante (`reference_type` ex. `epoc_stock_report`). Não baixa as irmãs.
 4. CMV na baixa da variante (custo médio dela).
 5. Item que também está na venda (água, Heineken): **não** baixar de novo — a venda já baixou.
 6. Insumo de ficha que só aparece no estoque: **não** tratar como variante, a menos que alguém vincule na mão.
@@ -143,34 +143,34 @@ Por dia: `revenue_entry` de Bolinhos + `stock_movements` das variantes que **de 
 
 ## UI
 
-Textos: “Família de venda” / “Variante”. Não “agrupamento”, não “ficha”.
+Textos: “Agrupamento” / “Variante”. Não “família”, não “ficha”.
 
 ### 1. Lista de venda do dia (unificada)
 
-O que só saiu no estoque **entra na mesma lista** de venda de produtos daquele dia, com flag **possível família**. Conciliar (vincular / criar família) a partir da linha. Detalhe em `epoc-familia-venda-operacional.md`.
+O que só saiu no estoque **entra na mesma lista** de venda de produtos daquele dia, com flag **possível agrupamento**. Conciliar (vincular / criar agrupamento) a partir da linha. Detalhe em `epoc-familia-venda-operacional.md`.
 
 Não criar receita para essa linha. Água (venda + estoque) = uma linha, sem a flag.
 
 ### 2. Cadastro do produto
 
-- Família: “Item de cardápio. A venda não baixa estoque. As variantes saem pelo relatório de estoque do dia.” Lista das N variantes + proporção.
-- Variante: “Faz parte da família Bolinhos (3 por 1).”
+- Agrupamento: “Item de cardápio. A venda não baixa estoque. As variantes saem pelo relatório de estoque do dia.” Lista das N variantes + proporção.
+- Variante: “Faz parte do agrupamento Bolinhos (3 por 1).”
 - Ficha técnica: tela e copy **separados**. Sem misturar ingredientes com variantes.
 
 ### 3. Catálogo
 
-Família não entra em saldo/alerta. Variantes são produtos normais.
+Agrupamento não entra em saldo/alerta. Variantes são produtos normais.
 
 ## Fases sugeridas
 
-1. **Modelo + UI de vínculo** — família/variantes a partir de “só no estoque”. Sync ainda não muda.
-2. **Venda não baixa família** — `create_revenue_entry` / import CSV. Ficha permanece como está.
+1. **Modelo + UI de vínculo** — agrupamento/variantes a partir de “só no estoque”. Sync ainda não muda.
+2. **Venda não baixa agrupamento** — `create_revenue_entry` / import CSV. Ficha permanece como está.
 3. **Importar saídas de estoque** — baixa só o que o dia trouxe, sem duplicar venda normal.
 4. **CMV + conferência de proporção** — aviso se 1 Bolinhos × 3 ≠ soma do sabor daquele dia (não exige casar todos os sabores).
 
 ## Critérios de aceite (quando implementar)
 
-- [x] Vender `Bolinhos` (família) não baixa Bolinhos nem as 10 variantes. (`adjust_product_stock` no-op em `revenue_entry`; `apply_epoc_stock_variant_outs` só toca variantes já ligadas.)
+- [x] Vender `Bolinhos` (agrupamento) não baixa Bolinhos nem as 10 variantes. (`adjust_product_stock` no-op em `revenue_entry`; `apply_epoc_stock_variant_outs` só toca variantes já ligadas.)
 - [x] Receita/histórico de Bolinhos permanecem. (`create_revenue_entry` segue criando o lançamento.)
 - [x] Dia com só carne no estoque baixa **só** carne; cupim intacto.
 - [x] Outro dia com só cupim baixa **só** cupim.
@@ -183,26 +183,26 @@ Família não entra em saldo/alerta. Variantes são produtos normais.
 
 - Migrations: `20260904140000_product_sale_family.sql`, `20260904140100_sale_family_skip_stock_check.sql` — aplicar no banco (`supabase db push`).
 - Card **Estoque vs vendas**: vincular variante + aplicar baixas do dia.
-- Cadastro do produto: seção **Família de venda** (separada da ficha).
+- Cadastro do produto: seção **Agrupamento** (separada da ficha).
 - Fase 4 (aviso de proporção 1×3 ≠ soma do dia) ficou para depois.
 - Continuação operacional: `epoc-familia-venda-operacional.md` (página no catálogo + estoque no sync).
 
 ## Riscos / perguntas para revisão
 
-1. Nome na UI: **família de venda** + **variante** — ok, ou prefere outro (ex. “item de cardápio” / “opção”)?
+1. Nome na UI: **agrupamento** + **variante**. Código interno: `sale_family`.
 2. Vínculo sempre manual? (`Cachaça` só no estoque = ficha, não variante.)
 3. CMV só quando o estoque do dia entrar. Se o sync falhar, receita sem CMV até reprocessar?
-4. Uma variante em uma família só?
+4. Uma variante em um agrupamento só?
 5. Fase 1 só em Desenvolvimento, ou já no catálogo?
 6. Fase 3 no `epoc-daily-sync` ou só botão até validar um mês?
 7. Histórico já importado com baixa em Bolinhos: script depois?
 
 ## Notas para a IA (quando for implementar)
 
-- Ficha e família são códigos e telas **distintos**. Não reusar `recipe_ingredients` / `consume_recipe_stock` para variantes.
-- Na venda da família: zero baixa, zero loop nas variantes.
+- Ficha e agrupamento são códigos e telas **distintos**. Não reusar `recipe_ingredients` / `consume_recipe_stock` para variantes.
+- Na venda do agrupamento: zero baixa, zero loop nas variantes.
 - Na baixa do estoque: só as linhas daquele dia.
 - Reutilizar `epocExactNameKey`, `listEstoqueSemVenda`, parsers EPOC.
-- `create_revenue_entry`: ignorar `adjust_product_stock` se for família; **não** alterar o ramo de `recipe_sale`.
-- Variantes: SKU do estoque (` - 1028 - BOLINHO CUPIM`). Família: Codigo da venda, se existir; senão nome.
-- Copy: nunca chamar família de ficha, nem “agrupamento”.
+- `create_revenue_entry`: ignorar `adjust_product_stock` se for agrupamento (`SALE_FAMILY`); **não** alterar o ramo de `recipe_sale`.
+- Variantes: SKU do estoque (` - 1028 - BOLINHO CUPIM`). Agrupamento: Codigo da venda, se existir; senão nome.
+- Copy: **agrupamento** / **variante**. Nunca chamar de ficha nem de “família”.

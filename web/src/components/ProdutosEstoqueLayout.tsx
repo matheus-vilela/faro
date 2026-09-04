@@ -129,13 +129,13 @@ const STOCK_GROUPS: {
   },
   {
     id: "familias",
-    label: "Famílias de venda",
+    label: "Agrupamentos",
     description: "Cardápio × variantes de estoque",
     icon: Layers,
     links: [
       {
         to: SALE_FAMILIES_PATH,
-        label: "Famílias de venda",
+        label: "Agrupamentos",
         icon: Layers,
         end: true,
       },
@@ -197,7 +197,7 @@ export function ProdutosEstoqueLayout() {
       <PageHeader
         icon={Package}
         title="Produtos e estoque"
-        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas, famílias de venda e serviços."
+        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas, agrupamentos e serviços."
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">

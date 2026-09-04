@@ -500,8 +500,8 @@ export function RevenueDaySalesSheet({
           </div>
           {totals.pendingFamily > 0 ? (
             <p className="text-amber-900 dark:text-amber-100 text-xs">
-              Itens só no estoque não entram no total faturado. Vincule à
-              família de cardápio se for variante.
+              Itens só no estoque não entram no total faturado. Vincule ao
+              agrupamento se for variante.
             </p>
           ) : null}
         </div>
@@ -685,7 +685,7 @@ export function RevenueDaySalesSheet({
                                 if (found) setLinkItem(found);
                               }}
                             >
-                              Vincular à família
+                              Vincular ao agrupamento
                             </button>
                           ) : null}
                         </td>

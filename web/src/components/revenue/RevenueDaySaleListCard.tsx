@@ -193,8 +193,7 @@ export function DaySaleItemCard({
 
       {isStockOnly ? (
         <p className="text-muted-foreground text-xs">
-          Saiu no estoque e não está na venda. Vincule à família de cardápio
-          correta.
+          Saiu no estoque e não está na venda. Vincule ao agrupamento correto.
           {item.stockSku ? ` SKU ${item.stockSku}.` : ""}
         </p>
       ) : null}
@@ -235,7 +234,7 @@ export function DaySaleItemCard({
             onConfigureFamily();
           }}
         >
-          Vincular à família
+          Vincular ao agrupamento
         </button>
       ) : null}
     </>

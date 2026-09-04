@@ -1,4 +1,3 @@
-import { EpocEstoqueVsVendasPanel } from "@/components/desenvolvimento/EpocEstoqueVsVendasCard";
 import { SaleFamilyLinkSheet } from "@/components/products/SaleFamilyLinkSheet";
 import {
   AlertDialog,
@@ -51,7 +50,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
     try {
       setRows(await fetchSaleFamilyRows(companyId));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao listar famílias.");
+      toast.error(e instanceof Error ? e.message : "Falha ao listar agrupamentos.");
       setRows([]);
     } finally {
       setLoading(false);
@@ -95,7 +94,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
     setPromoteBusy(true);
     try {
       await promoteProductToSaleFamily(promoteId);
-      toast.success("Produto virou família de venda.");
+      toast.success("Produto virou agrupamento.");
       setPromoteOpen(false);
       setPromoteId("");
       await load();
@@ -113,7 +112,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
           <div>
             <h2 className="flex items-center gap-2 text-base font-semibold">
               <Layers className="size-4" />
-              Famílias de venda
+              Agrupamentos
             </h2>
             <p className="text-muted-foreground mt-1 text-sm">
               Item de cardápio (ex.: Bolinhos) + variantes de estoque (carne,
@@ -127,7 +126,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
               size="sm"
               onClick={() => setPromoteOpen(true)}
             >
-              Tornar item em família
+              Tornar item em agrupamento
             </Button>
             <Button type="button" size="sm" onClick={() => setLinkOpen(true)}>
               <Plus className="size-3.5" />
@@ -140,8 +139,8 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
           <p className="text-muted-foreground text-sm">Carregando…</p>
         ) : rows.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            Nenhuma família ainda. Transforme um produto da venda (Bolinhos) ou
-            vincule uma variante — o alvo vira família automaticamente.
+            Nenhum agrupamento ainda. Transforme um produto da venda (Bolinhos)
+            ou vincule uma variante — o alvo vira agrupamento automaticamente.
           </p>
         ) : (
           <div className="overflow-x-auto rounded-md border">
@@ -149,7 +148,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
               <thead>
                 <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
                   <SortableTableHead
-                    label="Família"
+                    label="Agrupamento"
                     column="name"
                     sortKey={sortKey}
                     sortAsc={sortAsc}
@@ -194,17 +193,6 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
         )}
       </section>
 
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-base font-semibold">Estoque vs vendas do dia</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Cruza a venda de produtos EPOC com as saídas de estoque. Use para
-            ligar o que só apareceu no estoque e aplicar baixas do dia.
-          </p>
-        </div>
-        <EpocEstoqueVsVendasPanel />
-      </section>
-
       <SaleFamilyLinkSheet
         open={linkOpen}
         onOpenChange={setLinkOpen}
@@ -215,7 +203,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
       <AlertDialog open={promoteOpen} onOpenChange={setPromoteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Tornar item em família de venda</AlertDialogTitle>
+            <AlertDialogTitle>Tornar item em agrupamento</AlertDialogTitle>
             <AlertDialogDescription>
               A venda desse produto passa a gerar só receita. Estoque sai pelas
               variantes ligadas, no relatório do dia. Não é ficha técnica.
@@ -263,7 +251,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
       >
         <SheetContent className="flex flex-col">
           <SheetHeader>
-            <SheetTitle>{openFamily?.name ?? "Família de venda"}</SheetTitle>
+            <SheetTitle>{openFamily?.name ?? "Agrupamento"}</SheetTitle>
             <SheetDescription>
               Variantes ligadas a este item de cardápio.
             </SheetDescription>

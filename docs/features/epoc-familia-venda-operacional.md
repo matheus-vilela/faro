@@ -1,4 +1,4 @@
-# Feature: Família de venda no fluxo operacional
+# Feature: Agrupamento no fluxo operacional
 
 - **Slug:** `epoc-familia-venda-operacional`
 - **Status:** feita
@@ -11,16 +11,16 @@ A venda de produtos no EPOC (`mod_rel_produto_sintetico`) não traz as variantes
 
 ## Objetivo
 
-**Estoque do dia faz parte da busca de venda de produtos.** Sempre que o Faro buscar venda de produtos no EPOC (onboarding, diário, “Sincronizar neste dia”), busca o estoque **em paralelo**. Com as duas listas, o que só aparece no estoque e ainda não é variante entra na **mesma** listagem de produtos daquele dia, com tipo **Produto** e tag de origem **Somente estoque**, para vincular/criar família.
+**Estoque do dia faz parte da busca de venda de produtos.** Sempre que o Faro buscar venda de produtos no EPOC (onboarding, diário, “Sincronizar neste dia”), busca o estoque **em paralelo**. Com as duas listas, o que só aparece no estoque e ainda não é variante entra na **mesma** listagem de produtos daquele dia, com tipo **Produto** e tag de origem **Somente estoque**, para vincular/criar agrupamento.
 
 Não existe fluxo separado “conferir estoque” na tela de vendas.
 
 ## Fora de escopo
 
 - Criar `revenue_entry` / receita para o item só-estoque (não inflar DRE).
-- Inferir família sozinho.
+- Inferir agrupamento sozinho.
 - Recalcular vendas históricas já baixadas no cardápio.
-- Transformar família em ficha.
+- Transformar agrupamento em ficha.
 
 ## Comportamento esperado
 
@@ -44,7 +44,7 @@ Receitas / “Vendas neste dia” / qualquer lista de produtos do dia:
 |---|---|---|---|
 | Venda | Sim | Produto ou Serviço | — |
 | Venda + estoque (água) | Uma linha (a da venda) | Produto | — |
-| Só estoque, sem família | Sim | Produto | **Somente estoque** |
+| Só estoque, sem agrupamento | Sim | Produto | **Somente estoque** |
 | Só estoque, já vinculado | Não | — | — |
 
 Filtros: tipo (todos / produto / serviço), origem (todas / venda / somente estoque) e busca por nome. Tabela com cabeçalhos ordenáveis (inclui origem). Cards no celular.
@@ -76,7 +76,7 @@ Sem chamada ao portal ao abrir o sheet. Sem loader “conferindo estoque”.
 - [x] Produto já cadastrado cujo SKU/nome aparece só no estoque ganha `stock_only_origin` (e SKU se faltava).
 - [x] Se não existir cadastro, o sync cria o produto no catálogo com `stock_only_origin`.
 - [x] Só-estoque gera movimentação de saída e atualiza quantidade, como a venda de produto. Sem receita.
-- [x] Filtro do catálogo **Somente estoque** lista esses produtos para vincular à família.
+- [x] Filtro do catálogo **Somente estoque** lista esses produtos para vincular ao agrupamento.
 
 ## Notas para a IA
 

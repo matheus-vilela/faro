@@ -21,7 +21,7 @@ function product(
 describe("isSaleFamilyCandidate", () => {
   const keys = saleNameKeys(["Bolinhos", "Água"]);
 
-  it("aceita família de venda já marcada", () => {
+  it("aceita agrupamento já marcado", () => {
     expect(
       isSaleFamilyCandidate(
         product({ name: "Outro", stock_control_type: "SALE_FAMILY" }),
@@ -70,7 +70,7 @@ describe("shouldShowPossibleSaleFamilyTag", () => {
     ).toBe(false);
   });
 
-  it("omite família e variante já ligadas", () => {
+  it("omite agrupamento e variante já ligadas", () => {
     expect(
       shouldShowPossibleSaleFamilyTag({
         ...candidate,

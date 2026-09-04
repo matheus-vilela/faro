@@ -271,7 +271,7 @@ function EstoqueTable({
                     onClick={() => onLink(it)}
                   >
                     <Link2 className="size-3.5" />
-                    Vincular à família
+                    Vincular ao agrupamento
                   </Button>
                 </td>
               ) : null}
@@ -521,8 +521,8 @@ export function EpocEstoqueVsVendasPanel({
             </div>
             <p className="text-muted-foreground text-xs">
               Vínculo é manual: o que só saiu no estoque não vira variante
-              sozinho. Aplicar baixas só mexe em variantes já ligadas a uma
-              família — água e insumos da venda não saem de novo.
+              sozinho. Aplicar baixas só mexe em variantes já ligadas a um
+              agrupamento — água e insumos da venda não saem de novo.
             </p>
             <EstoqueTable
               items={soNoEstoque}

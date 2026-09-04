@@ -7,7 +7,7 @@
 
 ## Problema
 
-No detalhe, “família” e as ações (tornar, vincular, ficha, unificar) ficam espalhadas no header e em cards separados. Não dá para marcar que o item **não** é agrupamento. O layout empilha identificação, estoque e status sem necessidade.
+No detalhe, o agrupamento e as ações (tornar, vincular, ficha, unificar) ficam espalhadas no header e em cards separados. Não dá para marcar que o item **não** é agrupamento. O layout empilha identificação, estoque e status sem necessidade.
 
 ## Objetivo
 

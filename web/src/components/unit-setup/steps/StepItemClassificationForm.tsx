@@ -1008,7 +1008,7 @@ export function StepItemClassificationForm({
             to={SALE_FAMILIES_PATH}
             className="text-foreground font-medium underline-offset-2 hover:underline"
           >
-            Famílias de venda
+            Agrupamentos
           </Link>
           . A baixa sai do estoque do dia, só na variante que o cliente pediu.
         </p>

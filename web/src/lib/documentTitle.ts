@@ -81,7 +81,7 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/produtos/estoque/compras", label: "Pedidos de compra" },
     { prefix: "/app/produtos/estoque", label: "Estoque" },
     { prefix: "/app/produtos/contagem", label: "Contagem" },
-    { prefix: "/app/produtos/familias", label: "Famílias de venda" },
+    { prefix: "/app/produtos/familias", label: "Agrupamentos" },
     { prefix: "/app/produtos/fichas", label: "Fichas técnicas" },
     { prefix: "/app/produtos/servicos", label: "Serviços" },
     { prefix: "/app/produtos/catalogo", label: "Catálogo" },

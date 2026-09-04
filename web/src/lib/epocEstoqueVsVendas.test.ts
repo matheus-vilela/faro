@@ -84,7 +84,7 @@ describe("listEstoqueSemVenda", () => {
 });
 
 describe("listEstoqueSemVendaNaoVinculado", () => {
-  it("omite variante já ligada à família", () => {
+  it("omite variante já ligada ao agrupamento", () => {
     const only = listEstoqueSemVendaNaoVinculado(
       [saida("1028", "BOLINHO CUPIM"), saida("1100", "CACHACA")],
       [],
