@@ -25,6 +25,14 @@ export function setupItemOrigin(
   return "pdv";
 }
 
+export function setupItemSourceLabel(
+  item: Pick<ProductSetupItem, "kind">,
+): string {
+  return item.kind === "purchase_unlinked"
+    ? "Nota fiscal / compra"
+    : "PDV / venda";
+}
+
 function haystack(item: ProductSetupItem): string {
   return [item.name, item.sku, item.ean, item.barcode, item.sourceLabel]
     .filter(Boolean)

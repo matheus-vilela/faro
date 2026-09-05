@@ -1,0 +1,14 @@
+---
+description: Domínio de produto, ficha, agrupamento e correlação
+alwaysApply: true
+---
+
+# Domínio de produtos
+
+Antes de implementar correlação, ficha, agrupamento, intermediário ou estoque de produto, leia `docs/dominio/produtos.md`.
+
+Não unifique dose/prato (ex. «DS GIN») com a garrafa/insumo da nota. Isso é **ficha normal**: o vendido baixa o insumo na proporção da receita. Unificar é só o mesmo item de estoque (`DIRECT`, ou intermediário do mesmo SKU). Ficha normal e agrupamento não unificam com a nota.
+
+Insumo não é um tipo do vendido: é o produto da nota usado na ficha.
+
+Ficha normal ≠ ficha de produção ≠ agrupamento. Variante é produto + vínculo, não um tipo exclusivo.

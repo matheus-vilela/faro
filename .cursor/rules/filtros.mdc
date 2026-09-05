@@ -1,0 +1,20 @@
+---
+description: Filtro de lista no padrão de Notas e recebimento
+alwaysApply: true
+---
+
+# Filtros
+
+Quando a tela precisar de filtro de lista ou período, use o **filtro padrão** (Notas e recebimento em `Despesas.tsx`). Não invente outro visual (abas “Um dia / 7 dias / Intervalo”, card grande de mês, labels empilhadas).
+
+Barra compacta: `flex flex-wrap items-center gap-2`. Controles em `h-8`.
+
+- Mês: `ReferencePeriodCard` `compact` + as classes do seletor em Notas. `onChange` chama `applyPeriod`: redefine de/até com `monthYmdBounds`.
+- Datas: `Input type="date"` `h-8 w-[9.5rem]`, início e fim. Consulta com `orderedYmdRange`.
+- Busca: `Input` `h-8 min-w-[12rem] flex-1 md:max-w-xs`.
+- Extra: `Select` com `SelectTrigger size="sm"`.
+- **Limpar** (`FilterX`, `variant="ghost"` `size="sm"` `h-8`): desabilitado se nada saiu do padrão (mês inteiro, busca vazia, selects em “todos”).
+
+Lista sem competência: mesma barra (busca + selects + Limpar), sem mês/datas.
+
+Referência: `web/src/pages/Despesas.tsx`. Reutilizar `ReferencePeriodCard`, `monthYmdBounds`, `orderedYmdRange`.

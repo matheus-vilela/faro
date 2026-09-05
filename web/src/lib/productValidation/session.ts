@@ -1,4 +1,8 @@
 import { invokeCorrelateSoldPurchased } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
+import {
+  defaultSoldRoleForSameItem,
+  type CorrelationSoldRole,
+} from "@/lib/productValidation/soldRole";
 import type { ProductValidationResult } from "@/lib/productValidation/types";
 import type { ProductSetupQueue } from "@/lib/productSetupQueue";
 import { useEffect, useState } from "react";
@@ -9,6 +13,8 @@ export type ProductValidationSessionState = {
   samePick: Record<string, string[]>;
   soldPick: Record<string, string>;
   recipePicks: Record<string, string[]>;
+  soldRole: Record<string, CorrelationSoldRole>;
+  familyPick: Record<string, string>;
   generation: number;
 };
 
@@ -29,6 +35,8 @@ const emptyState = (): ProductValidationSessionState => ({
   samePick: {},
   soldPick: {},
   recipePicks: {},
+  soldRole: {},
+  familyPick: {},
   generation: 0,
 });
 
@@ -42,7 +50,14 @@ function notify(companyId: string, state: ProductValidationSessionState) {
 export function getProductValidationSession(
   companyId: string,
 ): ProductValidationSessionState {
-  return sessions.get(companyId) ?? emptyState();
+  const stored = sessions.get(companyId);
+  if (!stored) return emptyState();
+  return {
+    ...emptyState(),
+    ...stored,
+    soldRole: stored.soldRole ?? {},
+    familyPick: stored.familyPick ?? {},
+  };
 }
 
 export function subscribeProductValidationSession(
@@ -76,25 +91,29 @@ export function patchProductValidationSession(
 
 export function defaultPicksFromResult(result: ProductValidationResult): Pick<
   ProductValidationSessionState,
-  "samePick" | "soldPick" | "recipePicks"
+  "samePick" | "soldPick" | "recipePicks" | "soldRole" | "familyPick"
 > {
   const samePick: Record<string, string[]> = {};
   const soldPick: Record<string, string> = {};
   const recipePicks: Record<string, string[]> = {};
+  const soldRole: Record<string, CorrelationSoldRole> = {};
+  const familyPick: Record<string, string> = {};
   for (const row of result.sameItem) {
     if (row.band !== "high") continue;
     samePick[row.id] = row.candidates.map(
       (candidate) => candidate.purchase.productId,
     );
     soldPick[row.id] = row.sold.productId;
+    soldRole[row.id] = defaultSoldRoleForSameItem(row.conflictWithRecipe);
   }
   for (const row of result.recipes) {
     if (row.band !== "high") continue;
     recipePicks[row.id] = row.ingredients.map(
       (ingredient) => ingredient.purchase.productId,
     );
+    soldRole[row.id] = "recipe";
   }
-  return { samePick, soldPick, recipePicks };
+  return { samePick, soldPick, recipePicks, soldRole, familyPick };
 }
 
 export function beginProductValidationRun(companyId: string): number {

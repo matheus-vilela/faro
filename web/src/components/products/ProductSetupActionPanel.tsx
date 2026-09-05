@@ -14,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SaleFamilyDestinationFields } from "@/components/products/SaleFamilyDestinationFields";
 import { Button } from "@/components/ui/button";
 import { SearchSelect } from "@/components/ui/search-select";
 import {
@@ -33,8 +34,8 @@ import {
   fetchSaleFamilyCandidates,
   linkSaleFamilyVariant,
   promoteProductToSaleFamily,
-  type SaleFamilyProductOption,
 } from "@/lib/productSaleFamily";
+import { ensureSaleFamilyProductId } from "@/lib/resolveSaleFamilyTarget";
 import {
   setupItemAsMatchRow,
   PRODUCT_SETUP_CHOICE_LABEL,
@@ -91,7 +92,7 @@ export function ProductSetupActionPanel({
   const [pickedPartnerId, setPickedPartnerId] = useState("");
   const [recipeId, setRecipeId] = useState("");
   const [familyId, setFamilyId] = useState("");
-  const [families, setFamilies] = useState<SaleFamilyProductOption[]>([]);
+  const [newFamilyName, setNewFamilyName] = useState("");
   const [confirmPromote, setConfirmPromote] = useState(false);
   const [ingredientConfig, setIngredientConfig] =
     useState<IngredientLinkConfig | null>(null);
@@ -104,36 +105,10 @@ export function ProductSetupActionPanel({
     setPickedPartnerId("");
     setRecipeId("");
     setFamilyId("");
+    setNewFamilyName("");
     setConfirmPromote(false);
     setIngredientConfig(null);
   }, [item.key, choice]);
-
-  useEffect(() => {
-    if (choice !== "sale_family_variant") return;
-    let cancelled = false;
-    void fetchSaleFamilyCandidates(companyId, [])
-      .then((rows) => {
-        if (!cancelled) {
-          setFamilies(
-            rows.filter(
-              (row) =>
-                row.id !== item.productId &&
-                row.stock_control_type !== "INTERMEDIATE",
-            ),
-          );
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          toast.error(
-            e instanceof Error ? e.message : "Não foi possível listar agrupamentos.",
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [choice, companyId, item.productId]);
 
   const suggestion = useMemo(() => {
     if (item.kind !== "purchase_unlinked") return null;
@@ -255,7 +230,7 @@ export function ProductSetupActionPanel({
         return;
       }
     }
-    toast.success("Registrado como item de venda, sem ficha técnica.");
+    toast.success("Registrado como produto interno, sem ficha técnica.");
     onResolved();
   };
 
@@ -311,7 +286,7 @@ export function ProductSetupActionPanel({
   };
 
   const linkAsVariant = async () => {
-    if (!familyId) return;
+    if (!familyId && !newFamilyName.trim()) return;
     setBusy(true);
     try {
       const reverted = await revertRecipeStubIfNeeded();
@@ -319,9 +294,20 @@ export function ProductSetupActionPanel({
         toast.error(reverted.error ?? "Não foi possível ajustar a ficha.");
         return;
       }
-      await linkSaleFamilyVariant({
+      const candidates = await fetchSaleFamilyCandidates(companyId, []);
+      const family = await ensureSaleFamilyProductId({
         companyId,
         familyProductId: familyId,
+        newFamilyName,
+        existing: candidates.filter((row) => row.id !== item.productId),
+      });
+      if (!family.ok) {
+        toast.error(family.error);
+        return;
+      }
+      await linkSaleFamilyVariant({
+        companyId,
+        familyProductId: family.id,
         variantName: item.name,
         variantSku: item.sku,
         variantUnit: item.unit !== "—" ? item.unit : "un",
@@ -332,7 +318,11 @@ export function ProductSetupActionPanel({
       if (!dismissed.ok) {
         toast.error(dismissed.error ?? "Variante ligada, mas a fila não atualizou.");
       } else {
-        toast.success("Produto ligado ao agrupamento. Continua no cadastro.");
+        toast.success(
+          familyId
+            ? "Produto ligado ao agrupamento. Continua no cadastro."
+            : "Agrupamento cadastrado e produto ligado como variante.",
+        );
       }
       onResolved();
     } catch (e) {
@@ -475,31 +465,21 @@ export function ProductSetupActionPanel({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             Este cadastro continua sendo produto de estoque, ligado a um
-            agrupamento de cardápio.
+            agrupamento de cardápio. Se o agrupamento ainda não existe, cadastre
+            pelo nome.
           </p>
-          <SearchSelect
-            value={familyId}
-            onValueChange={setFamilyId}
-            options={families.map((row) => ({
-              value: row.id,
-              label: row.name,
-              description:
-                row.stock_control_type === "SALE_FAMILY"
-                  ? row.sku
-                    ? `Agrupamento · SKU ${row.sku}`
-                    : "Agrupamento"
-                  : row.sku
-                    ? `SKU ${row.sku} · vira agrupamento ao ligar`
-                    : "Vira agrupamento ao ligar",
-              keywords: row.sku ?? "",
-            }))}
-            placeholder="Escolher agrupamento"
-            searchPlaceholder="Buscar agrupamento…"
-            emptyMessage="Nenhum agrupamento no cadastro."
+          <SaleFamilyDestinationFields
+            companyId={companyId}
+            excludeProductId={item.productId}
+            familyId={familyId}
+            newFamilyName={newFamilyName}
+            onFamilyIdChange={setFamilyId}
+            onNewFamilyNameChange={setNewFamilyName}
+            disabled={busy}
           />
           <Button
             type="button"
-            disabled={busy || !familyId}
+            disabled={busy || (!familyId && !newFamilyName.trim())}
             onClick={() => void linkAsVariant()}
           >
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -512,8 +492,8 @@ export function ProductSetupActionPanel({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {isPurchase
-              ? "Fica como produto de estoque. Entradas da nota continuam neste cadastro, sem unificar e sem entrar em ficha."
-              : "Fica como produto. Sem ficha, sem agrupamento e sem unificar agora."}
+              ? "Fica como produto interno. Entradas da nota continuam neste cadastro, sem unificar e sem entrar em ficha."
+              : "Fica como produto interno. Sem ficha, sem agrupamento e sem unificar agora."}
           </p>
           <Button
             type="button"

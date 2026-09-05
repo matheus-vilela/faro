@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   setupChoicesForItem,
+  suggestedSetupChoice,
   type ProductSetupItem,
 } from "@/lib/productSetupQueue";
 
@@ -47,5 +48,29 @@ describe("setupChoicesForItem", () => {
     expect(
       setupChoicesForItem(item("recipe_sales_unlinked")).map((o) => o.value),
     ).toEqual(["recipe"]);
+  });
+});
+
+describe("suggestedSetupChoice", () => {
+  it("pré-seleciona variante quando o produto é possível agrupamento", () => {
+    expect(
+      suggestedSetupChoice({
+        ...item("sold_unlinked"),
+        possibleGrouping: true,
+      }),
+    ).toBe("sale_family_variant");
+  });
+
+  it("na compra também sugere fazer parte de um agrupamento", () => {
+    expect(
+      suggestedSetupChoice({
+        ...item("purchase_unlinked"),
+        possibleGrouping: true,
+      }),
+    ).toBe("sale_family_variant");
+  });
+
+  it("não sugere papel sem o sinal de agrupamento", () => {
+    expect(suggestedSetupChoice(item("sold_unlinked"))).toBeUndefined();
   });
 });

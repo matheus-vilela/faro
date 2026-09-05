@@ -27,6 +27,14 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `contas-a-pagar-sidebar.md` | Contas a pagar: calendário e listagem na sidebar |
 | `checklist-historico-filtro-periodo.md` | Histórico: filtro de mês + de/até como em Notas |
 | `contas-filtro-padrao.md` | Contas: calendário e listagem com filtro de Notas |
+| `correlacao-mesmo-item-ou-ficha.md` | Match da IA: unificar **ou** ficha (dose × garrafa) |
+| `correlacao-configurar-papel.md` | Card de confirmação: papel do vendido (produto, ficha, agrupamento, variante) |
+| `correlacao-variante-criar-agrupamento.md` | Variante em «Para corrigir»: cadastrar agrupamento que ainda não existe |
+| `correlacao-corrigir-badges.md` | «Para corrigir»: uma badge de origem; volume só na coluna |
+| `correlacao-corrigir-origem-agrupamento.md` | Badge PDV/nota; possível agrupamento já selecionado |
+| `correlacao-direita-por-papel.md` | Card de correlação: direita muda com o papel (ficha no card) |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.
+
+Modelo de produto / correlação: `docs/dominio/`.

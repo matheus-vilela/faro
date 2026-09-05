@@ -1,4 +1,3 @@
-import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { ProductCorrelationKpis } from "@/components/products/ProductCorrelationKpis";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import { ProductSetupInbox } from "@/components/products/ProductSetupInbox";
@@ -8,12 +7,6 @@ import {
   ValidationMatchListHeader,
 } from "@/components/products/ProductValidationCards";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   correlationFiscalStepStatus,
@@ -26,14 +19,16 @@ import {
   dashboardImportReviewMarkTechSheetSaved,
 } from "@/lib/dashboardImportReview";
 import {
-  addPurchaseAsRecipeIngredient,
-  createProductRecipeMatch,
-} from "@/lib/onboardingProductRecipeMatch";
-import {
   fetchProductSetupQueue,
   maxTurnoverQty,
+  type ProductSetupItem,
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
+import {
+  applySoldAsGrouping,
+  applySoldAsProduct,
+  applySoldAsVariant,
+} from "@/lib/productValidation/applySoldRole";
 import { filterValidationToQueue } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
   patchProductValidationSession,
@@ -41,6 +36,10 @@ import {
   startProductValidationSession,
   useProductValidationSession,
 } from "@/lib/productValidation/session";
+import {
+  defaultSoldRoleForSameItem,
+  type CorrelationSoldRole,
+} from "@/lib/productValidation/soldRole";
 import type {
   RecipeSuggestion,
   SameItemSuggestion,
@@ -79,10 +78,6 @@ async function fetchProductById(productId: string): Promise<Product | null> {
 
 function formatCurrency(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function fallbackUnit(unit: string): string {
-  return unit && unit !== "—" ? unit : "un";
 }
 
 function PrerequisiteStatusIcon({
@@ -183,7 +178,7 @@ function CorrelationIdleCard({
 
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const { currentCompany, refetchCompanies } = useCompany();
-  const { running, result, samePick, soldPick, recipePicks } =
+  const { running, result, samePick, soldPick, recipePicks, soldRole, familyPick } =
     useProductValidationSession(companyId);
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,7 +188,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
   const mergePartnerQueueRef = useRef<string[]>([]);
   const continuingMergeRef = useRef(false);
-  const [recipeSheetId, setRecipeSheetId] = useState<string | null>(null);
 
   const loadQueue = useCallback(async () => {
     const next = await fetchProductSetupQueue(supabase, companyId);
@@ -237,11 +231,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     }));
   };
 
-  const confirmSameItem = async (suggestionId: string) => {
-    const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
-    if (!suggestion) return;
-    const partnerIds = samePickIds(samePick, suggestionId);
-    const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
+  const openUnify = async (soldId: string, partnerIds: string[]) => {
     if (partnerIds.length === 0 || !soldId) return;
     setBusy(true);
     const product = await fetchProductById(soldId);
@@ -254,6 +244,14 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     mergePartnerQueueRef.current = partnerIds;
     setMergePartnerId(partnerIds[0] ?? null);
     setMergeOpen(true);
+  };
+
+  const confirmSameItem = async (suggestionId: string) => {
+    const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
+    if (!suggestion) return;
+    const partnerIds = samePickIds(samePick, suggestionId);
+    const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
+    await openUnify(soldId, partnerIds);
   };
 
   const addSamePurchase = (suggestionId: string, purchaseId: string) => {
@@ -278,87 +276,91 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     }));
   };
 
-  const toggleIngredient = (recipeId: string, purchaseId: string) => {
-    patchProductValidationSession(companyId, (current) => {
-      const prev = new Set(current.recipePicks[recipeId] ?? []);
-      if (prev.has(purchaseId)) prev.delete(purchaseId);
-      else prev.add(purchaseId);
-      return { recipePicks: { ...current.recipePicks, [recipeId]: [...prev] } };
-    });
-  };
-
-  const confirmRecipe = async (suggestionId: string) => {
-    const suggestion = result?.recipes.find((row) => row.id === suggestionId);
-    if (!suggestion) return;
-    const selected = new Set(recipePicks[suggestionId] ?? []);
-    const ingredients = suggestion.ingredients.filter((row) =>
-      selected.has(row.purchase.productId),
-    );
-    if (ingredients.length === 0) {
-      setRecipeSheetId(suggestion.sold.productId);
-      return;
-    }
-    setBusy(true);
-    const payload = ingredients.map((row) => ({
-      product_id: row.purchase.productId,
-      name: row.purchase.name,
-      input_quantity: 1,
-      input_unit_code: fallbackUnit(row.purchase.unit),
-      stock_quantity: row.purchase.quantity,
-    }));
-    let ok = true;
-    let error: string | undefined;
-    if (suggestion.sold.recipeId) {
-      for (const row of payload) {
-        const res = await addPurchaseAsRecipeIngredient(supabase, {
-          companyId,
-          recipeId: suggestion.sold.recipeId,
-          ingredientProductId: row.product_id,
-          inputQuantity: row.input_quantity,
-          inputUnitCode: row.input_unit_code,
-        });
-        if (!res.ok) {
-          ok = false;
-          error = res.error;
-          break;
-        }
-      }
-    } else {
-      const res = await createProductRecipeMatch(supabase, {
-        companyId,
-        outputProductId: suggestion.sold.productId,
-        ingredients: payload,
-      });
-      ok = res.ok;
-      error = res.error;
-    }
-    if (ok) {
-      await dashboardImportReviewMarkTechSheetSaved(
-        supabase,
-        companyId,
-        suggestion.sold.productId,
-      );
-      await dashboardImportReviewFinalizeRecipeProductSales(
-        supabase,
-        companyId,
-        suggestion.sold.productId,
-      );
-    }
-    setBusy(false);
-    if (!ok) {
-      toast.error(error ?? "Não foi possível criar a ficha.");
-      return;
-    }
-    toast.success(
-      "Ficha confirmada. Quantidades dos insumos ficam 1 unidade — ajuste na ficha se precisar.",
+  const finishSoldRecipe = async (soldId: string) => {
+    await dashboardImportReviewMarkTechSheetSaved(supabase, companyId, soldId);
+    await dashboardImportReviewFinalizeRecipeProductSales(
+      supabase,
+      companyId,
+      soldId,
     );
     await reloadAfterConfirm();
   };
 
-  const recipeSheetItem = useMemo(
-    () => result?.recipes.find((row) => row.sold.productId === recipeSheetId),
-    [result, recipeSheetId],
-  );
+  const resolveSoldItem = (
+    soldId: string,
+    fallback: ProductSetupItem,
+  ): ProductSetupItem =>
+    soldItems.find((item) => item.productId === soldId) ?? fallback;
+
+  const setSoldRole = (suggestionId: string, role: CorrelationSoldRole) => {
+    patchProductValidationSession(companyId, (current) => ({
+      soldRole: { ...current.soldRole, [suggestionId]: role },
+    }));
+  };
+
+  const setFamilyPick = (suggestionId: string, familyId: string) => {
+    patchProductValidationSession(companyId, (current) => ({
+      familyPick: { ...current.familyPick, [suggestionId]: familyId },
+    }));
+  };
+
+  const confirmSoldAsProduct = async (sold: ProductSetupItem) => {
+    setBusy(true);
+    const res = await applySoldAsProduct(supabase, companyId, sold);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível registrar o produto.");
+      return;
+    }
+    toast.success("Registrado como produto interno, sem unificar.");
+    await reloadAfterConfirm();
+  };
+
+  const confirmSoldAsGrouping = async (
+    sold: ProductSetupItem,
+    purchases: ProductSetupItem[],
+  ) => {
+    setBusy(true);
+    const res = await applySoldAsGrouping(supabase, companyId, sold, purchases);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível tornar agrupamento.");
+      return;
+    }
+    toast.success(
+      purchases.length > 0
+        ? "Agrupamento confirmado. As compras da nota viraram variantes."
+        : "Este item agora é o agrupamento.",
+    );
+    await reloadAfterConfirm();
+  };
+
+  const confirmSoldAsVariant = async (
+    sold: ProductSetupItem,
+    familyId: string,
+    newFamilyName = "",
+  ) => {
+    if (!familyId && !newFamilyName.trim()) return;
+    setBusy(true);
+    const res = await applySoldAsVariant(
+      supabase,
+      companyId,
+      sold,
+      familyId,
+      newFamilyName,
+    );
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error ?? "Não foi possível vincular ao agrupamento.");
+      return;
+    }
+    toast.success(
+      familyId
+        ? "Produto ligado ao agrupamento. Continua no cadastro."
+        : "Agrupamento cadastrado e produto ligado como variante.",
+    );
+    await reloadAfterConfirm();
+  };
 
   const confirmRows = useMemo(() => {
     if (!result) return [];
@@ -581,9 +583,11 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
               {result.stats.sameItem} vínculo
               {result.stats.sameItem === 1 ? "" : "s"} compra ↔ venda e{" "}
               {result.stats.recipes} ficha
-              {result.stats.recipes === 1 ? "" : "s"} com 90% ou mais. Os demais
-              ({result.stats.residual.toLocaleString("pt-BR")}) vão para
-              correção, pelos que mais giram. Nada é gravado até você confirmar.
+              {result.stats.recipes === 1 ? "" : "s"} com 90% ou mais. Diga o que
+              o vendido é: produto, ficha, agrupamento ou variante. Unificar só
+              vale entre produtos. Os demais (
+              {result.stats.residual.toLocaleString("pt-BR")}) vão para correção.
+              Nada é gravado até você confirmar.
             </p>
           </div>
           <Button
@@ -606,27 +610,61 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       {hasConfirm ? (
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold">Confirmar vínculo (≥ 90%)</h2>
+            <h2 className="text-sm font-semibold">Configurar o vendido (≥ 90%)</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              À esquerda o item do PDV; à direita as compras da nota. O mesmo
-              vendido pode ter mais de um cadastro (fornecedores ou EAN
-              diferentes). Adicione outros se faltar — nada é gravado até
-              unificar.
+              À esquerda, o que o vendido é. A direita muda com o papel:
+              unificar com a nota, montar a ficha (busca, quantidade e
+              unidade), virar agrupamento ou só produto interno.
             </p>
           </div>
           <ValidationMatchListHeader />
           <ul className="space-y-2">
             {confirmRows.map((row) => {
               if (row.kind === "recipe") {
+                const recipePurchaseIds =
+                  recipePicks[row.id] ??
+                  row.suggestion.ingredients.map(
+                    (ingredient) => ingredient.purchase.productId,
+                  );
+                const recipePurchases = row.suggestion.ingredients
+                  .filter((ingredient) =>
+                    recipePurchaseIds.includes(ingredient.purchase.productId),
+                  )
+                  .map((ingredient) => ingredient.purchase);
                 return (
                   <RecipeRow
                     key={row.id}
+                    companyId={companyId}
                     suggestion={row.suggestion}
                     selectedIngredientIds={new Set(recipePicks[row.id] ?? [])}
-                    onToggleIngredient={(id) => toggleIngredient(row.id, id)}
-                    onConfirmRecipe={() => void confirmRecipe(row.id)}
-                    onOpenSheet={() =>
-                      setRecipeSheetId(row.suggestion.sold.productId)
+                    role={soldRole[row.id] ?? "recipe"}
+                    onRoleChange={(role) => setSoldRole(row.id, role)}
+                    familyId={familyPick[row.id] ?? ""}
+                    onFamilyChange={(id) => setFamilyPick(row.id, id)}
+                    onUnify={() =>
+                      void openUnify(
+                        row.suggestion.sold.productId,
+                        recipePicks[row.id] ?? [],
+                      )
+                    }
+                    onConfirmProduct={() =>
+                      void confirmSoldAsProduct(row.suggestion.sold)
+                    }
+                    onConfirmGrouping={() =>
+                      void confirmSoldAsGrouping(
+                        row.suggestion.sold,
+                        recipePurchases,
+                      )
+                    }
+                    onConfirmVariant={(name) =>
+                      void confirmSoldAsVariant(
+                        row.suggestion.sold,
+                        familyPick[row.id] ?? "",
+                        name,
+                      )
+                    }
+                    onRecipeSaved={() =>
+                      void finishSoldRecipe(row.suggestion.sold.productId)
                     }
                     busy={busy}
                   />
@@ -653,9 +691,23 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
                   }
                 }
               }
+              const currentSold = resolveSoldItem(
+                currentSoldId,
+                row.suggestion.sold,
+              );
+              const currentPurchases = currentPurchaseIds
+                .map(
+                  (id) =>
+                    purchaseItems.find((item) => item.productId === id) ??
+                    row.suggestion.candidates.find(
+                      (candidate) => candidate.purchase.productId === id,
+                    )?.purchase,
+                )
+                .filter((item): item is ProductSetupItem => Boolean(item));
               return (
                 <SameItemRow
                   key={row.id}
+                  companyId={companyId}
                   suggestion={row.suggestion}
                   selectedPurchaseIds={currentPurchaseIds}
                   onAddPurchase={(id) => addSamePurchase(row.id, id)}
@@ -683,7 +735,26 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
                       item.productId === currentSoldId ||
                       !takenSolds.has(item.productId),
                   )}
+                  role={
+                    soldRole[row.id] ??
+                    defaultSoldRoleForSameItem(row.suggestion.conflictWithRecipe)
+                  }
+                  onRoleChange={(role) => setSoldRole(row.id, role)}
+                  familyId={familyPick[row.id] ?? ""}
+                  onFamilyChange={(id) => setFamilyPick(row.id, id)}
                   onConfirm={() => void confirmSameItem(row.id)}
+                  onConfirmProduct={() => void confirmSoldAsProduct(currentSold)}
+                  onConfirmGrouping={() =>
+                    void confirmSoldAsGrouping(currentSold, currentPurchases)
+                  }
+                  onConfirmVariant={(name) =>
+                    void confirmSoldAsVariant(
+                      currentSold,
+                      familyPick[row.id] ?? "",
+                      name,
+                    )
+                  }
+                  onRecipeSaved={() => void finishSoldRecipe(currentSold.productId)}
                   busy={busy}
                 />
               );
@@ -743,59 +814,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           }}
         />
       ) : null}
-
-      <Sheet
-        open={Boolean(recipeSheetItem)}
-        onOpenChange={(open) => {
-          if (!open) setRecipeSheetId(null);
-        }}
-      >
-        <SheetContent className="flex flex-col gap-0 p-0">
-          <SheetHeader>
-            <SheetTitle>
-              {recipeSheetItem
-                ? `Ficha: ${recipeSheetItem.sold.name}`
-                : "Ficha técnica"}
-            </SheetTitle>
-          </SheetHeader>
-          {recipeSheetItem ? (
-            <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
-              <EstoqueReceitasPanel
-                key={recipeSheetItem.sold.productId}
-                companyId={companyId}
-                sheetOnly
-                embedInline
-                ingredientsOnly
-                initialOpenRecipeId={recipeSheetItem.sold.recipeId}
-                prefillNewRecipeOutputProductId={
-                  recipeSheetItem.sold.recipeId
-                    ? null
-                    : recipeSheetItem.sold.productId
-                }
-                prefillNewRecipeAutoOpen={false}
-                technicalSheetOutputProductId={recipeSheetItem.sold.productId}
-                contextOutputProductId={recipeSheetItem.sold.productId}
-                onTechnicalSheetSaved={() => {
-                  void (async () => {
-                    await dashboardImportReviewMarkTechSheetSaved(
-                      supabase,
-                      companyId,
-                      recipeSheetItem.sold.productId,
-                    );
-                    await dashboardImportReviewFinalizeRecipeProductSales(
-                      supabase,
-                      companyId,
-                      recipeSheetItem.sold.productId,
-                    );
-                    setRecipeSheetId(null);
-                    await reloadAfterConfirm();
-                  })();
-                }}
-              />
-            </div>
-          ) : null}
-        </SheetContent>
-      </Sheet>
     </div>,
   );
 }

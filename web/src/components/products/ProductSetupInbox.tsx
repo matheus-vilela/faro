@@ -14,12 +14,14 @@ import { useClientTableSort } from "@/hooks/useClientTableSort";
 import {
   PRODUCT_SETUP_ORIGIN_LABEL,
   setupItemMatchesFilters,
+  setupItemSourceLabel,
   type ProductSetupOriginFilter,
 } from "@/lib/productSetupListFilter";
 import {
   formatTurnoverLine,
   itemTurnoverQty,
   setupChoicesForItem,
+  suggestedSetupChoice,
   type ProductSetupChoice,
   type ProductSetupItem,
   type ProductSetupQueue,
@@ -44,17 +46,6 @@ function compareSetup(
   return 0;
 }
 
-function formatUnitLine(item: ProductSetupItem): string | null {
-  const unit = item.unit && item.unit !== "—" ? item.unit : "";
-  if (item.quantity) {
-    const qty = Number(item.quantity).toLocaleString("pt-BR", {
-      maximumFractionDigits: 4,
-    });
-    return unit ? `${qty} ${unit}` : qty;
-  }
-  return unit || null;
-}
-
 const SOURCE_BADGE_CLASS: Record<ProductSetupItem["kind"], string> = {
   purchase_unlinked:
     "border-amber-500/35 bg-amber-500/15 text-amber-900 dark:text-amber-200",
@@ -63,37 +54,30 @@ const SOURCE_BADGE_CLASS: Record<ProductSetupItem["kind"], string> = {
   recipe_without_ingredients:
     "border-violet-500/35 bg-violet-500/15 text-violet-900 dark:text-violet-200",
   recipe_sales_unlinked:
-    "border-emerald-500/35 bg-emerald-500/15 text-emerald-900 dark:text-emerald-200",
+    "border-violet-500/35 bg-violet-500/15 text-violet-900 dark:text-violet-200",
 };
 
-function ItemIdentity({ item }: { item: ProductSetupItem }) {
-  const unitLine = formatUnitLine(item);
-  const turnoverLine = formatTurnoverLine(item);
+function ItemIdentity({
+  item,
+  showVolume = false,
+}: {
+  item: ProductSetupItem;
+  showVolume?: boolean;
+}) {
+  const volume = showVolume ? formatTurnoverLine(item) : null;
   return (
     <div className="min-w-0">
       <p className="truncate font-medium">{item.name}</p>
       <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-        {turnoverLine ? (
-          <Badge
-            variant="outline"
-            className="border-emerald-500/35 bg-emerald-500/15 font-normal text-emerald-900 dark:text-emerald-200"
-          >
-            {turnoverLine}
-          </Badge>
-        ) : unitLine ? (
-          <Badge
-            variant="outline"
-            className="border-sky-500/35 bg-sky-500/15 font-normal text-sky-900 dark:text-sky-200"
-          >
-            {unitLine}
-          </Badge>
-        ) : null}
         <Badge
           variant="outline"
           className={cn("font-normal", SOURCE_BADGE_CLASS[item.kind])}
         >
-          {item.sourceLabel}
+          {setupItemSourceLabel(item)}
         </Badge>
+        {volume ? (
+          <span className="text-xs text-muted-foreground">{volume}</span>
+        ) : null}
       </div>
     </div>
   );
@@ -174,19 +158,31 @@ export function ProductSetupInbox({
     SortKey
   >(filtered, "turnover", compareSetup, false);
 
+  const choiceFor = (item: ProductSetupItem): ProductSetupChoice | undefined => {
+    const picked = choices[item.key];
+    if (
+      picked &&
+      setupChoicesForItem(item).some((option) => option.value === picked)
+    ) {
+      return picked;
+    }
+    return suggestedSetupChoice(item);
+  };
+
   const activeItem = items.find((item) => item.key === activeKey) ?? null;
-  const activeChoiceRaw = activeItem ? choices[activeItem.key] : undefined;
-  const activeChoice =
-    activeItem &&
-    activeChoiceRaw &&
-    setupChoicesForItem(activeItem).some(
-      (option) => option.value === activeChoiceRaw,
-    )
-      ? activeChoiceRaw
-      : undefined;
+  const activeChoice = activeItem ? choiceFor(activeItem) : undefined;
 
   const pickRole = (item: ProductSetupItem, choice: ProductSetupChoice) => {
     setChoices((current) => ({ ...current, [item.key]: choice }));
+    setActiveKey(item.key);
+  };
+
+  const selectItem = (item: ProductSetupItem) => {
+    const choice = choiceFor(item);
+    if (choice) {
+      pickRole(item, choice);
+      return;
+    }
     setActiveKey(item.key);
   };
 
@@ -317,17 +313,18 @@ export function ProductSetupInbox({
                     <li key={item.key}>
                       <div
                         className={cn(
-                          "rounded-xl border p-3",
+                          "cursor-pointer rounded-xl border p-3",
                           selected
                             ? "border-primary/40 bg-primary/5"
                             : "border-border/80 bg-card",
                         )}
+                        onClick={() => selectItem(item)}
                       >
-                        <ItemIdentity item={item} />
+                        <ItemIdentity item={item} showVolume />
                         <div className="mt-3">
                           <RoleSelect
                             item={item}
-                            value={choices[item.key]}
+                            value={choiceFor(item)}
                             onChange={(choice) => pickRole(item, choice)}
                           />
                         </div>
@@ -367,9 +364,10 @@ export function ProductSetupInbox({
                         <tr
                           key={item.key}
                           className={cn(
-                            "border-b last:border-0",
+                            "cursor-pointer border-b last:border-0",
                             selected ? "bg-primary/5" : "hover:bg-muted/40",
                           )}
+                          onClick={() => selectItem(item)}
                         >
                           <td className="w-[32%] px-3 py-2.5">
                             <ItemIdentity item={item} />
@@ -380,7 +378,7 @@ export function ProductSetupInbox({
                           <td className="px-3 py-2.5">
                             <RoleSelect
                               item={item}
-                              value={choices[item.key]}
+                              value={choiceFor(item)}
                               onChange={(choice) => pickRole(item, choice)}
                             />
                           </td>

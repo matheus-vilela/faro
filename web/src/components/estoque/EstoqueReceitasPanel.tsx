@@ -150,6 +150,7 @@ function RecipeEditorForm({
 }) {
   return (
     <div className="space-y-4">
+      {ingredientsOnly ? null : (
       <section className={PRODUCT_SHEET_SECTION}>
         <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
           Tipo
@@ -218,6 +219,7 @@ function RecipeEditorForm({
           })}
         </div>
       </section>
+      )}
 
       {ingredientsOnly ? null : (
         <section className={PRODUCT_SHEET_SECTION}>
@@ -905,6 +907,11 @@ export const EstoqueReceitasPanel = forwardRef<
      * como primeiro insumo (qty 1 na unidade do produto).
      */
     prefillIngredientProductId?: string | null;
+    /**
+     * Insumos iniciais da ficha (correlação: compras da nota).
+     * Quantidade vazia — a pessoa informa a da receita (ex. 50 ml).
+     */
+    prefillIngredientProductIds?: string[] | null;
   }
 >(function EstoqueReceitasPanel(
   {
@@ -923,6 +930,7 @@ export const EstoqueReceitasPanel = forwardRef<
     technicalSheetKind = "sale",
     onTechnicalSheetSaved,
     prefillIngredientProductId,
+    prefillIngredientProductIds,
   },
   ref,
 ) {
@@ -988,6 +996,7 @@ export const EstoqueReceitasPanel = forwardRef<
     initialOpenRecipeId,
     technicalSheetOutputProductId,
     prefillIngredientProductId,
+    prefillIngredientProductIds,
   ]);
 
   const ingredientExcludeProductId = useMemo(() => {
@@ -1011,7 +1020,27 @@ export const EstoqueReceitasPanel = forwardRef<
     setOutputId(technicalSheetPid);
     setOutputDraftName("");
     setSheetKind(technicalSheetKind);
-    setIngs([]);
+    const prefills: string[] = [];
+    for (const id of [
+      ...(prefillIngredientProductIds ?? []),
+      prefillIngredientProductId,
+    ]) {
+      const next = id?.trim() ?? "";
+      if (!next || next === technicalSheetPid || prefills.includes(next)) {
+        continue;
+      }
+      prefills.push(next);
+    }
+    setIngs(
+      prefills.map((id) => {
+        const p = products.find((row) => row.id === id);
+        return {
+          product_id: id,
+          quantity: "",
+          unit_code: (p?.unit ?? "").trim(),
+        };
+      }),
+    );
     setSavedIngsSnapshot([]);
   }, [
     technicalSheetPid,
@@ -1019,6 +1048,8 @@ export const EstoqueReceitasPanel = forwardRef<
     loading,
     initialOpenRecipeId,
     products,
+    prefillIngredientProductId,
+    prefillIngredientProductIds,
   ]);
 
   useEffect(() => {

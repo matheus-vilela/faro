@@ -79,6 +79,16 @@ describe("defaultPicksFromResult", () => {
     const picks = defaultPicksFromResult(resultWithHighMatch());
     expect(picks.samePick["same:s1"]).toEqual(["p1"]);
     expect(picks.soldPick["same:s1"]).toBe("s1");
+    expect(picks.soldRole["same:s1"]).toBe("same_product");
+  });
+
+  it("começa em ficha quando o match conflita com dose ou prato", () => {
+    const base = resultWithHighMatch();
+    const picks = defaultPicksFromResult({
+      ...base,
+      sameItem: [{ ...base.sameItem[0]!, conflictWithRecipe: true }],
+    });
+    expect(picks.soldRole["same:s1"]).toBe("recipe");
   });
 
   it("pré-seleciona todas as notas do mesmo vendido", () => {

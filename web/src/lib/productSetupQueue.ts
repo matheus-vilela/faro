@@ -10,6 +10,7 @@ import {
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
 import { fetchExcludedFromSalesProductIds } from "@/lib/productExcludeFromSales";
+import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type ProductSetupKind =
@@ -35,6 +36,7 @@ export type ProductSetupItem = {
   priorityEpoc?: boolean;
   /** Volume de giro: saídas (venda) ou entradas (compra), para ordenar correção. */
   turnoverQty?: number;
+  possibleGrouping?: boolean;
 };
 
 export const PRODUCT_SETUP_KIND_LABEL: Record<ProductSetupKind, string> = {
@@ -54,13 +56,13 @@ export type ProductSetupChoice =
   | "skip";
 
 export const PRODUCT_SETUP_CHOICE_LABEL: Record<ProductSetupChoice, string> = {
-  link_item: "Unificar com outro item",
+  link_item: "Pode ser mesmo produto da nota",
   recipe: "Ficha técnica",
-  intermediate: "Produto intermediário",
+  intermediate: "Ficha de produção",
   sale_family: "É um agrupamento",
-  sale_family_variant: "Variante de um agrupamento",
+  sale_family_variant: "Faz parte de um agrupamento",
   ingredient: "Insumo de uma ficha",
-  skip: "É um produto",
+  skip: "É um produto interno",
 };
 
 const SOLD_SETUP_CHOICES: ProductSetupChoice[] = [
@@ -135,6 +137,47 @@ async function attachProductTurnover(
   });
 }
 
+async function attachPossibleGrouping(
+  client: SupabaseClient,
+  items: ProductSetupItem[],
+): Promise<ProductSetupItem[]> {
+  const ids = [...new Set(items.map((item) => item.productId))];
+  if (ids.length === 0) return items;
+  const flags = new Map<
+    string,
+    {
+      stock_control_type: string | null;
+      stock_only_origin: boolean;
+      not_sale_grouping: boolean;
+    }
+  >();
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const { data, error } = await client
+      .from("products")
+      .select("id, stock_control_type, stock_only_origin, not_sale_grouping")
+      .in("id", chunk);
+    if (error) break;
+    for (const row of data ?? []) {
+      const rec = row as {
+        id: string;
+        stock_control_type: string | null;
+        stock_only_origin: boolean | null;
+        not_sale_grouping: boolean | null;
+      };
+      flags.set(rec.id, {
+        stock_control_type: rec.stock_control_type,
+        stock_only_origin: rec.stock_only_origin === true,
+        not_sale_grouping: rec.not_sale_grouping === true,
+      });
+    }
+  }
+  return items.map((item) => ({
+    ...item,
+    possibleGrouping: isPossibleGroupingProduct(flags.get(item.productId) ?? {}),
+  }));
+}
+
 export function isEpocSetupItem(item: ProductSetupItem): boolean {
   if (item.kind === "purchase_unlinked") return false;
   return (
@@ -169,8 +212,13 @@ export function formatTurnoverLine(item: ProductSetupItem): string | null {
   return `${n} ${unit}`;
 }
 
-export function maxTurnoverQty(...items: Array<ProductSetupItem | undefined>): number {
-  return Math.max(0, ...items.map((item) => (item ? itemTurnoverQty(item) : 0)));
+export function maxTurnoverQty(
+  ...items: Array<ProductSetupItem | undefined>
+): number {
+  return Math.max(
+    0,
+    ...items.map((item) => (item ? itemTurnoverQty(item) : 0)),
+  );
 }
 
 export function compareTurnoverDesc(
@@ -180,6 +228,15 @@ export function compareTurnoverDesc(
   const d = itemTurnoverQty(b) - itemTurnoverQty(a);
   if (d !== 0) return d;
   return a.name.localeCompare(b.name, "pt-BR");
+}
+
+export function suggestedSetupChoice(
+  item: ProductSetupItem,
+): ProductSetupChoice | undefined {
+  if (!item.possibleGrouping) return undefined;
+  const values = setupChoicesForItem(item).map((option) => option.value);
+  if (values.includes("sale_family_variant")) return "sale_family_variant";
+  return undefined;
 }
 
 export function setupChoicesForItem(
@@ -224,7 +281,9 @@ function asMatchRow(item: ProductSetupItem): ProductRecipeMatchRow {
   };
 }
 
-export function setupItemAsMatchRow(item: ProductSetupItem): ProductRecipeMatchRow {
+export function setupItemAsMatchRow(
+  item: ProductSetupItem,
+): ProductRecipeMatchRow {
   return asMatchRow(item);
 }
 
@@ -234,17 +293,17 @@ export async function fetchProductSetupQueue(
 ): Promise<ProductSetupQueue> {
   const [lists, pendingRecipes, pendingSales, recipesPick, excludedIds] =
     await Promise.all([
-    fetchProductRecipeMatchLists(client, companyId, {
-      purchaseLimit: 2000,
-      purchaseOffset: 0,
-      soldLimit: 2000,
-      soldOffset: 0,
-    }),
-    fetchDashboardImportReviewEpocRecipesNoIngredients(client, companyId),
-    fetchDashboardImportReviewPendingRevenueLink(client, companyId),
-    fetchCompanyRecipesForPick(client, companyId),
-    fetchExcludedFromSalesProductIds(companyId),
-  ]);
+      fetchProductRecipeMatchLists(client, companyId, {
+        purchaseLimit: 2000,
+        purchaseOffset: 0,
+        soldLimit: 2000,
+        soldOffset: 0,
+      }),
+      fetchDashboardImportReviewEpocRecipesNoIngredients(client, companyId),
+      fetchDashboardImportReviewPendingRevenueLink(client, companyId),
+      fetchCompanyRecipesForPick(client, companyId),
+      fetchExcludedFromSalesProductIds(companyId),
+    ]);
 
   const error =
     lists.error ??
@@ -276,7 +335,7 @@ export async function fetchProductSetupQueue(
       unit: purchase.unit,
       quantity: purchase.current_quantity,
       kind: "purchase_unlinked",
-      sourceLabel: "Nota / compra",
+      sourceLabel: "Nota fiscal / compra",
       pendingQuestion:
         "A qual item isso se relaciona? Sem o vínculo, a próxima nota pode entrar no cadastro errado.",
       sku: purchase.sku,
@@ -293,7 +352,7 @@ export async function fetchProductSetupQueue(
       unit: row.unit,
       quantity: 0,
       kind: "recipe_without_ingredients",
-      sourceLabel: row.priority_epoc ? "PDV (EPOC) / venda" : "Venda",
+      sourceLabel: "PDV / venda",
       pendingQuestion:
         "Este item vendido parece uma ficha técnica. Informe os insumos ou diga que não é ficha.",
       recipeId: row.recipe_id,
@@ -333,7 +392,7 @@ export async function fetchProductSetupQueue(
       unit: "—",
       quantity: 0,
       kind: "recipe_sales_unlinked",
-      sourceLabel: "Ficha técnica",
+      sourceLabel: "PDV / venda",
       pendingQuestion:
         "A ficha já tem insumos, mas as vendas importadas ainda estão ligadas ao produto. Ligue-as à ficha.",
       recipeId: row.recipe_id,
@@ -353,9 +412,10 @@ export async function fetchProductSetupQueue(
   };
 
   const withTurnover = await attachProductTurnover(client, companyId, items);
+  const withGrouping = await attachPossibleGrouping(client, withTurnover);
 
   return {
-    items: withTurnover,
+    items: withGrouping,
     counts,
     soldOnly: lists.soldOnly,
     purchases: lists.purchases,

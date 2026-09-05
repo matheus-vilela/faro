@@ -3,6 +3,7 @@ import type { ProductSetupItem } from "@/lib/productSetupQueue";
 import {
   setupItemMatchesFilters,
   setupItemOrigin,
+  setupItemSourceLabel,
 } from "@/lib/productSetupListFilter";
 
 function item(
@@ -33,6 +34,18 @@ describe("setupItemOrigin", () => {
     expect(setupItemOrigin(item("recipe_sales_unlinked", "Caipirinha"))).toBe(
       "ficha",
     );
+  });
+
+  it("rótulo informa PDV venda ou nota compra", () => {
+    expect(setupItemSourceLabel(item("purchase_unlinked", "Açúcar"))).toBe(
+      "Nota fiscal / compra",
+    );
+    expect(setupItemSourceLabel(item("sold_unlinked", "Heineken"))).toBe(
+      "PDV / venda",
+    );
+    expect(
+      setupItemSourceLabel(item("recipe_without_ingredients", "Caipirinha")),
+    ).toBe("PDV / venda");
   });
 });
 
