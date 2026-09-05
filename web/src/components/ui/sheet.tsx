@@ -12,6 +12,9 @@ const STACKED_LAYER_SELECTOR = [
   "[data-slot='dialog-overlay']",
   "[data-slot='alert-dialog-content']",
   "[data-slot='alert-dialog-overlay']",
+  "[data-slot='select-content']",
+  "[data-slot='popover-content']",
+  "[data-slot='dropdown-menu-content']",
 ].join(",")
 
 function outsideEventTarget(event: Event): EventTarget | null {

@@ -87,7 +87,10 @@ export function UnitConversionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        overlayClassName="z-[80]"
+        className="z-[80] sm:max-w-md"
+      >
         <form onSubmit={(e) => void handleSubmit(e)}>
           <DialogHeader>
             <DialogTitle>Nova conversão</DialogTitle>
@@ -141,7 +144,7 @@ export function UnitConversionDialog({
                   <SelectTrigger className="mt-1.5">
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="z-[90]" position="popper">
                     {secondaryUnits.map((u) => (
                       <SelectItem key={u.code} value={u.code}>
                         {formatUnitLabelFromCodes(u.code)}

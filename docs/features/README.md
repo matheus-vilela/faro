@@ -43,6 +43,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `produto-ultimo-preco-por-unidade.md` | Detalhe: último preço + proporcional por unidade de estoque |
 | `produto-fornecedores-nfe-staging.md` | Aba Fornecedores inclui emitente de `nfe_staging_create` |
 | `movimentacao-detalhe-nfe.md` | Detalhe da movimentação: nota, fornecedor, qtd e item original |
+| `conversao-unidade-dialog-sheet.md` | Diálogo de conversão clicável acima do sheet do produto |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

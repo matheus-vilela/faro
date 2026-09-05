@@ -45,17 +45,46 @@ function DialogOverlay({
   )
 }
 
+const PORTALED_LAYER_SELECTOR = [
+  "[data-slot='select-content']",
+  "[data-slot='popover-content']",
+  "[data-slot='dropdown-menu-content']",
+].join(",")
+
+function outsideEventTarget(event: Event): EventTarget | null {
+  if ("detail" in event) {
+    const original = (event as CustomEvent<{ originalEvent?: Event }>).detail
+      ?.originalEvent
+    if (original?.target) return original.target
+  }
+  return event.target
+}
+
+function isPortaledOverlayTarget(event: Event) {
+  const target = outsideEventTarget(event)
+  return target instanceof Element && Boolean(target.closest(PORTALED_LAYER_SELECTOR))
+}
+
 function DialogContent({
   className,
   children,
   showCloseButton = true,
   overlayClassName,
+  onPointerDownOutside,
+  onFocusOutside,
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   /** Sobrescreve classes do overlay (ex.: z-index acima de um Sheet). */
   overlayClassName?: string
 }) {
+  const preventPortaledDismiss = React.useCallback((event: Event) => {
+    if (isPortaledOverlayTarget(event)) {
+      event.preventDefault()
+    }
+  }, [])
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
@@ -65,6 +94,18 @@ function DialogContent({
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
+        onPointerDownOutside={(event) => {
+          preventPortaledDismiss(event)
+          onPointerDownOutside?.(event)
+        }}
+        onFocusOutside={(event) => {
+          preventPortaledDismiss(event)
+          onFocusOutside?.(event)
+        }}
+        onInteractOutside={(event) => {
+          preventPortaledDismiss(event)
+          onInteractOutside?.(event)
+        }}
         {...props}
       >
         {children}
