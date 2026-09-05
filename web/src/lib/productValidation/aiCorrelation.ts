@@ -117,6 +117,7 @@ export function parseAiCorrelationRaw(
 
 /**
  * Garante 1 proposta por vendido. Compra só entra em um same_item (o de maior confiança).
+ * Um same_item pode ficar com várias compras (mesmo item de fornecedores/EANs diferentes).
  * Insumo de ficha não pode ser o mesmo cadastro de um same_item.
  */
 export function finalizeAiAssignments(
@@ -144,7 +145,7 @@ export function finalizeAiAssignments(
       });
       continue;
     }
-    usedSame.add(available[0]);
+    for (const id of available) usedSame.add(id);
     bySold.set(row.soldId, { ...row, purchasedIds: available });
   }
 
@@ -219,7 +220,9 @@ export function mapAiAssignmentsToValidationResult(input: {
       }
       const band = bandFromConfidence(row.confidence);
       if (band === "high") {
-        usedPurchases.add(candidates[0].purchase.productId);
+        for (const candidate of candidates) {
+          usedPurchases.add(candidate.purchase.productId);
+        }
       }
       sameItem.push({
         id: `same:${sold.key}`,

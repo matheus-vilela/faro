@@ -10,7 +10,7 @@ A ficha técnica de hoje (`RECIPE_CONTROLLED` + `recipe_type` PREP/SALE) explode
 
 Isso não cobre o caso em que a casa **produz e guarda** um item (molho, massa, pré-preparo) e depois vende (ou usa) esse item. Hoje, ou a venda baixa os insumos de novo, ou o estoque do preparado não existe.
 
-O tipo `COMPOSITE` **não serve**: não tem BOM. `PRODUCTION` já existe em `recipes.recipe_type`, mas não é usado. A tela **Baixa por preparo** só desconta insumos — não entra quantidade no produto de saída.
+O tipo `COMPOSITE` **não serve**: não tem BOM. `PRODUCTION` já existe em `recipes.recipe_type`. A ficha normal não se produz: só explode insumos na venda. A ficha de produção baixa insumos **e** entra saldo.
 
 ## Objetivo
 
@@ -38,7 +38,7 @@ Arquivos e peças que a IA deve abrir primeiro:
 - Componentes:
   - `web/src/components/products/ProductSetupCard.tsx` — seletor Ficha técnica
   - `web/src/components/products/ProductTechnicalSheetDialog.tsx`
-  - `web/src/components/estoque/EstoqueReceitasPanel.tsx` — cadastro da ficha + **Baixa por preparo** (hoje só consome insumos)
+  - `web/src/components/estoque/EstoqueReceitasPanel.tsx` — cadastro da ficha; **Produzir** só em ficha de produção
   - `web/src/components/products/ProductDetailSummary.tsx`
   - `web/src/components/products/ProductCatalogCard.tsx` — badges do card (hoje: Agrupamento)
   - `web/src/components/products/ProductCatalogTable.tsx` — rótulo ao lado do nome
@@ -69,7 +69,7 @@ Arquivos e peças que a IA deve abrir primeiro:
 | `stock_control_type` | `RECIPE_CONTROLLED` | `INTERMEDIATE` |
 | `recipe_type` | `PREP` / `SALE` | `PRODUCTION` (já no CHECK) |
 | Aparece em Produtos | Não (`listed_in_product_catalog = false`) | Sim — tem saldo |
-| Quando produz | Opcional: “Baixa por preparo” só some insumos; o prato não estoca | Ação **Produzir**: some insumos **e** entra no intermediário |
+| Quando produz | **Não produz.** Só existe para, na venda, baixar insumos na proporção da receita | Ação **Produzir**: some insumos **e** entra no intermediário |
 | Quando vende / sai | Explode insumos (`propagate_recipe_stock_on_output_out`) | Baixa **só** o saldo do intermediário, como `DIRECT` |
 | Insumos saem | Na venda (e no backfill histórico) | **Só na produção** |
 | Pode ser insumo de outra ficha | Em geral o prato não é SKU de estoque | Sim; a baixa é no saldo do intermediário |
@@ -106,7 +106,7 @@ Não reusar `COMPOSITE`.
 - A entrada **não** dispara explosão (só saída de PREP/SALE explode).
 - Custo da entrada: custo médio ponderado a partir do `average_cost` (ou `last_unit_value`) dos insumos × quantidade consumida / quantidade produzida, para o CMV da venda futura do intermediário.
 - Estoque negativo de insumo: mesma regra de `consume_recipe_stock` (hoje permite).
-- Produzir ficha **normal** pelo card antigo **não** entra saldo no prato. Só intermediário entra.
+- Ficha **normal** não tem ação de produzir/preparar. Insumos saem só na venda.
 
 ### Venda e outras saídas
 
@@ -157,7 +157,7 @@ Não reusar `COMPOSITE`.
 - Não reusar `COMPOSITE` nem marcar intermediário como `RECIPE_CONTROLLED` (a explosão na saída quebraria o fluxo).
 - Estender `upsert_product_technical_sheet` (ou RPC irmã com flag de modo) em vez de duplicar o editor de insumos.
 - `propagate_recipe_stock_on_output_out` e o backfill histórico são o caminho da ficha **normal**. Intermediário não entra aí.
-- Evoluir o card **Baixa por preparo** para **Produzir** quando a receita for `PRODUCTION` (entrada no output). Não deixar o card antigo “só consome” agir em intermediário sem a entrada.
+- Ação **Produzir** só em `PRODUCTION`. Ficha SALE/PREP não tem Preparar: a baixa é na venda.
 - Copy: badge e listas curtas = **Produção**. Texto longo / config = **produto intermediário**. Código interno: `INTERMEDIATE`.
 - Reutilizar o `Badge` e o lugar dos rótulos de Agrupamento em `ProductCatalogCard` / `ProductCatalogTable` / header do sheet. Não criar outro componente de tag.
 - Testes: upsert + produce + sale (intermediário vs PREP) e um caso em que o insumo é outro intermediário.

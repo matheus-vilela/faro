@@ -61,6 +61,7 @@ import {
   prepareProductUnitConversionsForPersist,
 } from "@/lib/productUnitConversionsService";
 import {
+  recipeCanBeProduced,
   recipeKindFilterValue,
   recipeMatchesListFilters,
   recipeMatchingIngredientNames,
@@ -162,13 +163,15 @@ function RecipeEditorForm({
               {
                 value: "sale" as const,
                 title: "Ficha normal",
-                description: "Na venda, baixa os insumos.",
+                description:
+                  "Na venda, baixa os insumos na proporção da receita. Não se produz.",
                 icon: ChefHat,
               },
               {
                 value: "intermediate" as const,
                 title: "Produção",
-                description: "Estoca o produto. A venda baixa o saldo dele.",
+                description:
+                  "Pode ser produzida: baixa insumos e entra o saldo. A venda baixa só o produto.",
                 icon: Factory,
               },
             ] as const
@@ -1191,8 +1194,9 @@ export const EstoqueReceitasPanel = forwardRef<
       tab: "ficha" | "historico" | "producao" = "ficha",
     ) => {
       const pending = linkProductId?.trim() ?? "";
+      const canProduce = recipeCanBeProduced(r.recipe_type);
       setEditingRecipeId(r.id);
-      setDetailTab(tab);
+      setDetailTab(tab === "producao" && !canProduce ? "ficha" : tab);
       setName(r.name);
       setBatchYield(String(r.batch_yield));
       let nextOutput = (r.output_product_id ?? "").trim();
@@ -1293,7 +1297,8 @@ export const EstoqueReceitasPanel = forwardRef<
       tab: "ficha" | "historico" | "producao" = "ficha",
     ) => {
       if (r.id === editingRecipeId) {
-        setDetailTab(tab);
+        const canProduce = recipeCanBeProduced(r.recipe_type);
+        setDetailTab(tab === "producao" && !canProduce ? "ficha" : tab);
         return;
       }
       promptUnsavedLeave(() => openEditRecipe(r, linkProductId, tab));
@@ -1320,6 +1325,13 @@ export const EstoqueReceitasPanel = forwardRef<
     requestOpenEditRecipe,
     onSheetOpenChange,
   ]);
+
+  const handleSheetKindChange = useCallback((next: TechnicalSheetKind) => {
+    setSheetKind(next);
+    if (next !== "intermediate") {
+      setDetailTab((tab) => (tab === "producao" ? "ficha" : tab));
+    }
+  }, []);
 
   const conversionsByProduct = useMemo(() => {
     const out = new Map<string, ProductUnitConversionDraft[]>();
@@ -1934,22 +1946,24 @@ export const EstoqueReceitasPanel = forwardRef<
                           >
                             {isProd ? "Produção" : "Ficha"}
                           </Badge>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestOpenEditRecipe(
-                                r,
-                                linkContextProductId,
-                                "producao",
-                              );
-                            }}
-                          >
-                            {isProd ? "Produzir" : "Preparar"}
-                          </Button>
+                          {recipeCanBeProduced(r.recipe_type) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                requestOpenEditRecipe(
+                                  r,
+                                  linkContextProductId,
+                                  "producao",
+                                );
+                              }}
+                            >
+                              Produzir
+                            </Button>
+                          ) : null}
                         </div>
                       </div>
                     </li>
@@ -2049,21 +2063,23 @@ export const EstoqueReceitasPanel = forwardRef<
                             className="px-3 py-2.5 text-right"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 px-2 text-xs"
-                              onClick={() =>
-                                requestOpenEditRecipe(
-                                  r,
-                                  linkContextProductId,
-                                  "producao",
-                                )
-                              }
-                            >
-                              {isProd ? "Produzir" : "Preparar"}
-                            </Button>
+                            {recipeCanBeProduced(r.recipe_type) ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  requestOpenEditRecipe(
+                                    r,
+                                    linkContextProductId,
+                                    "producao",
+                                  )
+                                }
+                              >
+                                Produzir
+                              </Button>
+                            ) : null}
                           </td>
                         </tr>
                       );
@@ -2141,7 +2157,7 @@ export const EstoqueReceitasPanel = forwardRef<
                 <div className="p-4">
                   <RecipeEditorForm
                     sheetKind={sheetKind}
-                    onSheetKindChange={setSheetKind}
+                    onSheetKindChange={handleSheetKindChange}
                     disabled={saving}
                     ingredientsOnly={ingredientsOnly}
                     name={name}
@@ -2240,9 +2256,7 @@ export const EstoqueReceitasPanel = forwardRef<
                           : detailTab === "historico"
                             ? "Histórico"
                             : detailTab === "producao"
-                              ? sheetKind === "intermediate"
-                                ? "Produzir"
-                                : "Preparar"
+                              ? "Produzir"
                               : sheetMode === "summary"
                                 ? name.trim() || "Ficha técnica"
                                 : "Editar ficha técnica"}
@@ -2324,13 +2338,14 @@ export const EstoqueReceitasPanel = forwardRef<
                     [
                       ["ficha", "Ficha", ChefHat],
                       ["historico", "Histórico", History],
-                      [
-                        "producao",
-                        sheetKind === "intermediate" ? "Produzir" : "Preparar",
-                        Factory,
-                      ],
+                      ["producao", "Produzir", Factory],
                     ] as const
-                  ).map(([id, label, Icon]) => (
+                  )
+                    .filter(
+                      ([id]) =>
+                        id !== "producao" || sheetKind === "intermediate",
+                    )
+                    .map(([id, label, Icon]) => (
                     <button
                       key={id}
                       type="button"
@@ -2366,13 +2381,12 @@ export const EstoqueReceitasPanel = forwardRef<
               </div>
             ) : editingRecipeId &&
               !ingredientsOnly &&
-              detailTab === "producao" ? (
+              detailTab === "producao" &&
+              sheetKind === "intermediate" ? (
               <div className="min-h-0 flex-1 overflow-y-auto bg-muted p-6">
                 <RecipeProducePanel
                   companyId={companyId}
-                  mode={
-                    sheetKind === "intermediate" ? "produce" : "prepare"
-                  }
+                  mode="produce"
                   outputProductId={outputId}
                   outputName={
                     productById.get(outputId)?.name || name
@@ -2460,7 +2474,7 @@ export const EstoqueReceitasPanel = forwardRef<
                 <div className="p-6">
                   <RecipeEditorForm
                     sheetKind={sheetKind}
-                    onSheetKindChange={setSheetKind}
+                    onSheetKindChange={handleSheetKindChange}
                     disabled={saving}
                     ingredientsOnly={ingredientsOnly}
                     name={name}

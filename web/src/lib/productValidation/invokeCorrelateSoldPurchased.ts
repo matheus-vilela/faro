@@ -77,8 +77,9 @@ export function filterValidationToQueue(
   const covered = new Set<string>();
   for (const row of sameItem) {
     covered.add(row.sold.productId);
-    const first = row.candidates[0]?.purchase.productId;
-    if (first) covered.add(first);
+    for (const candidate of row.candidates) {
+      covered.add(candidate.purchase.productId);
+    }
   }
   for (const row of recipes) {
     covered.add(row.sold.productId);

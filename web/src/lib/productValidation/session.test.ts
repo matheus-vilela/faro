@@ -8,6 +8,7 @@ import {
   getProductValidationSession,
   patchProductValidationSession,
   resetProductValidationSessionsForTests,
+  samePickIds,
   startProductValidationSession,
   subscribeProductValidationSession,
 } from "@/lib/productValidation/session";
@@ -76,8 +77,34 @@ afterEach(() => {
 describe("defaultPicksFromResult", () => {
   it("pré-seleciona pares high", () => {
     const picks = defaultPicksFromResult(resultWithHighMatch());
-    expect(picks.samePick["same:s1"]).toBe("p1");
+    expect(picks.samePick["same:s1"]).toEqual(["p1"]);
     expect(picks.soldPick["same:s1"]).toBe("s1");
+  });
+
+  it("pré-seleciona todas as notas do mesmo vendido", () => {
+    const base = resultWithHighMatch();
+    const extra = purchase("p2", "Heineken outro fornecedor");
+    const picks = defaultPicksFromResult({
+      ...base,
+      sameItem: [
+        {
+          ...base.sameItem[0]!,
+          candidates: [
+            ...base.sameItem[0]!.candidates,
+            { purchase: extra, score: 92, reasons: [] },
+          ],
+        },
+      ],
+    });
+    expect(picks.samePick["same:s1"]).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("samePickIds", () => {
+  it("aceita lista ou valor único legado", () => {
+    expect(samePickIds({ a: ["p1", "p2"] }, "a")).toEqual(["p1", "p2"]);
+    expect(samePickIds({ a: "p1" }, "a")).toEqual(["p1"]);
+    expect(samePickIds({}, "a")).toEqual([]);
   });
 });
 
@@ -98,7 +125,7 @@ describe("product validation session", () => {
     const stored = getProductValidationSession(companyId);
     expect(stored.running).toBe(false);
     expect(stored.result?.stats.sameItem).toBe(1);
-    expect(stored.samePick["same:s1"]).toBe("p1");
+    expect(stored.samePick["same:s1"]).toEqual(["p1"]);
   });
 
   it("ignora resposta antiga quando uma nova geração começou", () => {
@@ -161,10 +188,10 @@ describe("product validation session", () => {
       result: resultWithHighMatch(),
     });
     patchProductValidationSession(companyId, (prev) => ({
-      samePick: { ...prev.samePick, "same:s1": "p-other" },
+      samePick: { ...prev.samePick, "same:s1": ["p-other"] },
     }));
-    expect(getProductValidationSession(companyId).samePick["same:s1"]).toBe(
+    expect(getProductValidationSession(companyId).samePick["same:s1"]).toEqual([
       "p-other",
-    );
+    ]);
   });
 });

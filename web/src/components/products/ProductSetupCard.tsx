@@ -15,10 +15,12 @@ import {
   fetchSaleFamilyCandidates,
   linkSaleFamilyVariant,
   listSaleFamilyForProduct,
+  productGroupingRole,
   promoteProductToSaleFamily,
   demoteProductFromSaleFamily,
   setProductNotSaleGrouping,
   unlinkSaleFamilyVariant,
+  type ProductGroupingRole,
   type SaleFamilyInfo,
   type SaleFamilyProductOption,
 } from "@/lib/productSaleFamily";
@@ -28,9 +30,9 @@ import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-const NONE = "none";
-const SELF = "self";
-const NOT_GROUPING = "not_grouping";
+const ROLE_NOT: ProductGroupingRole = "not_grouping";
+const ROLE_SELF: ProductGroupingRole = "self";
+const ROLE_MEMBER: ProductGroupingRole = "member";
 const FICHA_NO = "no";
 const FICHA_SALE = "sale";
 const FICHA_INTERMEDIATE = "intermediate";
@@ -72,6 +74,7 @@ export function ProductSetupCard({
   const [confirmDemote, setConfirmDemote] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [linkMembersOpen, setLinkMembersOpen] = useState(false);
+  const [pickingMember, setPickingMember] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -113,6 +116,10 @@ export function ProductSetupCard({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setPickingMember(false);
+  }, [productId]);
+
   const kind = info?.kind ?? "none";
   const isRecipe = stockControlType === "RECIPE_CONTROLLED";
   const isIntermediate = stockControlType === "INTERMEDIATE";
@@ -127,109 +134,100 @@ export function ProductSetupCard({
   const familyId = info?.family?.id ?? null;
   const memberCount = info?.members.length ?? 0;
 
-  const groupingValue = isFamily
-    ? SELF
-    : inGrouping && familyId
-      ? familyId
-      : dismissed
-        ? NOT_GROUPING
-        : NONE;
+  const groupingRole = productGroupingRole({
+    isFamily,
+    inGrouping,
+    possibleGrouping,
+    dismissed,
+  });
+  const displayRole = pickingMember ? ROLE_MEMBER : groupingRole;
 
-  const groupingLeading = useMemo(() => {
+  const groupingRoleOptions = useMemo(() => {
     const rows = [
       {
-        value: NONE,
-        label: "Nenhum",
-        description: "Só produto, sem agrupamento",
+        value: ROLE_NOT,
+        label: "Não é agrupamento",
+        description: "Só produto, sem papel de cardápio",
       },
     ];
-    if (possibleGrouping && !dismissed && !isFamily && !inGrouping) {
+    if (!isRecipe && !isIntermediate) {
       rows.push({
-        value: NOT_GROUPING,
-        label: "Não é agrupamento",
-        description: "Some a tag de possível agrupamento",
-      });
-    }
-    if (dismissed) {
-      rows.push({
-        value: NOT_GROUPING,
-        label: "Não é agrupamento",
-        description: "Sugestão escondida",
-      });
-    }
-    if (!isRecipe && !isIntermediate && !inGrouping) {
-      rows.push({
-        value: SELF,
-        label: "Este produto é o agrupamento",
+        value: ROLE_SELF,
+        label: "Este produto é um agrupamento",
         description: "Venda de cardápio sem baixa neste SKU",
+      });
+      rows.push({
+        value: ROLE_MEMBER,
+        label: "Faz parte de um agrupamento",
+        description: "Liga a um produto de cardápio",
       });
     }
     return rows;
-  }, [possibleGrouping, dismissed, isFamily, inGrouping, isRecipe, isIntermediate]);
+  }, [isRecipe, isIntermediate]);
 
-  const groupingOptions = useMemo(() => {
-    if (isFamily || isRecipe) return [];
-    return families.map((p) => ({
-      value: p.id,
-      label: p.name,
-      description:
-        p.stock_control_type === "SALE_FAMILY"
-          ? p.sku
-            ? `Agrupamento · SKU ${p.sku}`
-            : "Agrupamento"
-          : p.sku
-            ? `SKU ${p.sku} · vira agrupamento ao ligar`
-            : "Vira agrupamento ao ligar",
-      keywords: p.sku ?? "",
-    }));
-  }, [families, isFamily, isRecipe]);
+  const familyOptions = useMemo(
+    () =>
+      families
+        .filter((p) => p.stock_control_type !== "INTERMEDIATE")
+        .map((p) => ({
+          value: p.id,
+          label: p.name,
+          description:
+            p.stock_control_type === "SALE_FAMILY"
+              ? p.sku
+                ? `Agrupamento · SKU ${p.sku}`
+                : "Agrupamento"
+              : p.sku
+                ? `SKU ${p.sku} · vira agrupamento ao ligar`
+                : "Vira agrupamento ao ligar",
+          keywords: p.sku ?? "",
+        })),
+    [families],
+  );
 
-  const applyGrouping = async (next: string) => {
-    if (next === groupingValue || busy) return;
-
-    if (next === SELF) {
+  const applyRole = async (next: string) => {
+    if (busy) return;
+    if (next === ROLE_MEMBER) {
+      if (displayRole === ROLE_MEMBER && (inGrouping || pickingMember)) return;
+      setPickingMember(true);
+      return;
+    }
+    setPickingMember(false);
+    if (next === ROLE_SELF) {
+      if (isFamily) return;
       setConfirmPromote(true);
       return;
     }
-    if (next === NONE || next === NOT_GROUPING) {
-      if (isFamily) {
-        setConfirmDemote(true);
-        return;
-      }
-      if (inGrouping) {
-        setConfirmUnlink(true);
-        return;
-      }
-      if (next === NOT_GROUPING && !dismissed) {
-        setBusy(true);
-        try {
-          await setProductNotSaleGrouping(productId, true);
-          toast.success("Marcado: não é agrupamento.");
-          onChanged?.();
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Não foi possível salvar.");
-        } finally {
-          setBusy(false);
-        }
-      }
-      if (next === NONE && dismissed) {
-        setBusy(true);
-        try {
-          await setProductNotSaleGrouping(productId, false);
-          toast.success("Pode ser agrupamento de novo.");
-          onChanged?.();
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Não foi possível salvar.");
-        } finally {
-          setBusy(false);
-        }
-      }
+    if (next !== ROLE_NOT) return;
+    if (isFamily) {
+      setConfirmDemote(true);
       return;
     }
+    if (inGrouping) {
+      setConfirmUnlink(true);
+      return;
+    }
+    if (!dismissed) {
+      setBusy(true);
+      try {
+        await setProductNotSaleGrouping(productId, true);
+        toast.success("Marcado: não é agrupamento.");
+        onChanged?.();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Não foi possível salvar.");
+      } finally {
+        setBusy(false);
+      }
+    }
+  };
 
+  const applyFamily = async (next: string) => {
+    if (!next || next === familyId || busy) return;
     setBusy(true);
     try {
-      if (inGrouping && familyId && familyId !== next) {
+      if (isFamily) {
+        await demoteProductFromSaleFamily(productId);
+      } else if (inGrouping && familyId && familyId !== next) {
         await unlinkSaleFamilyVariant(companyId, productId);
       }
       await linkSaleFamilyVariant({
@@ -240,6 +238,7 @@ export function ProductSetupCard({
         variantProductId: productId,
       });
       toast.success("Produto ligado ao agrupamento. Continua no cadastro.");
+      setPickingMember(false);
       await load();
       onChanged?.();
     } catch (e) {
@@ -268,6 +267,7 @@ export function ProductSetupCard({
     setBusy(true);
     try {
       await demoteProductFromSaleFamily(productId);
+      await setProductNotSaleGrouping(productId, true);
       toast.success("Deixou de ser agrupamento. Continua sendo produto.");
       setConfirmDemote(false);
       await load();
@@ -285,6 +285,7 @@ export function ProductSetupCard({
     setBusy(true);
     try {
       await unlinkSaleFamilyVariant(companyId, productId);
+      await setProductNotSaleGrouping(productId, true);
       toast.success("Saiu do agrupamento. Continua sendo produto.");
       setConfirmUnlink(false);
       await load();
@@ -305,15 +306,25 @@ export function ProductSetupCard({
         <div className="min-w-0 space-y-1.5">
           <Label className="text-xs text-muted-foreground">Agrupamento</Label>
           <SearchSelect
-            value={groupingValue}
-            onValueChange={(v) => void applyGrouping(v)}
+            value={displayRole}
+            onValueChange={(v) => void applyRole(v)}
             disabled={loading || busy || isRecipe}
-            placeholder="Nenhum"
-            searchPlaceholder="Buscar agrupamento…"
-            leadingOptions={groupingLeading}
-            options={groupingOptions}
+            placeholder="Escolher…"
+            searchPlaceholder="Filtrar…"
+            options={groupingRoleOptions}
             contentClassName="z-[200]"
           />
+          {displayRole === ROLE_MEMBER && !isRecipe ? (
+            <SearchSelect
+              value={inGrouping ? (familyId ?? "") : ""}
+              onValueChange={(v) => void applyFamily(v)}
+              disabled={loading || busy}
+              placeholder="De qual produto / agrupamento?"
+              searchPlaceholder="Buscar produto ou agrupamento…"
+              options={familyOptions}
+              contentClassName="z-[200]"
+            />
+          ) : null}
           {isFamily ? (
             <button
               type="button"
@@ -347,7 +358,8 @@ export function ProductSetupCard({
               {
                 value: FICHA_SALE,
                 label: "Ficha normal",
-                description: "Na venda, baixa os insumos",
+                description:
+                  "Na venda, baixa os insumos. Não se produz.",
               },
               {
                 value: FICHA_INTERMEDIATE,

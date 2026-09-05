@@ -14,7 +14,7 @@ import type {
   SameItemSuggestion,
 } from "@/lib/productValidation/types";
 import { cn } from "@/lib/utils";
-import { ChefHat, Loader2, Merge, Sparkles } from "lucide-react";
+import { ChefHat, Loader2, Merge, Plus, Sparkles, X } from "lucide-react";
 
 function pct(score: number, isZeroOne = false): string {
   const n = isZeroOne ? score * 100 : score;
@@ -98,10 +98,28 @@ function ScoreMark({
   );
 }
 
+function resolvePurchaseItems(
+  selectedIds: string[],
+  suggestion: SameItemSuggestion,
+  purchaseChoices: ProductSetupItem[],
+): ProductSetupItem[] {
+  const byId = new Map<string, ProductSetupItem>();
+  for (const row of suggestion.candidates) {
+    byId.set(row.purchase.productId, row.purchase);
+  }
+  for (const row of purchaseChoices) {
+    byId.set(row.productId, row);
+  }
+  return selectedIds
+    .map((id) => byId.get(id))
+    .filter((row): row is ProductSetupItem => Boolean(row));
+}
+
 export function SameItemRow({
   suggestion,
-  selectedPurchaseId,
-  onSelectPurchase,
+  selectedPurchaseIds,
+  onAddPurchase,
+  onRemovePurchase,
   selectedSoldId,
   onSelectSold,
   purchaseChoices,
@@ -110,8 +128,9 @@ export function SameItemRow({
   busy,
 }: {
   suggestion: SameItemSuggestion;
-  selectedPurchaseId: string;
-  onSelectPurchase: (purchaseId: string) => void;
+  selectedPurchaseIds: string[];
+  onAddPurchase: (purchaseId: string) => void;
+  onRemovePurchase: (purchaseId: string) => void;
   selectedSoldId: string;
   onSelectSold: (soldId: string) => void;
   purchaseChoices: ProductSetupItem[];
@@ -119,27 +138,26 @@ export function SameItemRow({
   onConfirm: () => void;
   busy: boolean;
 }) {
-  const aiPurchaseId = suggestion.candidates[0]?.purchase.productId ?? "";
-  const purchases = withCurrentItem(
-    purchaseChoices,
-    suggestion.candidates.find((row) => row.purchase.productId === selectedPurchaseId)
-      ?.purchase ?? suggestion.candidates[0]?.purchase,
+  const aiPurchaseIds = suggestion.candidates.map(
+    (row) => row.purchase.productId,
   );
   const solds = withCurrentItem(soldChoices, suggestion.sold);
-  const purchase =
-    purchases.find((row) => row.productId === selectedPurchaseId) ??
-    suggestion.candidates[0]?.purchase;
   const sold =
     solds.find((row) => row.productId === selectedSoldId) ?? suggestion.sold;
-  const selectedCandidate = suggestion.candidates.find(
-    (row) => row.purchase.productId === selectedPurchaseId,
+  const selectedPurchases = resolvePurchaseItems(
+    selectedPurchaseIds,
+    suggestion,
+    purchaseChoices,
+  );
+  const addablePurchases = purchaseChoices.filter(
+    (row) => !selectedPurchaseIds.includes(row.productId),
   );
   const edited =
     selectedSoldId !== suggestion.sold.productId ||
-    selectedPurchaseId !== aiPurchaseId;
-  const purchaseSub =
-    (purchase && formatTurnoverLine(purchase)) || "Nota / compra";
-  const soldSub = formatTurnoverLine(sold) || "PDV / venda";
+    selectedPurchaseIds.length !== aiPurchaseIds.length ||
+    selectedPurchaseIds.some((id) => !aiPurchaseIds.includes(id));
+  const topScore = suggestion.candidates[0]?.score;
+  const soldSub = formatTurnoverLine(sold) || "PDV / EPOC";
 
   return (
     <li>
@@ -152,88 +170,125 @@ export function SameItemRow({
         )}
       >
         <div className="min-w-0 space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Comprado (nota)
-          </p>
+          <div className="flex items-center gap-2">
+            <Sparkles
+              className={cn(
+                "h-3.5 w-3.5 shrink-0",
+                edited
+                  ? "text-amber-800 dark:text-amber-200"
+                  : "text-emerald-700 dark:text-emerald-300",
+              )}
+            />
+            <p
+              className={cn(
+                "text-[10px] font-semibold uppercase tracking-wide",
+                edited
+                  ? "text-amber-800 dark:text-amber-200"
+                  : "text-emerald-800 dark:text-emerald-200",
+              )}
+            >
+              {edited ? "Vendido (PDV) · editado" : "Vendido (PDV)"}
+            </p>
+          </div>
           <SearchSelect
-            value={selectedPurchaseId}
-            onValueChange={onSelectPurchase}
-            options={purchases.map(itemOption)}
-            placeholder="Escolher compra"
-            searchPlaceholder="Buscar compra…"
-            emptyMessage="Nenhuma compra na fila."
+            value={selectedSoldId}
+            onValueChange={onSelectSold}
+            options={solds.map(itemOption)}
+            placeholder="Escolher vendido"
+            searchPlaceholder="Buscar vendido no PDV…"
+            emptyMessage="Nenhum vendido na fila."
             disabled={busy}
             triggerClassName="h-auto min-h-10 bg-background px-3 py-2 text-left"
             contentClassName={SEARCH_SELECT_WIDE_POPOVER_CLASS}
           />
-          {purchaseSub ? (
+          {soldSub ? (
             <p className="truncate px-0.5 text-xs text-muted-foreground">
-              {purchaseSub}
+              {soldSub}
+            </p>
+          ) : null}
+          {suggestion.conflictWithRecipe ? (
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              O nome também parece ficha técnica. Confirme se é o mesmo item
+              da nota ou se é um prato.
             </p>
           ) : null}
         </div>
 
         <ScoreMark
           label={
-            edited
-              ? "editado"
-              : selectedCandidate
-                ? pct(selectedCandidate.score)
-                : "—"
+            edited ? "editado" : topScore != null ? pct(topScore) : "—"
           }
           strong={!edited}
         />
 
         <div className="min-w-0 space-y-2 self-start">
-          <div
-            className={cn(
-              "flex flex-col gap-2 rounded-lg border px-2.5 py-2 sm:flex-row sm:items-start",
-              edited
-                ? "border-amber-500/40 bg-amber-500/5"
-                : "border-emerald-500/40 bg-emerald-500/5",
-            )}
-          >
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Sparkles
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    edited
-                      ? "text-amber-800 dark:text-amber-200"
-                      : "text-emerald-700 dark:text-emerald-300",
-                  )}
-                />
-                <p
-                  className={cn(
-                    "text-[10px] font-semibold uppercase tracking-wide",
-                    edited
-                      ? "text-amber-800 dark:text-amber-200"
-                      : "text-emerald-800 dark:text-emerald-200",
-                  )}
-                >
-                  {edited ? "Produto vendido · editado" : "Sugestão · Produto vendido"}
-                </p>
-              </div>
-              <SearchSelect
-                value={selectedSoldId}
-                onValueChange={onSelectSold}
-                options={solds.map(itemOption)}
-                placeholder="Escolher vendido"
-                searchPlaceholder="Buscar vendido no PDV…"
-                emptyMessage="Nenhum vendido na fila."
-                disabled={busy}
-                triggerClassName="h-auto min-h-10 bg-background px-3 py-2 text-left"
-                contentClassName={SEARCH_SELECT_WIDE_POPOVER_CLASS}
-              />
-              {soldSub ? (
-                <p className="truncate text-xs text-muted-foreground">{soldSub}</p>
-              ) : null}
-            </div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Nota fiscal
+          </p>
+          {selectedPurchases.length > 0 ? (
+            <ul className="space-y-1.5">
+              {selectedPurchases.map((purchase) => {
+                const candidate = suggestion.candidates.find(
+                  (row) => row.purchase.productId === purchase.productId,
+                );
+                const sub =
+                  formatTurnoverLine(purchase) ||
+                  purchase.sourceLabel ||
+                  "Nota / compra";
+                return (
+                  <li
+                    key={purchase.productId}
+                    className="flex items-start gap-2 rounded-lg border bg-background px-2.5 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium" title={purchase.name}>
+                        {purchase.name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground" title={sub}>
+                        {sub}
+                        {candidate ? ` · ${pct(candidate.score)}` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground"
+                      disabled={busy}
+                      onClick={() => onRemovePurchase(purchase.productId)}
+                      aria-label={`Remover ${purchase.name}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="rounded-lg border bg-background px-2.5 py-2 text-sm text-muted-foreground">
+              Nenhuma compra da nota neste vendido. Adicione ao menos uma.
+            </p>
+          )}
+          {addablePurchases.length > 0 ? (
+            <SearchSelect
+              value=""
+              onValueChange={onAddPurchase}
+              options={addablePurchases.map(itemOption)}
+              placeholder="Adicionar produto da nota"
+              searchPlaceholder="Buscar compra da nota…"
+              emptyMessage="Nenhuma compra disponível."
+              disabled={busy}
+              triggerClassName="h-auto min-h-10 bg-background px-3 py-2 text-left"
+              contentClassName={SEARCH_SELECT_WIDE_POPOVER_CLASS}
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               size="sm"
-              className="shrink-0 self-end sm:self-center"
-              disabled={busy || !selectedPurchaseId || !selectedSoldId}
+              disabled={
+                busy || selectedPurchaseIds.length === 0 || !selectedSoldId
+              }
               onClick={onConfirm}
             >
               {busy ? (
@@ -242,17 +297,20 @@ export function SameItemRow({
                 <Merge className="mr-1.5 h-3.5 w-3.5" />
               )}
               Unificar
+              {selectedPurchaseIds.length > 1
+                ? ` (${selectedPurchaseIds.length})`
+                : ""}
             </Button>
+            {addablePurchases.length > 0 ? (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Plus className="h-3 w-3" />
+                Pode haver mais de um cadastro da nota
+              </span>
+            ) : null}
           </div>
-          {suggestion.conflictWithRecipe ? (
-            <p className="text-xs text-amber-800 dark:text-amber-200">
-              O nome também parece ficha técnica. Confirme se é o mesmo item
-              da nota ou se é um prato.
-            </p>
-          ) : null}
-          {!edited && selectedCandidate?.reasons[0] ? (
+          {!edited && suggestion.candidates[0]?.reasons[0] ? (
             <p className="text-xs text-muted-foreground">
-              {selectedCandidate.reasons[0]}
+              {suggestion.candidates[0].reasons[0]}
             </p>
           ) : null}
         </div>
@@ -284,6 +342,9 @@ export function RecipeRow({
     <li>
       <div className="grid items-start gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]">
         <div className="min-w-0 space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Vendido (PDV)
+          </p>
           <SideCard
             title={suggestion.sold.name}
             sub={soldSub}
@@ -302,6 +363,9 @@ export function RecipeRow({
         <ScoreMark label={pct(suggestion.roleConfidence, true)} strong />
 
         <div className="min-w-0 space-y-2 self-start">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Nota fiscal
+          </p>
           {suggestion.ingredients.length > 0 ? (
             <ul className="space-y-1.5">
               {suggestion.ingredients.map((ingredient) => {
@@ -376,9 +440,9 @@ export function RecipeRow({
 export function ValidationMatchListHeader() {
   return (
     <div className="hidden gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]">
-      <div>Compra / ficha</div>
+      <div>Vendido (PDV)</div>
       <div className="w-9" />
-      <div>Vínculo sugerido</div>
+      <div>Nota fiscal</div>
     </div>
   );
 }

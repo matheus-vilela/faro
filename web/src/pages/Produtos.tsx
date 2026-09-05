@@ -13,6 +13,7 @@ import { ProductCatalogTable } from "@/components/products/ProductCatalogTable";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductDetailSummary } from "@/components/products/ProductDetailSummary";
 import { ProductProduceCard } from "@/components/products/ProductProduceCard";
+import { ProductGroupingVariantBadge } from "@/components/products/ProductGroupingInfoCard";
 import { PossibleSaleFamilyTag } from "@/components/products/ProductSaleFamilySection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
@@ -2494,6 +2495,14 @@ export function Produtos() {
                                   <Layers className="h-3 w-3" />
                                   Agrupamento
                                 </Badge>
+                              ) : currentCompany?.id ? (
+                                <ProductGroupingVariantBadge
+                                  companyId={currentCompany.id}
+                                  productId={stockProduct.id}
+                                  stockControlType={
+                                    stockProduct.stock_control_type
+                                  }
+                                />
                               ) : null}
                               {stockProduct.stock_control_type !==
                                 "SALE_FAMILY" &&

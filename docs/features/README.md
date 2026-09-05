@@ -18,6 +18,11 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `producao-lotes.md` | Produzir: receitas × rendimento, resumo e confirmação |
 | `catalogo-filtros-tipo.md` | Catálogo: tipo, categoria, alerta e barra compacta |
 | `correlacao-validacao-persistente.md` | Validação da correlação sobrevive à troca de aba |
+| `correlacao-colunas-multi-nota.md` | PDV à esquerda, várias notas à direita na correlação |
+| `correlacao-corrigir-filtros-tipos.md` | Filtros e tipos atuais em «Para corrigir» |
+| `agrupamento-tres-opcoes.md` | Detalhe: três papéis de agrupamento + destino à parte |
+| `produto-detalhe-agrupamento-info.md` | Card de infos do agrupamento no detalhe do produto |
+| `ficha-normal-sem-preparo.md` | Ficha de venda não se produz; só a de produção |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

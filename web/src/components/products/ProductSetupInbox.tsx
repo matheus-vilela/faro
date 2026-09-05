@@ -1,5 +1,6 @@
 import { ProductSetupActionPanel } from "@/components/products/ProductSetupActionPanel";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,11 @@ import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import {
+  PRODUCT_SETUP_ORIGIN_LABEL,
+  setupItemMatchesFilters,
+  type ProductSetupOriginFilter,
+} from "@/lib/productSetupListFilter";
+import {
   formatTurnoverLine,
   itemTurnoverQty,
   setupChoicesForItem,
@@ -19,7 +25,7 @@ import {
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
 import { cn } from "@/lib/utils";
-import { CheckCircle2, Inbox, Package } from "lucide-react";
+import { CheckCircle2, Inbox, Package, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 type SortKey = "name" | "turnover";
@@ -114,7 +120,7 @@ function RoleSelect({
     >
       <SelectTrigger
         size="sm"
-        className="h-9 w-full min-w-64 bg-background"
+        className="h-9 w-full min-w-56 bg-background"
         onClick={(e) => e.stopPropagation()}
       >
         <SelectValue placeholder="O que é este item?" />
@@ -148,6 +154,8 @@ export function ProductSetupInbox({
     {},
   );
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [origin, setOrigin] = useState<ProductSetupOriginFilter>("all");
 
   const items = useMemo(() => {
     const all = queue.items;
@@ -156,12 +164,17 @@ export function ProductSetupInbox({
     return all.filter((item) => allow.has(item.key));
   }, [queue.items, onlyKeys]);
 
+  const filtered = useMemo(
+    () => items.filter((item) => setupItemMatchesFilters(item, query, origin)),
+    [items, query, origin],
+  );
+
   const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
     ProductSetupItem,
     SortKey
-  >(items, "turnover", compareSetup, false);
+  >(filtered, "turnover", compareSetup, false);
 
-  const activeItem = sorted.find((item) => item.key === activeKey) ?? null;
+  const activeItem = items.find((item) => item.key === activeKey) ?? null;
   const activeChoiceRaw = activeItem ? choices[activeItem.key] : undefined;
   const activeChoice =
     activeItem &&
@@ -179,7 +192,10 @@ export function ProductSetupInbox({
 
   const total = items.length;
 
-  const isRecipePanel = Boolean(activeItem && activeChoice === "recipe");
+  const isRecipePanel = Boolean(
+    activeItem &&
+      (activeChoice === "recipe" || activeChoice === "intermediate"),
+  );
 
   const panel = (
     <section
@@ -206,7 +222,10 @@ export function ProductSetupInbox({
       ) : (
         <div className="flex min-h-55 flex-1 flex-col items-center justify-center gap-2 px-4 py-10 text-center text-sm text-muted-foreground">
           <Package className="h-8 w-8 opacity-40" />
-          <p>Escolha o que é o item na lista para continuar aqui.</p>
+          <p>
+            Diga o que é o item: produto, ficha, intermediário, agrupamento ou
+            unificar.
+          </p>
         </div>
       )}
     </section>
@@ -237,7 +256,7 @@ export function ProductSetupInbox({
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {total > 0
-                ? "Na lista, diga o que é cada item. O detalhe abre ao lado."
+                ? "Filtre a lista e diga o que é cada item. O detalhe abre ao lado."
                 : "Novos itens da nota ou do PDV aparecem aqui até terem um papel definido."}
             </p>
           </div>
@@ -253,7 +272,44 @@ export function ProductSetupInbox({
                 "lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]",
             )}
           >
-            {isMobile ? (
+            <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Buscar por nome, SKU ou EAN…"
+                  className="pl-8"
+                />
+              </div>
+              <Select
+                value={origin}
+                onValueChange={(next) =>
+                  setOrigin(next as ProductSetupOriginFilter)
+                }
+              >
+                <SelectTrigger className="h-9 w-full bg-background sm:w-44">
+                  <SelectValue placeholder="Origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(
+                    Object.keys(
+                      PRODUCT_SETUP_ORIGIN_LABEL,
+                    ) as ProductSetupOriginFilter[]
+                  ).map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {PRODUCT_SETUP_ORIGIN_LABEL[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {sorted.length === 0 ? (
+              <p className="rounded-xl border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+                Nenhum item neste filtro.
+              </p>
+            ) : isMobile ? (
               <ul className="space-y-2">
                 {sorted.map((item) => {
                   const selected = item.key === activeKey;
@@ -335,6 +391,7 @@ export function ProductSetupInbox({
                 </table>
               </div>
             )}
+            </div>
 
             {panel}
           </div>

@@ -179,6 +179,26 @@ export function shouldShowPossibleSaleFamilyTag(input: {
   return input.seenInStockOuts;
 }
 
+export function groupingDetailTitle(kind: SaleFamilyKind): string | null {
+  if (kind === "family") return "Agrupamento";
+  if (kind === "variant") return "Faz parte de um agrupamento";
+  return null;
+}
+
+export type ProductGroupingRole = "not_grouping" | "self" | "member";
+
+export function productGroupingRole(input: {
+  isFamily: boolean;
+  inGrouping: boolean;
+  possibleGrouping?: boolean;
+  dismissed?: boolean;
+}): ProductGroupingRole | "" {
+  if (input.isFamily) return "self";
+  if (input.inGrouping) return "member";
+  if (input.possibleGrouping && !input.dismissed) return "";
+  return "not_grouping";
+}
+
 export function isPossibleGroupingProduct(product: {
   stock_control_type?: string | null;
   stock_only_origin?: boolean;

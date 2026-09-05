@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  groupingDetailTitle,
   isPossibleGroupingProduct,
   isSaleFamilyCandidate,
+  productGroupingRole,
   saleNameKeys,
   shouldShowPossibleSaleFamilyTag,
   type SaleFamilyProductOption,
@@ -131,5 +133,41 @@ describe("isPossibleGroupingProduct", () => {
         stock_only_origin: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("productGroupingRole", () => {
+  it("é agrupamento ou membro quando já está ligado", () => {
+    expect(
+      productGroupingRole({ isFamily: true, inGrouping: false }),
+    ).toBe("self");
+    expect(
+      productGroupingRole({ isFamily: false, inGrouping: true }),
+    ).toBe("member");
+  });
+
+  it("pede escolha quando é possível agrupamento e ainda não decidiu", () => {
+    expect(
+      productGroupingRole({
+        isFamily: false,
+        inGrouping: false,
+        possibleGrouping: true,
+        dismissed: false,
+      }),
+    ).toBe("");
+  });
+
+  it("mostra não é agrupamento no produto comum", () => {
+    expect(
+      productGroupingRole({ isFamily: false, inGrouping: false }),
+    ).toBe("not_grouping");
+  });
+});
+
+describe("groupingDetailTitle", () => {
+  it("só rotula agrupamento e variante", () => {
+    expect(groupingDetailTitle("family")).toBe("Agrupamento");
+    expect(groupingDetailTitle("variant")).toBe("Faz parte de um agrupamento");
+    expect(groupingDetailTitle("none")).toBeNull();
   });
 });

@@ -47,30 +47,40 @@ export const PRODUCT_SETUP_KIND_LABEL: Record<ProductSetupKind, string> = {
 export type ProductSetupChoice =
   | "link_item"
   | "recipe"
+  | "intermediate"
+  | "sale_family"
+  | "sale_family_variant"
   | "ingredient"
   | "skip";
 
 export const PRODUCT_SETUP_CHOICE_LABEL: Record<ProductSetupChoice, string> = {
-  link_item: "Vincular a um item",
-  recipe: "É uma ficha técnica",
-  ingredient: "É um insumo de uma ficha técnica",
-  skip: "Não fazer nada",
+  link_item: "Unificar com outro item",
+  recipe: "Ficha técnica",
+  intermediate: "Produto intermediário",
+  sale_family: "É um agrupamento",
+  sale_family_variant: "Variante de um agrupamento",
+  ingredient: "Insumo de uma ficha",
+  skip: "É um produto",
 };
 
-export const PRODUCT_SETUP_CHOICES: ProductSetupChoice[] = [
+const SOLD_SETUP_CHOICES: ProductSetupChoice[] = [
   "link_item",
   "recipe",
-  "ingredient",
+  "intermediate",
+  "sale_family",
+  "sale_family_variant",
   "skip",
 ];
-
-const EPOC_SETUP_CHOICES: ProductSetupChoice[] = ["recipe", "link_item"];
 
 const PURCHASE_SETUP_CHOICES: ProductSetupChoice[] = [
   "link_item",
   "ingredient",
+  "sale_family_variant",
+  "intermediate",
   "skip",
 ];
+
+const FICHA_SALES_SETUP_CHOICES: ProductSetupChoice[] = ["recipe"];
 
 export type ProductSetupChoiceOption = {
   value: ProductSetupChoice;
@@ -178,9 +188,9 @@ export function setupChoicesForItem(
   const values =
     item.kind === "purchase_unlinked"
       ? PURCHASE_SETUP_CHOICES
-      : isEpocSetupItem(item)
-        ? EPOC_SETUP_CHOICES
-        : PRODUCT_SETUP_CHOICES;
+      : item.kind === "recipe_sales_unlinked"
+        ? FICHA_SALES_SETUP_CHOICES
+        : SOLD_SETUP_CHOICES;
   return values.map((value) => ({
     value,
     label: PRODUCT_SETUP_CHOICE_LABEL[value],
@@ -307,7 +317,7 @@ export async function fetchProductSetupQueue(
       kind: "sold_unlinked",
       sourceLabel: "PDV / venda",
       pendingQuestion:
-        "Este item sai na venda, mas não tem entrada. É uma ficha, o mesmo produto de uma compra, ou revenda?",
+        "Este item sai na venda, mas não tem entrada. É ficha, intermediário, agrupamento, o mesmo produto de uma compra, ou só produto?",
       recipeId: sold.recipe_id,
       sku: sold.sku,
       ean: sold.ean,

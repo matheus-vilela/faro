@@ -1,3 +1,4 @@
+import { ProductGroupingInfoCard } from "@/components/products/ProductGroupingInfoCard";
 import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
 import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
 import { ProductRecipeLinksSection } from "@/components/products/ProductRecipeLinksSection";
@@ -10,6 +11,7 @@ import { type TechnicalSheetKind } from "@/lib/productIntermediate";
 import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import { useState } from "react";
 
 export function ProductDetailSummary({
   product,
@@ -44,6 +46,12 @@ export function ProductDetailSummary({
   onOpenMerge: (partnerId?: string) => void;
   onProductChanged: () => void;
 }) {
+  const [groupingRefreshKey, setGroupingRefreshKey] = useState(0);
+  const refreshGrouping = () => {
+    setGroupingRefreshKey((n) => n + 1);
+    onProductChanged();
+  };
+
   return (
     <div className="space-y-4 p-4 sm:p-6">
       <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
@@ -70,7 +78,15 @@ export function ProductDetailSummary({
           className={PRODUCT_SHEET_SECTION}
           onOpenTechnicalSheet={onOpenTechnicalSheet}
           onOpenMerge={onOpenMerge}
-          onChanged={onProductChanged}
+          onChanged={refreshGrouping}
+        />
+      ) : null}
+
+      {companyId ? (
+        <ProductGroupingInfoCard
+          companyId={companyId}
+          productId={product.id}
+          refreshKey={groupingRefreshKey}
         />
       ) : null}
 

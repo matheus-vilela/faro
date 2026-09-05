@@ -4,6 +4,16 @@ import {
 } from "@/components/estoque/EstoqueRecipeMatchIngredientConfig";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { SearchSelect } from "@/components/ui/search-select";
 import {
@@ -19,6 +29,12 @@ import {
   type PurchaseMatchRow,
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
+import {
+  fetchSaleFamilyCandidates,
+  linkSaleFamilyVariant,
+  promoteProductToSaleFamily,
+  type SaleFamilyProductOption,
+} from "@/lib/productSaleFamily";
 import {
   setupItemAsMatchRow,
   PRODUCT_SETUP_CHOICE_LABEL,
@@ -74,6 +90,9 @@ export function ProductSetupActionPanel({
   const [mergeSurvivorIsSource, setMergeSurvivorIsSource] = useState(false);
   const [pickedPartnerId, setPickedPartnerId] = useState("");
   const [recipeId, setRecipeId] = useState("");
+  const [familyId, setFamilyId] = useState("");
+  const [families, setFamilies] = useState<SaleFamilyProductOption[]>([]);
+  const [confirmPromote, setConfirmPromote] = useState(false);
   const [ingredientConfig, setIngredientConfig] =
     useState<IngredientLinkConfig | null>(null);
 
@@ -84,8 +103,37 @@ export function ProductSetupActionPanel({
     setMergePartnerId(null);
     setPickedPartnerId("");
     setRecipeId("");
+    setFamilyId("");
+    setConfirmPromote(false);
     setIngredientConfig(null);
   }, [item.key, choice]);
+
+  useEffect(() => {
+    if (choice !== "sale_family_variant") return;
+    let cancelled = false;
+    void fetchSaleFamilyCandidates(companyId, [])
+      .then((rows) => {
+        if (!cancelled) {
+          setFamilies(
+            rows.filter(
+              (row) =>
+                row.id !== item.productId &&
+                row.stock_control_type !== "INTERMEDIATE",
+            ),
+          );
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          toast.error(
+            e instanceof Error ? e.message : "Não foi possível listar agrupamentos.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [choice, companyId, item.productId]);
 
   const suggestion = useMemo(() => {
     if (item.kind !== "purchase_unlinked") return null;
@@ -157,6 +205,30 @@ export function ProductSetupActionPanel({
     onResolved();
   };
 
+  const dismissFromQueue = async () => {
+    const bucket =
+      item.kind === "purchase_unlinked"
+        ? "ENTRY_NO_EXIT"
+        : item.kind === "recipe_without_ingredients"
+          ? "RECIPE_NO_INGREDIENTS"
+          : "EXIT_NO_ENTRY";
+    return dashboardImportReviewSetResolution(supabase, {
+      companyId,
+      productId: item.productId,
+      bucket,
+      resolution: "DISMISSED",
+    });
+  };
+
+  const revertRecipeStubIfNeeded = async () => {
+    if (!item.recipeId) return { ok: true as const };
+    return dashboardImportReviewEpocRecipeRevertToProduct(
+      supabase,
+      companyId,
+      item.productId,
+    );
+  };
+
   const dismissSoldAsProduct = async () => {
     setBusy(true);
     if (item.recipeId) {
@@ -210,21 +282,85 @@ export function ProductSetupActionPanel({
     onResolved();
   };
 
+  const confirmAsGrouping = async () => {
+    setBusy(true);
+    try {
+      const reverted = await revertRecipeStubIfNeeded();
+      if (!reverted.ok) {
+        toast.error(reverted.error ?? "Não foi possível ajustar a ficha.");
+        return;
+      }
+      await promoteProductToSaleFamily(item.productId);
+      const dismissed = await dismissFromQueue();
+      if (!dismissed.ok) {
+        toast.error(dismissed.error ?? "Agrupamento criado, mas a fila não atualizou.");
+      } else {
+        toast.success(
+          "Este item agora é o agrupamento. A venda não baixa estoque neste SKU.",
+        );
+      }
+      setConfirmPromote(false);
+      onResolved();
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível tornar agrupamento.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linkAsVariant = async () => {
+    if (!familyId) return;
+    setBusy(true);
+    try {
+      const reverted = await revertRecipeStubIfNeeded();
+      if (!reverted.ok) {
+        toast.error(reverted.error ?? "Não foi possível ajustar a ficha.");
+        return;
+      }
+      await linkSaleFamilyVariant({
+        companyId,
+        familyProductId: familyId,
+        variantName: item.name,
+        variantSku: item.sku,
+        variantUnit: item.unit !== "—" ? item.unit : "un",
+        qtyPerSale: 1,
+        variantProductId: item.productId,
+      });
+      const dismissed = await dismissFromQueue();
+      if (!dismissed.ok) {
+        toast.error(dismissed.error ?? "Variante ligada, mas a fila não atualizou.");
+      } else {
+        toast.success("Produto ligado ao agrupamento. Continua no cadastro.");
+      }
+      onResolved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível vincular.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const isPurchase = item.kind === "purchase_unlinked";
   const title = PRODUCT_SETUP_CHOICE_LABEL[choice];
 
-  if (choice === "recipe" && item.kind !== "purchase_unlinked") {
+  if (choice === "recipe" || choice === "intermediate") {
     const finishRecipeSetup = async () => {
-      await dashboardImportReviewMarkTechSheetSaved(
-        supabase,
-        companyId,
-        item.productId,
-      );
-      await dashboardImportReviewFinalizeRecipeProductSales(
-        supabase,
-        companyId,
-        item.productId,
-      );
+      if (item.kind === "purchase_unlinked") {
+        await dismissFromQueue();
+      } else {
+        await dashboardImportReviewMarkTechSheetSaved(
+          supabase,
+          companyId,
+          item.productId,
+        );
+        await dashboardImportReviewFinalizeRecipeProductSales(
+          supabase,
+          companyId,
+          item.productId,
+        );
+      }
       onResolved();
     };
     return (
@@ -238,6 +374,7 @@ export function ProductSetupActionPanel({
         prefillNewRecipeOutputProductId={item.recipeId ? null : item.productId}
         prefillNewRecipeAutoOpen={false}
         technicalSheetOutputProductId={item.productId}
+        technicalSheetKind={choice === "intermediate" ? "intermediate" : "sale"}
         contextOutputProductId={item.productId}
         onTechnicalSheetSaved={() => void finishRecipeSetup()}
       />
@@ -317,12 +454,66 @@ export function ProductSetupActionPanel({
         </div>
       ) : null}
 
+      {choice === "sale_family" ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            A venda de «{item.name}» gera receita e não baixa estoque neste
+            SKU. A baixa vem das variantes ligadas (estoque do dia).
+          </p>
+          <Button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmPromote(true)}
+          >
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Confirmar agrupamento
+          </Button>
+        </div>
+      ) : null}
+
+      {choice === "sale_family_variant" ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Este cadastro continua sendo produto de estoque, ligado a um
+            agrupamento de cardápio.
+          </p>
+          <SearchSelect
+            value={familyId}
+            onValueChange={setFamilyId}
+            options={families.map((row) => ({
+              value: row.id,
+              label: row.name,
+              description:
+                row.stock_control_type === "SALE_FAMILY"
+                  ? row.sku
+                    ? `Agrupamento · SKU ${row.sku}`
+                    : "Agrupamento"
+                  : row.sku
+                    ? `SKU ${row.sku} · vira agrupamento ao ligar`
+                    : "Vira agrupamento ao ligar",
+              keywords: row.sku ?? "",
+            }))}
+            placeholder="Escolher agrupamento"
+            searchPlaceholder="Buscar agrupamento…"
+            emptyMessage="Nenhum agrupamento no cadastro."
+          />
+          <Button
+            type="button"
+            disabled={busy || !familyId}
+            onClick={() => void linkAsVariant()}
+          >
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Ligar ao agrupamento
+          </Button>
+        </div>
+      ) : null}
+
       {choice === "skip" ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {isPurchase
-              ? "Este item sai da fila. Entradas futuras da nota continuam neste cadastro, sem descontar outro produto e sem entrar em ficha."
-              : "Este item sai da fila. Não vamos criar ficha nem vincular a outro cadastro agora."}
+              ? "Fica como produto de estoque. Entradas da nota continuam neste cadastro, sem unificar e sem entrar em ficha."
+              : "Fica como produto. Sem ficha, sem agrupamento e sem unificar agora."}
           </p>
           <Button
             type="button"
@@ -337,6 +528,30 @@ export function ProductSetupActionPanel({
           </Button>
         </div>
       ) : null}
+
+      <AlertDialog open={confirmPromote} onOpenChange={setConfirmPromote}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Este produto é o agrupamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A venda de «{item.name}» gera receita e não baixa estoque. A
+              baixa vem do relatório do dia, nos produtos ligados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmAsGrouping();
+              }}
+            >
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {mergeProduct ? (
         <ProductMergeDialog

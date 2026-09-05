@@ -15,6 +15,12 @@ export function recipeKindFilterValue(
   return recipeType === "PRODUCTION" ? "production" : "sale";
 }
 
+export function recipeCanBeProduced(
+  recipeType: string | null | undefined,
+): boolean {
+  return recipeKindFilterValue(recipeType) === "production";
+}
+
 export function recipeMatchingIngredientNames(
   recipe: RecipeListFilterRow,
   query: string,

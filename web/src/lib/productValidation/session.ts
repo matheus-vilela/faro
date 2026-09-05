@@ -6,11 +6,20 @@ import { useEffect, useState } from "react";
 export type ProductValidationSessionState = {
   running: boolean;
   result: ProductValidationResult | null;
-  samePick: Record<string, string>;
+  samePick: Record<string, string[]>;
   soldPick: Record<string, string>;
   recipePicks: Record<string, string[]>;
   generation: number;
 };
+
+export function samePickIds(
+  samePick: Record<string, string[] | string | undefined>,
+  suggestionId: string,
+): string[] {
+  const value = samePick[suggestionId];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return value ? [value] : [];
+}
 
 type SessionRecord = ProductValidationSessionState;
 
@@ -69,13 +78,14 @@ export function defaultPicksFromResult(result: ProductValidationResult): Pick<
   ProductValidationSessionState,
   "samePick" | "soldPick" | "recipePicks"
 > {
-  const samePick: Record<string, string> = {};
+  const samePick: Record<string, string[]> = {};
   const soldPick: Record<string, string> = {};
   const recipePicks: Record<string, string[]> = {};
   for (const row of result.sameItem) {
     if (row.band !== "high") continue;
-    const first = row.candidates[0]?.purchase.productId;
-    if (first) samePick[row.id] = first;
+    samePick[row.id] = row.candidates.map(
+      (candidate) => candidate.purchase.productId,
+    );
     soldPick[row.id] = row.sold.productId;
   }
   for (const row of result.recipes) {

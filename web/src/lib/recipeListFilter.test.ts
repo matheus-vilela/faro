@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  recipeCanBeProduced,
   recipeMatchingIngredientNames,
   recipeMatchesListFilters,
 } from "./recipeListFilter";
@@ -49,5 +50,14 @@ describe("recipeMatchingIngredientNames", () => {
     expect(recipeMatchingIngredientNames(caipi, "lim")).toEqual(["Limão"]);
     expect(recipeMatchingIngredientNames(caipi, "tomate")).toEqual([]);
     expect(recipeMatchingIngredientNames(caipi, "")).toEqual([]);
+  });
+});
+
+describe("recipeCanBeProduced", () => {
+  it("só a ficha de produção pode ser produzida", () => {
+    expect(recipeCanBeProduced("PRODUCTION")).toBe(true);
+    expect(recipeCanBeProduced("PREP")).toBe(false);
+    expect(recipeCanBeProduced("SALE")).toBe(false);
+    expect(recipeCanBeProduced(null)).toBe(false);
   });
 });

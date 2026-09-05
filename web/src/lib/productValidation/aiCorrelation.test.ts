@@ -56,6 +56,33 @@ describe("parse + finalize AI correlation", () => {
     expect(final[2]!.kind).toBe("unmatched");
   });
 
+  it("mantém várias compras no mesmo vendido e não as reusa em outro", () => {
+    const final = finalizeAiAssignments(
+      ["s1", "s2"],
+      [
+        {
+          soldId: "s1",
+          kind: "same_item",
+          purchasedIds: ["p1", "p2"],
+          ingredientLabels: {},
+          confidence: 0.95,
+          reasonPt: "Mesma cerveja, dois fornecedores",
+        },
+        {
+          soldId: "s2",
+          kind: "same_item",
+          purchasedIds: ["p1"],
+          ingredientLabels: {},
+          confidence: 0.8,
+          reasonPt: "também parece heineken",
+        },
+      ],
+    );
+    expect(final[0]!.purchasedIds).toEqual(["p1", "p2"]);
+    expect(final[1]!.kind).toBe("unmatched");
+    expect(final[1]!.purchasedIds).toEqual([]);
+  });
+
   it("mapeia ficha com insumos e deixa compras não usadas no residual", () => {
     const sold = [item("s1", "CAIPIRINHA", "sold_unlinked")];
     const purchased = [
@@ -125,5 +152,31 @@ describe("parse + finalize AI correlation", () => {
       "p2",
       "s2",
     ]);
+  });
+
+  it("tira do residual todas as notas de um mesmo vendido high", () => {
+    const result = mapAiAssignmentsToValidationResult({
+      sold: [item("s1", "HEINEKEN 600", "sold_unlinked")],
+      purchased: [
+        item("p1", "HEINEKEN FORN A", "purchase_unlinked"),
+        item("p2", "HEINEKEN FORN B", "purchase_unlinked"),
+        item("p3", "AGUA", "purchase_unlinked"),
+      ],
+      leftover: [],
+      assignments: [
+        {
+          soldId: "s1",
+          kind: "same_item",
+          purchasedIds: ["p1", "p2"],
+          ingredientLabels: {},
+          confidence: 0.94,
+          reasonPt: "Dois cadastros da mesma cerveja",
+        },
+      ],
+    });
+    expect(result.sameItem[0]!.candidates.map((c) => c.purchase.productId)).toEqual(
+      ["p1", "p2"],
+    );
+    expect(result.residual.map((row) => row.productId)).toEqual(["p3"]);
   });
 });

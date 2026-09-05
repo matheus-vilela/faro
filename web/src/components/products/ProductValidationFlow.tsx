@@ -37,6 +37,7 @@ import {
 import { filterValidationToQueue } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
   patchProductValidationSession,
+  samePickIds,
   startProductValidationSession,
   useProductValidationSession,
 } from "@/lib/productValidation/session";
@@ -59,6 +60,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -189,6 +191,8 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const [mergeProduct, setMergeProduct] = useState<Product | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
+  const mergePartnerQueueRef = useRef<string[]>([]);
+  const continuingMergeRef = useRef(false);
   const [recipeSheetId, setRecipeSheetId] = useState<string | null>(null);
 
   const loadQueue = useCallback(async () => {
@@ -236,9 +240,9 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const confirmSameItem = async (suggestionId: string) => {
     const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
     if (!suggestion) return;
-    const partnerId = samePick[suggestionId];
+    const partnerIds = samePickIds(samePick, suggestionId);
     const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
-    if (!partnerId || !soldId) return;
+    if (partnerIds.length === 0 || !soldId) return;
     setBusy(true);
     const product = await fetchProductById(soldId);
     setBusy(false);
@@ -247,8 +251,31 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       return;
     }
     setMergeProduct(product);
-    setMergePartnerId(partnerId);
+    mergePartnerQueueRef.current = partnerIds;
+    setMergePartnerId(partnerIds[0] ?? null);
     setMergeOpen(true);
+  };
+
+  const addSamePurchase = (suggestionId: string, purchaseId: string) => {
+    if (!purchaseId) return;
+    patchProductValidationSession(companyId, (current) => {
+      const prev = samePickIds(current.samePick, suggestionId);
+      if (prev.includes(purchaseId)) return {};
+      return {
+        samePick: { ...current.samePick, [suggestionId]: [...prev, purchaseId] },
+      };
+    });
+  };
+
+  const removeSamePurchase = (suggestionId: string, purchaseId: string) => {
+    patchProductValidationSession(companyId, (current) => ({
+      samePick: {
+        ...current.samePick,
+        [suggestionId]: samePickIds(current.samePick, suggestionId).filter(
+          (id) => id !== purchaseId,
+        ),
+      },
+    }));
   };
 
   const toggleIngredient = (recipeId: string, purchaseId: string) => {
@@ -400,9 +427,10 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     for (const row of confirmRows) {
       if (row.kind === "same") {
         const soldId = soldPick[row.id] ?? row.suggestion.sold.productId;
-        const purchaseId = samePick[row.id];
         if (soldId) covered.add(soldId);
-        if (purchaseId) covered.add(purchaseId);
+        for (const purchaseId of samePickIds(samePick, row.id)) {
+          covered.add(purchaseId);
+        }
       } else {
         covered.add(row.suggestion.sold.productId);
         for (const id of recipePicks[row.id] ?? []) covered.add(id);
@@ -580,8 +608,10 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           <div>
             <h2 className="text-sm font-semibold">Confirmar vínculo (≥ 90%)</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Lista no mesmo formato de Vincular compras. Se a IA errou o
-              vendido, troque na lista antes de unificar.
+              À esquerda o item do PDV; à direita as compras da nota. O mesmo
+              vendido pode ter mais de um cadastro (fornecedores ou EAN
+              diferentes). Adicione outros se faltar — nada é gravado até
+              unificar.
             </p>
           </div>
           <ValidationMatchListHeader />
@@ -604,7 +634,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
               }
               const currentSoldId =
                 soldPick[row.id] ?? row.suggestion.sold.productId;
-              const currentPurchaseId = samePick[row.id] ?? "";
+              const currentPurchaseIds = samePickIds(samePick, row.id);
               const takenSolds = new Set<string>();
               const takenPurchases = new Set<string>();
               for (const other of confirmRows) {
@@ -612,8 +642,9 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
                   takenSolds.add(
                     soldPick[other.id] ?? other.suggestion.sold.productId,
                   );
-                  const purchaseId = samePick[other.id];
-                  if (purchaseId) takenPurchases.add(purchaseId);
+                  for (const purchaseId of samePickIds(samePick, other.id)) {
+                    takenPurchases.add(purchaseId);
+                  }
                 }
                 if (other.kind === "recipe") {
                   takenSolds.add(other.suggestion.sold.productId);
@@ -626,22 +657,26 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
                 <SameItemRow
                   key={row.id}
                   suggestion={row.suggestion}
-                  selectedPurchaseId={currentPurchaseId}
-                  onSelectPurchase={(id) =>
-                    patchProductValidationSession(companyId, (current) => ({
-                      samePick: { ...current.samePick, [row.id]: id },
-                    }))
-                  }
+                  selectedPurchaseIds={currentPurchaseIds}
+                  onAddPurchase={(id) => addSamePurchase(row.id, id)}
+                  onRemovePurchase={(id) => removeSamePurchase(row.id, id)}
                   selectedSoldId={currentSoldId}
                   onSelectSold={(id) =>
                     patchProductValidationSession(companyId, (current) => ({
                       soldPick: { ...current.soldPick, [row.id]: id },
                     }))
                   }
-                  purchaseChoices={purchaseItems.filter(
-                    (item) =>
-                      item.productId === currentPurchaseId ||
-                      !takenPurchases.has(item.productId),
+                  purchaseChoices={[
+                    ...row.suggestion.candidates.map(
+                      (candidate) => candidate.purchase,
+                    ),
+                    ...purchaseItems,
+                  ].filter(
+                    (item, index, list) =>
+                      list.findIndex((other) => other.productId === item.productId) ===
+                        index &&
+                      (currentPurchaseIds.includes(item.productId) ||
+                        !takenPurchases.has(item.productId)),
                   )}
                   soldChoices={soldItems.filter(
                     (item) =>
@@ -662,8 +697,8 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           <div>
             <h2 className="text-sm font-semibold">Para corrigir</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Abaixo de 90% ou sem par. Ordenado pelo maior volume de venda ou
-              compra.
+              Abaixo de 90% ou sem par. Filtre e diga o que é: produto, ficha,
+              intermediário, agrupamento ou unificar.
             </p>
           </div>
           <ProductSetupInbox
@@ -679,13 +714,30 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       {mergeProduct ? (
         <ProductMergeDialog
           open={mergeOpen}
-          onOpenChange={setMergeOpen}
+          onOpenChange={(open) => {
+            setMergeOpen(open);
+            if (!open && !continuingMergeRef.current) {
+              mergePartnerQueueRef.current = [];
+            }
+          }}
           companyId={companyId}
           sourceProduct={mergeProduct}
           formatCurrency={formatCurrency}
           initialPartnerId={mergePartnerId}
           initialSurvivorIsSource
           onMerged={() => {
+            const remaining = mergePartnerQueueRef.current.slice(1);
+            mergePartnerQueueRef.current = remaining;
+            if (remaining[0]) {
+              continuingMergeRef.current = true;
+              setMergePartnerId(remaining[0]);
+              setMergeOpen(false);
+              window.setTimeout(() => {
+                continuingMergeRef.current = false;
+                setMergeOpen(true);
+              }, 0);
+              return;
+            }
             setMergeOpen(false);
             void reloadAfterConfirm();
           }}
