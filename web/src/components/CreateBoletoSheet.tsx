@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  PRODUCT_SHEET_INPUT,
+  PRODUCT_SHEET_SELECT,
+  PRODUCT_SHEET_SECTION,
+} from "@/components/products/productSheetStyles";
+import {
+  SEARCH_SELECT_WIDE_POPOVER_CLASS,
   SearchSelect,
   supplierSearchOption,
 } from "@/components/ui/search-select";
@@ -48,8 +54,10 @@ import {
   isSelectableReceitaLeaf,
 } from "@/lib/companyCategoryLabels";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
+import { documentDigitsFromQuery } from "@/lib/applyFocusCnpjToSupplier";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import {
   bankAccountTypeLabel,
   type CompanyBankAccount,
@@ -62,8 +70,25 @@ import type {
   ExpenseSeriesType,
   RecurrenceFrequency,
 } from "@/types/expenseSeries";
-import { FileText, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeftRight,
+  Building2,
+  FileText,
+  Landmark,
+  Plus,
+  QrCode,
+  Receipt,
+  Repeat,
+  Wallet,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 
 /** Opções do select "Tipo de lançamento" (série + transferência). */
@@ -115,6 +140,104 @@ const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
   pix: "PIX",
   ted: "TED",
 };
+
+const LAUNCH_TYPE_OPTIONS: {
+  value: LaunchTypeSelect;
+  label: string;
+  hint: string;
+  icon: ReactNode;
+}[] = [
+  {
+    value: "single",
+    label: "Única",
+    hint: "Um pagamento",
+    icon: <Receipt className="h-4 w-4" />,
+  },
+  {
+    value: "recurring",
+    label: "Recorrente",
+    hint: "Repete sozinha",
+    icon: <Repeat className="h-4 w-4" />,
+  },
+  {
+    value: "installment",
+    label: "Parcelada",
+    hint: "Várias parcelas",
+    icon: <Wallet className="h-4 w-4" />,
+  },
+  {
+    value: "transfer",
+    label: "Transferência",
+    hint: "Entre contas",
+    icon: <ArrowLeftRight className="h-4 w-4" />,
+  },
+];
+
+const PAYMENT_TYPE_OPTIONS: {
+  value: PaymentType;
+  hint: string;
+  icon: ReactNode;
+}[] = [
+  {
+    value: "boleto",
+    hint: "Código de barras",
+    icon: <FileText className="h-4 w-4" />,
+  },
+  {
+    value: "pix",
+    hint: "Chave PIX",
+    icon: <QrCode className="h-4 w-4" />,
+  },
+  {
+    value: "ted",
+    hint: "Dados bancários",
+    icon: <Landmark className="h-4 w-4" />,
+  },
+];
+
+function ChoiceCard({
+  selected,
+  onSelect,
+  icon,
+  label,
+  hint,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  icon: ReactNode;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "flex items-start gap-3 rounded-xl border p-3 text-left shadow-sm transition-colors",
+        selected
+          ? "border-primary bg-primary/5 ring-1 ring-primary"
+          : "border-border bg-background hover:bg-accent/50",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+          selected
+            ? "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground",
+        )}
+      >
+        {icon}
+      </div>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {hint}
+        </span>
+      </span>
+    </button>
+  );
+}
 
 const PIX_KEY_TYPES = [
   { value: "cpf", label: "CPF" },
@@ -274,6 +397,9 @@ export function CreateBoletoSheet({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
+  const [supplierCreateDocument, setSupplierCreateDocument] = useState("");
+  const supplierSearchQueryRef = useRef("");
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([]);
   const [expenseProducts, setExpenseProducts] = useState<Product[]>([]);
   const [rateioEnabled, setRateioEnabled] = useState(false);
@@ -515,9 +641,18 @@ export function CreateBoletoSheet({
     }
   };
 
+  const openCreateSupplier = () => {
+    setSupplierCreateDocument(
+      documentDigitsFromQuery(
+        supplierSearchQueryRef.current || supplierSearchQuery,
+      ),
+    );
+    setCreateSupplierOpen(true);
+  };
+
   const handleSupplierChange = (value: string) => {
     if (value === "__create__") {
-      setCreateSupplierOpen(true);
+      openCreateSupplier();
       return;
     }
     applySupplierSelection(
@@ -608,6 +743,8 @@ export function CreateBoletoSheet({
     setAccountFlow(fixedAccountFlow ?? "payable");
     setCompanyCategoryId("");
     setSupplierId("");
+    setSupplierSearchQuery("");
+    setSupplierCreateDocument("");
     setLaunchType("single");
     setOriginBankAccountId("");
     setDestBankAccountId("");
@@ -860,56 +997,70 @@ export function CreateBoletoSheet({
     onSuccess?.(boleto);
   };
 
+  const sheetTitle = expenseId
+    ? "Novo pagamento"
+    : isTransfer
+      ? "Nova transferência"
+      : effectiveFlow === "receivable"
+        ? "Nova conta a receber"
+        : "Nova conta a pagar";
+  const sheetDescription = expenseId
+    ? "Cadastre boleto, PIX ou TED para vincular à despesa."
+    : isTransfer
+      ? "Movimenta valor entre contas bancárias, fora do fluxo e da DRE."
+      : effectiveFlow === "receivable"
+        ? "Registre valores a receber (entrada no fluxo de caixa)."
+        : "Quem pagar, quanto e quando — em poucos passos.";
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         maximizable
-        className="overflow-y-auto w-[70vw] sm:!max-w-[70vw]"
+        className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0"
       >
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            {expenseId
-              ? "Novo pagamento"
-              : isTransfer
-                ? "Nova transferência"
-                : effectiveFlow === "receivable"
-                  ? "Nova conta a receber"
-                  : "Nova conta a pagar"}
-          </SheetTitle>
-          <SheetDescription>
-            {expenseId
-              ? "Cadastre boleto, PIX ou TED para vincular à despesa"
-              : isTransfer
-                ? "Movimenta valor entre contas bancárias (fora do fluxo e da DRE)"
-                : effectiveFlow === "receivable"
-                  ? "Registre valores a receber (entrada no fluxo de caixa)"
-                  : "Registre contas a pagar (saída no fluxo de caixa)"}
-          </SheetDescription>
+        <SheetHeader className="shrink-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border bg-muted shadow-sm">
+              <FileText className="h-6 w-6 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1 pr-6">
+              <SheetTitle className="text-xl font-semibold sm:text-2xl">
+                {sheetTitle}
+              </SheetTitle>
+              <SheetDescription>{sheetDescription}</SheetDescription>
+            </div>
+          </div>
         </SheetHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          <div className="grid gap-4">
+        <form
+          onSubmit={handleSubmit}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
+            <div className="space-y-4 p-6">
             {!expenseId &&
               effectiveFlow === "payable" &&
               defaultLaunchType == null && (
-              <div className="space-y-3 rounded-lg border p-4">
-                <Label>Tipo de lançamento</Label>
-                <Select
-                  value={launchType}
-                  onValueChange={(v) => setLaunchType(v as LaunchTypeSelect)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single">Única</SelectItem>
-                    <SelectItem value="recurring">Recorrente</SelectItem>
-                    <SelectItem value="installment">Parcelada</SelectItem>
-                    <SelectItem value="transfer">Transferência</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className={PRODUCT_SHEET_SECTION}>
+                <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Tipo
+                </p>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Como esta conta entra no fluxo.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {LAUNCH_TYPE_OPTIONS.map((opt) => (
+                    <ChoiceCard
+                      key={opt.value}
+                      selected={launchType === opt.value}
+                      onSelect={() => setLaunchType(opt.value)}
+                      icon={opt.icon}
+                      label={opt.label}
+                      hint={opt.hint}
+                    />
+                  ))}
+                </div>
                 {!isTransfer && launchType === "recurring" && (
-                  <div className="space-y-2">
+                  <div className="mt-4 space-y-2">
                     <Label>Recorrência</Label>
                     <Select
                       value={recurrenceFrequency}
@@ -917,7 +1068,7 @@ export function CreateBoletoSheet({
                         setRecurrenceFrequency(v as RecurrenceFrequency)
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className={PRODUCT_SHEET_SELECT}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -931,13 +1082,12 @@ export function CreateBoletoSheet({
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      Define de quanto em quanto tempo esta despesa será
-                      repetida automaticamente.
+                      De quanto em quanto tempo esta despesa se repete.
                     </p>
                   </div>
                 )}
                 {!isTransfer && launchType === "installment" && (
-                  <div className="space-y-2">
+                  <div className="mt-4 space-y-2">
                     <Label htmlFor="installment-count">Número de parcelas</Label>
                     <Input
                       id="installment-count"
@@ -946,11 +1096,12 @@ export function CreateBoletoSheet({
                       max={360}
                       value={installmentCount}
                       onChange={(e) => setInstallmentCount(e.target.value)}
+                      className={PRODUCT_SHEET_INPUT}
                     />
                   </div>
                 )}
                 {isTransfer && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="mt-4 text-sm text-muted-foreground">
                     Cria uma saída na conta origem e uma entrada na conta
                     destino, sem categoria e sem impacto na DRE.
                   </p>
@@ -958,7 +1109,11 @@ export function CreateBoletoSheet({
               </div>
             )}
             {isTransfer && (
-              <div className="space-y-4 rounded-lg border p-4">
+              <div className={PRODUCT_SHEET_SECTION}>
+                <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Contas
+                </p>
+                <div className="space-y-4">
                 <div>
                   <Label>Conta origem</Label>
                   <Select
@@ -969,7 +1124,7 @@ export function CreateBoletoSheet({
                     }
                     onValueChange={handleOriginBankChange}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className={cn("w-full", PRODUCT_SHEET_SELECT)}>
                       <SelectValue placeholder="Selecione a conta de saída" />
                     </SelectTrigger>
                     <SelectContent>
@@ -998,7 +1153,7 @@ export function CreateBoletoSheet({
                     }
                     onValueChange={handleDestBankChange}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className={cn("w-full", PRODUCT_SHEET_SELECT)}>
                       <SelectValue placeholder="Selecione a conta de entrada" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1017,30 +1172,36 @@ export function CreateBoletoSheet({
                     </SelectContent>
                   </Select>
                 </div>
+                </div>
               </div>
             )}
             {requiresPaymentDetails && (
-              <div>
-                <Label>Forma de pagamento</Label>
-                <Select
-                  value={paymentType}
-                  onValueChange={(v) => setPaymentType(v as PaymentType)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="boleto">
-                      {PAYMENT_TYPE_LABELS.boleto}
-                    </SelectItem>
-                    <SelectItem value="pix">{PAYMENT_TYPE_LABELS.pix}</SelectItem>
-                    <SelectItem value="ted">{PAYMENT_TYPE_LABELS.ted}</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className={PRODUCT_SHEET_SECTION}>
+                <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Pagamento
+                </p>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Como você vai pagar esta conta.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {PAYMENT_TYPE_OPTIONS.map((opt) => (
+                    <ChoiceCard
+                      key={opt.value}
+                      selected={paymentType === opt.value}
+                      onSelect={() => setPaymentType(opt.value)}
+                      icon={opt.icon}
+                      label={PAYMENT_TYPE_LABELS[opt.value]}
+                      hint={opt.hint}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {!isTransfer && (
-              <div className="space-y-3">
+              <div className={cn(PRODUCT_SHEET_SECTION, "space-y-3")}>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Classificação
+                </p>
                 {allowRateio ? (
                   <>
                     {!rateioEnabled ? (
@@ -1164,100 +1325,130 @@ export function CreateBoletoSheet({
               />
             ) : null}
             {requiresPaymentDetails && !expenseId && (
-              <div>
-                <Label>Fornecedor</Label>
-                <SearchSelect
-                  value={supplierId === "__create__" ? "" : supplierId}
-                  onValueChange={handleSupplierChange}
-                  options={supplierSelectOptions}
-                  trailingOptions={[
-                    {
-                      value: "__create__",
-                      label: "Criar fornecedor",
-                      accent: true,
-                    },
-                  ]}
-                  placeholder="Selecione o fornecedor (opcional)"
-                  searchPlaceholder="Buscar fornecedor…"
-                  emptyMessage="Nenhum fornecedor encontrado."
-                />
-                {suppliers.length === 0 && !supplierId && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Nenhum fornecedor cadastrado.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setCreateSupplierOpen(true)}
-                      className="text-primary underline"
-                    >
-                      Criar fornecedor
-                    </button>
+              <div className={PRODUCT_SHEET_SECTION}>
+                <div className="mb-1 flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Fornecedor
                   </p>
-                )}
+                </div>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Opcional. Se escolher um cadastro com PIX ou TED, preenchemos
+                  o pagamento.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="min-w-0 flex-1">
+                    <SearchSelect
+                      value={supplierId === "__create__" ? "" : supplierId}
+                      onValueChange={handleSupplierChange}
+                      onSearchChange={(query) => {
+                        setSupplierSearchQuery(query);
+                        if (query.trim()) supplierSearchQueryRef.current = query;
+                      }}
+                      options={supplierSelectOptions}
+                      trailingOptions={[
+                        {
+                          value: "__create__",
+                          label: "Criar fornecedor",
+                          accent: true,
+                        },
+                      ]}
+                      placeholder="Buscar pelo nome ou CNPJ"
+                      searchPlaceholder="Nome, CNPJ ou CPF…"
+                      emptyMessage="Nenhum fornecedor encontrado."
+                      triggerClassName="h-11 rounded-xl border-border bg-background shadow-sm"
+                      contentClassName={SEARCH_SELECT_WIDE_POPOVER_CLASS}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0 rounded-xl"
+                    onClick={openCreateSupplier}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Novo
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
 
-          <div>
-            <Label>Descrição</Label>
-            <Input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={
-                isTransfer
-                  ? "Ex: Transferência para reserva"
-                  : "Ex: Pagamento energia - Jan/2025"
-              }
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={PRODUCT_SHEET_SECTION}>
+            <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+              Valores e datas
+            </p>
             <div>
-              <Label>Emissão</Label>
+              <Label>Descrição</Label>
               <Input
-                type="date"
-                value={emissionDate}
-                onChange={(e) => setEmissionDate(e.target.value)}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={
+                  isTransfer
+                    ? "Ex: Transferência para reserva"
+                    : "Ex: Pagamento energia - Jan/2025"
+                }
+                className={PRODUCT_SHEET_INPUT}
               />
             </div>
-            <div>
-              <Label>Vencimento</Label>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Emissão</Label>
+                <Input
+                  type="date"
+                  value={emissionDate}
+                  onChange={(e) => setEmissionDate(e.target.value)}
+                  className={PRODUCT_SHEET_INPUT}
+                />
+              </div>
+              <div>
+                <Label>Vencimento</Label>
+                <Input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className={PRODUCT_SHEET_INPUT}
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <Label>Valor (R$)</Label>
               <Input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                type="number"
+                step="0.01"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0,00"
+                className={PRODUCT_SHEET_INPUT}
               />
             </div>
-          </div>
-          <div>
-            <Label>Valor (R$)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0,00"
-            />
           </div>
 
           {requiresPaymentDetails && paymentType === "boleto" && (
-            <div>
+            <div className={PRODUCT_SHEET_SECTION}>
+              <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                Dados do boleto
+              </p>
               <Label>Código de barras</Label>
               <Input
                 value={barcode}
                 onChange={(e) => setBarcode(e.target.value)}
                 placeholder="Opcional"
+                className={PRODUCT_SHEET_INPUT}
               />
             </div>
           )}
 
           {requiresPaymentDetails && paymentType === "pix" && (
-            <div className="space-y-4 rounded-lg border p-4">
-              <Label>Chave PIX</Label>
-              <div className="flex gap-4 ">
-                <div>
+            <div className={PRODUCT_SHEET_SECTION}>
+              <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                Chave PIX
+              </p>
+              <div className="flex flex-col gap-4 sm:flex-row">
+                <div className="sm:w-44">
                   <Label className="text-xs">Tipo da chave</Label>
                   <Select value={pixKeyType} onValueChange={setPixKeyType}>
-                    <SelectTrigger>
+                    <SelectTrigger className={PRODUCT_SHEET_SELECT}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1291,6 +1482,7 @@ export function CreateBoletoSheet({
                             ? "(11) 99999-9999"
                             : "Informe a chave"
                     }
+                    className={PRODUCT_SHEET_INPUT}
                   />
                 </div>
               </div>
@@ -1298,8 +1490,10 @@ export function CreateBoletoSheet({
           )}
 
           {requiresPaymentDetails && paymentType === "ted" && (
-            <div className="space-y-4 rounded-lg border p-4">
-              <Label>Dados bancários</Label>
+            <div className={PRODUCT_SHEET_SECTION}>
+              <p className="mb-4 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                Dados bancários
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label className="text-xs">Banco</Label>
@@ -1307,6 +1501,7 @@ export function CreateBoletoSheet({
                     value={bankName}
                     onChange={(e) => setBankName(e.target.value)}
                     placeholder="Nome do banco"
+                    className={PRODUCT_SHEET_INPUT}
                   />
                 </div>
                 <div>
@@ -1315,16 +1510,16 @@ export function CreateBoletoSheet({
                     value={bankCode}
                     onChange={(e) => setBankCode(e.target.value)}
                     placeholder="001"
+                    className={PRODUCT_SHEET_INPUT}
                   />
                 </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label className="text-xs">Agência</Label>
                   <Input
                     value={agency}
                     onChange={(e) => setAgency(e.target.value)}
                     placeholder="0000"
+                    className={PRODUCT_SHEET_INPUT}
                   />
                 </div>
                 <div>
@@ -1333,13 +1528,14 @@ export function CreateBoletoSheet({
                     value={account}
                     onChange={(e) => setAccount(e.target.value)}
                     placeholder="00000-0"
+                    className={PRODUCT_SHEET_INPUT}
                   />
                 </div>
               </div>
-              <div>
+              <div className="mt-4">
                 <Label className="text-xs">Tipo de conta</Label>
                 <Select value={accountType} onValueChange={setAccountType}>
-                  <SelectTrigger>
+                  <SelectTrigger className={PRODUCT_SHEET_SELECT}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1351,19 +1547,35 @@ export function CreateBoletoSheet({
                   </SelectContent>
                 </Select>
               </div>
-              <div>
+              <div className="mt-4">
                 <Label className="text-xs">Beneficiário (opcional)</Label>
                 <Input
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   placeholder="Nome do favorecido"
+                  className={PRODUCT_SHEET_INPUT}
                 />
               </div>
             </div>
           )}
+            </div>
+          </div>
 
-          <SheetFooter>
-            <Button type="submit" disabled={!canSubmit || loading}>
+          <SheetFooter className="shrink-0 flex-col gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => onOpenChange(false)}
+              disabled={loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={!canSubmit || loading}
+              className="w-full sm:w-auto"
+            >
               {loading
                 ? "Cadastrando..."
                 : isTransfer
@@ -1375,8 +1587,15 @@ export function CreateBoletoSheet({
       </SheetContent>
       <CreateSupplierSheet
         open={createSupplierOpen}
-        onOpenChange={setCreateSupplierOpen}
+        onOpenChange={(next) => {
+          setCreateSupplierOpen(next);
+          if (!next) {
+            setSupplierCreateDocument("");
+            supplierSearchQueryRef.current = "";
+          }
+        }}
         companyId={companyId}
+        initialDocument={supplierCreateDocument}
         onSuccess={async (supplier) => {
           const { data } = await supabase
             .from("suppliers")

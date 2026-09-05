@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/popover";
 import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -109,6 +109,8 @@ export type SearchSelectProps = {
   /** Limite de altura da lista. */
   listMaxHeightClassName?: string;
   renderOptionLabel?: (option: SearchSelectOption) => ReactNode;
+  /** Notifica o texto da busca (ex.: pré-preencher CNPJ ao criar). */
+  onSearchChange?: (query: string) => void;
 };
 
 /** Lista mais larga que o trigger — células estreitas de tabela. */
@@ -130,11 +132,17 @@ export function SearchSelect({
   id,
   listMaxHeightClassName = "max-h-64",
   renderOptionLabel,
+  onSearchChange,
 }: SearchSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   usePopoverListScrollFix(open, listRef);
+
+  const setSearchAndNotify = (next: string) => {
+    setSearch(next);
+    onSearchChange?.(next);
+  };
 
   const allFixed = useMemo(() => {
     const map = new Map<string, SearchSelectOption>();
@@ -156,7 +164,7 @@ export function SearchSelect({
   const pick = (next: string) => {
     onValueChange(next);
     setOpen(false);
-    setSearch("");
+    setSearchAndNotify("");
   };
 
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -178,7 +186,10 @@ export function SearchSelect({
         onClick={() => pick(option.value)}
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-pretty leading-snug">
+          <span className="flex items-start gap-2 text-pretty leading-snug">
+            {option.accent ? (
+              <Plus className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            ) : null}
             {renderOptionLabel ? renderOptionLabel(option) : option.label}
           </span>
           {option.description ? (
@@ -200,7 +211,7 @@ export function SearchSelect({
       onOpenChange={(next) => {
         if (disabled) return;
         setOpen(next);
-        if (!next) setSearch("");
+        if (!next) setSearchAndNotify("");
       }}
     >
       <PopoverTrigger asChild>
@@ -239,7 +250,7 @@ export function SearchSelect({
             />
             <Input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => setSearchAndNotify(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               placeholder={searchPlaceholder}
               className="h-9 pl-8"
@@ -265,8 +276,12 @@ export function SearchSelect({
           ) : (
             filtered.map(renderRow)
           )}
-          {trailingOptions.map(renderRow)}
         </div>
+        {trailingOptions.length > 0 ? (
+          <div className="border-t border-border bg-muted/50 p-1">
+            {trailingOptions.map(renderRow)}
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );
