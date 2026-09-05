@@ -44,9 +44,15 @@ import {
 } from "@/lib/manualStockMovementUnits";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import { persistProductUnitConversions } from "@/lib/productUnitConversionsService";
+import { maskCpfCnpj } from "@/lib/masks";
 import {
   isExpenseStockMovementReference,
 } from "@/lib/stockMovementExpenseLink";
+import {
+  fetchStockMovementInvoiceContext,
+  formatInvoiceLabel,
+  type StockMovementInvoiceContext,
+} from "@/lib/stockMovementInvoiceContext";
 import {
   movementDateInputFromIso,
   stockMovementEditMode,
@@ -147,6 +153,9 @@ export function StockMovementEditSheet({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [revenueDetailId, setRevenueDetailId] = useState<string | null>(null);
+  const [invoiceContext, setInvoiceContext] =
+    useState<StockMovementInvoiceContext | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
 
   const mode = movement ? stockMovementEditMode(movement) : "readonly";
   const editable = movement ? stockMovementIsEditable(movement) : false;
@@ -248,6 +257,39 @@ export function StockMovementEditSheet({
   }, [open, movement?.id, loadProducts]);
 
   useEffect(() => {
+    if (!open || !movement) {
+      setInvoiceContext(null);
+      return;
+    }
+    let cancelled = false;
+    setInvoiceLoading(true);
+    void fetchStockMovementInvoiceContext({
+      companyId,
+      productId: movement.product_id,
+      referenceType: movement.reference_type,
+      referenceId: movement.reference_id,
+      createdAt: movement.created_at,
+      unitCost: movement.unit_cost,
+    }).then((ctx) => {
+      if (cancelled) return;
+      setInvoiceLoading(false);
+      setInvoiceContext(ctx);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    open,
+    companyId,
+    movement?.id,
+    movement?.product_id,
+    movement?.reference_type,
+    movement?.reference_id,
+    movement?.created_at,
+    movement?.unit_cost,
+  ]);
+
+  useEffect(() => {
     if (!open || !movement) return;
     hydrateFromMovement(movement, products);
     // Só reidrata ao abrir outra movimentação — não ao recarregar a lista de produtos.
@@ -291,9 +333,12 @@ export function StockMovementEditSheet({
     ? isManuallyRegisteredStockMovement(movement.metadata_json)
     : false;
 
+  const linkedExpenseId =
+    movement?.expense_id ?? invoiceContext?.expenseId ?? null;
   const hasExpense =
-    movement?.expense_id != null &&
-    isExpenseStockMovementReference(movement.reference_type);
+    linkedExpenseId != null &&
+    (isExpenseStockMovementReference(movement?.reference_type ?? null) ||
+      invoiceContext?.expenseId != null);
 
   const revenueEntryId =
     movement?.reference_type === "revenue_entry" ||
@@ -434,6 +479,72 @@ export function StockMovementEditSheet({
                     <StockMovementTypeBadge row={movement} />
                   </div>
                 </div>
+
+                {invoiceLoading ? (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Carregando dados da nota…
+                  </p>
+                ) : invoiceContext ? (
+                  <div className="rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Nota fiscal
+                    </p>
+                    <dl className="mt-2 grid gap-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">
+                          Documento
+                        </dt>
+                        <dd className="mt-0.5 font-medium">
+                          {formatInvoiceLabel(
+                            invoiceContext.invoiceNumber,
+                            invoiceContext.invoiceSeries,
+                          ) ?? "Cadastro pela NF-e"}
+                        </dd>
+                      </div>
+                      {invoiceContext.supplierName ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            Fornecedor
+                          </dt>
+                          <dd className="mt-0.5 font-medium">
+                            {invoiceContext.supplierName}
+                            {invoiceContext.supplierDocument ? (
+                              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                                {maskCpfCnpj(invoiceContext.supplierDocument)}
+                              </span>
+                            ) : null}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {invoiceContext.originalItemName ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            Item original na nota
+                          </dt>
+                          <dd className="mt-0.5 font-medium leading-snug">
+                            {invoiceContext.originalItemName}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {invoiceContext.invoiceQuantity != null ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            Quantidade na nota
+                          </dt>
+                          <dd className="mt-0.5 font-medium tabular-nums">
+                            {invoiceContext.invoiceQuantity.toLocaleString(
+                              "pt-BR",
+                            )}
+                            {invoiceContext.invoiceUnit
+                              ? ` ${invoiceContext.invoiceUnit}`
+                              : ""}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                ) : null}
 
                 {mergePair ? (
                   <div>
@@ -723,14 +834,12 @@ export function StockMovementEditSheet({
                   </div>
                 ) : null}
 
-                {hasExpense ? (
+                {hasExpense && linkedExpenseId ? (
                   <Button
                     type="button"
                     variant={editable ? "outline" : "default"}
                     className="w-full gap-2"
-                    onClick={() =>
-                      setExpenseDetailId(movement.expense_id!)
-                    }
+                    onClick={() => setExpenseDetailId(linkedExpenseId)}
                   >
                     <FileText className="h-4 w-4" />
                     Visualizar despesa / nota

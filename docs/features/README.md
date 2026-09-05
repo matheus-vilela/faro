@@ -41,6 +41,8 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `ncm-rpc-acesso-admin.md` | Aba NCMs: admin Faro deixa de levar «Acesso negado» |
 | `unificar-com-produto.md` | Unificar com qualquer produto; hub não inverte |
 | `produto-ultimo-preco-por-unidade.md` | Detalhe: último preço + proporcional por unidade de estoque |
+| `produto-fornecedores-nfe-staging.md` | Aba Fornecedores inclui emitente de `nfe_staging_create` |
+| `movimentacao-detalhe-nfe.md` | Detalhe da movimentação: nota, fornecedor, qtd e item original |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

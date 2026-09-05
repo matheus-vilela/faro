@@ -79,6 +79,13 @@ export function stockMovementOriginLabel(
 ): string {
   const ref = (row.reference_type ?? "").trim().toLowerCase();
   if (ref === "inventory_count") return "Contagem";
+  if (
+    ref === "nfe_staging_create" ||
+    ref === "nfe_product_create" ||
+    ref === "nfe_motor_create"
+  ) {
+    return "Nota fiscal";
+  }
   const mode = stockMovementEditMode(row);
   if (mode === "manual") return "Manual";
   if (mode === "expense") return "Nota fiscal / despesa";

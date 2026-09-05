@@ -23,11 +23,14 @@ O rótulo é «Unificar com produto». Produto que já tem unificações permane
 - `web/src/lib/productValidation/soldRole.ts`
 - `web/src/components/products/ProductMergeDialog.tsx`
 - `web/src/components/products/ProductSetupActionPanel.tsx`
+- `web/src/components/products/ProductSetupCard.tsx`
 
 ## Comportamento esperado
 
 - Texto da opção: **Unificar com produto**.
 - A lista e a busca usam o **catálogo** (`listed_in_product_catalog`), não só a fila de correlação.
+- No detalhe do produto, «Unificar com» busca no catálogo (não um recorte de 400 nomes).
+- A consulta espera 300 ms após a última tecla (não busca a cada letra). Enquanto espera ou consulta, o seletor mostra «Buscando…» e já filtra a lista que está na tela.
 - Busca inclui produtos que já unificaram outros (e aliases em `merged_catalog_names`).
 - Se um dos dois já tem itens unificados, ele fica. O botão de trocar some e o card explica o porquê.
 
@@ -35,6 +38,8 @@ O rótulo é «Unificar com produto». Produto que já tem unificações permane
 
 - [x] Rótulo sem «de nota fiscal».
 - [x] Produto com `merged_catalog_names` aparece na busca e no card.
+- [x] Detalhe: seletor busca no catálogo, sem teto de 400.
+- [x] Loader no seletor; busca com debounce de 300 ms.
 - [x] Não dá para inverter quando o hub já tem unificações.
 
 ## Notas para a IA

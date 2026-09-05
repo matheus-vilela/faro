@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   stockMovementEditMode,
   stockMovementIsEditable,
+  stockMovementOriginLabel,
   stockMovementSignedQuantity,
 } from "@/lib/stockMovementEdit";
 
@@ -49,6 +50,17 @@ describe("stockMovementEditMode", () => {
         metadata_json: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("stockMovementOriginLabel", () => {
+  it("trata cadastro via NF-e como nota fiscal", () => {
+    expect(
+      stockMovementOriginLabel({
+        reference_type: "nfe_staging_create",
+        metadata_json: null,
+      }),
+    ).toBe("Nota fiscal");
   });
 });
 

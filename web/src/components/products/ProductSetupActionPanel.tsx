@@ -98,7 +98,8 @@ export function ProductSetupActionPanel({
   const [mergeSurvivorIsSource, setMergeSurvivorIsSource] = useState(false);
   const [pickedPartnerId, setPickedPartnerId] = useState("");
   const [unifySearch, setUnifySearch] = useState("");
-  const debouncedUnifySearch = useDebounce(unifySearch, 250);
+  const debouncedUnifySearch = useDebounce(unifySearch, 300);
+  const [unifyFetching, setUnifyFetching] = useState(false);
   const [catalogOptions, setCatalogOptions] = useState<SearchSelectOption[]>(
     [],
   );
@@ -148,6 +149,7 @@ export function ProductSetupActionPanel({
   useEffect(() => {
     if (choice !== "link_item") return;
     let cancelled = false;
+    setUnifyFetching(true);
     void searchProductsForUnify({
       companyId,
       excludeId: item.productId,
@@ -176,6 +178,8 @@ export function ProductSetupActionPanel({
             .join(" "),
         })),
       );
+    }).finally(() => {
+      if (!cancelled) setUnifyFetching(false);
     });
     return () => {
       cancelled = true;
@@ -461,6 +465,10 @@ export function ProductSetupActionPanel({
             placeholder="Escolher produto do catálogo"
             searchPlaceholder="Buscar no catálogo…"
             emptyMessage="Nenhum produto encontrado no catálogo."
+            loading={
+              unifyFetching ||
+              unifySearch.trim() !== debouncedUnifySearch.trim()
+            }
             onSearchChange={setUnifySearch}
           />
           <Button

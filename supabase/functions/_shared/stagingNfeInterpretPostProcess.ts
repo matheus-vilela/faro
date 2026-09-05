@@ -355,6 +355,7 @@ async function insertProductFromStagingInterpret(
   >["conversions"],
   contexto: string,
   stock: { quantity: number; unitValue: number } | null,
+  supplierId: string | null,
 ): Promise<{ productId: string | null; stockApplied: boolean }> {
   const row = productRowForDbInsert(payload);
   const ncmRule = await lookupNcmProductRule(admin, companyId, row.ncm);
@@ -400,6 +401,9 @@ async function insertProductFromStagingInterpret(
     quantity: stock.quantity,
     unitValue: stock.unitValue,
     referenceType: "nfe_staging_create",
+    referenceId: supplierId && !supplierId.startsWith("preview:")
+      ? supplierId
+      : null,
     unitConversions: conversions,
   });
   if (created.error || !created.productId) {
@@ -491,6 +495,7 @@ async function stagingInterpretCreateProduct(
     lineIndex: number;
   },
   applyStockOnCreate = true,
+  supplierId: string | null = null,
 ): Promise<{ productId: string | null; stockApplied: boolean }> {
   const nomeProduto = String(built.payload.name ?? "").trim() || "—";
   const stockQty = Math.max(0, Number(line.quantidade) || 0);
@@ -537,6 +542,7 @@ async function stagingInterpretCreateProduct(
     applyStockOnCreate
       ? { quantity: stockQty, unitValue: stockUnitValue }
       : null,
+    supplierId,
   );
   if (!inserted.productId) return { productId: null, stockApplied: false };
   const newId = inserted.productId;
@@ -935,6 +941,7 @@ export async function resolveProductsForInterpretLog(
       line,
       previewCtx,
       applyStockOnCreate,
+      supplierId,
     );
     if (created.productId) {
       productIdByLineIndex.set(lineIndex, created.productId);

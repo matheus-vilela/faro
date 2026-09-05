@@ -35,6 +35,18 @@ export async function findProductIdBySupplierCProd(
   return data?.product_id != null ? String(data.product_id) : null;
 }
 
+/** cProd da NF-e, ou lastro sintético para cadastro sem código do fornecedor. */
+export function nfeSupplierLastroCProd(
+  cProd: string | null | undefined,
+  productId: string | null | undefined,
+): string | null {
+  const code = normalizeCProd(cProd);
+  if (code) return code;
+  const pid = productId != null ? String(productId).trim() : "";
+  if (!pid || pid.startsWith("preview:")) return null;
+  return `nfe:${pid}`;
+}
+
 export async function upsertProductSupplierCode(
   supabase: SupabaseClient,
   companyId: string,
@@ -43,8 +55,8 @@ export async function upsertProductSupplierCode(
   productId: string | null | undefined,
 ): Promise<void> {
   const sid = supplierId != null ? String(supplierId).trim() : "";
-  const code = normalizeCProd(cProd);
   const pid = productId != null ? String(productId).trim() : "";
+  const code = nfeSupplierLastroCProd(cProd, pid);
   if (!sid || !code || !pid || pid.startsWith("preview:")) return;
 
   const { error } = await supabase.from("product_supplier_codes").upsert(

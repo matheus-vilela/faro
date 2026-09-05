@@ -9,8 +9,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
-import { SearchSelect } from "@/components/ui/search-select";
+import {
+  SearchSelect,
+  type SearchSelectOption,
+} from "@/components/ui/search-select";
 import { SaleFamilyLinkSheet } from "@/components/products/SaleFamilyLinkSheet";
+import { useDebounce } from "@/hooks/useDebounce";
+import { searchProductsForUnify } from "@/lib/searchProductsForUnify";
 import {
   fetchSaleFamilyCandidates,
   linkSaleFamilyVariant,
@@ -24,7 +29,6 @@ import {
   type SaleFamilyInfo,
   type SaleFamilyProductOption,
 } from "@/lib/productSaleFamily";
-import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -65,9 +69,10 @@ export function ProductSetupCard({
 }) {
   const [info, setInfo] = useState<SaleFamilyInfo | null>(null);
   const [families, setFamilies] = useState<SaleFamilyProductOption[]>([]);
-  const [mergeOptions, setMergeOptions] = useState<
-    Array<{ id: string; name: string; sku: string | null }>
-  >([]);
+  const [mergeOptions, setMergeOptions] = useState<SearchSelectOption[]>([]);
+  const [mergeSearch, setMergeSearch] = useState("");
+  const debouncedMergeSearch = useDebounce(mergeSearch, 300);
+  const [mergeFetching, setMergeFetching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmPromote, setConfirmPromote] = useState(false);
@@ -79,29 +84,12 @@ export function ProductSetupCard({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [family, cands, mergeRows] = await Promise.all([
+      const [family, cands] = await Promise.all([
         listSaleFamilyForProduct(companyId, productId),
         fetchSaleFamilyCandidates(companyId, []),
-        supabase
-          .from("products")
-          .select("id, name, sku")
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .eq("listed_in_product_catalog", true)
-          .neq("id", productId)
-          .order("name")
-          .limit(400),
       ]);
       setInfo(family);
       setFamilies(cands.filter((p) => p.id !== productId));
-      if (mergeRows.error) throw mergeRows.error;
-      setMergeOptions(
-        (mergeRows.data ?? []) as Array<{
-          id: string;
-          name: string;
-          sku: string | null;
-        }>,
-      );
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : "Falha ao ler a configuração.",
@@ -118,7 +106,49 @@ export function ProductSetupCard({
 
   useEffect(() => {
     setPickingMember(false);
+    setMergeSearch("");
   }, [productId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMergeFetching(true);
+    void searchProductsForUnify({
+      companyId,
+      excludeId: productId,
+      term: debouncedMergeSearch,
+      limit: 80,
+    }).then((rows) => {
+      if (cancelled) return;
+      setMergeOptions(
+        rows.map((row) => ({
+          value: row.id,
+          label: row.name,
+          description:
+            (row.merged_catalog_names?.length ?? 0) > 0
+              ? `Já unificou ${row.merged_catalog_names!.length} ${
+                  row.merged_catalog_names!.length === 1 ? "item" : "itens"
+                }`
+              : row.sku
+                ? `SKU ${row.sku}`
+                : undefined,
+          keywords: [
+            row.name,
+            row.sku,
+            row.ean,
+            row.barcode,
+            ...(row.merged_catalog_names ?? []),
+          ]
+            .filter(Boolean)
+            .join(" "),
+        })),
+      );
+    }).finally(() => {
+      if (!cancelled) setMergeFetching(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, productId, debouncedMergeSearch]);
 
   const kind = info?.kind ?? "none";
   const isRecipe = stockControlType === "RECIPE_CONTROLLED";
@@ -394,8 +424,13 @@ export function ProductSetupCard({
               if (v) onOpenMerge(v);
             }}
             disabled={loading || busy}
-            placeholder="Escolher produto…"
-            searchPlaceholder="Buscar produto…"
+            placeholder="Escolher produto do catálogo…"
+            searchPlaceholder="Buscar no catálogo…"
+            emptyMessage="Nenhum produto encontrado no catálogo."
+            loading={
+              mergeFetching || mergeSearch.trim() !== debouncedMergeSearch.trim()
+            }
+            onSearchChange={setMergeSearch}
             leadingOptions={[
               {
                 value: MERGE_NONE,
@@ -403,12 +438,7 @@ export function ProductSetupCard({
                 description: "Não unificar agora",
               },
             ]}
-            options={mergeOptions.map((p) => ({
-              value: p.id,
-              label: p.name,
-              description: p.sku ? `SKU ${p.sku}` : undefined,
-              keywords: p.sku ?? "",
-            }))}
+            options={mergeOptions}
             contentClassName="z-[200]"
           />
         </div>

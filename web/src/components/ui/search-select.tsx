@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/popover";
 import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Plus, Search } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -111,6 +111,9 @@ export type SearchSelectProps = {
   renderOptionLabel?: (option: SearchSelectOption) => ReactNode;
   /** Notifica o texto da busca (ex.: pré-preencher CNPJ ao criar). */
   onSearchChange?: (query: string) => void;
+  /** Busca remota em andamento (ou aguardando debounce). */
+  loading?: boolean;
+  loadingMessage?: string;
 };
 
 /** Lista mais larga que o trigger — células estreitas de tabela. */
@@ -126,6 +129,8 @@ export function SearchSelect({
   placeholder = "Selecione",
   searchPlaceholder = "Buscar…",
   emptyMessage = "Nenhum item encontrado.",
+  loading = false,
+  loadingMessage = "Buscando…",
   disabled,
   triggerClassName,
   contentClassName,
@@ -244,10 +249,17 @@ export function SearchSelect({
       >
         <div className="border-b border-border p-2">
           <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
+            {loading ? (
+              <Loader2
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+                aria-hidden
+              />
+            ) : (
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+            )}
             <Input
               value={search}
               onChange={(e) => setSearchAndNotify(e.target.value)}
@@ -258,6 +270,7 @@ export function SearchSelect({
               autoCorrect="off"
               spellCheck={false}
               autoFocus
+              aria-busy={loading}
             />
           </div>
         </div>
@@ -269,12 +282,25 @@ export function SearchSelect({
           )}
         >
           {leadingOptions.map(renderRow)}
-          {filtered.length === 0 ? (
+          {loading && filtered.length === 0 ? (
+            <p className="flex items-center justify-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              {loadingMessage}
+            </p>
+          ) : filtered.length === 0 ? (
             <p className="px-2 py-3 text-center text-sm text-muted-foreground">
               {emptyMessage}
             </p>
           ) : (
-            filtered.map(renderRow)
+            <>
+              {loading ? (
+                <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  {loadingMessage}
+                </p>
+              ) : null}
+              {filtered.map(renderRow)}
+            </>
           )}
         </div>
         {trailingOptions.length > 0 ? (

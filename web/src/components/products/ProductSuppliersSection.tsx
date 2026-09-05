@@ -1,3 +1,9 @@
+import {
+  mergeProductSupplierEntries,
+  NFE_PRODUCT_CREATE_REFERENCE_TYPES,
+  productSupplierKey,
+  type ProductSupplierEntry,
+} from "@/lib/productSuppliers";
 import { maskCpfCnpj } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -21,16 +27,6 @@ type ExpenseItemSupplierRow = {
   unit_value: number | null;
   created_at: string;
   expenses: ExpenseJoin | ExpenseJoin[];
-};
-
-export type ProductSupplierEntry = {
-  key: string;
-  supplierId: string | null;
-  name: string;
-  document: string | null;
-  purchaseCount: number;
-  lastPurchaseAt: string;
-  lastUnitValue: number | null;
 };
 
 function expenseFromRow(row: ExpenseItemSupplierRow): ExpenseJoin {
@@ -75,7 +71,7 @@ export function aggregateProductSuppliers(
     const document =
       linked?.document ?? exp.supplier_document?.replace(/\D/g, "") ?? null;
     const supplierId = linked?.id ?? exp.supplier_id ?? null;
-    const key = supplierId ?? `nf:${name.toLowerCase()}`;
+    const key = productSupplierKey(supplierId, name);
     const purchasedAt = purchaseDateFromExpense(exp, row.created_at);
     const unitValue =
       row.unit_value != null && Number.isFinite(Number(row.unit_value))
@@ -92,6 +88,7 @@ export function aggregateProductSuppliers(
         purchaseCount: 1,
         lastPurchaseAt: purchasedAt,
         lastUnitValue: unitValue,
+        viaNfe: false,
       });
       continue;
     }
@@ -103,11 +100,119 @@ export function aggregateProductSuppliers(
     }
   }
 
-  return [...map.values()].sort(
-    (a, b) =>
-      b.purchaseCount - a.purchaseCount ||
-      a.name.localeCompare(b.name, "pt-BR"),
+  return [...map.values()];
+}
+
+function firstSupplierJoin(
+  raw:
+    | { id: string; name: string; document: string | null }
+    | { id: string; name: string; document: string | null }[]
+    | null
+    | undefined,
+): { id: string; name: string; document: string | null } | null {
+  if (!raw) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
+function lastroEntriesFromCodes(
+  rows: Array<{
+    supplier_id: string;
+    created_at: string;
+    suppliers:
+      | { id: string; name: string; document: string | null }
+      | { id: string; name: string; document: string | null }[]
+      | null;
+  }>,
+): ProductSupplierEntry[] {
+  const map = new Map<string, ProductSupplierEntry>();
+  for (const row of rows) {
+    const linked = firstSupplierJoin(row.suppliers);
+    const name = (linked?.name ?? "").trim() || "Fornecedor da NF-e";
+    const supplierId = linked?.id ?? row.supplier_id;
+    const key = productSupplierKey(supplierId, name);
+    const existing = map.get(key);
+    if (
+      existing &&
+      purchaseTimestamp(existing.lastPurchaseAt) >=
+        purchaseTimestamp(row.created_at)
+    ) {
+      continue;
+    }
+    map.set(key, {
+      key,
+      supplierId,
+      name,
+      document: linked?.document ?? null,
+      purchaseCount: 0,
+      lastPurchaseAt: row.created_at,
+      lastUnitValue: null,
+      viaNfe: true,
+    });
+  }
+  return [...map.values()];
+}
+
+async function loadNfeMovementLastro(
+  productId: string,
+): Promise<ProductSupplierEntry[]> {
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select("reference_id, unit_cost, created_at, reference_type")
+    .eq("product_id", productId)
+    .in("reference_type", [...NFE_PRODUCT_CREATE_REFERENCE_TYPES])
+    .not("reference_id", "is", null)
+    .limit(50);
+  if (error || !data?.length) return [];
+
+  const supplierIds = [
+    ...new Set(
+      data
+        .map((r) => (r.reference_id != null ? String(r.reference_id) : ""))
+        .filter(Boolean),
+    ),
+  ];
+  if (supplierIds.length === 0) return [];
+
+  const { data: suppliers, error: supErr } = await supabase
+    .from("suppliers")
+    .select("id, name, document")
+    .in("id", supplierIds);
+  if (supErr || !suppliers?.length) return [];
+
+  const byId = new Map(
+    suppliers.map((s) => [String(s.id), s] as const),
   );
+  const map = new Map<string, ProductSupplierEntry>();
+  for (const row of data) {
+    const sid = row.reference_id != null ? String(row.reference_id) : "";
+    const supplier = byId.get(sid);
+    if (!supplier) continue;
+    const name = (supplier.name ?? "").trim() || "Fornecedor da NF-e";
+    const key = productSupplierKey(sid, name);
+    const unitValue =
+      row.unit_cost != null && Number(row.unit_cost) > 0
+        ? Number(row.unit_cost)
+        : null;
+    const existing = map.get(key);
+    if (
+      existing &&
+      purchaseTimestamp(existing.lastPurchaseAt) >=
+        purchaseTimestamp(String(row.created_at))
+    ) {
+      continue;
+    }
+    map.set(key, {
+      key,
+      supplierId: sid,
+      name,
+      document: supplier.document ?? null,
+      purchaseCount: 0,
+      lastPurchaseAt: String(row.created_at),
+      lastUnitValue: unitValue,
+      viaNfe: true,
+    });
+  }
+  return [...map.values()];
 }
 
 type Props = {
@@ -133,10 +238,11 @@ export function ProductSuppliersSection({
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("expense_items")
-      .select(
-        `
+    const [expenseRes, codesRes, movementLastro] = await Promise.all([
+      supabase
+        .from("expense_items")
+        .select(
+          `
         unit_value,
         created_at,
         expenses!inner (
@@ -149,19 +255,42 @@ export function ProductSuppliersSection({
           suppliers ( id, name, document )
         )
       `,
-      )
-      .eq("product_id", productId)
-      .eq("expenses.company_id", companyId)
-      .limit(3000);
+        )
+        .eq("product_id", productId)
+        .eq("expenses.company_id", companyId)
+        .limit(3000),
+      supabase
+        .from("product_supplier_codes")
+        .select("supplier_id, created_at, suppliers ( id, name, document )")
+        .eq("product_id", productId)
+        .eq("company_id", companyId)
+        .limit(200),
+      loadNfeMovementLastro(productId),
+    ]);
 
-    if (error) {
-      console.error("[produto] fornecedores", error.message);
-      setEntries([]);
-    } else {
-      setEntries(
-        aggregateProductSuppliers((data ?? []) as ExpenseItemSupplierRow[]),
-      );
+    if (expenseRes.error) {
+      console.error("[produto] fornecedores", expenseRes.error.message);
     }
+    if (codesRes.error) {
+      console.error("[produto] fornecedores-nfe", codesRes.error.message);
+    }
+
+    const fromExpenses = aggregateProductSuppliers(
+      (expenseRes.data ?? []) as ExpenseItemSupplierRow[],
+    );
+    const fromCodes = lastroEntriesFromCodes(
+      (codesRes.data ?? []) as Array<{
+        supplier_id: string;
+        created_at: string;
+        suppliers:
+          | { id: string; name: string; document: string | null }
+          | { id: string; name: string; document: string | null }[]
+          | null;
+      }>,
+    );
+    setEntries(
+      mergeProductSupplierEntries(fromExpenses, [...fromCodes, ...movementLastro]),
+    );
     setLoading(false);
   }, [productId, companyId]);
 
@@ -178,6 +307,7 @@ export function ProductSuppliersSection({
 
   const formatPurchaseDate = (isoOrYmd: string) => {
     const trimmed = isoOrYmd.trim();
+    if (!trimmed) return "—";
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
       const [y, m, d] = trimmed.split("-").map(Number);
       return new Date(y, m - 1, d).toLocaleDateString("pt-BR", {
@@ -214,7 +344,7 @@ export function ProductSuppliersSection({
         </div>
       ) : entries.length === 0 ? (
         <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-          Nenhum fornecedor vinculado em despesas com este produto ainda.
+          Nenhum fornecedor vinculado a este produto ainda.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -236,10 +366,27 @@ export function ProductSuppliersSection({
                   </p>
                 ) : null}
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  Última compra em{" "}
-                  <span className="font-medium text-foreground">
-                    {formatPurchaseDate(entry.lastPurchaseAt)}
-                  </span>
+                  {entry.purchaseCount > 0 ? (
+                    <>
+                      Última compra em{" "}
+                      <span className="font-medium text-foreground">
+                        {formatPurchaseDate(entry.lastPurchaseAt)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      Vínculo da NF-e
+                      {entry.lastPurchaseAt ? (
+                        <>
+                          {" "}
+                          em{" "}
+                          <span className="font-medium text-foreground">
+                            {formatPurchaseDate(entry.lastPurchaseAt)}
+                          </span>
+                        </>
+                      ) : null}
+                    </>
+                  )}
                   {entry.lastUnitValue != null ? (
                     <>
                       {" "}
@@ -252,9 +399,11 @@ export function ProductSuppliersSection({
                 </p>
               </div>
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {entry.purchaseCount === 1
-                  ? "1× em notas"
-                  : `${entry.purchaseCount}× em notas`}
+                {entry.purchaseCount === 0
+                  ? "NF-e"
+                  : entry.purchaseCount === 1
+                    ? "1× em notas"
+                    : `${entry.purchaseCount}× em notas`}
               </span>
             </li>
           ))}
