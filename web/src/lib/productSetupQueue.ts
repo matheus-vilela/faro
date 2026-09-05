@@ -9,6 +9,7 @@ import {
   type PurchaseMatchRow,
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
+import { fetchExcludedFromSalesProductIds } from "@/lib/productExcludeFromSales";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type ProductSetupKind =
@@ -221,7 +222,8 @@ export async function fetchProductSetupQueue(
   client: SupabaseClient,
   companyId: string,
 ): Promise<ProductSetupQueue> {
-  const [lists, pendingRecipes, pendingSales, recipesPick] = await Promise.all([
+  const [lists, pendingRecipes, pendingSales, recipesPick, excludedIds] =
+    await Promise.all([
     fetchProductRecipeMatchLists(client, companyId, {
       purchaseLimit: 2000,
       purchaseOffset: 0,
@@ -231,6 +233,7 @@ export async function fetchProductSetupQueue(
     fetchDashboardImportReviewEpocRecipesNoIngredients(client, companyId),
     fetchDashboardImportReviewPendingRevenueLink(client, companyId),
     fetchCompanyRecipesForPick(client, companyId),
+    fetchExcludedFromSalesProductIds(companyId),
   ]);
 
   const error =
@@ -249,6 +252,7 @@ export async function fetchProductSetupQueue(
       .map((row) => row.output_product_id)
       .filter((id): id is string => Boolean(id)),
   );
+  const excludedFromSales = new Set(excludedIds);
 
   const items: ProductSetupItem[] = [];
 
@@ -288,6 +292,7 @@ export async function fetchProductSetupQueue(
   }
 
   for (const sold of lists.soldOnly) {
+    if (excludedFromSales.has(sold.product_id)) continue;
     if (recipePendingIds.has(sold.product_id)) continue;
     if (salesLinkIds.has(sold.product_id)) continue;
     // Ficha já existe: a correlação ainda devolve o item (só saída), mas o setup acabou.

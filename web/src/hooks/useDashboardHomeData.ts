@@ -36,6 +36,10 @@ import {
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import {
+  fetchExcludedFromSalesProductIds,
+  sumRevenueCmvAppearingAsSale,
+} from "@/lib/productExcludeFromSales";
+import {
   buildVendasRealizadasResumo,
   getResumoRanges,
   normalizeWeekStartsOn,
@@ -193,6 +197,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         boletosRows,
         dreBoletosRes,
         dreCmvRes,
+        excludedFromSalesIds,
       ] = await Promise.all([
         fetchAllInRange<RevenueEntry>(
           supabase
@@ -255,11 +260,12 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           .lte("due_date", monthEnd),
         supabase
           .from("revenue_entries")
-          .select("cmv_amount")
+          .select("cmv_amount, product_id, entry_mode")
           .eq("company_id", companyId)
           .in("entry_mode", ["product_sale", "recipe_sale"])
           .gte("entry_date", monthStart)
           .lte("entry_date", monthEnd),
+        fetchExcludedFromSalesProductIds(companyId),
       ]);
 
       const productIds = [
@@ -294,7 +300,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         cmvProductIds.size
           ? supabase
               .from("products")
-              .select("id, name, composes_cmv, average_cost")
+              .select("id, name, composes_cmv, average_cost, exclude_from_sales")
               .in("id", [...cmvProductIds])
           : Promise.resolve({ data: [], error: null }),
         recipeIds.length
@@ -312,11 +318,13 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         name: string;
         composes_cmv: boolean | null;
         average_cost: number | null;
+        exclude_from_sales?: boolean | null;
       }>) {
         productNameById.set(p.id, p.name);
         productMetaById.set(p.id, {
           composes_cmv: p.composes_cmv !== false,
           average_cost: p.average_cost,
+          exclude_from_sales: p.exclude_from_sales === true,
         });
       }
       const recipeNameById = new Map(
@@ -326,6 +334,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       );
       const categoriesById = new Map(catRows.map((c) => [c.id, c]));
 
+      const excludedProductIds = new Set(excludedFromSalesIds);
       const resumo = buildVendasRealizadasResumo({
         entries: revenueRows,
         period,
@@ -334,6 +343,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         categoriesById,
         productNameById,
         recipeNameById,
+        excludedProductIds,
         epocPayments: epocPaymentRows,
         epocFaturamentoDays: epocFatRows,
         weekStartsOn,
@@ -425,14 +435,13 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
           : undefined;
         return cat ? mapCategoryToDreBucket(cat) !== "CMV" : true;
       });
-      const salesCmv = (dreCmvRes.data ?? []).reduce(
-        (s, r) =>
-          s +
-          Math.max(
-            0,
-            Number((r as { cmv_amount?: number }).cmv_amount) || 0,
-          ),
-        0,
+      const salesCmv = sumRevenueCmvAppearingAsSale(
+        (dreCmvRes.data ?? []) as Array<{
+          cmv_amount?: number | null;
+          product_id?: string | null;
+          entry_mode?: string | null;
+        }>,
+        excludedProductIds,
       );
       const rateioItems = await fetchExpenseItemsForRateio(
         companyId,

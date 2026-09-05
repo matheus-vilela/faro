@@ -56,6 +56,11 @@ import {
   roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
+import {
+  applyRevenueExcludeFromSalesFilter,
+  fetchExcludedFromSalesProductIds,
+  isProductExcludedFromSales,
+} from "@/lib/productExcludeFromSales";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
@@ -156,7 +161,10 @@ function PontualProductRecipePicker({
   const parsed = useMemo(() => parsePontualRef(value), [value]);
 
   const activeProducts = useMemo(
-    () => products.filter((p) => p.is_active !== false),
+    () =>
+      products.filter(
+        (p) => p.is_active !== false && !isProductExcludedFromSales(p),
+      ),
     [products],
   );
   const activeRecipes = useMemo(
@@ -629,7 +637,7 @@ export function Receitas() {
       // PostgrestFilterBuilder após .select(); tipagem do client é instável aqui.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       q: any,
-      opts: { startD: string; endD: string; companyId: string },
+      opts: { startD: string; endD: string; companyId: string; excludedProductIds: string[] },
     ) => {
       let filtered = q
         .eq("company_id", opts.companyId)
@@ -645,6 +653,10 @@ export function Receitas() {
       if (revenueTypeFilter !== "all") {
         filtered = filtered.eq("revenue_type", revenueTypeFilter);
       }
+      filtered = applyRevenueExcludeFromSalesFilter(
+        filtered,
+        opts.excludedProductIds,
+      );
       return filtered;
     },
     [debouncedSearch, entryModeFilter, revenueTypeFilter],
@@ -656,10 +668,13 @@ export function Receitas() {
     setSummaryLoading(true);
     const startD = startOfMonthDate(period.month, period.year);
     const endD = endOfMonthDate(period.month, period.year);
+    const excludedProductIds = await fetchExcludedFromSalesProductIds(
+      currentCompany.id,
+    );
 
     const q = applyRevenueListFilters(
       supabase.from("revenue_entries").select("*", { count: "exact" }),
-      { startD, endD, companyId: currentCompany.id },
+      { startD, endD, companyId: currentCompany.id, excludedProductIds },
     )
       .order("entry_date", { ascending: false })
       .order("created_at", { ascending: false });
@@ -668,7 +683,7 @@ export function Receitas() {
       supabase
         .from("revenue_entries")
         .select("gross_amount, tax_amount, net_amount"),
-      { startD, endD, companyId: currentCompany.id },
+      { startD, endD, companyId: currentCompany.id, excludedProductIds },
     );
 
     const [{ data, count, error }, summaryResult] = await Promise.all([
@@ -786,7 +801,14 @@ export function Receitas() {
       const data = await fetchAllInRange<RevenueEntry>(
         applyRevenueListFilters(
           supabase.from("revenue_entries").select("*"),
-          { startD: startIso, endD: endIso, companyId: currentCompany.id },
+          {
+            startD: startIso,
+            endD: endIso,
+            companyId: currentCompany.id,
+            excludedProductIds: await fetchExcludedFromSalesProductIds(
+              currentCompany.id,
+            ),
+          },
         )
           .order("entry_date", { ascending: true })
           .order("created_at", { ascending: true }),

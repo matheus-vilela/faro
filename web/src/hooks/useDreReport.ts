@@ -19,6 +19,10 @@ import {
   type RateioLine,
 } from "@/lib/dre/rateioBoletoByItems";
 import { supabase } from "@/lib/supabase";
+import {
+  fetchExcludedFromSalesProductIds,
+  sumRevenueCmvAppearingAsSale,
+} from "@/lib/productExcludeFromSales";
 import type { CompanyCategory } from "@/types/category";
 import type { Boleto } from "@/types/expense";
 import { isBoletoPayable, isBoletoTransfer } from "@/types/expense";
@@ -108,7 +112,7 @@ export function useDreReport(
     const startDate = start.slice(0, 10);
     const endDate = end.slice(0, 10);
 
-    const [catRes, bolRes, revCmvRes] = await Promise.all([
+    const [catRes, bolRes, revCmvRes, excludedIds] = await Promise.all([
       supabase
         .from("company_categories")
         .select("*")
@@ -128,11 +132,12 @@ export function useDreReport(
         .order("amount", { ascending: false }),
       supabase
         .from("revenue_entries")
-        .select("cmv_amount")
+        .select("cmv_amount, product_id, entry_mode")
         .eq("company_id", companyId)
         .in("entry_mode", ["product_sale", "recipe_sale"])
         .gte("entry_date", startDate)
         .lte("entry_date", endDate),
+      fetchExcludedFromSalesProductIds(companyId),
     ]);
 
     if (catRes.error) {
@@ -176,9 +181,13 @@ export function useDreReport(
       console.error(e);
       setRateioItemsByExpenseId(new Map());
     }
-    const salesCmv = (revCmvRes.data ?? []).reduce(
-      (s, row) => s + Math.max(0, Number((row as { cmv_amount?: number }).cmv_amount) || 0),
-      0,
+    const salesCmv = sumRevenueCmvAppearingAsSale(
+      (revCmvRes.data ?? []) as Array<{
+        cmv_amount?: number | null;
+        product_id?: string | null;
+        entry_mode?: string | null;
+      }>,
+      new Set(excludedIds),
     );
     setSalesCmvInPeriod(salesCmv);
     setLoading(false);

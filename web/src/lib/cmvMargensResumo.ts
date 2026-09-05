@@ -5,6 +5,7 @@ import {
 } from "@/lib/vendasRealizadasResumo";
 import { parseRevenueCmvLines } from "@/types/revenueCmv";
 import type { RevenueEntry } from "@/types/revenue";
+import { filterRevenueEntriesAppearingAsSale } from "@/lib/productExcludeFromSales";
 
 export type CmvPeriodFilter = ResumoPeriodFilter;
 
@@ -90,6 +91,7 @@ export type CmvMargensDashboard = {
 export type ProductCmvMeta = {
   composes_cmv?: boolean | null;
   average_cost?: number | null;
+  exclude_from_sales?: boolean | null;
 };
 
 function inRange(ymd: string, start: string, end: string): boolean {
@@ -460,11 +462,16 @@ export function buildCmvMargensDashboard(input: {
   weekStartsOn?: number;
 }): CmvMargensDashboard {
   const productMetaById = input.productMetaById ?? new Map();
+  const excludedProductIds = new Set<string>();
+  for (const [id, meta] of productMetaById) {
+    if (meta.exclude_from_sales === true) excludedProductIds.add(id);
+  }
   const ranges = getResumoRanges(input.period, input.todayYmd, null, {
     weekStartsOn: input.weekStartsOn,
   });
-  const operational = input.entries.filter(
-    (e) => e.revenue_type === "operational",
+  const operational = filterRevenueEntriesAppearingAsSale(
+    input.entries.filter((e) => e.revenue_type === "operational"),
+    excludedProductIds,
   );
   const current = operational.filter((e) =>
     inRange(e.entry_date.slice(0, 10), ranges.currentStart, ranges.currentEnd),

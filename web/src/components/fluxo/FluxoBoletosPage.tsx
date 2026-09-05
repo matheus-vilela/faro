@@ -6,19 +6,22 @@ import {
 import { CreateBoletoSheet } from "@/components/CreateBoletoSheet";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { BoletoResumoSheet } from "@/components/fluxo/BoletoResumoSheet";
-import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { EditBoletoSheet } from "@/components/fluxo/EditBoletoSheet";
-import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
 import { PayableByCategoryView } from "@/components/fluxo/PayableByCategoryView";
 import { PayableByDueDateView } from "@/components/fluxo/PayableByDueDateView";
 import { PayableListViewToggle } from "@/components/fluxo/PayableListViewToggle";
 import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
+import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
+import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
+import {
+  ExportButton,
+  HeaderExportActions,
+} from "@/components/reports/ExportButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,31 +50,21 @@ import {
 } from "@/components/ui/sheet";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
+import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
+import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { localDateYmd } from "@/lib/boletoPayment";
 import {
   fetchSplitRemainderBoletos,
   undoPayBoleto,
 } from "@/lib/boletoPaymentApi";
-import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
-import { formatBoletoCategoryLabel } from "@/lib/boletoCategory";
-import { boletoVisibleInFluxo } from "@/lib/boletoFluxo";
-import { formatBoletoFluxoDescription } from "@/lib/boletoFluxoDescription";
 import { getCalendarGridDateRange } from "@/lib/boletosCalendarGrid";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
-import { fetchPayableReceiptContext } from "@/lib/fetchPayableReceiptContext";
 import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
 import {
   groupRateioItemsByExpenseId,
   type RateioLine,
 } from "@/lib/dre/rateioBoletoByItems";
-import {
-  EMPTY_PAYABLE_RECEIPT_CONTEXT,
-  isBoletoPendingMerchandiseReceipt,
-  isBoletoReadyToPay,
-  isScheduledPayableBoleto,
-  sumPayableBuckets,
-  type PayableReceiptContext,
-} from "@/lib/payableBoletoReceipt";
 import {
   fetchMergedPayableBoletosInRange,
   fetchSeriesMastersWithAnchorBoletos,
@@ -81,6 +74,16 @@ import {
   filterBoletosBySearch,
   isProjectedBoleto,
 } from "@/lib/expenseSeriesProjection";
+import { fetchPayableReceiptContext } from "@/lib/fetchPayableReceiptContext";
+import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
+import {
+  EMPTY_PAYABLE_RECEIPT_CONTEXT,
+  isBoletoPendingMerchandiseReceipt,
+  isBoletoReadyToPay,
+  isScheduledPayableBoleto,
+  sumPayableBuckets,
+  type PayableReceiptContext,
+} from "@/lib/payableBoletoReceipt";
 import type { PayableListView } from "@/lib/payableListViews";
 import { sortPayablesPaidLast } from "@/lib/payableListViews";
 import {
@@ -91,6 +94,10 @@ import {
   getPayableTotalsFetchRange,
   type PayableTotals,
 } from "@/lib/payableTotals";
+import {
+  fetchExcludedFromSalesProductIds,
+  filterRevenueEntriesAppearingAsSale,
+} from "@/lib/productExcludeFromSales";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -106,15 +113,22 @@ import type { RevenueEntry } from "@/types/revenue";
 import type { ServiceDailySaleCalendarRow } from "@/types/serviceDailySale";
 import type { LucideIcon } from "lucide-react";
 import { Loader2, PackageSearch, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { RevenueDaySalesSheet } from "../revenue/RevenueDaySalesSheet";
 import { RevenueDetailSheet } from "../revenue/RevenueDetailSheet";
 import {
-  type RevenueCalendarDayListPayload,
   RevenueEntriesCalendar,
+  type RevenueCalendarDayListPayload,
 } from "../revenue/RevenueEntriesCalendar";
-import { RevenueDaySalesSheet } from "../revenue/RevenueDaySalesSheet";
 import { VendasRealizadasListTable } from "./VendasRealizadasListTable";
 
 const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
@@ -426,7 +440,7 @@ export function FluxoBoletosPage({
       period.year,
     );
     try {
-      const [data, servicesData] = await Promise.all([
+      const [data, servicesData, excludedIds] = await Promise.all([
         fetchAllInRange<RevenueEntry>(
           supabase
             .from("revenue_entries")
@@ -446,15 +460,20 @@ export function FluxoBoletosPage({
             .lte("sale_date", endIso)
             .order("sale_date", { ascending: true }),
         ),
+        fetchExcludedFromSalesProductIds(companyId),
       ]);
-      setCalendarRevenueEntries(data);
+      const filteredData = filterRevenueEntriesAppearingAsSale(
+        data,
+        new Set(excludedIds),
+      );
       const services = normalizeServiceDailySales(servicesData);
+      setCalendarRevenueEntries(filteredData);
       setCalendarServiceSales(services);
       setRevenueCalendarDayList((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          items: data.filter(
+          items: filteredData.filter(
             (entry) => entry.entry_date.slice(0, 10) === prev.dateKey,
           ),
           serviceItems: services.filter(
@@ -526,18 +545,25 @@ export function FluxoBoletosPage({
       } else {
         setBoletosMonthFiltered([]);
         setBoletosList([]);
-        const data = await fetchAllInRange<RevenueEntry>(
-          supabase
-            .from("revenue_entries")
-            .select("*")
-            .eq("company_id", companyId)
-            .gte("entry_date", startYmd)
-            .lte("entry_date", endYmd)
-            .order("entry_date", { ascending: true })
-            .order("created_at", { ascending: true }),
+        const [data, excludedIds] = await Promise.all([
+          fetchAllInRange<RevenueEntry>(
+            supabase
+              .from("revenue_entries")
+              .select("*")
+              .eq("company_id", companyId)
+              .gte("entry_date", startYmd)
+              .lte("entry_date", endYmd)
+              .order("entry_date", { ascending: true })
+              .order("created_at", { ascending: true }),
+          ),
+          fetchExcludedFromSalesProductIds(companyId),
+        ]);
+        const visible = filterRevenueEntriesAppearingAsSale(
+          data,
+          new Set(excludedIds),
         );
-        setListRevenueEntries(data);
-        setBoletosListCount(data.length);
+        setListRevenueEntries(visible);
+        setBoletosListCount(visible.length);
       }
     } catch (e) {
       console.error(e);
@@ -644,7 +670,9 @@ export function FluxoBoletosPage({
       .map((b) => b.expense_id)
       .filter((id): id is string => Boolean(id));
     void fetchExpenseItemsForRateio(companyId, expenseIds)
-      .then((items) => setRateioItemsByExpenseId(groupRateioItemsByExpenseId(items)))
+      .then((items) =>
+        setRateioItemsByExpenseId(groupRateioItemsByExpenseId(items)),
+      )
       .catch((error) => {
         console.error(error);
         setRateioItemsByExpenseId(new Map());
@@ -1116,9 +1144,7 @@ export function FluxoBoletosPage({
               </span>
             )}
             <span className="inline-block text-xs font-medium text-primary rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5">
-              {isBoletoTransfer(b)
-                ? "Transferência"
-                : boletoCategoryLabel(b)}
+              {isBoletoTransfer(b) ? "Transferência" : boletoCategoryLabel(b)}
             </span>
           </div>
           {fluxoBoletoSupplierLabel(b) ? (
@@ -1267,9 +1293,7 @@ export function FluxoBoletosPage({
       };
     }
     const ready = items.filter((b) => boletoReadyToPay(b));
-    const pending = items.filter((b) =>
-      boletoPendingMerchandiseReceipt(b),
-    );
+    const pending = items.filter((b) => boletoPendingMerchandiseReceipt(b));
     const other = items.filter(
       (b) => !boletoReadyToPay(b) && !boletoPendingMerchandiseReceipt(b),
     );
@@ -1303,7 +1327,12 @@ export function FluxoBoletosPage({
       allowedReportIds={
         isReceivableFlow
           ? ["receivables_open", "receipts_made", "financial_movement"]
-          : ["payables_open", "payables_overdue", "payments_made", "financial_movement"]
+          : [
+              "payables_open",
+              "payables_overdue",
+              "payments_made",
+              "financial_movement",
+            ]
       }
       lockReport={false}
       initialFilters={{
@@ -1537,7 +1566,8 @@ export function FluxoBoletosPage({
           open={!!calendarDayList}
           modal={false}
           onOpenChange={(o) => {
-            if (!o && (boletoResumo || seriesEditOpen || editBoletoOpen)) return;
+            if (!o && (boletoResumo || seriesEditOpen || editBoletoOpen))
+              return;
             if (!o) closeCalendarDayList();
           }}
         >
@@ -1799,9 +1829,7 @@ export function FluxoBoletosPage({
 
       <PayBoletoDialog
         open={
-          markPaidDialogOpen &&
-          !!boletoResumo &&
-          isBoletoPayable(boletoResumo)
+          markPaidDialogOpen && !!boletoResumo && isBoletoPayable(boletoResumo)
         }
         onOpenChange={setMarkPaidDialogOpen}
         boleto={boletoResumo}
@@ -1815,9 +1843,7 @@ export function FluxoBoletosPage({
 
       <Dialog
         open={
-          markPaidDialogOpen &&
-          !!boletoResumo &&
-          !isBoletoPayable(boletoResumo)
+          markPaidDialogOpen && !!boletoResumo && !isBoletoPayable(boletoResumo)
         }
         onOpenChange={(open) => {
           if (!open && markingPaid) return;

@@ -60,7 +60,7 @@ export function ProductCategoryTagsField({
     label === undefined ? "Categorias de produto" : label;
   const resolvedHint =
     hint === undefined
-      ? "Adicione quantas quiser. Busque, selecione ou crie uma nova categoria."
+      ? "Adicione quantas quiser. Busque, selecione ou crie uma nova categoria. Categorias marcadas como não-venda não entram em vendas nem na correlação."
       : hint;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -166,13 +166,18 @@ export function ProductCategoryTagsField({
             <button
               key={c.id}
               type="button"
-              className="flex w-full rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
               onClick={() => {
                 addId(c.id);
                 setOpen(false);
               }}
             >
-              {c.name}
+              <span>{c.name}</span>
+              {c.exclude_from_sales ? (
+                <span className="shrink-0 text-[11px] text-amber-800 dark:text-amber-200">
+                  Não é venda
+                </span>
+              ) : null}
             </button>
           ))
         )}
@@ -217,9 +222,16 @@ export function ProductCategoryTagsField({
           <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
             {first ? (
               <span
+                title={
+                  first.exclude_from_sales
+                    ? "Não aparece como venda"
+                    : undefined
+                }
                 className={cn(
                   "inline-flex max-w-full min-w-0 items-center gap-0.5 rounded-full border px-2 py-0.5 text-xs font-medium",
-                  tagClassAt(0),
+                  first.exclude_from_sales
+                    ? "border-amber-500/50 bg-amber-500/12 text-amber-950 dark:text-amber-50"
+                    : tagClassAt(0),
                 )}
               >
                 <span className="truncate">{first.name}</span>
@@ -299,12 +311,24 @@ export function ProductCategoryTagsField({
             {selectedOrdered.map((c, idx) => (
               <span
                 key={c.id}
+                title={
+                  c.exclude_from_sales
+                    ? "Não aparece como venda"
+                    : undefined
+                }
                 className={cn(
                   "inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm",
-                  tagClassAt(idx),
+                  c.exclude_from_sales
+                    ? "border-amber-500/50 bg-amber-500/12 text-amber-950 dark:text-amber-50"
+                    : tagClassAt(idx),
                 )}
               >
                 <span className="truncate">{c.name}</span>
+                {c.exclude_from_sales ? (
+                  <span className="shrink-0 text-[10px] font-normal opacity-80">
+                    não venda
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"

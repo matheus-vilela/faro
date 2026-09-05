@@ -58,7 +58,7 @@ export async function buildCmvMarginsReport(
     cmvProductIds.size
       ? supabase
           .from("products")
-          .select("id, name, composes_cmv, average_cost")
+          .select("id, name, composes_cmv, average_cost, exclude_from_sales")
           .in("id", [...cmvProductIds])
       : Promise.resolve({ data: [], error: null }),
     recipeIds.length
@@ -75,11 +75,13 @@ export async function buildCmvMarginsReport(
     name: string;
     composes_cmv?: boolean | null;
     average_cost?: number | null;
+    exclude_from_sales?: boolean | null;
   }[]) {
     productNameById.set(p.id, p.name);
     productMetaById.set(p.id, {
       composes_cmv: p.composes_cmv,
       average_cost: p.average_cost,
+      exclude_from_sales: p.exclude_from_sales,
     });
   }
   const recipeNameById = new Map<string, string>();

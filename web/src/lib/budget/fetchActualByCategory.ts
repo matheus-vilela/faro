@@ -1,6 +1,10 @@
 import type { MonthYear } from "@/components/MonthSelector";
 import { getMonthYmdRange } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
+import {
+  fetchExcludedFromSalesProductIds,
+  sumRevenueCmvAppearingAsSale,
+} from "@/lib/productExcludeFromSales";
 import type { CompanyCategory } from "@/types/category";
 import { mapCategoryToDreBucket } from "@/lib/dre/dreMapping";
 import { fetchExpenseItemsForRateio } from "@/lib/dre/fetchExpenseItemsForRateio";
@@ -78,14 +82,28 @@ export async function fetchActualByCategory(
 
   const salesCmvPromise =
     basis === "competencia"
-      ? supabase
-          .from("revenue_entries")
-          .select("cmv_amount")
-          .eq("company_id", companyId)
-          .in("entry_mode", ["product_sale", "recipe_sale"])
-          .gte("entry_date", startYmd)
-          .lte("entry_date", endYmd)
-      : Promise.resolve({ data: [] as { cmv_amount: number | null }[], error: null });
+      ? Promise.all([
+          supabase
+            .from("revenue_entries")
+            .select("cmv_amount, product_id, entry_mode")
+            .eq("company_id", companyId)
+            .in("entry_mode", ["product_sale", "recipe_sale"])
+            .gte("entry_date", startYmd)
+            .lte("entry_date", endYmd),
+          fetchExcludedFromSalesProductIds(companyId),
+        ]).then(([revRes, excludedIds]) => ({
+          ...revRes,
+          excludedIds,
+        }))
+      : Promise.resolve({
+          data: [] as {
+            cmv_amount: number | null;
+            product_id?: string | null;
+            entry_mode?: string | null;
+          }[],
+          error: null,
+          excludedIds: [] as string[],
+        });
 
   const [bolRes, revRes] = await Promise.all([query, salesCmvPromise]);
 
@@ -141,9 +159,13 @@ export async function fetchActualByCategory(
     }
   }
 
-  const salesCmv = (revRes.data ?? []).reduce(
-    (s, row) => s + Math.max(0, Number(row.cmv_amount) || 0),
-    0,
+  const salesCmv = sumRevenueCmvAppearingAsSale(
+    (revRes.data ?? []) as Array<{
+      cmv_amount?: number | null;
+      product_id?: string | null;
+      entry_mode?: string | null;
+    }>,
+    new Set(revRes.excludedIds ?? []),
   );
 
   return {

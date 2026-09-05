@@ -24,6 +24,7 @@ import {
 import { nestedRelation } from "@/types/acquirer";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
+import { excludedProductIdsFromRows } from "@/lib/productExcludeFromSales";
 import {
   Banknote,
   Hash,
@@ -576,6 +577,9 @@ export function VendasRealizadasResumo() {
   const [recipeNameById, setRecipeNameById] = useState<Map<string, string>>(
     () => new Map(),
   );
+  const [excludedProductIds, setExcludedProductIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [loading, setLoading] = useState(true);
 
   const todayYmd = localDateYmd();
@@ -691,7 +695,10 @@ export function VendasRealizadasResumo() {
 
       const [productsRes, recipesRes] = await Promise.all([
         productIds.length
-          ? supabase.from("products").select("id, name").in("id", productIds)
+          ? supabase
+              .from("products")
+              .select("id, name, exclude_from_sales")
+              .in("id", productIds)
           : Promise.resolve({ data: [], error: null }),
         recipeIds.length
           ? supabase.from("recipes").select("id, name").in("id", recipeIds)
@@ -707,9 +714,21 @@ export function VendasRealizadasResumo() {
       setCategories(catRows);
       setProductNameById(
         new Map(
-          ((productsRes.data as { id: string; name: string }[]) ?? []).map(
-            (p) => [p.id, p.name],
-          ),
+          (
+            (productsRes.data as {
+              id: string;
+              name: string;
+              exclude_from_sales?: boolean | null;
+            }[]) ?? []
+          ).map((p) => [p.id, p.name]),
+        ),
+      );
+      setExcludedProductIds(
+        excludedProductIdsFromRows(
+          (productsRes.data as {
+            id: string;
+            exclude_from_sales?: boolean | null;
+          }[]) ?? [],
         ),
       );
       setRecipeNameById(
@@ -748,6 +767,7 @@ export function VendasRealizadasResumo() {
         categoriesById,
         productNameById,
         recipeNameById,
+        excludedProductIds,
         epocPayments,
         epocFaturamentoDays,
         customRange,
@@ -761,6 +781,7 @@ export function VendasRealizadasResumo() {
       categoriesById,
       productNameById,
       recipeNameById,
+      excludedProductIds,
       epocPayments,
       epocFaturamentoDays,
       customRange,
