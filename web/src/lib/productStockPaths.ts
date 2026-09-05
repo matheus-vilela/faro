@@ -22,7 +22,7 @@ export function recipesPendingPath(): string {
 }
 
 export function recipesMatchPath(): string {
-  return RECIPES_MATCH_PATH;
+  return RECIPES_PATH;
 }
 
 export function stockLossesPath(): string {

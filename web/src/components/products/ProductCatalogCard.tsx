@@ -1,4 +1,8 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  INTERMEDIATE_BADGE_CLASS,
+  isIntermediateProduct,
+} from "@/lib/productIntermediate";
 import { Checkbox } from "@/components/ui/checkbox";
 import { isSystemUnitCode } from "@/lib/companyUnits/productUnitOptions";
 import { cn } from "@/lib/utils";
@@ -6,6 +10,7 @@ import type { Product } from "@/types/product";
 import {
   AlertTriangle,
   ChevronRight,
+  Factory,
   Package,
   PowerOff,
   ShoppingCart,
@@ -114,8 +119,21 @@ export function ProductCatalogCard({
     ? Math.max(0, catSegments.length - visibleCatSegments.length)
     : 0;
 
+  const isIntermediate = isIntermediateProduct(p);
   const statusBadges = (
     <>
+      {isIntermediate && (
+        <Badge
+          variant="secondary"
+          className={cn(
+            "h-6 gap-1 px-2 text-[0.7rem] font-normal",
+            INTERMEDIATE_BADGE_CLASS,
+          )}
+        >
+          <Factory className="h-3 w-3" />
+          Produção
+        </Badge>
+      )}
       {isSaleFamily && (
         <Badge
           variant="secondary"
@@ -124,7 +142,10 @@ export function ProductCatalogCard({
           Agrupamento
         </Badge>
       )}
-      {!isSaleFamily && p.stock_only_origin && !p.not_sale_grouping && (
+      {!isSaleFamily &&
+        !isIntermediate &&
+        p.stock_only_origin &&
+        !p.not_sale_grouping && (
         <Badge
           variant="outline"
           className="h-6 border-amber-600/40 bg-amber-500/10 px-2 text-[0.7rem] font-normal text-amber-950 dark:text-amber-100"

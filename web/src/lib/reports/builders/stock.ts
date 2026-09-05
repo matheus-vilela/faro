@@ -19,6 +19,7 @@ export async function buildStockCatalogReport(
   const mode = ctx.filters.stockMode;
   const filters = ctx.stockFilters ?? {
     search: "",
+    filterCatalogKind: "all",
     filterCategoryId: "all",
     filterActive: "all",
     filterComposesCmv: "all",

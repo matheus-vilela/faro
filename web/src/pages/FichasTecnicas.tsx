@@ -1,6 +1,5 @@
 import { EstoqueFichasPendentesPanel } from "@/components/estoque/EstoqueFichasPendentesPanel";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
-import { EstoqueVincularComprasPanel } from "@/components/estoque/EstoqueVincularComprasPanel";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useCallback } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
@@ -12,7 +11,6 @@ export function FichasTecnicas() {
   const recipeOutputProductId =
     searchParams.get("recipeOutputProduct")?.trim() || undefined;
   const isPendentes = pathname.endsWith("/pendentes");
-  const isVinculos = pathname.endsWith("/vinculos");
 
   const clearRecipeOutputProductParam = useCallback(() => {
     const next = new URLSearchParams(searchParams);
@@ -29,9 +27,6 @@ export function FichasTecnicas() {
 
   if (isPendentes) {
     return <EstoqueFichasPendentesPanel companyId={currentCompany.id} />;
-  }
-  if (isVinculos) {
-    return <EstoqueVincularComprasPanel companyId={currentCompany.id} />;
   }
 
   return (

@@ -13,7 +13,7 @@ No detalhe, o agrupamento e as ações (tornar, vincular, ficha, unificar) ficam
 
 No detalhe do produto, o nome visível é **agrupamento**. As ações de configurar o item (tornar agrupamento, vincular, ficha técnica, unificar, não é agrupamento) ficam no **mesmo card**. Status no header, abaixo das categorias.
 
-Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; configuração em card próprio; lotes, conversões, unificação e fichas abaixo, sem tiles soltos.
+Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; configuração em card próprio; lotes, conversões, unificação e fichas abaixo, sem tiles soltos. Intermediário tem aba **Produção** (mesmo fluxo da ficha).
 
 ## Fora de escopo
 

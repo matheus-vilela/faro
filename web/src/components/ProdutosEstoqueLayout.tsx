@@ -8,7 +8,6 @@ import {
   STOCK_PURCHASES_PATH,
   RECIPES_PATH,
   RECIPES_PENDING_PATH,
-  RECIPES_MATCH_PATH,
   SALE_FAMILIES_PATH,
   SERVICES_PATH,
 } from "@/lib/productStockPaths";
@@ -23,7 +22,6 @@ import {
   Package,
   ShoppingCart,
   SlidersHorizontal,
-  UtensilsCrossed,
   Warehouse,
   type LucideIcon,
 } from "lucide-react";
@@ -106,7 +104,7 @@ const STOCK_GROUPS: {
   {
     id: "fichas",
     label: "Fichas técnicas",
-    description: "Receitas e pendências",
+    description: "Receitas e produção",
     icon: ChefHat,
     links: [
       {
@@ -119,11 +117,6 @@ const STOCK_GROUPS: {
         to: RECIPES_PENDING_PATH,
         label: "Pendentes",
         icon: Inbox,
-      },
-      {
-        to: RECIPES_MATCH_PATH,
-        label: "Vincular compras",
-        icon: UtensilsCrossed,
       },
     ],
   },

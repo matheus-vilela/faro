@@ -6,6 +6,7 @@ import { ProductStockLotsSection } from "@/components/products/ProductStockLotsS
 import { ProductStockValueCard } from "@/components/products/ProductStockValueCard";
 import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import { PRODUCT_SHEET_SECTION } from "@/components/products/productSheetStyles";
+import { type TechnicalSheetKind } from "@/lib/productIntermediate";
 import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
@@ -39,7 +40,7 @@ export function ProductDetailSummary({
   conversionsSaving: boolean;
   onConversionsChange: (next: ProductUnitConversionDraft[]) => void;
   onPromoteStockUnit: (code: string) => void;
-  onOpenTechnicalSheet: () => void;
+  onOpenTechnicalSheet: (kind: TechnicalSheetKind) => void;
   onOpenMerge: (partnerId?: string) => void;
   onProductChanged: () => void;
 }) {

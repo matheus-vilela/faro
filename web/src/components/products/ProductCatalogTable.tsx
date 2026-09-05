@@ -5,6 +5,7 @@ import {
   productUnitCost,
 } from "@/lib/productCatalogValue";
 import type { CatalogSortKey } from "@/lib/productCatalogSort";
+import { isIntermediateProduct } from "@/lib/productIntermediate";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
 import { AlertTriangle } from "lucide-react";
@@ -87,6 +88,7 @@ export function ProductCatalogTable({
         <tbody>
           {products.map((p) => {
             const isSaleFamily = p.stock_control_type === "SALE_FAMILY";
+            const isIntermediate = isIntermediateProduct(p);
             const qNum = Number(p.current_quantity);
             const minNum = Number(p.min_quantity ?? 0);
             const hasAlert =
@@ -118,12 +120,18 @@ export function ProductCatalogTable({
                 <td className="px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="font-medium">{p.name}</span>
+                    {isIntermediate ? (
+                      <span className="text-[0.65rem] text-teal-800 dark:text-teal-200">
+                        Produção
+                      </span>
+                    ) : null}
                     {isSaleFamily ? (
                       <span className="text-[0.65rem] text-sky-800 dark:text-sky-200">
                         Agrupamento
                       </span>
                     ) : null}
                     {!isSaleFamily &&
+                    !isIntermediate &&
                     p.stock_only_origin &&
                     !p.not_sale_grouping ? (
                       <span className="text-[0.65rem] text-amber-900 dark:text-amber-100">

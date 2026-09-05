@@ -32,7 +32,8 @@ const NONE = "none";
 const SELF = "self";
 const NOT_GROUPING = "not_grouping";
 const FICHA_NO = "no";
-const FICHA_YES = "yes";
+const FICHA_SALE = "sale";
+const FICHA_INTERMEDIATE = "intermediate";
 const MERGE_NONE = "";
 
 export function ProductSetupCard({
@@ -56,7 +57,7 @@ export function ProductSetupCard({
   possibleGrouping?: boolean;
   hasTechnicalSheet?: boolean;
   className?: string;
-  onOpenTechnicalSheet: () => void;
+  onOpenTechnicalSheet: (kind: "sale" | "intermediate") => void;
   onOpenMerge: (partnerId?: string) => void;
   onChanged?: () => void;
 }) {
@@ -114,7 +115,13 @@ export function ProductSetupCard({
 
   const kind = info?.kind ?? "none";
   const isRecipe = stockControlType === "RECIPE_CONTROLLED";
+  const isIntermediate = stockControlType === "INTERMEDIATE";
   const isFamily = kind === "family" || stockControlType === "SALE_FAMILY";
+  const fichaValue = isIntermediate
+    ? FICHA_INTERMEDIATE
+    : hasTechnicalSheet || isRecipe
+      ? FICHA_SALE
+      : FICHA_NO;
   const inGrouping = kind === "variant";
   const dismissed = Boolean(notSaleGrouping) && kind === "none" && !isRecipe;
   const familyId = info?.family?.id ?? null;
@@ -150,7 +157,7 @@ export function ProductSetupCard({
         description: "Sugestão escondida",
       });
     }
-    if (!isRecipe && !inGrouping) {
+    if (!isRecipe && !isIntermediate && !inGrouping) {
       rows.push({
         value: SELF,
         label: "Este produto é o agrupamento",
@@ -158,7 +165,7 @@ export function ProductSetupCard({
       });
     }
     return rows;
-  }, [possibleGrouping, dismissed, isFamily, inGrouping, isRecipe]);
+  }, [possibleGrouping, dismissed, isFamily, inGrouping, isRecipe, isIntermediate]);
 
   const groupingOptions = useMemo(() => {
     if (isFamily || isRecipe) return [];
@@ -323,29 +330,48 @@ export function ProductSetupCard({
         <div className="min-w-0 space-y-1.5">
           <Label className="text-xs text-muted-foreground">Ficha técnica</Label>
           <SearchSelect
-            value={hasTechnicalSheet ? FICHA_YES : FICHA_NO}
+            value={fichaValue}
             onValueChange={(v) => {
-              if (v === FICHA_YES) onOpenTechnicalSheet();
+              if (v === FICHA_SALE) onOpenTechnicalSheet("sale");
+              if (v === FICHA_INTERMEDIATE) onOpenTechnicalSheet("intermediate");
             }}
-            disabled={loading || busy}
+            disabled={loading || busy || isFamily}
             placeholder="Não"
             searchPlaceholder="Filtrar…"
             options={[
               {
                 value: FICHA_NO,
                 label: "Não",
-                description: "Não é ficha técnica",
+                description: "Sem ficha",
               },
               {
-                value: FICHA_YES,
-                label: hasTechnicalSheet ? "Deste produto" : "É ficha técnica",
-                description: hasTechnicalSheet
-                  ? "Abrir para editar"
-                  : "Composição fixa de insumos",
+                value: FICHA_SALE,
+                label: "Ficha normal",
+                description: "Na venda, baixa os insumos",
+              },
+              {
+                value: FICHA_INTERMEDIATE,
+                label: "Produto intermediário",
+                description: "Produz, estoca e baixa o produto na venda",
               },
             ]}
             contentClassName="z-[200]"
           />
+          {fichaValue !== FICHA_NO ? (
+            <button
+              type="button"
+              className="text-xs text-primary underline-offset-2 hover:underline"
+              onClick={() =>
+                onOpenTechnicalSheet(
+                  fichaValue === FICHA_INTERMEDIATE
+                    ? "intermediate"
+                    : "sale",
+                )
+              }
+            >
+              Editar ficha
+            </button>
+          ) : null}
         </div>
 
         <div className="min-w-0 space-y-1.5">

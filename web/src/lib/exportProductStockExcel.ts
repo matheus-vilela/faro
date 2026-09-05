@@ -4,6 +4,7 @@ import {
   type ProductExportFilterState,
   updatedAtFilterBounds,
 } from "@/lib/productCatalogFilters";
+import { applyProductCatalogKindFilter } from "@/lib/productCatalogKind";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 
@@ -46,11 +47,10 @@ function buildFilteredQuery(companyId: string, f: ProductExportFilterState) {
     f.filterUpdatedFrom,
     f.filterUpdatedTo,
   );
-  let q = supabase
-    .from("products")
-    .select("*")
-    .eq("company_id", companyId)
-    .order("name");
+  let q = applyProductCatalogKindFilter(
+    supabase.from("products").select("*").eq("company_id", companyId),
+    f.filterCatalogKind,
+  ).order("name");
 
   if (f.lowStockOnly) {
     q = q.eq("stock_below_min_inclusive", true);

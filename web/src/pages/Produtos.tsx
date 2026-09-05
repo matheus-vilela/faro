@@ -12,6 +12,7 @@ import { ProductCatalogKpis } from "@/components/products/ProductCatalogKpis";
 import { ProductCatalogTable } from "@/components/products/ProductCatalogTable";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
 import { ProductDetailSummary } from "@/components/products/ProductDetailSummary";
+import { ProductProduceCard } from "@/components/products/ProductProduceCard";
 import { PossibleSaleFamilyTag } from "@/components/products/ProductSaleFamilySection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
@@ -92,6 +93,10 @@ import {
 } from "@/lib/companyUnits/stockHubUnitChange";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import {
+  applyProductCatalogKindFilter,
+  type ProductCatalogKind,
+} from "@/lib/productCatalogKind";
 import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
 import { getUndoableProductBulkEdit } from "@/lib/productBulkEdit";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
@@ -107,6 +112,11 @@ import {
 } from "@/lib/productStockLots";
 import { fetchCatalogStockKpis, type CatalogStockKpis } from "@/lib/productCatalogValue";
 import { printProductLabels } from "@/lib/printProductLabels";
+import {
+  INTERMEDIATE_BADGE_CLASS,
+  isIntermediateProduct,
+  type TechnicalSheetKind,
+} from "@/lib/productIntermediate";
 import {
   fetchProductTechnicalSheet,
   technicalSheetErrorMessage,
@@ -133,6 +143,7 @@ import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   AlertTriangle,
   ChefHat,
+  Factory,
   FileSpreadsheet,
   History,
   Layers,
@@ -382,6 +393,8 @@ export function Produtos() {
   const [filterActive, setFilterActive] = useState<
     "all" | "active" | "inactive"
   >("active");
+  const [filterCatalogKind, setFilterCatalogKind] =
+    useState<ProductCatalogKind>("all");
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [filterStockAlert, setFilterStockAlert] = useState<
     "all" | "zero" | "below_min" | "any"
@@ -398,9 +411,6 @@ export function Produtos() {
   const [filterUpdatedFrom, setFilterUpdatedFrom] = useState("");
   const [filterUpdatedTo, setFilterUpdatedTo] = useState("");
   const catalogListView = useSheetListView();
-  const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(
-    () => lowStockOnly || purchasesFilter != null,
-  );
   const canBulkEditCatalog = useHasPermission("produtos");
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
     () => new Set(),
@@ -427,7 +437,7 @@ export function Produtos() {
   );
   /** Abas dentro do detalhe do produto (vista resumo). */
   const [productDetailTab, setProductDetailTab] = useState<
-    "resumo" | "historico" | "fornecedores"
+    "resumo" | "producao" | "historico" | "fornecedores"
   >("resumo");
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
@@ -511,6 +521,8 @@ export function Produtos() {
     string | null
   >(null);
   const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
+  const [technicalSheetKind, setTechnicalSheetKind] =
+    useState<TechnicalSheetKind>("sale");
   const [outputTechnicalSheetRecipeId, setOutputTechnicalSheetRecipeId] =
     useState<string | null>(null);
   const [stockDeleting, setStockDeleting] = useState(false);
@@ -1144,6 +1156,7 @@ export function Produtos() {
         companyId: currentCompany.id,
         categoryProductIds,
         search: debouncedSearch,
+        filterCatalogKind,
         filterActive,
         filterComposesCmv,
         filterStockOnlyOrigin,
@@ -1159,6 +1172,7 @@ export function Produtos() {
   }, [
     currentCompany?.id,
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     filterComposesCmv,
     filterStockOnlyOrigin,
@@ -1290,13 +1304,13 @@ export function Produtos() {
       );
 
       const buildBase = () => {
-        let q = supabase
-          .from("products")
-          .select("*", { count: "exact" })
-          .eq("company_id", companyId)
-          .or(
-            "listed_in_product_catalog.eq.true,stock_control_type.eq.SALE_FAMILY",
-          );
+        let q = applyProductCatalogKindFilter(
+          supabase
+            .from("products")
+            .select("*", { count: "exact" })
+            .eq("company_id", companyId),
+          filterCatalogKind,
+        );
         q = applyCatalogProductOrder(q, catalogSortKey, catalogSortAsc);
         if (categoryProductIds) {
           q = q.in("id", categoryProductIds);
@@ -1442,6 +1456,7 @@ export function Produtos() {
   }, [
     currentCompany?.id,
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     filterCategoryId,
     filterStockAlert,
@@ -1472,6 +1487,7 @@ export function Produtos() {
     setProductsPage(1);
   }, [
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     lowStockOnly,
     filterCategoryId,
@@ -1593,6 +1609,15 @@ export function Produtos() {
     },
     [operationalTypeByProduct],
   );
+
+  useEffect(() => {
+    if (
+      productDetailTab === "producao" &&
+      (!stockProduct || !isIntermediateProduct(stockProduct))
+    ) {
+      setProductDetailTab("resumo");
+    }
+  }, [productDetailTab, stockProduct]);
 
   const openStockSheet = (p: Product) => {
     const gen = ++assignmentLoadGenRef.current;
@@ -2219,6 +2244,7 @@ export function Produtos() {
                   lockReport={false}
                   stockFilters={{
                     search: debouncedSearch,
+                    filterCatalogKind,
                     filterCategoryId,
                     filterActive,
                     filterComposesCmv,
@@ -2269,10 +2295,10 @@ export function Produtos() {
                 </div>
               )}
               <ProductCatalogFiltersPanel
-                open={catalogFiltersOpen}
-                onOpenChange={setCatalogFiltersOpen}
                 search={search}
                 onSearchChange={setSearch}
+                filterCatalogKind={filterCatalogKind}
+                onFilterCatalogKindChange={setFilterCatalogKind}
                 filterActive={filterActive}
                 onFilterActiveChange={setFilterActive}
                 filterCategoryId={filterCategoryId}
@@ -2293,6 +2319,7 @@ export function Produtos() {
                 companyProductCategories={companyProductCategories}
                 onClearFilters={() => {
                   setSearch("");
+                  setFilterCatalogKind("all");
                   setFilterActive("active");
                   setFilterCategoryId("all");
                   setFilterStockAlert("all");
@@ -2438,7 +2465,18 @@ export function Produtos() {
                               <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
                                 {stockProduct.name}
                               </SheetTitle>
-                              {outputTechnicalSheetRecipeId ? (
+                              {isIntermediateProduct(stockProduct) ? (
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    "gap-1",
+                                    INTERMEDIATE_BADGE_CLASS,
+                                  )}
+                                >
+                                  <Factory className="h-3 w-3" />
+                                  Produção
+                                </Badge>
+                              ) : outputTechnicalSheetRecipeId ? (
                                 <Badge
                                   variant="secondary"
                                   className="gap-1 border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100"
@@ -2567,6 +2605,23 @@ export function Produtos() {
                       <Package className="h-4 w-4 shrink-0" />
                       Resumo
                     </button>
+                    {isIntermediateProduct(stockProduct) ? (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={productDetailTab === "producao"}
+                        onClick={() => setProductDetailTab("producao")}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                          productDetailTab === "producao"
+                            ? "border-primary text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Factory className="h-4 w-4 shrink-0" />
+                        Produção
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       role="tab"
@@ -2622,9 +2677,10 @@ export function Produtos() {
                         onPromoteStockUnit={(code) => {
                           void handleSummaryPromoteStockUnit(code);
                         }}
-                        onOpenTechnicalSheet={() =>
-                          setTechnicalSheetOpen(true)
-                        }
+                        onOpenTechnicalSheet={(kind) => {
+                          setTechnicalSheetKind(kind);
+                          setTechnicalSheetOpen(true);
+                        }}
                         onOpenMerge={(partnerId) => {
                           setProductMergePartnerId(partnerId ?? null);
                           setProductMergeOpen(true);
@@ -2641,6 +2697,27 @@ export function Produtos() {
                             });
                         }}
                       />
+                    ) : productDetailTab === "producao" &&
+                      isIntermediateProduct(stockProduct) &&
+                      currentCompany?.id ? (
+                      <div className="p-6">
+                        <ProductProduceCard
+                          companyId={currentCompany.id}
+                          product={stockProduct}
+                          active={productDetailTab === "producao"}
+                          onProduced={() => {
+                            void fetchProducts();
+                            void supabase
+                              .from("products")
+                              .select("*")
+                              .eq("id", stockProduct.id)
+                              .maybeSingle()
+                              .then(({ data }) => {
+                                if (data) setStockProduct(data as Product);
+                              });
+                          }}
+                        />
+                      </div>
                     ) : productDetailTab === "historico" ? (
                       <div className="space-y-4 p-6">
                         <ProductStockMovementHistorySection
@@ -3152,6 +3229,7 @@ export function Produtos() {
           onOpenChange={setTechnicalSheetOpen}
           companyId={currentCompany.id}
           outputProduct={stockProduct}
+          sheetKind={technicalSheetKind}
           onSaved={(recipeId, backfill) => {
             setOutputTechnicalSheetRecipeId(recipeId);
             closeStockSheet();

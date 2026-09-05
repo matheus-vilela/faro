@@ -29,7 +29,7 @@ export interface Product {
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
   ean?: string | null;
   is_active?: boolean;
-  /** DIRECT | RECIPE_CONTROLLED | COMPOSITE | SERVICE | SALE_FAMILY */
+  /** DIRECT | RECIPE_CONTROLLED | COMPOSITE | SERVICE | SALE_FAMILY | INTERMEDIATE */
   stock_control_type?: string | null;
   /** false = prato de ficha ou agrupamento de venda (oculto na listagem de Produtos). */
   /** Derivado: true se alguma categoria de catálogo marca o produto como não-venda. */

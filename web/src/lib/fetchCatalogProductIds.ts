@@ -1,3 +1,7 @@
+import {
+  applyProductCatalogKindFilter,
+  type ProductCatalogKind,
+} from "@/lib/productCatalogKind";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import {
@@ -10,6 +14,7 @@ export type CatalogProductFilterParams = {
   companyId: string;
   categoryProductIds: string[] | null;
   search: string;
+  filterCatalogKind: ProductCatalogKind;
   filterActive: "all" | "active" | "inactive";
   filterComposesCmv: "all" | "yes" | "no";
   bounds: { gte?: string; lte?: string } | null;
@@ -20,12 +25,13 @@ export type CatalogProductFilterParams = {
 };
 
 function buildCatalogProductsQuery(params: CatalogProductFilterParams) {
-  let q = supabase
-    .from("products")
-    .select("id")
-    .eq("company_id", params.companyId)
-    .eq("listed_in_product_catalog", true)
-    .order("name");
+  let q = applyProductCatalogKindFilter(
+    supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", params.companyId),
+    params.filterCatalogKind,
+  ).order("name");
 
   if (params.categoryProductIds) {
     q = q.in("id", params.categoryProductIds);
@@ -71,12 +77,13 @@ export async function fetchCatalogProductIds(
 ): Promise<string[]> {
   if (params.purchasesFilter) {
     const all = await fetchAllInRange<Product>(
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", params.companyId)
-        .eq("listed_in_product_catalog", true)
-        .order("name"),
+      applyProductCatalogKindFilter(
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", params.companyId),
+        params.filterCatalogKind,
+      ).order("name"),
     );
     return all
       .filter((p) => matchesPurchasesMetric(p, params.purchasesFilter!))

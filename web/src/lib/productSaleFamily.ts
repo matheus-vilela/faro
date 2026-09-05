@@ -135,6 +135,7 @@ export function isSaleFamilyCandidate(
 ): boolean {
   if (product.stock_control_type === "SALE_FAMILY") return true;
   if (product.stock_control_type === "RECIPE_CONTROLLED") return false;
+  if (product.stock_control_type === "INTERMEDIATE") return false;
   return saleNameKeys.has(product.name.trim().toLowerCase());
 }
 
@@ -172,6 +173,7 @@ export function shouldShowPossibleSaleFamilyTag(input: {
   if (input.notSaleGrouping) return false;
   if (input.stockControlType === "SALE_FAMILY") return false;
   if (input.stockControlType === "RECIPE_CONTROLLED") return false;
+  if (input.stockControlType === "INTERMEDIATE") return false;
   if (input.familyKind !== "none") return false;
   if (input.hasOwnSale) return false;
   return input.seenInStockOuts;
@@ -185,6 +187,7 @@ export function isPossibleGroupingProduct(product: {
   if (product.not_sale_grouping) return false;
   if (product.stock_control_type === "SALE_FAMILY") return false;
   if (product.stock_control_type === "RECIPE_CONTROLLED") return false;
+  if (product.stock_control_type === "INTERMEDIATE") return false;
   return Boolean(product.stock_only_origin);
 }
 

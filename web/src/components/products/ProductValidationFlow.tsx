@@ -34,12 +34,13 @@ import {
   maxTurnoverQty,
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
+import { filterValidationToQueue } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
-  filterValidationToQueue,
-  invokeCorrelateSoldPurchased,
-} from "@/lib/productValidation/invokeCorrelateSoldPurchased";
+  patchProductValidationSession,
+  startProductValidationSession,
+  useProductValidationSession,
+} from "@/lib/productValidation/session";
 import type {
-  ProductValidationResult,
   RecipeSuggestion,
   SameItemSuggestion,
 } from "@/lib/productValidation/types";
@@ -180,14 +181,11 @@ function CorrelationIdleCard({
 
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const { currentCompany, refetchCompanies } = useCompany();
+  const { running, result, samePick, soldPick, recipePicks } =
+    useProductValidationSession(companyId);
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ProductValidationResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [samePick, setSamePick] = useState<Record<string, string>>({});
-  const [soldPick, setSoldPick] = useState<Record<string, string>>({});
-  const [recipePicks, setRecipePicks] = useState<Record<string, string[]>>({});
   const [mergeProduct, setMergeProduct] = useState<Product | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
@@ -202,7 +200,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    setResult(null);
     void loadQueue();
   }, [loadQueue]);
 
@@ -218,45 +215,22 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       );
       return;
     }
-    setRunning(true);
-    const next = await loadQueue();
-    const correlated = await invokeCorrelateSoldPurchased({
+    const outcome = await startProductValidationSession({
       companyId,
-      items: next.items,
+      loadQueue,
     });
-    setRunning(false);
-    if (!correlated.ok) {
-      toast.error(correlated.error);
-      return;
+    if (!outcome.ok) {
+      toast.error(outcome.error);
     }
-    const interpreted = correlated.result;
-    const picks: Record<string, string> = {};
-    const soldPicks: Record<string, string> = {};
-    const recipePicksInit: Record<string, string[]> = {};
-    for (const row of interpreted.sameItem) {
-      if (row.band !== "high") continue;
-      const first = row.candidates[0]?.purchase.productId;
-      if (first) picks[row.id] = first;
-      soldPicks[row.id] = row.sold.productId;
-    }
-    for (const row of interpreted.recipes) {
-      if (row.band !== "high") continue;
-      recipePicksInit[row.id] = row.ingredients.map(
-        (ingredient) => ingredient.purchase.productId,
-      );
-    }
-    setSamePick(picks);
-    setSoldPick(soldPicks);
-    setRecipePicks(recipePicksInit);
-    setResult(interpreted);
   };
 
   const reloadAfterConfirm = async () => {
     const next = await loadQueue();
-    setResult((current) => {
-      if (!current) return current;
-      return filterValidationToQueue(current, next.items);
-    });
+    patchProductValidationSession(companyId, (current) => ({
+      result: current.result
+        ? filterValidationToQueue(current.result, next.items)
+        : current.result,
+    }));
   };
 
   const confirmSameItem = async (suggestionId: string) => {
@@ -278,11 +252,11 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   };
 
   const toggleIngredient = (recipeId: string, purchaseId: string) => {
-    setRecipePicks((current) => {
-      const prev = new Set(current[recipeId] ?? []);
+    patchProductValidationSession(companyId, (current) => {
+      const prev = new Set(current.recipePicks[recipeId] ?? []);
       if (prev.has(purchaseId)) prev.delete(purchaseId);
       else prev.add(purchaseId);
-      return { ...current, [recipeId]: [...prev] };
+      return { recipePicks: { ...current.recipePicks, [recipeId]: [...prev] } };
     });
   };
 
@@ -467,7 +441,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     </div>
   );
 
-  if (loading && !queue) {
+  if (loading && !queue && !result && !running) {
     return (
       <CorrelationIdleCard
         tone="muted"
@@ -480,7 +454,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     );
   }
 
-  if (queue?.error) {
+  if (queue?.error && !result && !running) {
     return (
       <p className="text-sm text-destructive">
         Não foi possível carregar os produtos. {queue.error}
@@ -654,11 +628,15 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
                   suggestion={row.suggestion}
                   selectedPurchaseId={currentPurchaseId}
                   onSelectPurchase={(id) =>
-                    setSamePick((current) => ({ ...current, [row.id]: id }))
+                    patchProductValidationSession(companyId, (current) => ({
+                      samePick: { ...current.samePick, [row.id]: id },
+                    }))
                   }
                   selectedSoldId={currentSoldId}
                   onSelectSold={(id) =>
-                    setSoldPick((current) => ({ ...current, [row.id]: id }))
+                    patchProductValidationSession(companyId, (current) => ({
+                      soldPick: { ...current.soldPick, [row.id]: id },
+                    }))
                   }
                   purchaseChoices={purchaseItems.filter(
                     (item) =>

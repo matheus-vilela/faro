@@ -1,3 +1,5 @@
+import type { ProductCatalogKind } from "@/lib/productCatalogKind";
+
 /** Intervalo de `updated_at` para filtros do catálogo / exportação. */
 export function updatedAtFilterBounds(
   preset: "all" | "today" | "7d" | "30d" | "custom",
@@ -41,6 +43,7 @@ export function updatedAtFilterBounds(
 
 export type ProductExportFilterState = {
   search: string;
+  filterCatalogKind: ProductCatalogKind;
   filterCategoryId: string;
   filterActive: "all" | "active" | "inactive";
   filterComposesCmv: "all" | "yes" | "no";

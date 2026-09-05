@@ -45,6 +45,15 @@ describe("isSaleFamilyCandidate", () => {
     ).toBe(false);
   });
 
+  it("rejeita produto intermediário como agrupamento", () => {
+    expect(
+      isSaleFamilyCandidate(
+        product({ name: "Bolinhos", stock_control_type: "INTERMEDIATE" }),
+        keys,
+      ),
+    ).toBe(false);
+  });
+
   it("rejeita insumo que não está na venda", () => {
     expect(
       isSaleFamilyCandidate(product({ name: "Cachaça" }), keys),
@@ -111,6 +120,15 @@ describe("isPossibleGroupingProduct", () => {
         stock_control_type: "DIRECT",
         stock_only_origin: true,
         not_sale_grouping: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("omite produto intermediário", () => {
+    expect(
+      isPossibleGroupingProduct({
+        stock_control_type: "INTERMEDIATE",
+        stock_only_origin: true,
       }),
     ).toBe(false);
   });
