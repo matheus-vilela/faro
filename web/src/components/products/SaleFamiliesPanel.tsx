@@ -1,4 +1,4 @@
-import { SaleFamilyLinkSheet } from "@/components/products/SaleFamilyLinkSheet";
+import { SaleFamilyDetailSheet } from "@/components/products/SaleFamilyDetailSheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,13 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import {
@@ -28,32 +21,34 @@ import {
   type SaleFamilyListRow,
   type SaleFamilyProductOption,
 } from "@/lib/productSaleFamily";
-import { Layers, Loader2, Plus } from "lucide-react";
+import { Layers, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ProductSaleFamilySection } from "./ProductSaleFamilySection";
 
 type SortKey = "name" | "sku" | "variants";
 
 export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
   const [rows, setRows] = useState<SaleFamilyListRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [linkOpen, setLinkOpen] = useState(false);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [promoteId, setPromoteId] = useState("");
   const [promoteBusy, setPromoteBusy] = useState(false);
   const [candidates, setCandidates] = useState<SaleFamilyProductOption[]>([]);
   const [openFamily, setOpenFamily] = useState<SaleFamilyListRow | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
-      setRows(await fetchSaleFamilyRows(companyId));
+      const next = await fetchSaleFamilyRows(companyId);
+      setRows(next);
+      setOpenFamily((current) =>
+        current ? (next.find((row) => row.id === current.id) ?? current) : null,
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Falha ao listar agrupamentos.");
       setRows([]);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [companyId]);
 
@@ -119,20 +114,14 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
               cupim). A venda não baixa o cardápio. Não é ficha técnica.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPromoteOpen(true)}
-            >
-              Tornar item em agrupamento
-            </Button>
-            <Button type="button" size="sm" onClick={() => setLinkOpen(true)}>
-              <Plus className="size-3.5" />
-              Vincular variante
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPromoteOpen(true)}
+          >
+            Tornar item em agrupamento
+          </Button>
         </div>
 
         {loading ? (
@@ -140,7 +129,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
         ) : rows.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             Nenhum agrupamento ainda. Transforme um produto da venda (Bolinhos)
-            ou vincule uma variante — o alvo vira agrupamento automaticamente.
+            e, no detalhe, ligue as variantes de estoque.
           </p>
         ) : (
           <div className="overflow-x-auto rounded-md border">
@@ -193,13 +182,6 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
         )}
       </section>
 
-      <SaleFamilyLinkSheet
-        open={linkOpen}
-        onOpenChange={setLinkOpen}
-        companyId={companyId}
-        onLinked={() => void load()}
-      />
-
       <AlertDialog open={promoteOpen} onOpenChange={setPromoteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -217,6 +199,7 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
               placeholder="Ex.: Bolinhos"
               searchPlaceholder="Buscar…"
               disabled={promoteBusy}
+              contentClassName="z-[200]"
               options={candidates.map((p) => ({
                 value: p.id,
                 label: p.name,
@@ -243,32 +226,15 @@ export function SaleFamiliesPanel({ companyId }: { companyId: string }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Sheet
+      <SaleFamilyDetailSheet
         open={openFamily != null}
-        onOpenChange={(open) => {
-          if (!open) setOpenFamily(null);
+        onOpenChange={(next) => {
+          if (!next) setOpenFamily(null);
         }}
-      >
-        <SheetContent className="flex flex-col">
-          <SheetHeader>
-            <SheetTitle>{openFamily?.name ?? "Agrupamento"}</SheetTitle>
-            <SheetDescription>
-              Variantes ligadas a este item de cardápio.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
-            {openFamily ? (
-              <ProductSaleFamilySection
-                companyId={companyId}
-                productId={openFamily.id}
-                productName={openFamily.name}
-                stockControlType="SALE_FAMILY"
-                onChanged={() => void load()}
-              />
-            ) : null}
-          </div>
-        </SheetContent>
-      </Sheet>
+        companyId={companyId}
+        family={openFamily}
+        onChanged={() => void load({ silent: true })}
+      />
     </div>
   );
 }
