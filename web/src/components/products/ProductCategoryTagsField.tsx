@@ -82,6 +82,7 @@ export function ProductCategoryTagsField({
   const available = useMemo(() => {
     const sel = new Set(selectedIds);
     return categories
+      .filter((c) => c.ativo !== false)
       .filter((c) => !sel.has(c.id))
       .filter((c) =>
         q ? c.name.toLowerCase().normalize("NFD").includes(q.normalize("NFD")) : true,

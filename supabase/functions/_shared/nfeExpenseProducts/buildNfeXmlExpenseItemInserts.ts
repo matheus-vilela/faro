@@ -17,6 +17,11 @@ import {
 import type { ExtractedExpenseItem } from "../openaiExpense.ts";
 import { catalogRegistrationNameFromNfeLine } from "./newProductCatalogFromNfe.ts";
 import { fetchProductDefaultExpenseCategoryById, preferredPurchaseCategoryId } from "../productDefaultExpenseCategory.ts";
+import {
+  fetchCompanyNcmCategoryMap,
+  ncmKeyForCategoryRule,
+  resolvePurchaseCategoryId,
+} from "../ncmCategoryRule.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import {
   createProductAutoWhenNoReviewQueue,
@@ -114,6 +119,8 @@ export async function buildNfeXmlExpenseItemInserts(
       if (id && cat) defaultCategoryByProductId.set(id, cat);
     }
   }
+
+  const ncmCategoryByNcm = await fetchCompanyNcmCategoryMap(supabase, companyId);
 
   const lines: BuiltXmlCatalogExpenseLine[] = [];
 
@@ -328,9 +335,17 @@ export async function buildNfeXmlExpenseItemInserts(
         const cat = extra.get(productId);
         if (cat) defaultCategoryByProductId.set(productId, cat);
       }
-      const defCat = defaultCategoryByProductId.get(productId);
-      if (defCat) insertRow.company_category_id = defCat;
     }
+    const ncmKey = ncmKeyForCategoryRule(items[i]?.ncm);
+    const resolvedCat = resolvePurchaseCategoryId({
+      productCategoryId: productId
+        ? defaultCategoryByProductId.get(productId) ?? null
+        : null,
+      ncmCategoryId: ncmKey
+        ? ncmCategoryByNcm.get(ncmKey)?.dreCategoryId ?? null
+        : null,
+    });
+    if (resolvedCat) insertRow.company_category_id = resolvedCat;
     if (pm?.stockQuantity != null) insertRow.stock_quantity = pm.stockQuantity;
     if (pm?.conversionFactorApplied != null) {
       insertRow.conversion_factor_applied = pm.conversionFactorApplied;

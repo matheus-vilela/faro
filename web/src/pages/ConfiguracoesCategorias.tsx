@@ -55,8 +55,10 @@ import type {
   PapelReceitaDre,
   TipoCategoria,
 } from "@/types/category";
+import { ConfiguracoesCategoriasNcmsPanel } from "@/pages/ConfiguracoesCategoriasNcmsPanel";
 import { ConfiguracoesCategoriasProdutosPanel } from "@/pages/ConfiguracoesCategoriasProdutosPanel";
 import {
+  Barcode,
   Check,
   ChevronDown,
   ChevronRight,
@@ -109,9 +111,9 @@ export function ConfiguracoesCategorias() {
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [parentSearch, setParentSearch] = useState("");
   const [editWarningOpen, setEditWarningOpen] = useState(false);
-  const [configTab, setConfigTab] = useState<"financeiras" | "produtos">(
-    "financeiras",
-  );
+  const [configTab, setConfigTab] = useState<
+    "financeiras" | "produtos" | "ncms"
+  >("financeiras");
 
   const load = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -539,7 +541,7 @@ export function ConfiguracoesCategorias() {
       <PageHeader
         icon={FolderTree}
         title="Categorias"
-        description="Gerencie categorias financeiras (receitas, despesas, CMV no DRE) e categorias de produtos (organização do catálogo e etiquetas)."
+        description="Gerencie categorias do DRE (receitas, despesas), categorias de produtos (organização do catálogo) e o vínculo de NCMs às categorias de produto."
         action={
           configTab === "financeiras" ? (
             <Button onClick={openCreateRoot} disabled={!isOwner || loading}>
@@ -568,7 +570,7 @@ export function ConfiguracoesCategorias() {
           )}
         >
           <FolderTree className="h-4 w-4 shrink-0" />
-          Categorias financeiras
+          Categorias do DRE
         </button>
         <button
           type="button"
@@ -585,7 +587,29 @@ export function ConfiguracoesCategorias() {
           <Package className="h-4 w-4 shrink-0" />
           Categorias de produtos
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={configTab === "ncms"}
+          onClick={() => setConfigTab("ncms")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+            configTab === "ncms"
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+        >
+          <Barcode className="h-4 w-4 shrink-0" />
+          NCMs
+        </button>
       </div>
+
+      {configTab === "ncms" && currentCompany?.id ? (
+        <ConfiguracoesCategoriasNcmsPanel
+          companyId={currentCompany.id}
+          isOwner={isOwner}
+        />
+      ) : null}
 
       {configTab === "produtos" && currentCompany?.id ? (
         <ConfiguracoesCategoriasProdutosPanel

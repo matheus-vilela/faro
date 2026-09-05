@@ -147,6 +147,19 @@ describe("evaluateConfigurationCompleteness", () => {
     expect(r.is_complete).toBe(false);
   });
 
+  it("plano sem CMV conclui com categoria de produto", () => {
+    const r = evaluateConfigurationCompleteness({
+      finalType: "INSUMO",
+      product: {
+        unit: "kg",
+        cmv_category_id: null,
+        has_product_category_assignment: true,
+      },
+      linkedEntryBreakdownRecipeId: null,
+    });
+    expect(r.is_complete).toBe(true);
+  });
+
   it("revisão pendente nunca conclui", () => {
     const r = evaluateConfigurationCompleteness({
       finalType: "REVISAO_PENDENTE",

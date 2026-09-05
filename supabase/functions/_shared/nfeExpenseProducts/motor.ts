@@ -18,6 +18,11 @@ import {
 import { loadNfeMotorExtractContext } from "./extractFromStoredContext.ts";
 import { catalogRegistrationNameFromNfeLine } from "./newProductCatalogFromNfe.ts";
 import { fetchProductDefaultExpenseCategoryById, preferredPurchaseCategoryId } from "../productDefaultExpenseCategory.ts";
+import {
+  fetchCompanyNcmCategoryMap,
+  ncmKeyForCategoryRule,
+  resolvePurchaseCategoryId,
+} from "../ncmCategoryRule.ts";
 import { upsertProductSupplierCode } from "../productImport/productSupplierCodes.ts";
 import { matchNfeExpenseCatalogLines } from "./matchPipeline.ts";
 import { reconcileNfeFinancials } from "./financialReconciliation.ts";
@@ -447,6 +452,8 @@ export async function runNfeExpenseProductMotor(
     }
   }
 
+  const ncmCategoryByNcm = await fetchCompanyNcmCategoryMap(supabase, companyId);
+
   for (let i = 0; i < ctx.items.length; i += 1) {
     const lineItem = matchResult.items[i] as ItemWithProductMatch | undefined;
     const pm = lineItem?.productMatch;
@@ -652,8 +659,19 @@ export async function runNfeExpenseProductMotor(
           const cat = extra.get(productId);
           if (cat) defaultCategoryByProductId.set(productId, cat);
         }
-        const defCat = defaultCategoryByProductId.get(productId);
-        if (defCat) updateRow.company_category_id = defCat;
+      }
+      if (!existingCategory) {
+        const ncmKey = ncmKeyForCategoryRule(ctx.items[i]?.ncm);
+        const resolvedCat = resolvePurchaseCategoryId({
+          existingCategoryId: existingCategory,
+          productCategoryId: productId
+            ? defaultCategoryByProductId.get(productId) ?? null
+            : null,
+          ncmCategoryId: ncmKey
+            ? ncmCategoryByNcm.get(ncmKey)?.dreCategoryId ?? null
+            : null,
+        });
+        if (resolvedCat) updateRow.company_category_id = resolvedCat;
       }
       if (pm?.stockQuantity != null) updateRow.stock_quantity = pm.stockQuantity;
       if (stockAppliedOnCreate) {

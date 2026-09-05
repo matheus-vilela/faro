@@ -5,6 +5,7 @@ import {
   PRODUCT_SHEET_SELECT,
 } from '@/components/products/productSheetStyles'
 import { ProductCategoryTagsField } from '@/components/products/ProductCategoryTagsField'
+import { composesCmvFromCatalogNames } from '@/lib/companyProductCategories/catalogSeed'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -242,6 +243,12 @@ export function CreateProductSheet({
             })),
           )
         : []
+    const selectedCats = companyProductCategories.filter((c) =>
+      productCategoryIds.includes(c.id),
+    )
+    const dreId = selectedCats
+      .map((c) => c.default_dre_category_id)
+      .find((id) => Boolean(id))
     const { data, error } = await supabase
       .from('products')
       .insert({
@@ -253,6 +260,7 @@ export function CreateProductSheet({
         current_quantity: parseFloat(currentQuantity || "0") || 0,
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
+        ...(dreId ? { default_expense_category_id: dreId } : {}),
         unit_conversions: toProductUnitConversionsJson(toPersistConversions),
         ...(lastUnitValueToSave != null
           ? {
@@ -397,7 +405,17 @@ export function CreateProductSheet({
                   companyId={companyId}
                   categories={companyProductCategories}
                   selectedIds={productCategoryIds}
-                  onChange={setProductCategoryIds}
+                  onChange={(ids) => {
+                    setProductCategoryIds(ids)
+                    const names = ids
+                      .map(
+                        (id) =>
+                          companyProductCategories.find((c) => c.id === id)
+                            ?.name,
+                      )
+                      .filter((n): n is string => Boolean(n))
+                    setComposesCmv(composesCmvFromCatalogNames(names))
+                  }}
                   onCategoriesChange={() => void loadCompanyProductCategories()}
                   disabled={loading}
                   label=""

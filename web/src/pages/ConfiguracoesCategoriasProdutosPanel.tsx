@@ -1,3 +1,4 @@
+import { BoletoCategoryPicker } from "@/components/BoletoCategoryPicker";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import type { CompanyCategory } from "@/types/category";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
 import { Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -29,26 +31,42 @@ export function ConfiguracoesCategoriasProdutosPanel({
   isOwner: boolean;
 }) {
   const [rows, setRows] = useState<CompanyProductCategory[]>([]);
+  const [dreCategories, setDreCategories] = useState<CompanyCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [savingDreId, setSavingDreId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("company_product_categories")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
+    const [prodRes, dreRes] = await Promise.all([
+      supabase
+        .from("company_product_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("company_categories")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("ordem", { ascending: true })
+        .order("name", { ascending: true }),
+    ]);
     setLoading(false);
-    if (error) {
-      toast.error("Erro ao carregar categorias de produto: " + error.message);
+    if (prodRes.error) {
+      toast.error("Erro ao carregar categorias de produto: " + prodRes.error.message);
       setRows([]);
       return;
     }
-    setRows((data ?? []) as CompanyProductCategory[]);
+    setRows((prodRes.data ?? []) as CompanyProductCategory[]);
+    if (dreRes.error) {
+      toast.error("Erro ao carregar contas do DRE: " + dreRes.error.message);
+      setDreCategories([]);
+      return;
+    }
+    setDreCategories((dreRes.data ?? []) as CompanyCategory[]);
   }, [companyId]);
 
   useEffect(() => {
@@ -76,6 +94,10 @@ export function ConfiguracoesCategoriasProdutosPanel({
 
   const remove = async (row: CompanyProductCategory) => {
     if (!isOwner) return;
+    if (row.padrao_sistema) {
+      toast.error("Categoria padrão não pode ser excluída. Desative-a.");
+      return;
+    }
     const { error } = await supabase
       .from("company_product_categories")
       .delete()
@@ -87,6 +109,46 @@ export function ConfiguracoesCategoriasProdutosPanel({
     }
     toast.success("Categoria removida.");
     void load();
+  };
+
+  const toggleAtivo = async (row: CompanyProductCategory, next: boolean) => {
+    if (!isOwner) return;
+    setTogglingId(row.id);
+    const { error } = await supabase
+      .from("company_product_categories")
+      .update({ ativo: next })
+      .eq("id", row.id)
+      .eq("company_id", companyId);
+    setTogglingId(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, ativo: next } : r)),
+    );
+  };
+
+  const saveDre = async (row: CompanyProductCategory, dreId: string) => {
+    if (!isOwner) return;
+    setSavingDreId(row.id);
+    const { error } = await supabase
+      .from("company_product_categories")
+      .update({ default_dre_category_id: dreId || null })
+      .eq("id", row.id)
+      .eq("company_id", companyId);
+    setSavingDreId(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? { ...r, default_dre_category_id: dreId || null }
+          : r,
+      ),
+    );
   };
 
   const toggleExcludeFromSales = async (
@@ -120,8 +182,9 @@ export function ConfiguracoesCategoriasProdutosPanel({
           Categorias de produtos
         </CardTitle>
         <CardDescription>
-          Classifique itens do catálogo (organização interna). São independentes
-          das categorias financeiras e do CMV. Marque{" "}
+          Classifique itens do catálogo (organização interna). A Conta do DRE
+          desta categoria preenche a linha da nota quando o NCM apontar para
+          ela. Marque{" "}
           <span className="font-medium text-foreground">
             Não aparece como venda
           </span>{" "}
@@ -176,24 +239,69 @@ export function ConfiguracoesCategoriasProdutosPanel({
             Nenhuma categoria cadastrada.
           </p>
         ) : (
-          <ul className="grid gap-2 sm:grid-cols-2">
+          <ul className="grid gap-2">
             {rows.map((row) => {
               const excluded = row.exclude_from_sales === true;
+              const inactive = row.ativo === false;
+              const locked = row.padrao_sistema === true;
               return (
                 <li
                   key={row.id}
                   className={cn(
-                    "flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-sm",
+                    "flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-sm sm:flex-row sm:items-center",
                     excluded
                       ? "border-amber-500/40 bg-amber-500/8"
                       : "border-border/80 bg-muted/20",
+                    inactive && "opacity-70",
                     !isOwner && "opacity-90",
                   )}
                 >
-                  <span className="min-w-0 font-medium leading-snug">
+                  <span className="min-w-0 font-medium leading-snug sm:w-44 sm:shrink-0">
                     {row.name}
+                    {locked ? (
+                      <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                        padrão
+                      </span>
+                    ) : null}
                   </span>
+                  <div className="min-w-0 flex-1">
+                    <BoletoCategoryPicker
+                      companyId={companyId}
+                      value={row.default_dre_category_id ?? ""}
+                      onValueChange={(id) => void saveDre(row, id)}
+                      categories={dreCategories}
+                      loading={loading}
+                      onReload={load}
+                      disabled={!isOwner || savingDreId === row.id}
+                      compact
+                      allowClear={Boolean(row.default_dre_category_id)}
+                      placeholder="Conta do DRE"
+                    />
+                  </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {locked ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-1.5">
+                            <Switch
+                              checked={row.ativo !== false}
+                              disabled={!isOwner || togglingId === row.id}
+                              onCheckedChange={(next) =>
+                                void toggleAtivo(row, next)
+                              }
+                              aria-label={`Ativa: ${row.name}`}
+                            />
+                            <span className="hidden text-[11px] leading-tight text-muted-foreground sm:inline">
+                              Ativa
+                            </span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          Categoria padrão: desative em vez de apagar, para não
+                          quebrar regras de NCM.
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div className="flex items-center gap-1.5">
@@ -215,7 +323,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                         entram em vendas, campeões nem correlação.
                       </TooltipContent>
                     </Tooltip>
-                    {isOwner ? (
+                    {isOwner && !locked ? (
                       <Button
                         type="button"
                         variant="ghost"

@@ -67,14 +67,22 @@ export function bulkEditFieldLabel(key: BulkEditFieldKey): string {
   return BULK_EDIT_FIELDS.find((f) => f.key === key)?.label ?? key;
 }
 
-export function bulkEditFieldsByGroup(): Map<string, BulkEditFieldMeta[]> {
+export function bulkEditFieldsByGroup(fields: BulkEditFieldMeta[] = BULK_EDIT_FIELDS): Map<string, BulkEditFieldMeta[]> {
   const map = new Map<string, BulkEditFieldMeta[]>();
-  for (const field of BULK_EDIT_FIELDS) {
+  for (const field of fields) {
     const list = map.get(field.group) ?? [];
     list.push(field);
     map.set(field.group, list);
   }
   return map;
+}
+
+/** Plano v4 não tem folhas CMV: esconde o campo para não obrigar. */
+export function bulkEditFieldsForCompany(opts: {
+  hasCmvLeaves: boolean;
+}): BulkEditFieldMeta[] {
+  if (opts.hasCmvLeaves) return BULK_EDIT_FIELDS;
+  return BULK_EDIT_FIELDS.filter((f) => f.key !== "cmv_category_id");
 }
 
 export function operationalTypeOptions(): Array<{ value: string; label: string }> {
