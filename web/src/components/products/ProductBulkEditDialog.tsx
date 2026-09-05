@@ -23,6 +23,7 @@ import {
 } from "@/lib/productBulkEdit";
 import {
   BULK_EDIT_FIELDS,
+  bulkEditFieldsForCompany,
   bulkEditFieldsByGroup,
   buildBulkEditChangesPayload,
   operationalTypeOptions,
@@ -77,7 +78,15 @@ export function ProductBulkEditDialog({
     [fieldKey],
   );
 
-  const fieldsByGroup = useMemo(() => bulkEditFieldsByGroup(), []);
+  const visibleFields = useMemo(
+    () => bulkEditFieldsForCompany({ hasCmvLeaves: cmvCategories.length > 0 }),
+    [cmvCategories],
+  );
+
+  const fieldsByGroup = useMemo(
+    () => bulkEditFieldsByGroup(visibleFields),
+    [visibleFields],
+  );
 
   const productCategoryNameById = useMemo(
     () => Object.fromEntries(companyProductCategories.map((c) => [c.id, c.name])),
@@ -257,6 +266,12 @@ export function ProductBulkEditDialog({
               </Select>
             ) : null}
             {fieldMeta.inputType === "cmv_category" ? (
+              cmvCategories.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Este plano de contas não tem categoria CMV. Use categorias de
+                  produto e a Conta do DRE.
+                </p>
+              ) : (
               <Select
                 value={cmvCategoryId || "__none__"}
                 onValueChange={(v) =>
@@ -275,6 +290,7 @@ export function ProductBulkEditDialog({
                   ))}
                 </SelectContent>
               </Select>
+              )
             ) : null}
             {fieldMeta.inputType === "categories" ? (
               <div className="space-y-3">

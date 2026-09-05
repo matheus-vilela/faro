@@ -26,40 +26,45 @@ function firstCategoryWhoseNameIncludes(
 
 const OPERATIONAL_TYPE_TO_KEYWORDS: Record<OperationalItemType, readonly string[]> = {
   INSUMO: [
-    "cozinha",
-    "mercearia",
-    "condiment",
     "hortifruti",
-    "proteina",
-    "congelad",
-    "oleo",
-    "farin",
-    "graos",
+    "protein",
     "latic",
+    "nao perec",
+    "congelad",
     "embalag",
-    "descart",
     "limpeza",
-    "aditivo",
-    "conserva",
-    "molho",
-    "caldo",
-    "caldos",
-  ],
-  PRODUTO_REVENDA: ["cervej", "bebida", "vinho", "alcool", "refriger", "mini", "lata", "suco", "leite e bebida"],
-  ITEM_OPERACIONAL: ["utens", "itens salao", "salao", "etiqueta", "diversos", "gás", "descart", "sacola", "sacolas"],
-  RECEITA_FICHA: [
-    "comida pronta",
+    "mercado",
     "salgad",
-    "bolinho",
-    "pastel",
-    "porcao",
-    "doce",
+    "insumos - drink",
+    "insumos - bar",
+  ],
+  PRODUTO_REVENDA: [
+    "cervej",
+    "destil",
+    "vinho",
+    "soft drink",
+    "soft",
+    "gelo",
+    "bebida",
+  ],
+  ITEM_OPERACIONAL: [
+    "utensil",
+    "limpeza",
+    "gás",
+    "gas",
+    "diversos",
+    "embalag",
+    "carvao",
+  ],
+  RECEITA_FICHA: [
+    "salgad",
+    "sobremes",
     "paes",
     "pão",
     "pao",
     "pronto",
   ],
-  NAO_ESTOCAVEL: ["itens salao", "salao", "etiqueta", "diversos", "gás", "espeto", "gás", "diversos"],
+  NAO_ESTOCAVEL: ["diversos", "gás", "gas", "limpeza"],
   REVISAO_PENDENTE: [],
 };
 
@@ -82,7 +87,7 @@ function suggestFromProductName(
   };
 
   if (/(coca|fanta|pepsi|guaran|refrigerante|refriger|suco|isoton|energ|nescau|nes)\b/i.test(p)) {
-    const hit = tryKeywords(["refriger", "suco", "bebida", "leite e bebida", "mini"]);
+    const hit = tryKeywords(["soft drink", "soft", "bebida"]);
     if (hit) return hit;
   }
   if (/\b(cervej|chopp|lager|pilsen|ipa|stout|heine|brahma|skol)\b/.test(p)) {
@@ -90,15 +95,19 @@ function suggestFromProductName(
     if (hit) return hit;
   }
   if (/\b(água|agua|mineral|com gas|gaseific)\b/.test(p) && n.length < 40) {
-    const hit = tryKeywords(["bebida", "refriger", "suco", "leite e bebida", "agua", "diversos"]);
+    const hit = tryKeywords(["soft drink", "gelo", "bebida", "diversos"]);
     if (hit) return hit;
   }
   if (/\b(vinho|espum|champ|prosecco|malbec)\b/.test(p)) {
-    const hit = tryKeywords(["vinho", "alcool", "bebida", "diversos"]);
+    const hit = tryKeywords(["vinho", "destil", "bebida", "diversos"]);
+    if (hit) return hit;
+  }
+  if (/\b(gin|vodka|whisky|whiskey|cachaca|cachaça|rum|tequila|destil)\b/.test(p)) {
+    const hit = tryKeywords(["destil", "bebida"]);
     if (hit) return hit;
   }
   if (/\b(pao|pão|french|brioch|criosp|focac)\b/.test(p)) {
-    const hit = tryKeywords(["pães", "paes", "fari", "diversos"]);
+    const hit = tryKeywords(["pães", "paes", "nao perec", "diversos"]);
     if (hit) return hit;
   }
 

@@ -14,6 +14,14 @@ import { isNfeBonificationCfop } from "./nfeCfopBonification.ts";
 import type { ExtractedDocumentResult } from "./openaiExpense.ts";
 import { createProductWithStockIn } from "./createProductWithStockIn.ts";
 import { fetchProductDefaultExpenseCategoryById } from "./productDefaultExpenseCategory.ts";
+import {
+  fetchCompanyNcmCategoryMap,
+  lookupNcmProductRule,
+  applyNcmProductRuleToNewProduct,
+  ensureProductCatalogTag,
+  ncmKeyForCategoryRule,
+  resolvePurchaseCategoryId,
+} from "./ncmCategoryRule.ts";
 import { buildNewProductCatalogFromNfeLine } from "./productImport/buildPackUnitConversionsFromLabel.ts";
 import { canonicalProductName } from "./productImport/canonicalName.ts";
 import { catalogMatchNameKey } from "./productImport/llmCatalogCandidates.ts";
@@ -309,6 +317,7 @@ function productRowForDbInsert(
     ean,
     min_quantity,
     current_quantity,
+    default_expense_category_id,
   } = payload;
   const ncmStr = normalizeNcm8(ncm != null ? String(ncm) : null);
   const cfopRaw =
@@ -316,6 +325,10 @@ function productRowForDbInsert(
   const csosnRaw =
     csosn != null ? String(csosn).replace(/\D/g, "").slice(0, 4) : "";
   const cn = canonicalProductName(String(name ?? ""));
+  const defaultCat =
+    default_expense_category_id != null
+      ? String(default_expense_category_id).trim()
+      : "";
   return {
     company_id,
     name,
@@ -329,6 +342,7 @@ function productRowForDbInsert(
     canonical_name: cn.length >= 2 ? cn : null,
     is_active: true,
     stock_control_type: "DIRECT",
+    ...(defaultCat ? { default_expense_category_id: defaultCat } : {}),
   };
 }
 
@@ -343,14 +357,18 @@ async function insertProductFromStagingInterpret(
   stock: { quantity: number; unitValue: number } | null,
 ): Promise<{ productId: string | null; stockApplied: boolean }> {
   const row = productRowForDbInsert(payload);
+  const ncmRule = await lookupNcmProductRule(admin, companyId, row.ncm);
+  applyNcmProductRuleToNewProduct(row, ncmRule);
 
   // Fluxo steady: cadastra produto sem entrada de stock (aguarda recebimento).
   if (!stock) {
+    const tagId = String(row.product_category_id ?? "").trim();
     const insertPayload: Record<string, unknown> = {
       ...row,
       company_id: companyId,
       current_quantity: 0,
     };
+    delete insertPayload.product_category_id;
     if (conversions.length > 0) {
       insertPayload.unit_conversions = conversions;
     }
@@ -369,7 +387,11 @@ async function insertProductFromStagingInterpret(
       );
       return { productId: null, stockApplied: false };
     }
-    return { productId: String(ins.id), stockApplied: false };
+    const createdId = String(ins.id);
+    if (tagId) {
+      await ensureProductCatalogTag(admin, companyId, createdId, tagId);
+    }
+    return { productId: createdId, stockApplied: false };
   }
 
   const created = await createProductWithStockIn(admin, {
@@ -1353,11 +1375,21 @@ export async function persistStagingInterpretExpenseAndBoletos(
       companyId,
       [...productIdByLineIndex.values()],
     );
+  const ncmCategoryByNcm = await fetchCompanyNcmCategoryMap(admin, companyId);
 
   const itemRows = produtos.map((line, i) => {
     const q = Math.max(0.0001, Number(line.quantidade) || 0);
     const uv = Math.round((Number(line.valor_unitario) || 0) * 100) / 100;
     const pid = productIdByLineIndex.get(i);
+    const ncmKey = ncmKeyForCategoryRule(line.ncm);
+    const resolvedCat = resolvePurchaseCategoryId({
+      productCategoryId: pid
+        ? defaultCategoryByProductId.get(pid) ?? null
+        : null,
+      ncmCategoryId: ncmKey
+        ? ncmCategoryByNcm.get(ncmKey)?.dreCategoryId ?? null
+        : null,
+    });
     const row: Record<string, unknown> = {
       company_id: companyId,
       expense_id: "preview:expense",
@@ -1365,15 +1397,15 @@ export async function persistStagingInterpretExpenseAndBoletos(
       quantity: q,
       unit_value: uv,
       product_id: pid ?? null,
+      ncm: line.ncm ?? null,
     };
+    if (resolvedCat) row.company_category_id = resolvedCat;
     if (pid) {
       row.stock_quantity = q;
       // Entrada já aplicada atomicamente no create do produto nesta linha.
       if (stockAppliedByLineIndex?.has(i)) {
         row.stock_added = true;
       }
-      const defCat = defaultCategoryByProductId.get(pid);
-      if (defCat) row.company_category_id = defCat;
     }
     const u =
       line.unidade_comercial != null

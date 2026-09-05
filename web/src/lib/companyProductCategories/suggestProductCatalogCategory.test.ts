@@ -14,9 +14,9 @@ function cat(id: string, name: string): CompanyProductCategory {
 }
 
 const SEED_LIKE: CompanyProductCategory[] = [
-  cat("1", "Bebidas"),
+  cat("1", "Soft Drink"),
   cat("2", "Cervejas"),
-  cat("3", "Cozinha"),
+  cat("3", "Hortifruti"),
   cat("4", "Diversos"),
   cat("5", "COCA XPTO LATA 350ml"),
 ].map((c, i) => ({ ...c, sort_order: i }));
@@ -33,7 +33,7 @@ describe("suggestProductCatalogCategory", () => {
     expect(r!.source).toBe("product_name");
   });
 
-  it("mapeia tipo insumo para categoria alinhada (cozinha)", () => {
+  it("mapeia tipo insumo para categoria alinhada (hortifruti)", () => {
     const r = suggestProductCatalogCategory({
       categories: SEED_LIKE,
       operationalType: "INSUMO",

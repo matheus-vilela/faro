@@ -1,5 +1,9 @@
 import type { ItemWithProductMatch } from "../../received-whatsapp-message/productMatch.ts";
 import { createProductWithStockIn } from "../createProductWithStockIn.ts";
+import {
+  applyNcmProductRuleToNewProduct,
+  lookupNcmProductRule,
+} from "../ncmCategoryRule.ts";
 import { canonicalProductName } from "../productImport/canonicalName.ts";
 import {
   loadSupplierProductMatchHints,
@@ -172,6 +176,12 @@ async function insertMotorProductWithStock(
     is_active: true,
     stock_control_type: "DIRECT",
   };
+  const ncmRule = await lookupNcmProductRule(
+    supabase,
+    companyId,
+    item.ncm,
+  );
+  applyNcmProductRuleToNewProduct(insertRow, ncmRule);
   if (pack) {
     insertRow.import_unit_needs_review = false;
     insertRow.import_unit_raw = null;

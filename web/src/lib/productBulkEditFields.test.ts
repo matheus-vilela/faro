@@ -3,6 +3,7 @@ import {
   BULK_EDIT_FIELDS,
   buildBulkEditChangesPayload,
   bulkEditFieldLabel,
+  bulkEditFieldsForCompany,
   formatBulkEditPreviewDisplay,
 } from "@/lib/productBulkEditFields";
 import { BULK_EDIT_ERROR_MESSAGES, BULK_EDIT_FIELD_KEYS } from "@/types/productBulkEdit";
@@ -13,6 +14,17 @@ describe("productBulkEditFields v1", () => {
     expect(BULK_EDIT_FIELDS.map((f) => f.key).sort()).toEqual(
       [...BULK_EDIT_FIELD_KEYS].sort(),
     );
+  });
+
+  it("omite categoria CMV quando o plano v4 não tem folhas CMV", () => {
+    expect(
+      bulkEditFieldsForCompany({ hasCmvLeaves: false }).some(
+        (f) => f.key === "cmv_category_id",
+      ),
+    ).toBe(false);
+    expect(
+      bulkEditFieldsForCompany({ hasCmvLeaves: true }),
+    ).toHaveLength(BULK_EDIT_FIELDS.length);
   });
 
   it("bulkEditFieldLabel retorna label ou key", () => {
