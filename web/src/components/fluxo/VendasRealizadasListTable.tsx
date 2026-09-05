@@ -316,38 +316,6 @@ export function VendasRealizadasListTable({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="vendas-list-from">Data de início</Label>
-          <Input
-            id="vendas-list-from"
-            type="date"
-            aria-label="Data de início"
-            title="Data de início"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => {
-              onDateFromChange(e.target.value || monthBounds.min);
-              setPage(1);
-            }}
-            className="w-auto"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="vendas-list-to">Data de fim</Label>
-          <Input
-            id="vendas-list-to"
-            type="date"
-            aria-label="Data de fim"
-            title="Data de fim"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => {
-              onDateToChange(e.target.value || monthBounds.max);
-              setPage(1);
-            }}
-            className="w-auto"
-          />
-        </div>
-        <div className="space-y-1.5">
           <Label>Tipo</Label>
           <Select
             value={kind}

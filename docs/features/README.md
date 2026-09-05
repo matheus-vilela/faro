@@ -23,6 +23,10 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `agrupamento-tres-opcoes.md` | Detalhe: três papéis de agrupamento + destino à parte |
 | `produto-detalhe-agrupamento-info.md` | Card de infos do agrupamento no detalhe do produto |
 | `ficha-normal-sem-preparo.md` | Ficha de venda não se produz; só a de produção |
+| `checklist-sidebar.md` | Checklists: tabs viram sidebar no padrão de Produtos |
+| `contas-a-pagar-sidebar.md` | Contas a pagar: calendário e listagem na sidebar |
+| `checklist-historico-filtro-periodo.md` | Histórico: filtro de mês + de/até como em Notas |
+| `contas-filtro-padrao.md` | Contas: calendário e listagem com filtro de Notas |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

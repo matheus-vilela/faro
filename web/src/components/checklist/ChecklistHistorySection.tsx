@@ -1,3 +1,5 @@
+import { type MonthYear } from "@/components/MonthSelector";
+import { ReferencePeriodCard } from "@/components/ReferencePeriodCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,7 +10,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -23,27 +24,14 @@ import {
   checklistRunStatusBadgeVariant,
   checklistRunStatusLabel,
 } from "@/lib/checklistOperationalTypes";
-import {
-  spAddCalendarDays,
-  spCivilDayBoundsUtc,
-  spCivilRangeBoundsUtc,
-  spTodayYmd,
-} from "@/lib/checklistSpDay";
+import { spCivilRangeBoundsUtc } from "@/lib/checklistSpDay";
+import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 import type { CompanyMember } from "@/types/companyMember";
-import {
-  CalendarClock,
-  ChevronLeft,
-  ChevronRight,
-  History,
-  Loader2,
-} from "lucide-react";
+import { FilterX, History, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type ChecklistOption = { id: string; title: string };
-
-export type HistoryMode = "day" | "last7" | "range";
 
 type HistoryRow = {
   id: string;
@@ -78,12 +66,17 @@ export function ChecklistHistorySection({
   checklists,
   members,
 }: Props) {
-  const [mode, setMode] = useState<HistoryMode>("day");
-  const [dayYmd, setDayYmd] = useState(() => spTodayYmd());
-  const [rangeFrom, setRangeFrom] = useState(() =>
-    spAddCalendarDays(spTodayYmd(), -6),
+  const now = new Date();
+  const [period, setPeriod] = useState<MonthYear>({
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  });
+  const [rangeFrom, setRangeFrom] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).min,
   );
-  const [rangeTo, setRangeTo] = useState(() => spTodayYmd());
+  const [rangeTo, setRangeTo] = useState(
+    () => monthYmdBounds(now.getMonth() + 1, now.getFullYear()).max,
+  );
   const [filterChecklist, setFilterChecklist] = useState<string>("all");
   const [filterMember, setFilterMember] = useState<string>("all");
   const [rows, setRows] = useState<HistoryRow[]>([]);
@@ -91,21 +84,42 @@ export function ChecklistHistorySection({
 
   const checklistIds = useMemo(() => checklists.map((c) => c.id), [checklists]);
 
+  const monthBounds = useMemo(
+    () => monthYmdBounds(period.month, period.year),
+    [period.month, period.year],
+  );
+  const dateRangeIsCustom =
+    rangeFrom !== monthBounds.min || rangeTo !== monthBounds.max;
+  const hasListFilters =
+    dateRangeIsCustom ||
+    filterChecklist !== "all" ||
+    filterMember !== "all";
+
+  const applyPeriod = (next: MonthYear) => {
+    const bounds = monthYmdBounds(next.month, next.year);
+    setPeriod(next);
+    setRangeFrom(bounds.min);
+    setRangeTo(bounds.max);
+  };
+
+  const clearListFilters = () => {
+    setRangeFrom(monthBounds.min);
+    setRangeTo(monthBounds.max);
+    setFilterChecklist("all");
+    setFilterMember("all");
+  };
+
   const bounds = useMemo(() => {
     try {
-      if (mode === "day") {
-        return spCivilDayBoundsUtc(dayYmd);
-      }
-      if (mode === "last7") {
-        const end = spTodayYmd();
-        const start = spAddCalendarDays(end, -6);
-        return spCivilRangeBoundsUtc(start, end);
-      }
-      return spCivilRangeBoundsUtc(rangeFrom, rangeTo);
+      const { gte, lte } = orderedYmdRange(
+        rangeFrom || monthBounds.min,
+        rangeTo || monthBounds.max,
+      );
+      return spCivilRangeBoundsUtc(gte, lte);
     } catch {
       return null;
     }
-  }, [mode, dayYmd, rangeFrom, rangeTo]);
+  }, [rangeFrom, rangeTo, monthBounds]);
 
   const load = useCallback(async () => {
     if (!companyId || checklistIds.length === 0 || !bounds) {
@@ -182,13 +196,6 @@ export function ChecklistHistorySection({
     },
   );
 
-  const modeLabel =
-    mode === "day"
-      ? "Dia"
-      : mode === "last7"
-        ? "Últimos 7 dias (calendário)"
-        : "Intervalo";
-
   return (
     <Card>
       <CardHeader className="space-y-1">
@@ -202,163 +209,73 @@ export function ChecklistHistorySection({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ["day", "Um dia"],
-              ["last7", "Últimos 7 dias"],
-              ["range", "Intervalo"],
-            ] as const
-          ).map(([m, label]) => (
-            <Button
-              key={m}
-              type="button"
-              variant={mode === m ? "default" : "outline"}
-              size="sm"
-              className={cn(mode === m && "shadow-sm")}
-              onClick={() => setMode(m)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-
-        {mode === "day" ? (
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="hist-day">Dia</Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={() => setDayYmd((d) => spAddCalendarDays(d, -1))}
-                  aria-label="Dia anterior"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Input
-                  id="hist-day"
-                  type="date"
-                  className="w-44"
-                  value={dayYmd}
-                  onChange={(e) => setDayYmd(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={() => setDayYmd((d) => spAddCalendarDays(d, 1))}
-                  aria-label="Próximo dia"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setDayYmd(spTodayYmd())}
-            >
-              Hoje (SP)
-            </Button>
-          </div>
-        ) : null}
-
-        {mode === "range" ? (
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="hist-from">De</Label>
-              <Input
-                id="hist-from"
-                type="date"
-                value={rangeFrom}
-                onChange={(e) => setRangeFrom(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="hist-to">Até</Label>
-              <Input
-                id="hist-to"
-                type="date"
-                value={rangeTo}
-                onChange={(e) => setRangeTo(e.target.value)}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {mode === "last7" ? (
-          <p className="text-xs text-muted-foreground">
-            Do dia{" "}
-            <span className="font-medium text-foreground">
-              {spAddCalendarDays(spTodayYmd(), -6)}
-            </span>{" "}
-            a{" "}
-            <span className="font-medium text-foreground">{spTodayYmd()}</span>{" "}
-            (inclusive), em horário de São Paulo.
-          </p>
-        ) : null}
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label>Checklist</Label>
-            <Select value={filterChecklist} onValueChange={setFilterChecklist}>
-              <SelectTrigger>
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os checklists</SelectItem>
-                {checklists.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Operador</Label>
-            <Select value={filterMember} onValueChange={setFilterMember}>
-              <SelectTrigger>
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os operadores</SelectItem>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name?.trim() || "Operador"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <CalendarClock className="h-3.5 w-3.5" />
-            {modeLabel}
-            {bounds ? (
-              <>
-                {" · "}
-                <span className="font-mono text-[11px] text-foreground/90">
-                  {bounds.startIso.slice(0, 16)} → {bounds.endIso.slice(0, 16)}{" "}
-                  UTC
-                </span>
-              </>
-            ) : null}
-          </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <ReferencePeriodCard
+            value={period}
+            onChange={applyPeriod}
+            description="Mês da lista"
+            className="rounded-lg p-1.5"
+            compact
+            monthSelectorClassName="shrink-0 [&_button]:h-8 [&_button]:w-8 [&_span]:min-w-36 [&_span]:text-sm [&_span]:font-semibold"
+          />
+          <Input
+            id="hist-from"
+            type="date"
+            aria-label="Data de início"
+            title="Data de início"
+            value={rangeFrom}
+            max={rangeTo || undefined}
+            onChange={(e) =>
+              setRangeFrom(e.target.value || monthBounds.min)
+            }
+            className="h-8 w-[9.5rem]"
+          />
+          <Input
+            id="hist-to"
+            type="date"
+            aria-label="Data de fim"
+            title="Data de fim"
+            value={rangeTo}
+            min={rangeFrom || undefined}
+            onChange={(e) => setRangeTo(e.target.value || monthBounds.max)}
+            className="h-8 w-[9.5rem]"
+          />
+          <Select value={filterChecklist} onValueChange={setFilterChecklist}>
+            <SelectTrigger size="sm" className="w-[12rem]">
+              <SelectValue placeholder="Checklist" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os checklists</SelectItem>
+              {checklists.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterMember} onValueChange={setFilterMember}>
+            <SelectTrigger size="sm" className="w-[12rem]">
+              <SelectValue placeholder="Operador" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os operadores</SelectItem>
+              {members.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name?.trim() || "Operador"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => void load()}
+            className="h-8"
+            disabled={!hasListFilters}
+            onClick={clearListFilters}
           >
-            Atualizar
+            <FilterX className="mr-1 size-3.5" />
+            Limpar
           </Button>
         </div>
 

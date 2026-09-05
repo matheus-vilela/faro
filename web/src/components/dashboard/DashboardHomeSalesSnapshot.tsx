@@ -17,12 +17,6 @@ const BAR_COLORS = [
   "bg-primary",
 ];
 
-function shortLabel(label: string): string {
-  const t = label.trim();
-  if (t.length <= 14) return t;
-  return `${t.slice(0, 13)}…`;
-}
-
 export function DashboardHomeSalesSnapshot({
   sales,
   loading,
@@ -87,14 +81,18 @@ export function DashboardHomeSalesSnapshot({
                   ? Math.min(100, (row.revenue / maxAmount) * 100)
                   : 0;
               return (
-                <li key={row.key} className="flex items-center gap-3">
-                  <span
-                    className="w-[5.5rem] shrink-0 truncate text-sm text-foreground"
-                    title={row.label}
-                  >
-                    {shortLabel(row.label)}
-                  </span>
-                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                <li key={row.key} className="space-y-1.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-sm leading-snug break-words text-foreground">
+                      {row.label}
+                    </span>
+                    <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+                      {row.revenue >= 1000
+                        ? `R$ ${formatCompactBrl(row.revenue)}`
+                        : formatBrl(row.revenue)}
+                    </span>
+                  </div>
+                  <div className="h-2.5 overflow-hidden rounded-full bg-muted">
                     <div
                       className={cn(
                         "h-full rounded-full transition-[width] duration-500",
@@ -103,11 +101,6 @@ export function DashboardHomeSalesSnapshot({
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <span className="w-16 shrink-0 text-right text-sm font-semibold tabular-nums">
-                    {row.revenue >= 1000
-                      ? `R$ ${formatCompactBrl(row.revenue)}`
-                      : formatBrl(row.revenue)}
-                  </span>
                 </li>
               );
             })}

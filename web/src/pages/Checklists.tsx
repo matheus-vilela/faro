@@ -36,6 +36,13 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
+  CHECKLISTS_CONFERENCE_PATH,
+  CHECKLISTS_HISTORY_PATH,
+  CHECKLISTS_HOME_PATH,
+  CHECKLISTS_RANKING_PATH,
+  checklistSectionFromPath,
+} from "@/lib/checklistPaths";
+import {
   toggleWeekdayBit,
   type ChecklistRecurrenceMeta,
 } from "@/lib/checklistRecurrence";
@@ -51,9 +58,46 @@ import {
   Plus,
   Sparkles,
   Trophy,
+  type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { NavLink, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
+
+const CHECKLIST_NAV: {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  description: string;
+}[] = [
+  {
+    to: CHECKLISTS_HOME_PATH,
+    label: "Visão geral",
+    icon: LayoutGrid,
+    end: true,
+    description:
+      "Rotinas da equipe: quem faz, quando, e conferência dos envios.",
+  },
+  {
+    to: CHECKLISTS_CONFERENCE_PATH,
+    label: "Conferência",
+    icon: ClipboardCheck,
+    description: "Revisar e aceitar ou devolver os checklists enviados.",
+  },
+  {
+    to: CHECKLISTS_HISTORY_PATH,
+    label: "Histórico",
+    icon: History,
+    description: "Envios concluídos e o que ficou pendente.",
+  },
+  {
+    to: CHECKLISTS_RANKING_PATH,
+    label: "Ranking",
+    icon: Trophy,
+    description: "Desempenho da equipe nos últimos 30 dias.",
+  },
+];
 
 type ChecklistRow = {
   id: string;
@@ -97,10 +141,9 @@ export function Checklists() {
   const [rows, setRows] = useState<ChecklistRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<CompanyMember[]>([]);
+  const { pathname } = useLocation();
+  const checklistsTab = checklistSectionFromPath(pathname);
   const [overviewTick, setOverviewTick] = useState(0);
-  const [checklistsTab, setChecklistsTab] = useState<
-    "overview" | "historico" | "conferencia" | "ranking"
-  >("overview");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiHint, setAiHint] = useState("");
@@ -168,9 +211,11 @@ export function Checklists() {
       .eq("company_id", companyId);
     const map: Record<string, { id: string; name: string }[]> = {};
     for (const row of data ?? []) {
-      const m = row.company_members as
-        | { id?: string; name?: string; is_active?: boolean }
-        | null;
+      const m = row.company_members as {
+        id?: string;
+        name?: string;
+        is_active?: boolean;
+      } | null;
       if (!m?.id || m.is_active === false) continue;
       const cid = row.checklist_id as string;
       (map[cid] ??= []).push({
@@ -320,7 +365,12 @@ export function Checklists() {
     const items = Array.isArray(rawItems)
       ? (rawItems as { title?: string }[])
       : [];
-    setItemLines(items.map((i) => i.title ?? "").filter(Boolean).join("\n"));
+    setItemLines(
+      items
+        .map((i) => i.title ?? "")
+        .filter(Boolean)
+        .join("\n"),
+    );
     setShowPreview(true);
     toast.success("Template aplicado — revise e salve.");
   };
@@ -333,7 +383,10 @@ export function Checklists() {
         p_company_member_id: memberId,
       },
     );
-    let row = data as { ok?: boolean; error?: string; slug?: string; token?: string } | string | null;
+    let row = data as
+      | { ok?: boolean; error?: string; slug?: string; token?: string }
+      | string
+      | null;
     if (typeof row === "string") {
       try {
         row = JSON.parse(row) as typeof row;
@@ -344,7 +397,9 @@ export function Checklists() {
     const payload = row && typeof row === "object" ? row : null;
     if (error || !payload?.ok) {
       const detail = error?.message || payload?.error;
-      toast.error(detail ? `Falha ao gerar link: ${detail}` : "Falha ao gerar link.");
+      toast.error(
+        detail ? `Falha ao gerar link: ${detail}` : "Falha ao gerar link.",
+      );
       return;
     }
     const base = window.location.origin.replace(/\/$/, "");
@@ -526,11 +581,22 @@ export function Checklists() {
     "Sáb",
   ] as const;
 
+  if (!checklistsTab) {
+    return <Navigate to={CHECKLISTS_HOME_PATH} replace />;
+  }
+
+  const activeNav =
+    CHECKLIST_NAV.find((item) =>
+      item.end
+        ? pathname === item.to || pathname === `${item.to}/`
+        : pathname === item.to || pathname.startsWith(`${item.to}/`),
+    ) ?? CHECKLIST_NAV[0];
+
   return (
-    <PageShell>
+    <PageShell className="h-full space-y-6">
       <PageHeader
         title="Checklists"
-        description="Rotinas da equipe: quem faz, quando, e conferência dos envios."
+        description={activeNav.description}
         icon={ListChecks}
         action={
           <Button type="button" size="sm" onClick={openCreate}>
@@ -540,137 +606,121 @@ export function Checklists() {
         }
       />
 
-      <div className="flex gap-1 border-b border-border/80">
-        <button
-          type="button"
-          onClick={() => setChecklistsTab("overview")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-            checklistsTab === "overview"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <LayoutGrid className="h-4 w-4 shrink-0" />
-          Visão geral
-        </button>
-        <button
-          type="button"
-          onClick={() => setChecklistsTab("historico")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-            checklistsTab === "historico"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <History className="h-4 w-4 shrink-0" />
-          Histórico
-        </button>
-        <button
-          type="button"
-          onClick={() => setChecklistsTab("conferencia")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-            checklistsTab === "conferencia"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <ClipboardCheck className="h-4 w-4 shrink-0" />
-          Conferência
-          {conferencePending > 0 ? (
-            <Badge variant="secondary" className="tabular-nums">
-              {conferencePending}
-            </Badge>
+      <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">
+        <aside className="h-full w-full shrink-0 border-b border-border pb-4 md:w-56 md:border-b-0 md:border-r md:pb-0 md:pr-4">
+          <nav
+            className="flex h-full gap-2 md:flex-col md:gap-1"
+            aria-label="Seções de checklists"
+          >
+            {CHECKLIST_NAV.map((item) => {
+              const Icon = item.icon;
+              const showConferenceBadge =
+                item.to === CHECKLISTS_CONFERENCE_PATH && conferencePending > 0;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex min-w-0 flex-1 items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors md:flex-none",
+                      isActive
+                        ? "border-border bg-background text-foreground shadow-sm"
+                        : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                    )
+                  }
+                >
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="block text-sm font-medium">
+                      {item.label}
+                    </span>
+                    {showConferenceBadge ? (
+                      <Badge variant="secondary" className="tabular-nums">
+                        {conferencePending}
+                      </Badge>
+                    ) : null}
+                  </span>
+                </NavLink>
+              );
+            })}
+          </nav>
+        </aside>
+
+        <div className="min-w-0 flex-1 space-y-8">
+          {checklistsTab === "overview" ? (
+            <>
+              {companyId ? (
+                <ChecklistOverviewDashboard
+                  companyId={companyId}
+                  reloadNonce={overviewTick}
+                />
+              ) : null}
+
+              {companyId ? (
+                <ChecklistNotificationSettingsCard companyId={companyId} />
+              ) : null}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Rotinas cadastradas
+                  </CardTitle>
+                  <CardDescription>
+                    Quem faz cada checklist e em quais dias. Só operadores
+                    ativos entram na atribuição e no WhatsApp.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loading ? (
+                    <p className="text-sm text-muted-foreground">Carregando…</p>
+                  ) : rows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Nenhum checklist ainda.
+                    </p>
+                  ) : (
+                    <ChecklistCatalogList
+                      checklists={rows.map((r) => ({
+                        id: r.id,
+                        title: r.title,
+                        active: r.active,
+                        recurrence: rowToMeta(r),
+                      }))}
+                      assignedByChecklist={assignedByChecklist}
+                      onGenerate={(checklistId, memberId) =>
+                        void startRunForMember(checklistId, memberId)
+                      }
+                      onEdit={(id) => {
+                        const r = rows.find((x) => x.id === id);
+                        if (r) void openEdit(r);
+                      }}
+                      onRemove={(id) => {
+                        const r = rows.find((x) => x.id === id);
+                        if (r) void remove(r);
+                      }}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          ) : checklistsTab === "historico" ? (
+            <ChecklistHistorySection
+              companyId={companyId}
+              checklists={rows.map((r) => ({ id: r.id, title: r.title }))}
+              members={members}
+            />
+          ) : checklistsTab === "conferencia" && companyId ? (
+            <ChecklistConferenceSection
+              companyId={companyId}
+              onPendingCount={handleConferencePending}
+            />
+          ) : checklistsTab === "ranking" && companyId ? (
+            <ChecklistRankingSection
+              companyId={companyId}
+              reloadNonce={overviewTick}
+            />
           ) : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => setChecklistsTab("ranking")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-none border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-            checklistsTab === "ranking"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <Trophy className="h-4 w-4 shrink-0" />
-          Ranking
-        </button>
-      </div>
-
-      <div className="space-y-8 pt-6">
-        {checklistsTab === "overview" ? (
-          <>
-            {companyId ? (
-              <ChecklistOverviewDashboard
-                companyId={companyId}
-                reloadNonce={overviewTick}
-              />
-            ) : null}
-
-            {companyId ? (
-              <ChecklistNotificationSettingsCard companyId={companyId} />
-            ) : null}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Rotinas cadastradas</CardTitle>
-                <CardDescription>
-                  Quem faz cada checklist e em quais dias. Só operadores
-                  ativos entram na atribuição e no WhatsApp.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <p className="text-sm text-muted-foreground">Carregando…</p>
-                ) : rows.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhum checklist ainda.
-                  </p>
-                ) : (
-                  <ChecklistCatalogList
-                    checklists={rows.map((r) => ({
-                      id: r.id,
-                      title: r.title,
-                      active: r.active,
-                      recurrence: rowToMeta(r),
-                    }))}
-                    assignedByChecklist={assignedByChecklist}
-                    onGenerate={(checklistId, memberId) =>
-                      void startRunForMember(checklistId, memberId)
-                    }
-                    onEdit={(id) => {
-                      const r = rows.find((x) => x.id === id);
-                      if (r) void openEdit(r);
-                    }}
-                    onRemove={(id) => {
-                      const r = rows.find((x) => x.id === id);
-                      if (r) void remove(r);
-                    }}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          </>
-        ) : checklistsTab === "historico" ? (
-          <ChecklistHistorySection
-            companyId={companyId}
-            checklists={rows.map((r) => ({ id: r.id, title: r.title }))}
-            members={members}
-          />
-        ) : checklistsTab === "conferencia" && companyId ? (
-          <ChecklistConferenceSection
-            companyId={companyId}
-            onPendingCount={handleConferencePending}
-          />
-        ) : checklistsTab === "ranking" && companyId ? (
-          <ChecklistRankingSection
-            companyId={companyId}
-            reloadNonce={overviewTick}
-          />
-        ) : null}
+        </div>
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>

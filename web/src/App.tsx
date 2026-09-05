@@ -147,7 +147,14 @@ function AuthenticatedLayout() {
             path="lancamento-receitas"
             element={<Navigate to="/app/vendas" replace />}
           />
-          <Route path="contas-a-pagar" element={<PermissionRouteGuard permission="contas_a_pagar"><ContasAPagar /></PermissionRouteGuard>} />
+          <Route
+            path="contas-a-pagar/*"
+            element={
+              <PermissionRouteGuard permission="contas_a_pagar">
+                <ContasAPagar />
+              </PermissionRouteGuard>
+            }
+          />
           <Route path="vendas-realizadas" element={<PermissionRouteGuard permission="vendas_realizadas"><VendasRealizadasFluxo /></PermissionRouteGuard>}>
             <Route index element={<VendasRealizadasIndex />} />
             <Route path="calendario" element={<VendasRealizadasCalendario />} />
@@ -240,7 +247,14 @@ function AuthenticatedLayout() {
             path="importacoes"
             element={<Navigate to="/app" replace />}
           />
-          <Route path="checklists" element={<PermissionRouteGuard permission="checklists"><Checklists /></PermissionRouteGuard>} />
+          <Route
+            path="checklists/*"
+            element={
+              <PermissionRouteGuard permission="checklists">
+                <Checklists />
+              </PermissionRouteGuard>
+            }
+          />
           <Route path="alertas" element={<PermissionRouteGuard permission="alertas"><Alertas /></PermissionRouteGuard>} />
           <Route
             path="integracoes"

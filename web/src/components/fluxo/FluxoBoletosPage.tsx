@@ -13,7 +13,7 @@ import { PayableListViewToggle } from "@/components/fluxo/PayableListViewToggle"
 import { PayableTotalsCards } from "@/components/fluxo/PayableTotalsCards";
 import { PayBoletoDialog } from "@/components/fluxo/PayBoletoDialog";
 import { SeriesBoletoActionsSheet } from "@/components/fluxo/SeriesBoletoActionsSheet";
-import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
+import { type MonthYear } from "@/components/MonthSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
@@ -90,7 +90,6 @@ import {
   computePayableTotals,
   EMPTY_PAYABLE_TOTALS,
   formatPayableMonthName,
-  getMonthYmdRange,
   getPayableTotalsFetchRange,
   type PayableTotals,
 } from "@/lib/payableTotals";
@@ -112,7 +111,7 @@ import type {
 import type { RevenueEntry } from "@/types/revenue";
 import type { ServiceDailySaleCalendarRow } from "@/types/serviceDailySale";
 import type { LucideIcon } from "lucide-react";
-import { Loader2, PackageSearch, Plus } from "lucide-react";
+import { FilterX, Loader2, PackageSearch, Plus } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -198,12 +197,15 @@ export function FluxoBoletosPage({
   config,
   afterHeader,
   embedded = false,
+  section,
 }: {
   config: FluxoBoletosPageConfig;
   /** Conteúdo renderizado logo abaixo do PageHeader (ex.: abas). */
   afterHeader?: ReactNode;
   /** Sem PageShell/PageHeader — o pai já renderiza o chrome. */
   embedded?: boolean;
+  /** Sem valor, calendário e lista aparecem juntos. */
+  section?: "calendar" | "list";
 }) {
   const {
     flowType,
@@ -278,6 +280,16 @@ export function FluxoBoletosPage({
   const [boletosPage, setBoletosPage] = useState(1);
   const [boletosSearch, setBoletosSearch] = useState("");
   const debouncedSearch = useDebounce(boletosSearch, 300);
+  const dateRangeIsCustom =
+    listDateFrom !== competenceMonthBounds.min ||
+    listDateTo !== competenceMonthBounds.max;
+  const hasListFilters =
+    dateRangeIsCustom || boletosSearch.trim().length > 0;
+  const clearListFilters = () => {
+    setListDateFrom(competenceMonthBounds.min);
+    setListDateTo(competenceMonthBounds.max);
+    setBoletosSearch("");
+  };
   const [loadingList, setLoadingList] = useState(true);
   const [listView, setListView] = useState<PayableListView>("category");
   const [calendarDayListView, setCalendarDayListView] =
@@ -517,15 +529,8 @@ export function FluxoBoletosPage({
   const fetchBoletosList = useCallback(async () => {
     if (!companyId) return;
     setLoadingList(true);
-    const monthRange = getMonthRange(period.month, period.year);
-    const startYmd =
-      flowType === "receivable"
-        ? listDateRange.gte
-        : monthRange.start.slice(0, 10);
-    const endYmd =
-      flowType === "receivable"
-        ? listDateRange.lte
-        : monthRange.end.slice(0, 10);
+    const startYmd = listDateRange.gte;
+    const endYmd = listDateRange.lte;
     try {
       if (flowType === "payable") {
         setListRevenueEntries([]);
@@ -576,8 +581,6 @@ export function FluxoBoletosPage({
     setLoadingList(false);
   }, [
     companyId,
-    period.month,
-    period.year,
     flowType,
     debouncedSearch,
     boletosPage,
@@ -683,6 +686,37 @@ export function FluxoBoletosPage({
     () => boletosMonthFiltered.filter((b) => isScheduledPayableBoleto(b)),
     [boletosMonthFiltered],
   );
+
+  const calendarBoletosFiltered = useMemo(() => {
+    const { gte, lte } = listDateRange;
+    const inRange = calendarBoletos.filter((b) => {
+      const d = String(b.due_date ?? "").slice(0, 10);
+      if (gte && d < gte) return false;
+      if (lte && d > lte) return false;
+      return true;
+    });
+    return filterBoletosBySearch(inRange, boletosSearch);
+  }, [calendarBoletos, listDateRange, boletosSearch]);
+
+  const calendarRevenueFiltered = useMemo(() => {
+    const { gte, lte } = listDateRange;
+    return calendarRevenueEntries.filter((e) => {
+      const d = e.entry_date.slice(0, 10);
+      if (gte && d < gte) return false;
+      if (lte && d > lte) return false;
+      return true;
+    });
+  }, [calendarRevenueEntries, listDateRange]);
+
+  const calendarServiceSalesFiltered = useMemo(() => {
+    const { gte, lte } = listDateRange;
+    return calendarServiceSales.filter((s) => {
+      const d = s.sale_date.slice(0, 10);
+      if (gte && d < gte) return false;
+      if (lte && d > lte) return false;
+      return true;
+    });
+  }, [calendarServiceSales, listDateRange]);
 
   const todayYmd = localDateYmd();
 
@@ -1320,7 +1354,6 @@ export function FluxoBoletosPage({
     </Button>
   );
 
-  const { startYmd, endYmd } = getMonthYmdRange(period.month, period.year);
   const exportButton = currentCompany?.id ? (
     <ExportButton
       reportId={isReceivableFlow ? "receivables_open" : "payables_open"}
@@ -1336,8 +1369,8 @@ export function FluxoBoletosPage({
       }
       lockReport={false}
       initialFilters={{
-        dateFrom: startYmd,
-        dateTo: endYmd,
+        dateFrom: listDateFrom,
+        dateTo: listDateTo,
         month: period.month,
         year: period.year,
         search: boletosSearch,
@@ -1353,8 +1386,10 @@ export function FluxoBoletosPage({
     <>
       {embedded ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">{description}</p>
-          {headerActions}
+          {section ? null : (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          )}
+          <div className={section ? "ml-auto" : undefined}>{headerActions}</div>
         </div>
       ) : (
         <PageHeader
@@ -1369,11 +1404,58 @@ export function FluxoBoletosPage({
         <div className="w-fit max-w-full">{afterHeader}</div>
       ) : null}
 
-      <ReferencePeriodCard
-        value={period}
-        onChange={isReceivableFlow ? applyPeriod : setPeriod}
-        description={periodDescription}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <ReferencePeriodCard
+          value={period}
+          onChange={applyPeriod}
+          description={periodDescription}
+          className="rounded-lg p-1.5"
+          compact
+          monthSelectorClassName="shrink-0 [&_button]:h-8 [&_button]:w-8 [&_span]:min-w-36 [&_span]:text-sm [&_span]:font-semibold"
+        />
+        <Input
+          id="fluxo-date-from"
+          type="date"
+          aria-label="Data de início"
+          title="Data de início"
+          value={listDateFrom}
+          max={listDateTo || undefined}
+          onChange={(e) =>
+            setListDateFrom(e.target.value || competenceMonthBounds.min)
+          }
+          className="h-8 w-[9.5rem]"
+        />
+        <Input
+          id="fluxo-date-to"
+          type="date"
+          aria-label="Data de fim"
+          title="Data de fim"
+          value={listDateTo}
+          min={listDateFrom || undefined}
+          onChange={(e) =>
+            setListDateTo(e.target.value || competenceMonthBounds.max)
+          }
+          className="h-8 w-[9.5rem]"
+        />
+        <Input
+          id="fluxo-search"
+          placeholder={searchPlaceholder}
+          value={boletosSearch}
+          onChange={(e) => setBoletosSearch(e.target.value)}
+          className="h-8 min-w-[12rem] flex-1 md:max-w-xs"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8"
+          disabled={!hasListFilters}
+          onClick={clearListFilters}
+        >
+          <FilterX className="mr-1 size-3.5" />
+          Limpar
+        </Button>
+      </div>
 
       {!isReceivableFlow && (
         <PayableTotalsCards
@@ -1403,12 +1485,12 @@ export function FluxoBoletosPage({
           }}
         />
       )}
-      {isReceivableFlow ? (
+      {section === "list" ? null : isReceivableFlow ? (
         <RevenueEntriesCalendar
           month={period.month}
           year={period.year}
-          entries={calendarRevenueEntries}
-          serviceSales={calendarServiceSales}
+          entries={calendarRevenueFiltered}
+          serviceSales={calendarServiceSalesFiltered}
           loading={calendarLoading}
           onDayListOpen={handleRevenueDayListOpen}
           formatCurrency={formatCurrency}
@@ -1417,7 +1499,7 @@ export function FluxoBoletosPage({
         <BoletosCalendar
           month={period.month}
           year={period.year}
-          boletos={calendarBoletos}
+          boletos={calendarBoletosFiltered}
           loading={calendarLoading}
           viewMode={calendarViewMode}
           onDayListOpen={handleCalendarDayListOpen}
@@ -1431,17 +1513,9 @@ export function FluxoBoletosPage({
         />
       )}
 
-      {!isReceivableFlow ? (
+      {section === "calendar" ? null : !isReceivableFlow ? (
         <div className="space-y-4">
           <PayableListViewToggle value={listView} onChange={setListView} />
-          <div className="flex flex-wrap gap-3 items-center">
-            <Input
-              placeholder={searchPlaceholder}
-              value={boletosSearch}
-              onChange={(e) => setBoletosSearch(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
           {listView === "category" && (
             <PayableByCategoryView
               boletos={scheduledMonthBoletos}
