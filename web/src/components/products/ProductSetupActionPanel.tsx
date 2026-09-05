@@ -465,8 +465,8 @@ export function ProductSetupActionPanel({
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             Este cadastro continua sendo produto de estoque, ligado a um
-            agrupamento de cardápio. Se o agrupamento ainda não existe, cadastre
-            pelo nome.
+            agrupamento de cardápio. Se o nome ainda não existe, cadastre no
+            próprio seletor.
           </p>
           <SaleFamilyDestinationFields
             companyId={companyId}

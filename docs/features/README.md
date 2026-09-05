@@ -30,8 +30,10 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-mesmo-item-ou-ficha.md` | Match da IA: unificar **ou** ficha (dose × garrafa) |
 | `correlacao-configurar-papel.md` | Card de confirmação: papel do vendido (produto, ficha, agrupamento, variante) |
 | `correlacao-variante-criar-agrupamento.md` | Variante em «Para corrigir»: cadastrar agrupamento que ainda não existe |
+| `correlacao-variante-seletor-criar.md` | Variante: criar agrupamento no próprio seletor, sem campo extra |
 | `correlacao-corrigir-badges.md` | «Para corrigir»: uma badge de origem; volume só na coluna |
 | `correlacao-corrigir-origem-agrupamento.md` | Badge PDV/nota; possível agrupamento já selecionado |
+| `correlacao-corrigir-somente-estoque.md` | «Para corrigir»: tag Somente estoque ao lado da origem |
 | `correlacao-direita-por-papel.md` | Card de correlação: direita muda com o papel (ficha no card) |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 

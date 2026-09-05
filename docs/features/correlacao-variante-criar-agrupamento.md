@@ -29,7 +29,7 @@ Dá para informar o nome de um agrupamento novo, criá-lo e ligar o item como va
 ## Comportamento esperado
 
 - Continua dando para buscar um agrupamento ou produto existente (produto existente vira agrupamento ao ligar).
-- Nome novo: campo ou opção «Cadastrar «nome» como agrupamento».
+- Nome novo: no próprio seletor, opção «Cadastrar «nome» como agrupamento» (sem campo extra).
 - Nome igual a um cadastro existente não cria duplicata — usa esse cadastro.
 - Ao confirmar, cria o agrupamento (cadastro mínimo) e liga a variante. O agrupamento não tem estoque; a variante continua sendo o produto.
 

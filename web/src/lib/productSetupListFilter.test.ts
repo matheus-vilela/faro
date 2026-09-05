@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ProductSetupItem } from "@/lib/productSetupQueue";
 import {
+  SETUP_STOCK_ONLY_LABEL,
   setupItemMatchesFilters,
   setupItemOrigin,
+  setupItemShowsStockOnly,
   setupItemSourceLabel,
 } from "@/lib/productSetupListFilter";
 
@@ -47,6 +49,20 @@ describe("setupItemOrigin", () => {
       setupItemSourceLabel(item("recipe_without_ingredients", "Caipirinha")),
     ).toBe("PDV / venda");
   });
+
+  it("tag Somente estoque só em possível agrupamento como variante", () => {
+    const grouping = item("sold_unlinked", "Bolinho", {
+      possibleGrouping: true,
+    });
+    expect(setupItemShowsStockOnly(item("sold_unlinked", "Heineken"))).toBe(
+      false,
+    );
+    expect(setupItemShowsStockOnly(grouping)).toBe(true);
+    expect(setupItemShowsStockOnly(grouping, "sale_family_variant")).toBe(true);
+    expect(setupItemShowsStockOnly(grouping, "sale_family")).toBe(false);
+    expect(setupItemShowsStockOnly(grouping, "recipe")).toBe(false);
+    expect(SETUP_STOCK_ONLY_LABEL).toBe("Somente estoque");
+  });
 });
 
 describe("setupItemMatchesFilters", () => {
@@ -75,5 +91,12 @@ describe("setupItemMatchesFilters", () => {
     expect(
       rows.filter((row) => setupItemMatchesFilters(row, "hein", "all")).map((r) => r.name),
     ).toEqual(["Heineken 600"]);
+    expect(
+      setupItemMatchesFilters(
+        item("sold_unlinked", "Bolinho", { possibleGrouping: true }),
+        "estoque",
+        "all",
+      ),
+    ).toBe(true);
   });
 });

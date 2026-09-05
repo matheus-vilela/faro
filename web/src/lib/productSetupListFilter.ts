@@ -1,4 +1,7 @@
-import type { ProductSetupItem } from "@/lib/productSetupQueue";
+import type {
+  ProductSetupChoice,
+  ProductSetupItem,
+} from "@/lib/productSetupQueue";
 
 export type ProductSetupOriginFilter = "all" | "pdv" | "nota" | "ficha";
 
@@ -33,8 +36,26 @@ export function setupItemSourceLabel(
     : "PDV / venda";
 }
 
+export const SETUP_STOCK_ONLY_LABEL = "Somente estoque";
+
+export function setupItemShowsStockOnly(
+  item: Pick<ProductSetupItem, "possibleGrouping">,
+  choice?: ProductSetupChoice | null,
+): boolean {
+  if (item.possibleGrouping !== true) return false;
+  if (choice == null) return true;
+  return choice === "sale_family_variant";
+}
+
 function haystack(item: ProductSetupItem): string {
-  return [item.name, item.sku, item.ean, item.barcode, item.sourceLabel]
+  return [
+    item.name,
+    item.sku,
+    item.ean,
+    item.barcode,
+    item.sourceLabel,
+    setupItemShowsStockOnly(item) ? SETUP_STOCK_ONLY_LABEL : "",
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();

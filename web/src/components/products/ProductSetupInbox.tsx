@@ -13,7 +13,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import {
   PRODUCT_SETUP_ORIGIN_LABEL,
+  SETUP_STOCK_ONLY_LABEL,
   setupItemMatchesFilters,
+  setupItemShowsStockOnly,
   setupItemSourceLabel,
   type ProductSetupOriginFilter,
 } from "@/lib/productSetupListFilter";
@@ -59,9 +61,11 @@ const SOURCE_BADGE_CLASS: Record<ProductSetupItem["kind"], string> = {
 
 function ItemIdentity({
   item,
+  choice,
   showVolume = false,
 }: {
   item: ProductSetupItem;
+  choice?: ProductSetupChoice;
   showVolume?: boolean;
 }) {
   const volume = showVolume ? formatTurnoverLine(item) : null;
@@ -75,6 +79,14 @@ function ItemIdentity({
         >
           {setupItemSourceLabel(item)}
         </Badge>
+        {setupItemShowsStockOnly(item, choice) ? (
+          <Badge
+            variant="outline"
+            className="font-normal border-sky-500/35 bg-sky-500/15 text-sky-900 dark:text-sky-200"
+          >
+            {SETUP_STOCK_ONLY_LABEL}
+          </Badge>
+        ) : null}
         {volume ? (
           <span className="text-xs text-muted-foreground">{volume}</span>
         ) : null}
@@ -320,7 +332,11 @@ export function ProductSetupInbox({
                         )}
                         onClick={() => selectItem(item)}
                       >
-                        <ItemIdentity item={item} showVolume />
+                        <ItemIdentity
+                          item={item}
+                          choice={choiceFor(item)}
+                          showVolume
+                        />
                         <div className="mt-3">
                           <RoleSelect
                             item={item}
@@ -370,7 +386,10 @@ export function ProductSetupInbox({
                           onClick={() => selectItem(item)}
                         >
                           <td className="w-[32%] px-3 py-2.5">
-                            <ItemIdentity item={item} />
+                            <ItemIdentity
+                              item={item}
+                              choice={choiceFor(item)}
+                            />
                           </td>
                           <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
                             {formatTurnoverLine(item) ?? "—"}
