@@ -217,7 +217,8 @@ type IgnoredRowReason =
   | "quantity_invalid"
   | "epoc_product_unresolved"
   | "unit_conversion_failed"
-  | "product_create_failed";
+  | "product_create_failed"
+  | "excluded_from_sales";
 
 type IgnoredRowDiagnostic = {
   row_index: number;
@@ -891,6 +892,7 @@ async function runCsvRevenueImportForJob(
 
     const skuProductCache = loadSkuProductCacheFromMetadata(priorMeta);
     const productCategoryCache = new Map<string, string>();
+    const excludeFromSalesByProduct = new Map<string, boolean>();
     const createdProductIdsThisChunk = new Set<string>();
 
     const catByKey: Record<string, StoredRevenueCat> = {};
@@ -1094,6 +1096,32 @@ async function runCsvRevenueImportForJob(
         continue;
       }
       const productId = ensured.productId;
+      let excludedFromSales = excludeFromSalesByProduct.get(productId);
+      if (excludedFromSales === undefined) {
+        const { data: saleFlag } = await admin
+          .from("products")
+          .select("exclude_from_sales")
+          .eq("id", productId)
+          .maybeSingle();
+        excludedFromSales = saleFlag?.exclude_from_sales === true;
+        excludeFromSalesByProduct.set(productId, excludedFromSales);
+      }
+      if (excludedFromSales) {
+        skippedChunk += 1;
+        pushDiagnostic({
+          row_index: idx + 1,
+          entry_date_raw: rawDate,
+          product_name_raw: rawProdutoForMatch,
+          quantity_raw: qtyCell,
+          total_received_raw: totalCell,
+          reason: "excluded_from_sales",
+          details:
+            "Produto em categoria marcada para nao aparecer como venda",
+          action: "linha ignorada",
+        });
+        idx += 1;
+        continue;
+      }
       if (ensured.created) {
         createdNewProductThisIteration = true;
         productsAutoCreatedChunk += 1;

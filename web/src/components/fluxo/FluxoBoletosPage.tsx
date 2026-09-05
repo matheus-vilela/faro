@@ -93,6 +93,10 @@ import {
 } from "@/lib/payableTotals";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
+import {
+  fetchExcludedFromSalesProductIds,
+  filterRevenueEntriesAppearingAsSale,
+} from "@/lib/productExcludeFromSales";
 import { cn } from "@/lib/utils";
 import type { CompanyBankAccount } from "@/types/bankAccount";
 import type { CompanyCategory } from "@/types/category";
@@ -426,7 +430,7 @@ export function FluxoBoletosPage({
       period.year,
     );
     try {
-      const [data, servicesData] = await Promise.all([
+      const [data, servicesData, excludedIds] = await Promise.all([
         fetchAllInRange<RevenueEntry>(
           supabase
             .from("revenue_entries")
@@ -446,8 +450,11 @@ export function FluxoBoletosPage({
             .lte("sale_date", endIso)
             .order("sale_date", { ascending: true }),
         ),
+        fetchExcludedFromSalesProductIds(companyId),
       ]);
-      setCalendarRevenueEntries(data);
+      setCalendarRevenueEntries(
+        filterRevenueEntriesAppearingAsSale(data, new Set(excludedIds)),
+      );
       setCalendarServiceSales(normalizeServiceDailySales(servicesData));
     } catch (e) {
       console.error(e);
@@ -513,18 +520,25 @@ export function FluxoBoletosPage({
       } else {
         setBoletosMonthFiltered([]);
         setBoletosList([]);
-        const data = await fetchAllInRange<RevenueEntry>(
-          supabase
-            .from("revenue_entries")
-            .select("*")
-            .eq("company_id", companyId)
-            .gte("entry_date", startYmd)
-            .lte("entry_date", endYmd)
-            .order("entry_date", { ascending: true })
-            .order("created_at", { ascending: true }),
+        const [data, excludedIds] = await Promise.all([
+          fetchAllInRange<RevenueEntry>(
+            supabase
+              .from("revenue_entries")
+              .select("*")
+              .eq("company_id", companyId)
+              .gte("entry_date", startYmd)
+              .lte("entry_date", endYmd)
+              .order("entry_date", { ascending: true })
+              .order("created_at", { ascending: true }),
+          ),
+          fetchExcludedFromSalesProductIds(companyId),
+        ]);
+        const visible = filterRevenueEntriesAppearingAsSale(
+          data,
+          new Set(excludedIds),
         );
-        setListRevenueEntries(data);
-        setBoletosListCount(data.length);
+        setListRevenueEntries(visible);
+        setBoletosListCount(visible.length);
       }
     } catch (e) {
       console.error(e);

@@ -2,6 +2,7 @@ import { addDaysYmd, getMonthYmdRange } from "@/lib/payableTotals";
 import {
   companyCategoryDisplayName,
 } from "@/lib/companyCategoryLabels";
+import { filterRevenueEntriesAppearingAsSale } from "@/lib/productExcludeFromSales";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 
@@ -965,6 +966,8 @@ export function buildVendasRealizadasResumo(input: {
   categoriesById: Map<string, CompanyCategory>;
   productNameById: Map<string, string>;
   recipeNameById: Map<string, string>;
+  /** Produtos de categoria marcada como não-venda. */
+  excludedProductIds?: ReadonlySet<string>;
   /** Formas de pagamento do faturamento EPOC (período já filtrado ou completo). */
   epocPayments?: EpocPaymentLineInput[];
   /** Dias de faturamento EPOC para os KPIs (fonte preferencial). */
@@ -980,8 +983,9 @@ export function buildVendasRealizadasResumo(input: {
     input.customRange,
     { weekStartsOn: input.weekStartsOn },
   );
-  const operational = input.entries.filter(
-    (e) => e.revenue_type === "operational",
+  const operational = filterRevenueEntriesAppearingAsSale(
+    input.entries.filter((e) => e.revenue_type === "operational"),
+    input.excludedProductIds,
   );
   const current = operational.filter((e) =>
     inRange(e.entry_date.slice(0, 10), ranges.currentStart, ranges.currentEnd),

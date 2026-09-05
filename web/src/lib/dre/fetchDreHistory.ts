@@ -12,6 +12,10 @@ import {
   groupRateioItemsByExpenseId,
 } from "@/lib/dre/rateioBoletoByItems";
 import { supabase } from "@/lib/supabase";
+import {
+  fetchExcludedFromSalesProductIds,
+  revenueEntryAppearsAsSale,
+} from "@/lib/productExcludeFromSales";
 import type { CompanyCategory } from "@/types/category";
 import { isBoletoPayable } from "@/types/expense";
 
@@ -48,6 +52,8 @@ type BolRow = {
 type RevRow = {
   cmv_amount: number | null;
   entry_date: string;
+  product_id?: string | null;
+  entry_mode?: string | null;
 };
 
 function periodKey(p: MonthYear): string {
@@ -82,7 +88,7 @@ export async function fetchDreHistory(
 
   const categoriesById = new Map(categories.map((c) => [c.id, c]));
 
-  const [bolRes, revRes] = await Promise.all([
+  const [bolRes, revRes, excludedIds] = await Promise.all([
     supabase
       .from("boletos")
       .select(
@@ -93,11 +99,12 @@ export async function fetchDreHistory(
       .lte("due_date", endDate),
     supabase
       .from("revenue_entries")
-      .select("cmv_amount, entry_date")
+      .select("cmv_amount, entry_date, product_id, entry_mode")
       .eq("company_id", companyId)
       .in("entry_mode", ["product_sale", "recipe_sale"])
       .gte("entry_date", startDate)
       .lte("entry_date", endDate),
+    fetchExcludedFromSalesProductIds(companyId),
   ]);
 
   if (bolRes.error) throw bolRes.error;
@@ -120,8 +127,10 @@ export async function fetchDreHistory(
     bolByPeriod.set(key, list);
   }
 
+  const excludedProductIds = new Set(excludedIds);
   const cmvByPeriod = new Map<string, number>();
   for (const r of revs) {
+    if (!revenueEntryAppearsAsSale(r, excludedProductIds)) continue;
     const p = ymdToPeriod(r.entry_date);
     const key = periodKey(p);
     cmvByPeriod.set(

@@ -266,4 +266,37 @@ describe("buildCmvMargensDashboard", () => {
     expect(dash.products[0]!.recipeId).toBe("r1");
     expect(dash.products[0]!.productId).toBeNull();
   });
+
+  it("omite product_sale de categoria não-venda", () => {
+    const entries = [
+      entry({
+        id: "1",
+        title: "Guardanapo",
+        product_id: "p2",
+        net_amount: 50,
+        cmv_amount: 10,
+        entry_date: "2026-07-15",
+      }),
+      entry({
+        id: "2",
+        title: "Heineken",
+        product_id: "p1",
+        net_amount: 140,
+        cmv_amount: 64,
+        entry_date: "2026-07-15",
+      }),
+    ];
+    const dash = buildCmvMargensDashboard({
+      entries,
+      period: "today",
+      todayYmd: "2026-07-15",
+      sort: "volume",
+      productNameById,
+      recipeNameById,
+      productMetaById: new Map([["p2", { exclude_from_sales: true }]]),
+    });
+    expect(dash.products).toHaveLength(1);
+    expect(dash.products[0]!.key).toBe("product:p1");
+    expect(dash.kpis.eligibleRevenue).toBe(140);
+  });
 });

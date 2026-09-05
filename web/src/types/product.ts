@@ -29,6 +29,8 @@ export interface Product {
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
   ean?: string | null
   is_active?: boolean
+  /** Derivado: true se alguma categoria de catálogo marca o produto como não-venda. */
+  exclude_from_sales?: boolean
   /** false = prato de ficha técnica (oculto na listagem de Produtos). */
   listed_in_product_catalog?: boolean
   created_at: string

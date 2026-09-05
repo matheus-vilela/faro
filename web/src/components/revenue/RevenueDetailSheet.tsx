@@ -46,6 +46,7 @@ import {
   roundHubQuantityForStock,
 } from "@/lib/productQuantityInput";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
+import { isProductExcludedFromSales } from "@/lib/productExcludeFromSales";
 import { ptBrUi } from "@/lib/ptBrUiStrings";
 import { supabase } from "@/lib/supabase";
 import type { CompanyCategory } from "@/types/category";
@@ -182,7 +183,7 @@ export function RevenueDetailSheet({
   const productSelectOptions = useMemo(
     () =>
       products
-        .filter((p) => p.is_active !== false)
+        .filter((p) => p.is_active !== false && !isProductExcludedFromSales(p))
         .map(productSearchOption),
     [products],
   );
