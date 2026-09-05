@@ -10,7 +10,10 @@ import {
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
 import { fetchExcludedFromSalesProductIds } from "@/lib/productExcludeFromSales";
-import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
+import {
+  fetchResolvedSaleFamilyProductIds,
+  isPossibleGroupingProduct,
+} from "@/lib/productSaleFamily";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type ProductSetupKind =
@@ -56,7 +59,7 @@ export type ProductSetupChoice =
   | "skip";
 
 export const PRODUCT_SETUP_CHOICE_LABEL: Record<ProductSetupChoice, string> = {
-  link_item: "Pode ser mesmo produto da nota",
+  link_item: "Unificar com produto",
   recipe: "Ficha técnica",
   intermediate: "Ficha de produção",
   sale_family: "É um agrupamento",
@@ -230,6 +233,14 @@ export function compareTurnoverDesc(
   return a.name.localeCompare(b.name, "pt-BR");
 }
 
+export function excludeSaleFamilyResolvedItems(
+  items: ProductSetupItem[],
+  resolvedIds: ReadonlySet<string>,
+): ProductSetupItem[] {
+  if (resolvedIds.size === 0) return items;
+  return items.filter((item) => !resolvedIds.has(item.productId));
+}
+
 export function suggestedSetupChoice(
   item: ProductSetupItem,
 ): ProductSetupChoice | undefined {
@@ -291,8 +302,14 @@ export async function fetchProductSetupQueue(
   client: SupabaseClient,
   companyId: string,
 ): Promise<ProductSetupQueue> {
-  const [lists, pendingRecipes, pendingSales, recipesPick, excludedIds] =
-    await Promise.all([
+  const [
+    lists,
+    pendingRecipes,
+    pendingSales,
+    recipesPick,
+    excludedIds,
+    saleFamilyResolvedIds,
+  ] = await Promise.all([
       fetchProductRecipeMatchLists(client, companyId, {
         purchaseLimit: 2000,
         purchaseOffset: 0,
@@ -303,6 +320,7 @@ export async function fetchProductSetupQueue(
       fetchDashboardImportReviewPendingRevenueLink(client, companyId),
       fetchCompanyRecipesForPick(client, companyId),
       fetchExcludedFromSalesProductIds(companyId),
+      fetchResolvedSaleFamilyProductIds(companyId),
     ]);
 
   const error =
@@ -400,18 +418,28 @@ export async function fetchProductSetupQueue(
     });
   }
 
+  const pendingItems = excludeSaleFamilyResolvedItems(
+    items,
+    saleFamilyResolvedIds,
+  );
+
   const counts = {
-    total: items.length,
-    purchases: items.filter((i) => i.kind === "purchase_unlinked").length,
-    sold: items.filter((i) => i.kind === "sold_unlinked").length,
-    recipes: items.filter(
+    total: pendingItems.length,
+    purchases: pendingItems.filter((i) => i.kind === "purchase_unlinked")
+      .length,
+    sold: pendingItems.filter((i) => i.kind === "sold_unlinked").length,
+    recipes: pendingItems.filter(
       (i) =>
         i.kind === "recipe_without_ingredients" ||
         i.kind === "recipe_sales_unlinked",
     ).length,
   };
 
-  const withTurnover = await attachProductTurnover(client, companyId, items);
+  const withTurnover = await attachProductTurnover(
+    client,
+    companyId,
+    pendingItems,
+  );
   const withGrouping = await attachPossibleGrouping(client, withTurnover);
 
   return {

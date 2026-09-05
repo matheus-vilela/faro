@@ -33,6 +33,8 @@ interface UnitConversionDialogProps {
     secondary_qty: number;
   }) => Promise<void>;
   saving?: boolean;
+  /** Pré-seleciona a unidade secundária (ex.: unidade do último preço). */
+  initialSecondaryUnit?: string | null;
 }
 
 export function UnitConversionDialog({
@@ -42,6 +44,7 @@ export function UnitConversionDialog({
   secondaryUnits,
   onSave,
   saving,
+  initialSecondaryUnit,
 }: UnitConversionDialogProps) {
   const [primaryQty, setPrimaryQty] = useState("1");
   const [secondaryCode, setSecondaryCode] = useState("");
@@ -50,9 +53,13 @@ export function UnitConversionDialog({
   useEffect(() => {
     if (!open) return;
     setPrimaryQty("1");
-    setSecondaryCode(secondaryUnits[0]?.code ?? "");
+    const preferred = initialSecondaryUnit?.trim().toLowerCase() ?? "";
+    const match = secondaryUnits.find(
+      (u) => u.code.trim().toLowerCase() === preferred,
+    );
+    setSecondaryCode(match?.code ?? secondaryUnits[0]?.code ?? "");
     setSecondaryQty("");
-  }, [open, secondaryUnits]);
+  }, [open, secondaryUnits, initialSecondaryUnit]);
 
   const canSubmit = useMemo(() => {
     const p = parseFloat(primaryQty.replace(",", "."));

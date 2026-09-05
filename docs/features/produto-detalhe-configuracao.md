@@ -13,7 +13,7 @@ No detalhe, o agrupamento e as ações (tornar, vincular, ficha, unificar) ficam
 
 No detalhe do produto, o nome visível é **agrupamento**. As ações de configurar o item (tornar agrupamento, vincular, ficha técnica, unificar, não é agrupamento) ficam no **mesmo card**. Status no header, abaixo das categorias.
 
-Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; configuração em card próprio; lotes, conversões, unificação e fichas abaixo, sem tiles soltos. Intermediário tem aba **Produção** (mesmo fluxo da ficha).
+Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; configuração em card próprio; lotes e conversões abaixo; **Unificações** e **Vínculos em fichas** na mesma linha (`md+`). Sem tiles soltos. Intermediário tem aba **Produção** (mesmo fluxo da ficha).
 
 ## Fora de escopo
 
@@ -37,6 +37,7 @@ Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; confi
 - Quem já é agrupamento pode deixar de ser (variantes desvinculam).
 - Header: só **Editar**. Status (ativo/inativo) abaixo de Categorias de produto.
 - Grid: identificação à esquerda; quantidade, mínimo, último preço e valor em estoque em 2×2 à direita.
+- Unificações e vínculos em fichas lado a lado a partir de `md`. Se só um existir, ocupa a linha inteira.
 
 ## Critérios de aceite
 
@@ -45,6 +46,7 @@ Aba **Resumo**: identificação e estoque/valor em dois cards lado a lado; confi
 - [x] Marcar “não é agrupamento” some a tag e persiste após recarregar.
 - [x] Sem card Status; ativo/inativo no header abaixo das categorias.
 - [x] Identificação e estoque/valor em dois cards lado a lado (`lg+`).
+- [x] Unificações e vínculos em fichas na mesma linha (`md+`); um sozinho estica.
 - [x] Aba Resumo extraída em `ProductDetailSummary` + cards próprios.
 - [x] Item ligado a um agrupamento continua produto (ficha, unificar, estoque). O vínculo é extra, não um tipo exclusivo.
 - [ ] Verificar no browser o fluxo principal (não só screenshot).

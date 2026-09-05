@@ -234,6 +234,49 @@ export async function fetchPersistedDayStockOuts(
   }));
 }
 
+/** IDs já resolvidos como agrupamento ou variante — saem da fila de correlação. */
+export async function fetchResolvedSaleFamilyProductIds(
+  companyId: string,
+): Promise<Set<string>> {
+  const [membersRes, familiesRes] = await Promise.all([
+    supabase
+      .from("product_sale_family_members")
+      .select("family_product_id, variant_product_id")
+      .eq("company_id", companyId),
+    supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("stock_control_type", "SALE_FAMILY"),
+  ]);
+  if (membersRes.error) {
+    throw new Error(
+      rpcError(membersRes.error, "Não foi possível listar variantes."),
+    );
+  }
+  if (familiesRes.error) {
+    throw new Error(
+      rpcError(familiesRes.error, "Não foi possível listar agrupamentos."),
+    );
+  }
+  const ids = new Set<string>();
+  for (const row of membersRes.data ?? []) {
+    const rec = row as {
+      family_product_id?: string;
+      variant_product_id?: string;
+    };
+    const familyId = String(rec.family_product_id ?? "").trim();
+    const variantId = String(rec.variant_product_id ?? "").trim();
+    if (familyId) ids.add(familyId);
+    if (variantId) ids.add(variantId);
+  }
+  for (const row of familiesRes.data ?? []) {
+    const id = String((row as { id?: string }).id ?? "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
 export async function fetchLinkedSaleFamilyVariantKeys(
   companyId: string,
 ): Promise<Array<{ sku: string | null; name: string }>> {

@@ -34,7 +34,7 @@ Papéis do **vendido (PDV)**:
 
 | Papel | Ação |
 |---|---|
-| Pode ser mesmo produto da nota | Unificar com a(s) compra(s). Só produto ↔ produto. |
+| Unificar com produto de nota fiscal | Unificar com a(s) compra(s). Só produto ↔ produto. |
 | É um produto interno | Sai da fila sem unificar. A nota continua pendente. |
 | Ficha técnica | Abre ficha de venda; a nota entra como insumo. |
 | Ficha de produção | Abre ficha intermediária; a nota entra como insumo da produção. |
@@ -46,7 +46,7 @@ Insumo não é opção do vendido. A compra da nota vira insumo quando o papel �
 ## Critérios de aceite
 
 - [x] Card de match alto (same_item e recipe) tem seletor de papel com as seis opções.
-- [x] Unificar só fica disponível em «Pode ser mesmo produto da nota».
+- [x] Unificar só fica disponível em «Unificar com produto de nota fiscal».
 - [x] Ficha técnica e ficha de produção abrem o editor certo, com a nota como insumo.
 - [x] Agrupamento promove o vendido e liga as notas como variantes.
 - [x] Variante pede o agrupamento e liga o vendido.

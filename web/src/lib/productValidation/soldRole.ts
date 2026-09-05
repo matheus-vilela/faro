@@ -13,8 +13,8 @@ export const CORRELATION_SOLD_ROLES: Array<{
 }> = [
   {
     value: "same_product",
-    label: "Pode ser mesmo produto da nota",
-    hint: "Unifica os cadastros. Só produto com produto — não ficha nem agrupamento.",
+    label: "Unificar com produto",
+    hint: "Unifica os cadastros, inclusive com um produto que já absorveu outros. Só produto com produto — não ficha nem agrupamento.",
   },
   {
     value: "product",
@@ -56,7 +56,7 @@ export function soldRoleHint(role: CorrelationSoldRole): string {
 }
 
 export function correlationRightTitle(role: CorrelationSoldRole): string {
-  if (role === "same_product") return "Nota fiscal";
+  if (role === "same_product") return "Produto";
   if (role === "product") return "Produto interno";
   if (role === "recipe") return "Insumos da ficha";
   if (role === "intermediate") return "Insumos da produção";

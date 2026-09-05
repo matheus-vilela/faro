@@ -1,4 +1,5 @@
 export const PRODUCT_HOME_PATH = "/app/produtos";
+export const PRODUCT_CORRELACAO_2_PATH = "/app/produtos/correlacao-2";
 export const PRODUCT_CATALOG_PATH = "/app/produtos/catalogo";
 export const STOCK_LEDGER_PATH = "/app/produtos/estoque";
 export const STOCK_COUNT_PATH = "/app/produtos/contagem";

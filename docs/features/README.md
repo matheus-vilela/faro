@@ -35,6 +35,12 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-corrigir-origem-agrupamento.md` | Badge PDV/nota; possível agrupamento já selecionado |
 | `correlacao-corrigir-somente-estoque.md` | «Para corrigir»: tag Somente estoque ao lado da origem |
 | `correlacao-direita-por-papel.md` | Card de correlação: direita muda com o papel (ficha no card) |
+| `correlacao-2.md` | Aba Correlação 2: fila + inspector, sem corte de 90% |
+| `correlacao-2-variante-fila.md` | Variante já ligada não volta na fila da Correlação 2 |
+| `vendas-calendario-abas.md` | Vendas: Calendário com abas internas calendário / listagem |
+| `ncm-rpc-acesso-admin.md` | Aba NCMs: admin Faro deixa de levar «Acesso negado» |
+| `unificar-com-produto.md` | Unificar com qualquer produto; hub não inverte |
+| `produto-ultimo-preco-por-unidade.md` | Detalhe: último preço + proporcional por unidade de estoque |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

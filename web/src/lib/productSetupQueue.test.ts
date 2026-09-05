@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  excludeSaleFamilyResolvedItems,
   setupChoicesForItem,
   suggestedSetupChoice,
   type ProductSetupItem,
@@ -72,5 +73,22 @@ describe("suggestedSetupChoice", () => {
 
   it("não sugere papel sem o sinal de agrupamento", () => {
     expect(suggestedSetupChoice(item("sold_unlinked"))).toBeUndefined();
+  });
+});
+
+describe("excludeSaleFamilyResolvedItems", () => {
+  it("tira da fila variante ou agrupamento já ligado", () => {
+    const sold = item("sold_unlinked");
+    const other = { ...item("purchase_unlinked"), productId: "p2", key: "p2" };
+    expect(
+      excludeSaleFamilyResolvedItems([sold, other], new Set(["p1"])).map(
+        (row) => row.productId,
+      ),
+    ).toEqual(["p2"]);
+  });
+
+  it("mantém a lista quando ninguém está resolvido", () => {
+    expect(excludeSaleFamilyResolvedItems([item("sold_unlinked")], new Set()))
+      .toHaveLength(1);
   });
 });

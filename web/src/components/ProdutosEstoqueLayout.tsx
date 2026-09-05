@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import {
   PRODUCT_CATALOG_PATH,
+  PRODUCT_CORRELACAO_2_PATH,
   PRODUCT_HOME_PATH,
   STOCK_COUNT_PATH,
   STOCK_LEDGER_PATH,
@@ -50,6 +51,12 @@ const STOCK_GROUPS: {
       {
         to: PRODUCT_HOME_PATH,
         label: "Correlação",
+        icon: Link2,
+        end: true,
+      },
+      {
+        to: PRODUCT_CORRELACAO_2_PATH,
+        label: "Correlação 2",
         icon: Link2,
         end: true,
       },

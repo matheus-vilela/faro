@@ -16,7 +16,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { SaleFamilyDestinationFields } from "@/components/products/SaleFamilyDestinationFields";
 import { Button } from "@/components/ui/button";
-import { SearchSelect } from "@/components/ui/search-select";
+import {
+  SearchSelect,
+  type SearchSelectOption,
+} from "@/components/ui/search-select";
+import { useDebounce } from "@/hooks/useDebounce";
 import {
   dashboardImportReviewEpocRecipeRevertToProduct,
   dashboardImportReviewFinalizeRecipeProductSales,
@@ -42,6 +46,7 @@ import {
   type ProductSetupChoice,
   type ProductSetupItem,
 } from "@/lib/productSetupQueue";
+import { searchProductsForUnify } from "@/lib/searchProductsForUnify";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
 import { Loader2 } from "lucide-react";
@@ -75,6 +80,7 @@ export function ProductSetupActionPanel({
   recipes,
   purchases,
   onResolved,
+  hideTitle = false,
 }: {
   companyId: string;
   item: ProductSetupItem;
@@ -83,6 +89,7 @@ export function ProductSetupActionPanel({
   recipes: RecipePickRow[];
   purchases: PurchaseMatchRow[];
   onResolved: () => void;
+  hideTitle?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [mergeProduct, setMergeProduct] = useState<Product | null>(null);
@@ -90,6 +97,11 @@ export function ProductSetupActionPanel({
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
   const [mergeSurvivorIsSource, setMergeSurvivorIsSource] = useState(false);
   const [pickedPartnerId, setPickedPartnerId] = useState("");
+  const [unifySearch, setUnifySearch] = useState("");
+  const debouncedUnifySearch = useDebounce(unifySearch, 250);
+  const [catalogOptions, setCatalogOptions] = useState<SearchSelectOption[]>(
+    [],
+  );
   const [recipeId, setRecipeId] = useState("");
   const [familyId, setFamilyId] = useState("");
   const [newFamilyName, setNewFamilyName] = useState("");
@@ -103,6 +115,8 @@ export function ProductSetupActionPanel({
     setMergeOpen(false);
     setMergePartnerId(null);
     setPickedPartnerId("");
+    setUnifySearch("");
+    setCatalogOptions([]);
     setRecipeId("");
     setFamilyId("");
     setNewFamilyName("");
@@ -131,6 +145,43 @@ export function ProductSetupActionPanel({
     [soldOnly],
   );
 
+  useEffect(() => {
+    if (choice !== "link_item") return;
+    let cancelled = false;
+    void searchProductsForUnify({
+      companyId,
+      excludeId: item.productId,
+      term: debouncedUnifySearch,
+      limit: 80,
+    }).then((rows) => {
+      if (cancelled) return;
+      setCatalogOptions(
+        rows.map((row) => ({
+          value: row.id,
+          label: row.name,
+          description:
+            (row.merged_catalog_names?.length ?? 0) > 0
+              ? `Já unificou ${row.merged_catalog_names!.length} ${
+                  row.merged_catalog_names!.length === 1 ? "item" : "itens"
+                }`
+              : formatQty(row.current_quantity, row.unit),
+          keywords: [
+            row.name,
+            row.sku,
+            row.ean,
+            row.barcode,
+            ...(row.merged_catalog_names ?? []),
+          ]
+            .filter(Boolean)
+            .join(" "),
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [choice, companyId, item.productId, debouncedUnifySearch]);
+
   const purchaseOptions = useMemo(
     () =>
       purchases
@@ -143,6 +194,17 @@ export function ProductSetupActionPanel({
         })),
     [purchases, item.productId],
   );
+
+  const unifyOptions = useMemo(() => {
+    const queue =
+      item.kind === "purchase_unlinked" ? soldOptions : purchaseOptions;
+    const byId = new Map<string, SearchSelectOption>();
+    for (const row of catalogOptions) byId.set(row.value, row);
+    for (const row of queue) {
+      if (!byId.has(row.value)) byId.set(row.value, row);
+    }
+    return [...byId.values()];
+  }, [catalogOptions, item.kind, purchaseOptions, soldOptions]);
 
   const matchRow = setupItemAsMatchRow(item);
 
@@ -373,17 +435,19 @@ export function ProductSetupActionPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div>
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{item.name}</p>
-      </div>
+      {hideTitle ? null : (
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{item.name}</p>
+        </div>
+      )}
 
       {choice === "link_item" ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            {isPurchase
-              ? "Este cadastro e o item vendido no PDV passam a ser o mesmo. A nota movimenta o item certo."
-              : "Une este cadastro ao item da compra. A nota e a venda passam a ser o mesmo produto."}
+            Une este cadastro a outro produto — da fila ou do catálogo, inclusive
+            um que já unificou outros itens. Nesse caso ele permanece e não dá
+            para inverter quem fica.
           </p>
           {isPurchase && suggestion ? (
             <p className="text-sm">
@@ -393,10 +457,11 @@ export function ProductSetupActionPanel({
           <SearchSelect
             value={pickedPartnerId}
             onValueChange={setPickedPartnerId}
-            options={isPurchase ? soldOptions : purchaseOptions}
-            placeholder="Escolher o outro item"
-            searchPlaceholder="Buscar produto…"
-            emptyMessage="Nenhum item na fila. Abra o diálogo para buscar no catálogo."
+            options={unifyOptions}
+            placeholder="Escolher produto do catálogo"
+            searchPlaceholder="Buscar no catálogo…"
+            emptyMessage="Nenhum produto encontrado no catálogo."
+            onSearchChange={setUnifySearch}
           />
           <Button
             type="button"

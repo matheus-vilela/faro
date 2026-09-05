@@ -1,16 +1,26 @@
+import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
+import {
+  lastPriceDisplayUnit,
+  lastPriceNeedsConversion,
+  lastPricePerStockUnit,
+  lastPriceRecorded,
+  type LastPriceConversionRow,
+} from "@/lib/lastPricePerStockUnit";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 
-function productLineUnit(p: Product): {
+function productLineUnit(
+  p: Product,
+  conversions?: LastPriceConversionRow[],
+): {
   last: number | null;
   lastUnitCode: string | null;
+  lastPerStock: number | null;
   lineUnit: number | null;
 } {
-  const last =
-    p.last_unit_value != null && p.last_unit_value > 0
-      ? Number(p.last_unit_value)
-      : null;
+  const last = lastPriceRecorded(p);
   const lastStock =
     p.last_unit_value_stock != null && p.last_unit_value_stock > 0
       ? Number(p.last_unit_value_stock)
@@ -21,7 +31,8 @@ function productLineUnit(p: Product): {
       : null;
   return {
     last,
-    lastUnitCode: p.last_unit_value_unit_code ?? p.unit ?? null,
+    lastUnitCode: lastPriceDisplayUnit(p) || null,
+    lastPerStock: lastPricePerStockUnit(p, conversions),
     lineUnit: average ?? lastStock ?? null,
   };
 }
@@ -30,11 +41,15 @@ function Metric({
   label,
   value,
   suffix,
+  extra,
+  action,
   emphasize,
 }: {
   label: string;
   value: string;
   suffix?: string;
+  extra?: { value: string; suffix: string };
+  action?: ReactNode;
   emphasize?: boolean;
 }) {
   return (
@@ -55,6 +70,13 @@ function Metric({
           </span>
         ) : null}
       </p>
+      {extra ? (
+        <p className="mt-1 text-xs font-medium tabular-nums leading-snug text-muted-foreground">
+          {extra.value}
+          <span className="ml-1">{extra.suffix}</span>
+        </p>
+      ) : null}
+      {action}
     </div>
   );
 }
@@ -62,16 +84,27 @@ function Metric({
 export function ProductStockValueCard({
   product,
   formatCurrency,
+  conversions,
+  conversionsLoading,
+  onCreateConversion,
   className,
 }: {
   product: Product;
   formatCurrency: (value: number) => string;
+  conversions?: LastPriceConversionRow[];
+  conversionsLoading?: boolean;
+  onCreateConversion?: (priceUnit: string) => void;
   className?: string;
 }) {
   const qty = Number(product.current_quantity);
   const min = Number(product.min_quantity);
   const unit = product.unit;
-  const { last, lastUnitCode, lineUnit } = productLineUnit(product);
+  const { last, lastUnitCode, lastPerStock, lineUnit } = productLineUnit(
+    product,
+    conversions,
+  );
+  const needsConversion =
+    !conversionsLoading && lastPriceNeedsConversion(product, conversions);
   const lineValue = lineUnit != null ? qty * lineUnit : null;
   const isFamily = product.stock_control_type === "SALE_FAMILY";
   const lowStock = !isFamily && min > 0 && qty <= min;
@@ -109,6 +142,35 @@ export function ProductStockValueCard({
           label="Último preço"
           value={last != null ? formatCurrency(last) : "—"}
           suffix={last != null ? `por ${lastUnitCode ?? unit}` : undefined}
+          extra={
+            lastPerStock != null
+              ? {
+                  value: formatCurrency(lastPerStock),
+                  suffix: `por ${unit}`,
+                }
+              : undefined
+          }
+          action={
+            needsConversion && onCreateConversion ? (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-xs leading-snug text-muted-foreground">
+                  Sem conversão para {unit}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={() =>
+                    onCreateConversion(lastUnitCode ?? unit)
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Criar conversão
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
         <Metric
           label="Valor em estoque"

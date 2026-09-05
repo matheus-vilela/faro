@@ -47,6 +47,10 @@ export function ProductDetailSummary({
   onProductChanged: () => void;
 }) {
   const [groupingRefreshKey, setGroupingRefreshKey] = useState(0);
+  const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
+  const [conversionPrefillUnit, setConversionPrefillUnit] = useState<
+    string | null
+  >(null);
   const refreshGrouping = () => {
     setGroupingRefreshKey((n) => n + 1);
     onProductChanged();
@@ -63,6 +67,12 @@ export function ProductDetailSummary({
         <ProductStockValueCard
           product={product}
           formatCurrency={formatCurrency}
+          conversions={conversions}
+          conversionsLoading={conversionsLoading}
+          onCreateConversion={(priceUnit) => {
+            setConversionPrefillUnit(priceUnit);
+            setConversionDialogOpen(true);
+          }}
         />
       </div>
 
@@ -99,7 +109,7 @@ export function ProductDetailSummary({
       />
 
       {companyId ? (
-        conversionsLoading ? (
+        conversionsLoading && !conversionDialogOpen ? (
           <div className={PRODUCT_SHEET_SECTION}>
             <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
               Conversões de unidade
@@ -118,27 +128,32 @@ export function ProductDetailSummary({
             onPromoteSecondaryToStockUnit={onPromoteStockUnit}
             disabled={conversionsSaving}
             sectionClassName={PRODUCT_SHEET_SECTION}
+            addDialogOpen={conversionDialogOpen}
+            onAddDialogOpenChange={(open) => {
+              setConversionDialogOpen(open);
+              if (!open) setConversionPrefillUnit(null);
+            }}
+            preferredSecondaryUnit={conversionPrefillUnit}
           />
         )
       ) : null}
 
       {companyId ? (
-        <ProductMergeAuditSection
-          companyId={companyId}
-          product={product}
-          className={PRODUCT_SHEET_SECTION}
-          onUndone={onProductChanged}
-        />
-      ) : null}
-
-      {companyId ? (
-        <ProductRecipeLinksSection
-          companyId={companyId}
-          productId={product.id}
-          productName={product.name}
-          className={PRODUCT_SHEET_SECTION}
-          onChanged={onProductChanged}
-        />
+        <div className="flex flex-col items-stretch gap-4 md:flex-row">
+          <ProductMergeAuditSection
+            companyId={companyId}
+            product={product}
+            className={`${PRODUCT_SHEET_SECTION} min-w-0 md:flex-1`}
+            onUndone={onProductChanged}
+          />
+          <ProductRecipeLinksSection
+            companyId={companyId}
+            productId={product.id}
+            productName={product.name}
+            className={`${PRODUCT_SHEET_SECTION} min-w-0 md:flex-1`}
+            onChanged={onProductChanged}
+          />
+        </div>
       ) : null}
     </div>
   );

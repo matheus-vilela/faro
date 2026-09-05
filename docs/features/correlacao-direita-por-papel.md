@@ -30,7 +30,7 @@ A coluna da direita segue o papel do vendido. Em ficha técnica ou de produção
 
 | Papel | Direita |
 |---|---|
-| Pode ser mesmo produto da nota | Compras da nota + Unificar |
+| Unificar com produto de nota fiscal | Compras da nota + Unificar |
 | É um produto interno | A nota fica na fila; confirmar o vendido |
 | Ficha técnica | Editor de ficha (busca, qtde, unidade, adicionar). Nota pode pré-preencher insumo com qtde vazia |
 | Ficha de produção | O mesmo editor, tipo produção |
@@ -42,7 +42,7 @@ A coluna da direita segue o papel do vendido. Em ficha técnica ou de produção
 - [x] Com o papel já escolhido, o editor não pede de novo se é ficha normal ou de produção.
 - [x] Marcar ficha de produção troca a direita para o fluxo de insumos, não a nota para unificar.
 - [x] Ficha técnica usa o mesmo editor (não unificar).
-- [x] Unificar só aparece em «Pode ser mesmo produto da nota».
+- [x] Unificar só aparece em «Unificar com produto de nota fiscal».
 - [x] Produto interno e variante não listam a nota como par de unificação.
 - [ ] Verificar no browser o fluxo principal (não só screenshot).
 

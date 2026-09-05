@@ -12,7 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDebounce } from "@/hooks/useDebounce";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
+import {
+  hasMergedCatalogItems,
+  mergedCatalogNameCount,
+  mergeSurvivorLock,
+} from "@/lib/mergeSurvivorLock";
 import { mergeCompanyProducts } from "@/lib/mergeProducts";
+import { searchProductsForUnify } from "@/lib/searchProductsForUnify";
 import {
   buildMergedUnitConversionsForMerge,
   convertLoserQuantityToWinner,
@@ -80,10 +86,12 @@ function ProductMergeCard({
   product,
   formatCurrency,
   variant,
+  lockReason,
 }: {
   product: Product;
   formatCurrency: (v: number) => string;
   variant: "survivor" | "removed";
+  lockReason?: string;
 }) {
   const isSurvivor = variant === "survivor";
   return (
@@ -128,10 +136,17 @@ function ProductMergeCard({
           <p className="mt-1 text-xs text-muted-foreground">
             {productMetaLine(product, formatCurrency)}
           </p>
-          {(product.merged_catalog_names?.length ?? 0) > 0 && isSurvivor ? (
+          {hasMergedCatalogItems(product) ? (
             <p className="mt-2 text-[0.65rem] text-muted-foreground">
-              Já unificou: {product.merged_catalog_names!.slice(0, 3).join(", ")}
+              Já unificou {mergedCatalogNameCount(product)}{" "}
+              {mergedCatalogNameCount(product) === 1 ? "item" : "itens"}:{" "}
+              {product.merged_catalog_names!.slice(0, 3).join(", ")}
               {product.merged_catalog_names!.length > 3 ? "…" : ""}
+            </p>
+          ) : null}
+          {isSurvivor && lockReason ? (
+            <p className="mt-2 text-xs leading-snug text-emerald-900 dark:text-emerald-100">
+              {lockReason}
             </p>
           ) : null}
         </div>
@@ -189,28 +204,15 @@ export function ProductMergeDialog({
     let cancelled = false;
     const load = async () => {
       setCandidatesLoading(true);
-      let q = supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", companyId)
-        .neq("id", sourceProduct.id)
-        .or("is_active.is.null,is_active.eq.true")
-        .order("name")
-        .limit(50);
-      const term = debouncedSearch.trim();
-      if (term) {
-        const like = `%${term}%`;
-        q = q.or(`name.ilike.${like},sku.ilike.${like},ean.ilike.${like},barcode.ilike.${like}`);
-      }
-      const { data, error } = await q;
+      const rows = await searchProductsForUnify({
+        companyId,
+        excludeId: sourceProduct.id,
+        term: debouncedSearch,
+        limit: 80,
+      });
       if (cancelled) return;
       setCandidatesLoading(false);
-      if (error) {
-        console.error(error);
-        setCandidates([]);
-        return;
-      }
-      setCandidates((data ?? []) as Product[]);
+      setCandidates(rows);
     };
     void load();
     return () => {
@@ -241,6 +243,16 @@ export function ProductMergeDialog({
       cancelled = true;
     };
   }, [partnerId, candidates]);
+
+  const survivorLock = useMemo(
+    () => mergeSurvivorLock(sourceProduct, partner),
+    [sourceProduct, partner],
+  );
+
+  useEffect(() => {
+    if (!survivorLock.locked) return;
+    setSurvivorIsSource(survivorLock.survivor === "source");
+  }, [survivorLock]);
 
   const winner = useMemo(
     () => (survivorIsSource ? sourceProduct : partner),
@@ -433,8 +445,8 @@ export function ProductMergeDialog({
           <DialogTitle>Unificar produtos</DialogTitle>
           <DialogDescription>
             {step === "pick"
-              ? "Escolha o outro cadastro que é o mesmo item. Isso corrige vínculo e histórico de movimentações dos dois cadastros."
-              : "Revise o resultado: estoque, histórico de movimentações e vínculos de notas vão para o produto que permanece."}
+              ? "Escolha o outro cadastro que é o mesmo item — inclusive um que já unificou outros produtos."
+              : "Revise o resultado: estoque, histórico de movimentações e vínculos vão para o produto que permanece."}
           </DialogDescription>
         </DialogHeader>
 
@@ -489,7 +501,15 @@ export function ProductMergeDialog({
                     }}
                   >
                     <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{p.name}</span>
+                      {hasMergedCatalogItems(p) ? (
+                        <span className="block text-[0.65rem] text-muted-foreground">
+                          Já unificou {mergedCatalogNameCount(p)}{" "}
+                          {mergedCatalogNameCount(p) === 1 ? "item" : "itens"}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                       {Number(p.current_quantity).toLocaleString("pt-BR")} {p.unit}
                     </span>
@@ -510,28 +530,39 @@ export function ProductMergeDialog({
               product={winner}
               formatCurrency={formatCurrency}
               variant="survivor"
+              lockReason={
+                survivorLock.locked ? survivorLock.reason : undefined
+              }
             />
             <ProductMergeCard
               product={loser}
               formatCurrency={formatCurrency}
               variant="removed"
             />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() => {
-                setSurvivorIsSource((v) => !v);
-                setManualLoserQty("1");
-                setManualWinnerQty("1");
-                setSelectedFactorId(null);
-                setFactorMode("candidate");
-              }}
-            >
-              <ArrowLeftRight className="mr-2 h-4 w-4" />
-              Trocar qual produto permanece
-            </Button>
+            {survivorLock.locked ? (
+              <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-950 dark:text-amber-100">
+                Não é possível trocar quem permanece: {winner.name} já tem
+                itens unificados. O novo cadastro é absorvido para não perder
+                a referência.
+              </p>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => {
+                  setSurvivorIsSource((v) => !v);
+                  setManualLoserQty("1");
+                  setManualWinnerQty("1");
+                  setSelectedFactorId(null);
+                  setFactorMode("candidate");
+                }}
+              >
+                <ArrowLeftRight className="mr-2 h-4 w-4" />
+                Trocar qual produto permanece
+              </Button>
+            )}
 
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 text-sm font-medium">

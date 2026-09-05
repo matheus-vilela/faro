@@ -519,7 +519,7 @@ export function SameItemRow({
           {role === "variant" ? (
             <p className="rounded-lg border bg-background px-2.5 py-2 text-sm text-muted-foreground">
               Escolha o agrupamento à esquerda. A nota só unifica se for o
-              mesmo SKU — use «Pode ser mesmo produto da nota».
+              mesmo SKU — use «Unificar com produto».
             </p>
           ) : null}
           {role === "same_product" || role === "grouping" ? (
@@ -729,7 +729,7 @@ export function RecipeRow({
           {role === "variant" ? (
             <p className="rounded-lg border bg-background px-2.5 py-2 text-sm text-muted-foreground">
               Escolha o agrupamento à esquerda. A nota só unifica se for o
-              mesmo SKU — use «Pode ser mesmo produto da nota».
+              mesmo SKU — use «Unificar com produto».
             </p>
           ) : null}
           {role === "same_product" || role === "grouping" ? (

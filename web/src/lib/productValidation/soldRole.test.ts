@@ -21,6 +21,6 @@ describe("soldRole", () => {
   it("a direita da ficha de produção é insumos, não nota para unificar", () => {
     expect(correlationRightTitle("intermediate")).toBe("Insumos da produção");
     expect(correlationRightTitle("recipe")).toBe("Insumos da ficha");
-    expect(correlationRightTitle("same_product")).toBe("Nota fiscal");
+    expect(correlationRightTitle("same_product")).toBe("Produto");
   });
 });

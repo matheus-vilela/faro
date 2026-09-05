@@ -11,12 +11,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { undoProductMerge } from "@/lib/undoProductMerge";
 import { cn } from "@/lib/utils";
+import type { Product } from "@/types/product";
 import {
   activeProductMergeEvents,
   parseProductMergeAudit,
   type ProductMergeEvent,
 } from "@/types/productMergeAudit";
-import type { Product } from "@/types/product";
 import { GitMerge, Loader2, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -75,7 +75,7 @@ export function ProductMergeAuditSection({
       <section className={cn("space-y-3", className)}>
         <div className="flex items-center gap-2">
           <GitMerge className="h-4 w-4 text-muted-foreground" />
-          <p className="text-sm font-semibold">Unificações recentes</p>
+          <p className="text-sm font-semibold">Unificações</p>
         </div>
         <ul className="space-y-2">
           {events.map((event) => (
@@ -92,7 +92,9 @@ export function ProductMergeAuditSection({
                   {event.stock_delta_winner_unit > 0 ? (
                     <>
                       {" "}
-                      · +{event.stock_delta_winner_unit.toLocaleString("pt-BR")}{" "}
+                      · +{event.stock_delta_winner_unit.toLocaleString(
+                        "pt-BR",
+                      )}{" "}
                       {product.unit} somados ao estoque
                     </>
                   ) : null}

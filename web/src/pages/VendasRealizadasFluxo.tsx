@@ -10,6 +10,7 @@ import { FaturamentoEpoc } from "@/pages/FaturamentoEpoc";
 import {
   CalendarDays,
   LayoutDashboard,
+  List,
   Percent,
   Receipt,
   TrendingUp,
@@ -37,7 +38,7 @@ const VENDAS_NAV: {
     label: "Calendário",
     icon: CalendarDays,
     description:
-      "Entradas previstas com calendário de recebimentos e lista do mês.",
+      "Entradas previstas: calendário de recebimentos ou lista do mês.",
   },
   {
     to: "/app/vendas-realizadas/faturamento",
@@ -137,9 +138,55 @@ export function VendasRealizadasIndex() {
   return <VendasRealizadasResumo />;
 }
 
+const CALENDARIO_HOME = "/app/vendas-realizadas/calendario";
+const CALENDARIO_LIST = "/app/vendas-realizadas/calendario/listagem";
+
 export function VendasRealizadasCalendario() {
+  const { pathname } = useLocation();
+  const section = pathname.endsWith("/listagem") ? "list" : "calendar";
+
   return (
-    <FluxoBoletosPage config={VENDAS_REALIZADAS_FLUXO_CONFIG} embedded />
+    <div className="space-y-6">
+      <nav
+        className="flex flex-wrap gap-2 border-b border-border pb-px"
+        aria-label="Abas de calendário"
+      >
+        <NavLink
+          to={CALENDARIO_HOME}
+          end
+          className={({ isActive }) =>
+            cn(
+              "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+              isActive
+                ? "border-border bg-background text-foreground shadow-sm"
+                : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )
+          }
+        >
+          <CalendarDays className="h-4 w-4 shrink-0" />
+          Calendário
+        </NavLink>
+        <NavLink
+          to={CALENDARIO_LIST}
+          className={({ isActive }) =>
+            cn(
+              "inline-flex items-center gap-2 rounded-t-lg border border-b-0 px-4 py-2.5 text-sm font-medium transition-colors",
+              isActive
+                ? "border-border bg-background text-foreground shadow-sm"
+                : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )
+          }
+        >
+          <List className="h-4 w-4 shrink-0" />
+          Listagem
+        </NavLink>
+      </nav>
+      <FluxoBoletosPage
+        config={VENDAS_REALIZADAS_FLUXO_CONFIG}
+        embedded
+        section={section}
+      />
+    </div>
   );
 }
 

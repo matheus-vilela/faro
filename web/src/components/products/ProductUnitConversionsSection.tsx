@@ -28,6 +28,9 @@ interface ProductUnitConversionsSectionProps {
   sectionClassName?: string;
   /** Resumo do produto: título curto, sem texto explicativo longo. */
   compact?: boolean;
+  addDialogOpen?: boolean;
+  onAddDialogOpenChange?: (open: boolean) => void;
+  preferredSecondaryUnit?: string | null;
 }
 
 export function ProductUnitConversionsSection({
@@ -39,8 +42,13 @@ export function ProductUnitConversionsSection({
   disabled,
   sectionClassName = PRODUCT_SHEET_SECTION,
   compact = false,
+  addDialogOpen,
+  onAddDialogOpenChange,
+  preferredSecondaryUnit,
 }: ProductUnitConversionsSectionProps) {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const dialogOpen = addDialogOpen ?? uncontrolledOpen;
+  const setDialogOpen = onAddDialogOpenChange ?? setUncontrolledOpen;
 
   const primaryMeta = useMemo(() => {
     const c = stockUnitCode.trim().toLowerCase();
@@ -52,13 +60,29 @@ export function ProductUnitConversionsSection({
     const used = new Set(
       value.map((v) => v.secondary_unit_code.trim().toLowerCase()),
     );
-    return SYSTEM_PRODUCT_UNITS.filter(
+    const opts = SYSTEM_PRODUCT_UNITS.filter(
       (u) =>
         u.code.toLowerCase() !== c &&
         !used.has(u.code.toLowerCase()) &&
         !isLockedSystemConversionPair(stockUnitCode, u.code),
     ).map((u) => ({ code: u.code, label: u.label }));
-  }, [stockUnitCode, value]);
+    const preferred = preferredSecondaryUnit?.trim().toLowerCase() ?? "";
+    if (
+      preferred &&
+      preferred !== c &&
+      !used.has(preferred) &&
+      !opts.some((o) => o.code.toLowerCase() === preferred)
+    ) {
+      const meta = SYSTEM_PRODUCT_UNITS.find(
+        (u) => u.code.toLowerCase() === preferred,
+      );
+      opts.unshift({
+        code: preferredSecondaryUnit!.trim(),
+        label: meta?.label ?? preferredSecondaryUnit!.trim(),
+      });
+    }
+    return opts;
+  }, [stockUnitCode, value, preferredSecondaryUnit]);
 
   const lockedRows = useMemo(
     () => buildLockedProductConversionRows(companyId, stockUnitCode),
@@ -217,6 +241,7 @@ export function ProductUnitConversionsSection({
         onOpenChange={setDialogOpen}
         primaryUnit={primaryForDialog}
         secondaryUnits={secondaryOptions}
+        initialSecondaryUnit={preferredSecondaryUnit}
         onSave={(p) => handleAdd(p)}
         saving={false}
       />
