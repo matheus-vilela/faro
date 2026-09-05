@@ -9,6 +9,8 @@ import {
 
 export type DaySaleKind = "product" | "service";
 
+export type DaySaleOrigin = "sale" | "service" | "stock_only";
+
 export type DaySaleListItem = {
   id: string;
   kind: DaySaleKind;
@@ -20,7 +22,44 @@ export type DaySaleListItem = {
   net: number;
   /** Só produtos abrem o detalhe. */
   revenueEntryId?: string;
+  origin?: DaySaleOrigin;
+  stockSku?: string;
+  stockUnit?: string;
 };
+
+export const STOCK_ONLY_ORIGIN_LABEL = "Somente estoque";
+
+export function daySaleOriginLabel(item: Pick<DaySaleListItem, "origin">): string {
+  return item.origin === "stock_only" ? STOCK_ONLY_ORIGIN_LABEL : "";
+}
+
+export function DaySaleKindBadge({ item }: { item: DaySaleListItem }) {
+  const isProduct = item.kind === "product";
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        isProduct
+          ? "border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+          : "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300",
+      )}
+    >
+      {isProduct ? "Produto" : "Serviço"}
+    </Badge>
+  );
+}
+
+export function DaySaleOriginBadge({ item }: { item: DaySaleListItem }) {
+  if (item.origin !== "stock_only") return null;
+  return (
+    <Badge
+      variant="outline"
+      className="border-amber-600/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+    >
+      {STOCK_ONLY_ORIGIN_LABEL}
+    </Badge>
+  );
+}
 
 export function daySaleFromRevenueEntry(entry: RevenueEntry): DaySaleListItem {
   const quantity = Number(entry.quantity) || 0;
@@ -42,6 +81,7 @@ export function daySaleFromRevenueEntry(entry: RevenueEntry): DaySaleListItem {
     tax: Number(entry.tax_amount) || 0,
     net: Number(entry.net_amount) || 0,
     revenueEntryId: entry.id,
+    origin: "sale",
   };
 }
 
@@ -58,6 +98,28 @@ export function daySaleFromService(
     gross,
     tax: 0,
     net: gross,
+    origin: "service",
+  };
+}
+
+export function daySaleFromStockOnly(item: {
+  sku: string;
+  nome: string;
+  qtde: number | null;
+  qtde_unidade?: string;
+}): DaySaleListItem {
+  return {
+    id: `stock-only:${item.sku}:${item.nome}`,
+    kind: "product",
+    name: item.nome,
+    quantity: item.qtde ?? 0,
+    unitPrice: 0,
+    gross: 0,
+    tax: 0,
+    net: 0,
+    origin: "stock_only",
+    stockSku: item.sku,
+    stockUnit: item.qtde_unidade,
   };
 }
 
@@ -97,18 +159,23 @@ export function DaySaleItemCard({
   item,
   formatCurrency,
   onClick,
+  onConfigureFamily,
 }: {
   item: DaySaleListItem;
   formatCurrency: (v: number) => string;
   onClick?: () => void;
+  onConfigureFamily?: () => void;
 }) {
+  const isStockOnly = item.origin === "stock_only";
   const isProduct = item.kind === "product";
-  const interactive = typeof onClick === "function";
+  const interactive = !isStockOnly && typeof onClick === "function";
   const className = cn(
     "flex w-full flex-col gap-2.5 rounded-lg border px-3 py-2.5 text-left",
-    isProduct
-      ? "border-emerald-600/30 dark:border-emerald-500/35"
-      : "border-sky-600/35 dark:border-sky-500/40",
+    isStockOnly
+      ? "border-amber-600/40 bg-amber-500/[0.06] dark:border-amber-500/40"
+      : isProduct
+        ? "border-emerald-600/30 dark:border-emerald-500/35"
+        : "border-sky-600/35 dark:border-sky-500/40",
     interactive && "transition-colors hover:bg-muted/50",
   );
 
@@ -118,40 +185,58 @@ export function DaySaleItemCard({
         <p className="min-w-0 flex-1 text-sm font-medium leading-snug text-foreground">
           {item.name}
         </p>
-        <Badge
-          variant="outline"
-          className={cn(
-            "shrink-0",
-            isProduct
-              ? "border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
-              : "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:text-sky-300",
-          )}
-        >
-          {isProduct ? "Produto" : "Serviço"}
-        </Badge>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          <DaySaleKindBadge item={item} />
+          <DaySaleOriginBadge item={item} />
+        </div>
       </div>
+
+      {isStockOnly ? (
+        <p className="text-muted-foreground text-xs">
+          Saiu no estoque e não está na venda. Vincule ao agrupamento correto.
+          {item.stockSku ? ` SKU ${item.stockSku}.` : ""}
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
         <Metric
           label="Qtd"
-          value={item.quantity.toLocaleString("pt-BR", {
+          value={`${item.quantity.toLocaleString("pt-BR", {
             maximumFractionDigits: 4,
-          })}
+          })}${item.stockUnit ? ` ${item.stockUnit}` : ""}`}
         />
-        <Metric label="Preço unit." value={formatCurrency(item.unitPrice)} />
-        <Metric label="Total bruto" value={formatCurrency(item.gross)} />
-        <Metric
-          label="Taxa"
-          value={formatCurrency(item.tax)}
-          tone={item.tax > 0 ? "rose" : "muted"}
-        />
-        <Metric
-          label="Total líquido"
-          value={formatCurrency(item.net)}
-          emphasize
-          tone={isProduct ? "emerald" : "sky"}
-        />
+        {isStockOnly ? (
+          <Metric label="Receita" value="—" tone="muted" />
+        ) : (
+          <>
+            <Metric label="Preço unit." value={formatCurrency(item.unitPrice)} />
+            <Metric label="Total bruto" value={formatCurrency(item.gross)} />
+            <Metric
+              label="Taxa"
+              value={formatCurrency(item.tax)}
+              tone={item.tax > 0 ? "rose" : "muted"}
+            />
+            <Metric
+              label="Total líquido"
+              value={formatCurrency(item.net)}
+              emphasize
+              tone={isProduct ? "emerald" : "sky"}
+            />
+          </>
+        )}
       </div>
+      {isStockOnly && onConfigureFamily ? (
+        <button
+          type="button"
+          className="text-sm font-medium text-amber-900 underline-offset-2 hover:underline dark:text-amber-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            onConfigureFamily();
+          }}
+        >
+          Vincular ao agrupamento
+        </button>
+      ) : null}
     </>
   );
 

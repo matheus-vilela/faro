@@ -50,6 +50,10 @@ export function inferNfeFlowDiagnosticFromHistory(input: {
   let processed = Number(input.processedCount ?? 0) || 0;
 
   const metaFlow = input.flowDiagnostic;
+  const snapshotListExhausted =
+    metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)
+      ? (metaFlow as NfeFlowDiagnostic).list_exhausted
+      : undefined;
   const hasCounters =
     input.processedCount != null || input.downloadedCount != null;
   if (metaFlow && typeof metaFlow === "object" && !Array.isArray(metaFlow)) {
@@ -74,5 +78,6 @@ export function inferNfeFlowDiagnosticFromHistory(input: {
     processFailed: failed,
     processed,
     ignored,
+    listExhausted: processed > 0 ? true : snapshotListExhausted,
   });
 }

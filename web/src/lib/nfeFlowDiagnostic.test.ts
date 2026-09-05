@@ -76,6 +76,35 @@ describe("buildNfeCycleFlowDiagnostic", () => {
     expect(d.phases.xml_interpret.status).toBe("pending");
     expect(d.phases.xml_interpret.message).toBe("0/28 nota(s) interpretadas.");
   });
+
+  it("no onboarding não inicia interpretação enquanto a listagem continua", () => {
+    const d = buildNfeCycleFlowDiagnostic({
+      listed: 50,
+      downloaded: 50,
+      processed: 0,
+      processFailed: 0,
+      listExhausted: false,
+    });
+    expect(d.phases.nfe_search.status).toBe("pending");
+    expect(d.phases.xml_download.status).toBe("pending");
+    expect(d.phases.xml_interpret.status).toBe("skipped");
+    expect(d.summary).toContain("A descarregar notas");
+    expect(d.list_exhausted).toBe(false);
+  });
+
+  it("depois da captura esgotada mostra 0/X a interpretar", () => {
+    const d = buildNfeCycleFlowDiagnostic({
+      listed: 274,
+      downloaded: 274,
+      processed: 12,
+      processFailed: 0,
+      listExhausted: true,
+    });
+    expect(d.phases.xml_download.status).toBe("ok");
+    expect(d.phases.xml_interpret.status).toBe("pending");
+    expect(d.phases.xml_interpret.message).toBe("12/274 nota(s) interpretadas.");
+    expect(d.summary).toBe("A interpretar 12/274 nota(s).");
+  });
 });
 
 describe("canMarkOnboardingFiscalCompleted", () => {
@@ -89,12 +118,22 @@ describe("canMarkOnboardingFiscalCompleted", () => {
     ).toBe(false);
   });
 
-  it("fecha só quando a listagem esgotou e tudo foi interpretado", () => {
+  it("fecha a captura quando a listagem esgotou e tudo foi interpretado", () => {
     expect(
       canMarkOnboardingFiscalCompleted({
         listExhausted: true,
         downloaded: 274,
         processed: 274,
+      }),
+    ).toBe(true);
+  });
+
+  it("fecha a captura também sem notas (listagem vazia esgotada)", () => {
+    expect(
+      canMarkOnboardingFiscalCompleted({
+        listExhausted: true,
+        downloaded: 0,
+        processed: 0,
       }),
     ).toBe(true);
   });
@@ -133,5 +172,25 @@ describe("inferNfeFlowDiagnosticFromHistory", () => {
     });
     expect(d.phases.xml_interpret.status).toBe("ok");
     expect(d.phases.xml_interpret.message).toBe("28 nota(s) interpretada(s).");
+  });
+
+  it("mantém interpretação em espera se a captura ainda não esgotou", () => {
+    const stale = buildNfeCycleFlowDiagnostic({
+      listed: 50,
+      downloaded: 50,
+      processed: 0,
+      processFailed: 0,
+      listExhausted: false,
+    });
+    const d = inferNfeFlowDiagnosticFromHistory({
+      nfesEncontradas: 50,
+      flowDiagnostic: stale,
+      listedCount: 50,
+      downloadedCount: 50,
+      processedCount: 0,
+      failedCount: 0,
+    });
+    expect(d.phases.xml_interpret.status).toBe("skipped");
+    expect(d.summary).toContain("A descarregar notas");
   });
 });

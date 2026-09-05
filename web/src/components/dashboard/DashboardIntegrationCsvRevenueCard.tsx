@@ -47,6 +47,7 @@ export function DashboardIntegrationCsvRevenueCard({
   const [resumeImportClockMs, setResumeImportClockMs] = useState(() =>
     Date.now(),
   );
+  const [lastUpdateAtMs, setLastUpdateAtMs] = useState(() => Date.now());
 
   const confirmPhase = isOnboardingPdvConfirmPhase(onboardingPdv);
   const portalFailure = isOnboardingPdvPortalFailure(onboardingPdv);
@@ -60,10 +61,15 @@ export function DashboardIntegrationCsvRevenueCard({
     () =>
       shouldShowOnboardingPdvResumeImportButton(
         onboardingPdv,
+        lastUpdateAtMs,
         resumeImportClockMs,
       ),
-    [onboardingPdv, resumeImportClockMs],
+    [onboardingPdv, lastUpdateAtMs, resumeImportClockMs],
   );
+
+  useEffect(() => {
+    setLastUpdateAtMs(Date.now());
+  }, [percent]);
 
   useEffect(() => {
     if (!processingSales || confirmPhase || showResumeImportButton) {

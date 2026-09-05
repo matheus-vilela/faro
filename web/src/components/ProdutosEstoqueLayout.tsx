@@ -8,7 +8,7 @@ import {
   STOCK_PURCHASES_PATH,
   RECIPES_PATH,
   RECIPES_PENDING_PATH,
-  RECIPES_MATCH_PATH,
+  SALE_FAMILIES_PATH,
   SERVICES_PATH,
 } from "@/lib/productStockPaths";
 import { cn } from "@/lib/utils";
@@ -16,12 +16,12 @@ import {
   ChefHat,
   ClipboardList,
   ConciergeBell,
-  Home,
   Inbox,
+  Layers,
+  Link2,
   Package,
   ShoppingCart,
   SlidersHorizontal,
-  UtensilsCrossed,
   Warehouse,
   type LucideIcon,
 } from "lucide-react";
@@ -42,15 +42,15 @@ const STOCK_GROUPS: {
   links: StockLink[];
 }[] = [
   {
-    id: "inicio",
-    label: "Início",
-    description: "Insights e setup",
-    icon: Home,
+    id: "correlacao",
+    label: "Correlação",
+    description: "PDV × notas fiscais",
+    icon: Link2,
     links: [
       {
         to: PRODUCT_HOME_PATH,
-        label: "Início",
-        icon: Home,
+        label: "Correlação",
+        icon: Link2,
         end: true,
       },
     ],
@@ -104,7 +104,7 @@ const STOCK_GROUPS: {
   {
     id: "fichas",
     label: "Fichas técnicas",
-    description: "Receitas e pendências",
+    description: "Receitas e produção",
     icon: ChefHat,
     links: [
       {
@@ -118,10 +118,19 @@ const STOCK_GROUPS: {
         label: "Pendentes",
         icon: Inbox,
       },
+    ],
+  },
+  {
+    id: "familias",
+    label: "Agrupamentos",
+    description: "Cardápio × variantes de estoque",
+    icon: Layers,
+    links: [
       {
-        to: RECIPES_MATCH_PATH,
-        label: "Vincular compras",
-        icon: UtensilsCrossed,
+        to: SALE_FAMILIES_PATH,
+        label: "Agrupamentos",
+        icon: Layers,
+        end: true,
       },
     ],
   },
@@ -181,7 +190,7 @@ export function ProdutosEstoqueLayout() {
       <PageHeader
         icon={Package}
         title="Produtos e estoque"
-        description="Visão geral, catálogo, movimentações, contagem, fichas técnicas e serviços."
+        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas, agrupamentos e serviços."
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">

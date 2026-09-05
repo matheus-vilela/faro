@@ -1,0 +1,15 @@
+---
+description: Spec de feature antes de implementar
+alwaysApply: true
+---
+
+# Features
+
+Antes de implementar uma feature ou task de produto:
+
+1. Procure `docs/features/<slug>.md`. Se não existir, crie a partir de `docs/features/_template.md`.
+2. Não comece código até o spec ter **Objetivo**, **Fora de escopo** e **Critérios de aceite**.
+3. Specs em `docs/features/` são contexto sob demanda. Não copie o spec inteiro para `.cursor/rules/`.
+4. `.cursor/rules/` guarda convenções permanentes (UI, padrões). Specs guardam o “o quê” de uma task.
+
+Exemplo preenchido: `docs/features/_exemplo.md`.

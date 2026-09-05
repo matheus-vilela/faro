@@ -11,15 +11,14 @@ import { ProductCatalogFiltersPanel } from "@/components/products/ProductCatalog
 import { ProductCatalogKpis } from "@/components/products/ProductCatalogKpis";
 import { ProductCatalogTable } from "@/components/products/ProductCatalogTable";
 import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
-import { ProductIdentificationSummary } from "@/components/products/ProductIdentificationSummary";
-import { ProductMergeAuditSection } from "@/components/products/ProductMergeAuditSection";
-import { ProductRecipeLinksSection } from "@/components/products/ProductRecipeLinksSection";
+import { ProductDetailSummary } from "@/components/products/ProductDetailSummary";
+import { ProductProduceCard } from "@/components/products/ProductProduceCard";
+import { PossibleSaleFamilyTag } from "@/components/products/ProductSaleFamilySection";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import {
   PRODUCT_SHEET_INPUT,
   PRODUCT_SHEET_SECTION,
   PRODUCT_SHEET_SELECT,
-  PRODUCT_SHEET_TILE,
 } from "@/components/products/productSheetStyles";
 import { ProductStockLotsSection } from "@/components/products/ProductStockLotsSection";
 import { ProductStockMovementHistorySection } from "@/components/products/ProductStockMovementHistorySection";
@@ -94,6 +93,10 @@ import {
 } from "@/lib/companyUnits/stockHubUnitChange";
 import type { OperationalItemType } from "@/lib/itemClassification/operationalItemTypes";
 import { updatedAtFilterBounds } from "@/lib/productCatalogFilters";
+import {
+  applyProductCatalogKindFilter,
+  type ProductCatalogKind,
+} from "@/lib/productCatalogKind";
 import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
 import { getUndoableProductBulkEdit } from "@/lib/productBulkEdit";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
@@ -110,6 +113,11 @@ import {
 import { fetchCatalogStockKpis, type CatalogStockKpis } from "@/lib/productCatalogValue";
 import { printProductLabels } from "@/lib/printProductLabels";
 import {
+  INTERMEDIATE_BADGE_CLASS,
+  isIntermediateProduct,
+  type TechnicalSheetKind,
+} from "@/lib/productIntermediate";
+import {
   fetchProductTechnicalSheet,
   technicalSheetErrorMessage,
 } from "@/lib/productTechnicalSheet";
@@ -124,6 +132,7 @@ import {
   sortCatalogProducts,
   type CatalogSortKey,
 } from "@/lib/productCatalogSort";
+import { isPossibleGroupingProduct } from "@/lib/productSaleFamily";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -134,10 +143,11 @@ import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import {
   AlertTriangle,
   ChefHat,
+  Factory,
   FileSpreadsheet,
   History,
+  Layers,
   Loader2,
-  Merge,
   Package,
   Pencil,
   Plus,
@@ -167,39 +177,7 @@ function productComposesCmv(p: Pick<Product, "composes_cmv">): boolean {
   return p.composes_cmv !== false;
 }
 
-/** Médio e último a partir do cadastro do produto (compras atualizam ambos via estoque). */
-function productPriceFields(p: Product | null): {
-  average: number | null;
-  last: number | null;
-  lastUnitCode: string | null;
-  lineUnit: number | null;
-} {
-  if (!p) {
-    return { average: null, last: null, lastUnitCode: null, lineUnit: null };
-  }
-  const average =
-    p.average_cost != null && p.average_cost > 0
-      ? Number(p.average_cost)
-      : null;
-  const last =
-    p.last_unit_value != null && p.last_unit_value > 0
-      ? Number(p.last_unit_value)
-      : null;
-  const lastStock =
-    p.last_unit_value_stock != null && p.last_unit_value_stock > 0
-      ? Number(p.last_unit_value_stock)
-      : last;
-  const lineUnit = average ?? lastStock ?? null;
-  return {
-    average,
-    last,
-    lastUnitCode: p.last_unit_value_unit_code ?? p.unit ?? null,
-    lineUnit,
-  };
-}
-
 const SHEET_SECTION = PRODUCT_SHEET_SECTION;
-const SHEET_TILE = PRODUCT_SHEET_TILE;
 const SHEET_INPUT = PRODUCT_SHEET_INPUT;
 const SHEET_SELECT = PRODUCT_SHEET_SELECT;
 
@@ -415,6 +393,8 @@ export function Produtos() {
   const [filterActive, setFilterActive] = useState<
     "all" | "active" | "inactive"
   >("active");
+  const [filterCatalogKind, setFilterCatalogKind] =
+    useState<ProductCatalogKind>("all");
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [filterStockAlert, setFilterStockAlert] = useState<
     "all" | "zero" | "below_min" | "any"
@@ -422,15 +402,15 @@ export function Produtos() {
   const [filterComposesCmv, setFilterComposesCmv] = useState<
     "all" | "yes" | "no"
   >("all");
+  const [filterStockOnlyOrigin, setFilterStockOnlyOrigin] = useState<
+    "all" | "yes"
+  >("all");
   const [filterUpdatedPreset, setFilterUpdatedPreset] = useState<
     "all" | "today" | "7d" | "30d" | "custom"
   >("all");
   const [filterUpdatedFrom, setFilterUpdatedFrom] = useState("");
   const [filterUpdatedTo, setFilterUpdatedTo] = useState("");
   const catalogListView = useSheetListView();
-  const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(
-    () => lowStockOnly || purchasesFilter != null,
-  );
   const canBulkEditCatalog = useHasPermission("produtos");
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
     () => new Set(),
@@ -457,7 +437,7 @@ export function Produtos() {
   );
   /** Abas dentro do detalhe do produto (vista resumo). */
   const [productDetailTab, setProductDetailTab] = useState<
-    "resumo" | "historico" | "fornecedores"
+    "resumo" | "producao" | "historico" | "fornecedores"
   >("resumo");
   const [stockName, setStockName] = useState("");
   const [stockSku, setStockSku] = useState("");
@@ -537,7 +517,12 @@ export function Produtos() {
   >([]);
   const [stockDeleteDialogOpen, setStockDeleteDialogOpen] = useState(false);
   const [productMergeOpen, setProductMergeOpen] = useState(false);
+  const [productMergePartnerId, setProductMergePartnerId] = useState<
+    string | null
+  >(null);
   const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
+  const [technicalSheetKind, setTechnicalSheetKind] =
+    useState<TechnicalSheetKind>("sale");
   const [outputTechnicalSheetRecipeId, setOutputTechnicalSheetRecipeId] =
     useState<string | null>(null);
   const [stockDeleting, setStockDeleting] = useState(false);
@@ -1171,8 +1156,10 @@ export function Produtos() {
         companyId: currentCompany.id,
         categoryProductIds,
         search: debouncedSearch,
+        filterCatalogKind,
         filterActive,
         filterComposesCmv,
+        filterStockOnlyOrigin,
         bounds,
         lowStockOnly,
         filterStockAlert,
@@ -1185,8 +1172,10 @@ export function Produtos() {
   }, [
     currentCompany?.id,
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterStockAlert,
     filterUpdatedFrom,
     filterUpdatedPreset,
@@ -1315,11 +1304,13 @@ export function Produtos() {
       );
 
       const buildBase = () => {
-        let q = supabase
-          .from("products")
-          .select("*", { count: "exact" })
-          .eq("company_id", companyId)
-          .eq("listed_in_product_catalog", true);
+        let q = applyProductCatalogKindFilter(
+          supabase
+            .from("products")
+            .select("*", { count: "exact" })
+            .eq("company_id", companyId),
+          filterCatalogKind,
+        );
         q = applyCatalogProductOrder(q, catalogSortKey, catalogSortAsc);
         if (categoryProductIds) {
           q = q.in("id", categoryProductIds);
@@ -1337,6 +1328,9 @@ export function Produtos() {
           q = q.or("composes_cmv.is.null,composes_cmv.eq.true");
         } else if (filterComposesCmv === "no") {
           q = q.eq("composes_cmv", false);
+        }
+        if (filterStockOnlyOrigin === "yes") {
+          q = q.eq("stock_only_origin", true);
         }
         if (bounds?.gte) {
           q = q.gte("updated_at", bounds.gte);
@@ -1462,10 +1456,12 @@ export function Produtos() {
   }, [
     currentCompany?.id,
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     filterCategoryId,
     filterStockAlert,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterUpdatedPreset,
     filterUpdatedFrom,
     filterUpdatedTo,
@@ -1491,11 +1487,13 @@ export function Produtos() {
     setProductsPage(1);
   }, [
     debouncedSearch,
+    filterCatalogKind,
     filterActive,
     lowStockOnly,
     filterCategoryId,
     filterStockAlert,
     filterComposesCmv,
+    filterStockOnlyOrigin,
     filterUpdatedPreset,
     filterUpdatedFrom,
     filterUpdatedTo,
@@ -1569,17 +1567,6 @@ export function Produtos() {
     printProductLabels([...onPage, ...extra]);
   }, [products, selectedProductIds]);
 
-  const stockPricePresentation = useMemo(
-    () => productPriceFields(stockProduct),
-    [stockProduct],
-  );
-
-  const stockSummaryLineValue = useMemo(() => {
-    const u = stockPricePresentation.lineUnit;
-    if (!stockProduct || u == null) return null;
-    return Number(stockProduct.current_quantity) * u;
-  }, [stockProduct, stockPricePresentation.lineUnit]);
-
   const syncStockFormFromProduct = useCallback(
     (p: Product) => {
       const normalizedUnit = (p.unit || "un").trim().toLowerCase();
@@ -1622,6 +1609,15 @@ export function Produtos() {
     },
     [operationalTypeByProduct],
   );
+
+  useEffect(() => {
+    if (
+      productDetailTab === "producao" &&
+      (!stockProduct || !isIntermediateProduct(stockProduct))
+    ) {
+      setProductDetailTab("resumo");
+    }
+  }, [productDetailTab, stockProduct]);
 
   const openStockSheet = (p: Product) => {
     const gen = ++assignmentLoadGenRef.current;
@@ -2248,6 +2244,7 @@ export function Produtos() {
                   lockReport={false}
                   stockFilters={{
                     search: debouncedSearch,
+                    filterCatalogKind,
                     filterCategoryId,
                     filterActive,
                     filterComposesCmv,
@@ -2255,6 +2252,7 @@ export function Produtos() {
                     filterUpdatedFrom,
                     filterUpdatedTo,
                     filterStockAlert,
+                    filterStockOnlyOrigin,
                     lowStockOnly,
                   }}
                 />
@@ -2297,10 +2295,10 @@ export function Produtos() {
                 </div>
               )}
               <ProductCatalogFiltersPanel
-                open={catalogFiltersOpen}
-                onOpenChange={setCatalogFiltersOpen}
                 search={search}
                 onSearchChange={setSearch}
+                filterCatalogKind={filterCatalogKind}
+                onFilterCatalogKindChange={setFilterCatalogKind}
                 filterActive={filterActive}
                 onFilterActiveChange={setFilterActive}
                 filterCategoryId={filterCategoryId}
@@ -2309,6 +2307,8 @@ export function Produtos() {
                 onFilterStockAlertChange={setFilterStockAlert}
                 filterComposesCmv={filterComposesCmv}
                 onFilterComposesCmvChange={setFilterComposesCmv}
+                filterStockOnlyOrigin={filterStockOnlyOrigin}
+                onFilterStockOnlyOriginChange={setFilterStockOnlyOrigin}
                 filterUpdatedPreset={filterUpdatedPreset}
                 onFilterUpdatedPresetChange={setFilterUpdatedPreset}
                 filterUpdatedFrom={filterUpdatedFrom}
@@ -2319,10 +2319,12 @@ export function Produtos() {
                 companyProductCategories={companyProductCategories}
                 onClearFilters={() => {
                   setSearch("");
+                  setFilterCatalogKind("all");
                   setFilterActive("active");
                   setFilterCategoryId("all");
                   setFilterStockAlert("all");
                   setFilterComposesCmv("all");
+                  setFilterStockOnlyOrigin("all");
                   setFilterUpdatedPreset("all");
                   setFilterUpdatedFrom("");
                   setFilterUpdatedTo("");
@@ -2358,7 +2360,9 @@ export function Produtos() {
                 <p className="text-muted-foreground">
                   {lowStockOnly
                     ? "Nenhum produto com estoque baixo (entre os que têm quantidade mínima definida)."
-                    : "Nenhum produto cadastrado"}
+                    : filterStockOnlyOrigin === "yes"
+                      ? "Nenhum produto marcado como somente estoque. Sincronize um dia no EPOC ou vincule as variantes."
+                      : "Nenhum produto cadastrado"}
                 </p>
               ) : catalogListView === "table" ? (
                 <ProductCatalogTable
@@ -2440,46 +2444,11 @@ export function Produtos() {
             <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden border-l border-border bg-background p-0">
               {stockProduct && productSheetView === "summary" && (
                 <>
-                  <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-5 pt-6 text-left">
-                    <div className="mb-4 flex flex-wrap justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setTechnicalSheetOpen(true)}
-                      >
-                        <ChefHat className="h-4 w-4 mr-2" />
-                        {outputTechnicalSheetRecipeId
-                          ? "Editar ficha técnica"
-                          : "É ficha técnica"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setProductMergeOpen(true)}
-                      >
-                        <Merge className="h-4 w-4 mr-2" />
-                        Unificar com outro
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          productSheetViewRef.current = "edit";
-                          syncStockFormFromProduct(stockProduct);
-                          setProductSheetView("edit");
-                        }}
-                      >
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Editar
-                      </Button>
-                    </div>
+                  <SheetHeader className="shrink-0 space-y-0 border-b border-border bg-card px-6 pb-4 pt-6 text-left">
                     <div className="flex items-start gap-4">
                       <div
                         className={cn(
-                          "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border shadow-sm",
+                          "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border shadow-sm",
                           stockProduct.min_quantity > 0 &&
                             stockProduct.current_quantity <=
                               stockProduct.min_quantity
@@ -2487,48 +2456,84 @@ export function Produtos() {
                             : "border-border bg-muted text-muted-foreground",
                         )}
                       >
-                        <Package className="h-7 w-7" strokeWidth={1.5} />
+                        <Package className="h-6 w-6" strokeWidth={1.5} />
                       </div>
-                      <div className="min-w-0 flex-1 space-y-3 pr-6">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
-                            {stockProduct.name}
-                          </SheetTitle>
-                          {outputTechnicalSheetRecipeId ? (
-                            <Badge
-                              variant="secondary"
-                              className="gap-1 border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100"
-                            >
-                              <ChefHat className="h-3 w-3" />
-                              Ficha técnica
-                            </Badge>
-                          ) : null}
-                          {stockProduct.is_active === false ? (
-                            <Badge variant="secondary" className="gap-1">
-                              <PowerOff className="h-3 w-3" />
-                              Inativo
-                            </Badge>
-                          ) : null}
-                          {stockProduct.min_quantity > 0 &&
-                          stockProduct.current_quantity <=
-                            stockProduct.min_quantity ? (
-                            <Badge variant="destructive" className="gap-1">
-                              <AlertTriangle className="h-3 w-3" />
-                              Estoque baixo
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <SheetDescription>
-                          Resumo do cadastro — toque em{" "}
-                          <span className="font-medium text-foreground">
+                      <div className="min-w-0 flex-1 space-y-2.5 pr-6">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <SheetTitle className="text-xl font-semibold leading-snug sm:text-2xl">
+                                {stockProduct.name}
+                              </SheetTitle>
+                              {isIntermediateProduct(stockProduct) ? (
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    "gap-1",
+                                    INTERMEDIATE_BADGE_CLASS,
+                                  )}
+                                >
+                                  <Factory className="h-3 w-3" />
+                                  Produção
+                                </Badge>
+                              ) : outputTechnicalSheetRecipeId ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="gap-1 border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100"
+                                >
+                                  <ChefHat className="h-3 w-3" />
+                                  Ficha técnica
+                                </Badge>
+                              ) : null}
+                              {stockProduct.stock_control_type ===
+                              "SALE_FAMILY" ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="gap-1 border-sky-500/40 bg-sky-500/10 text-sky-900 dark:text-sky-100"
+                                >
+                                  <Layers className="h-3 w-3" />
+                                  Agrupamento
+                                </Badge>
+                              ) : null}
+                              {stockProduct.stock_control_type !==
+                                "SALE_FAMILY" &&
+                              stockProduct.min_quantity > 0 &&
+                              stockProduct.current_quantity <=
+                                stockProduct.min_quantity ? (
+                                <Badge variant="destructive" className="gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Estoque baixo
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <SheetDescription className="sr-only">
+                              Resumo do cadastro de {stockProduct.name}
+                            </SheetDescription>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => {
+                              productSheetViewRef.current = "edit";
+                              syncStockFormFromProduct(stockProduct);
+                              setProductSheetView("edit");
+                            }}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
                             Editar
-                          </span>{" "}
-                          para alterar dados, categorias e estoque.
-                        </SheetDescription>
+                          </Button>
+                        </div>
                         <div>
-                          <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                            Categorias de produto
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Categorias de produto
+                            </p>
+                            {isPossibleGroupingProduct(stockProduct) ? (
+                              <PossibleSaleFamilyTag className="h-5 px-2 text-[0.65rem]" />
+                            ) : null}
+                          </div>
                           {stockProductCategoryIds.length > 0 ? (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {stockProductCategoryIds
@@ -2560,6 +2565,21 @@ export function Produtos() {
                               Nenhuma categoria — adicione em Editar.
                             </p>
                           )}
+                          <div className="mt-2.5">
+                            {stockProduct.is_active !== false ? (
+                              <Badge variant="secondary" className="h-6 px-2.5">
+                                Ativo
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="secondary"
+                                className="h-6 gap-1 px-2.5"
+                              >
+                                <PowerOff className="h-3.5 w-3.5" />
+                                Inativo
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2585,6 +2605,23 @@ export function Produtos() {
                       <Package className="h-4 w-4 shrink-0" />
                       Resumo
                     </button>
+                    {isIntermediateProduct(stockProduct) ? (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={productDetailTab === "producao"}
+                        onClick={() => setProductDetailTab("producao")}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-none border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:px-2",
+                          productDetailTab === "producao"
+                            ? "border-primary text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Factory className="h-4 w-4 shrink-0" />
+                        Produção
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       role="tab"
@@ -2619,211 +2656,67 @@ export function Produtos() {
 
                   <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
                     {productDetailTab === "resumo" ? (
-                      <div className="space-y-4 p-6">
-                        <ProductIdentificationSummary
-                          product={stockProduct}
-                          composesCmv={productComposesCmv(stockProduct)}
-                          operationalTypeLabel={operationalTypeLabel(
-                            operationalTypeByProduct[stockProduct.id] ?? null,
-                          )}
-                          className={SHEET_SECTION}
-                        />
-
-                        <div>
-                          <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                            Estoque e valor
-                          </p>
-                          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                            <div className={SHEET_TILE}>
-                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Quantidade
-                              </p>
-                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
-                                {Number(
-                                  stockProduct.current_quantity,
-                                ).toLocaleString("pt-BR")}
-                                <span className="ml-1 text-sm font-medium text-muted-foreground">
-                                  {stockProduct.unit}
-                                </span>
-                              </p>
-                            </div>
-                            <div className={SHEET_TILE}>
-                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Mínimo
-                              </p>
-                              <p className="mt-2 text-xl font-semibold tabular-nums leading-none text-foreground sm:text-2xl">
-                                {Number(stockProduct.min_quantity) > 0
-                                  ? Number(
-                                      stockProduct.min_quantity,
-                                    ).toLocaleString("pt-BR")
-                                  : "—"}
-                                {Number(stockProduct.min_quantity) > 0 ? (
-                                  <span className="ml-1 text-sm font-medium text-muted-foreground">
-                                    {stockProduct.unit}
-                                  </span>
-                                ) : null}
-                              </p>
-                            </div>
-                            <div className={SHEET_TILE}>
-                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Último preço
-                              </p>
-                              <div className="mt-2 space-y-2.5 text-base font-semibold tabular-nums leading-snug text-foreground sm:text-lg">
-                                <p>
-                                  {formatCurrency(
-                                    stockPricePresentation.last ?? 0,
-                                  )}
-                                  <span className="text-xs font-normal text-muted-foreground">
-                                    {" "}
-                                    por{" "}
-                                    {stockPricePresentation.lastUnitCode ??
-                                      stockProduct.unit}
-                                  </span>
-                                </p>
-                              </div>
-                            </div>
-                            <div
-                              className={cn(
-                                SHEET_TILE,
-                                stockSummaryLineValue != null &&
-                                  stockPricePresentation.lineUnit != null
-                                  ? "border-primary/30 bg-card ring-1 ring-primary/20"
-                                  : "",
-                              )}
-                            >
-                              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Valor em estoque
-                              </p>
-                              <p
-                                className={cn(
-                                  "mt-2 text-lg font-bold tabular-nums sm:text-xl",
-                                  stockSummaryLineValue != null &&
-                                    stockPricePresentation.lineUnit != null
-                                    ? "text-foreground"
-                                    : "text-muted-foreground",
-                                )}
-                              >
-                                {stockSummaryLineValue != null &&
-                                stockPricePresentation.lineUnit != null
-                                  ? formatCurrency(stockSummaryLineValue)
-                                  : "—"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <ProductStockLotsSection
-                          productId={stockProduct.id}
-                          unit={stockProduct.unit}
-                          currentStock={Number(stockProduct.current_quantity)}
-                          refreshKey={lotsRefreshKey}
-                          readOnly
-                        />
-
-                        {currentCompany?.id ? (
-                          stockProductConversionsLoading ? (
-                            <div className={SHEET_SECTION}>
-                              <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Conversões de unidade
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                Carregando conversões…
-                              </p>
-                            </div>
-                          ) : (
-                            <ProductUnitConversionsSection
-                              compact
-                              companyId={currentCompany.id}
-                              stockUnitCode={stockProduct.unit}
-                              value={stockProductConversions}
-                              onChange={(next) =>
-                                void handleSummaryConversionsChange(next)
-                              }
-                              onPromoteSecondaryToStockUnit={(code) =>
-                                void handleSummaryPromoteStockUnit(code)
-                              }
-                              disabled={stockConversionsSaving}
-                              sectionClassName={SHEET_SECTION}
-                            />
-                          )
-                        ) : null}
-
-                        {currentCompany?.id ? (
-                          <ProductMergeAuditSection
-                            companyId={currentCompany.id}
-                            product={stockProduct}
-                            className={SHEET_SECTION}
-                            onUndone={async () => {
-                              await fetchProducts();
-                              const { data } = await supabase
-                                .from("products")
-                                .select("*")
-                                .eq("id", stockProduct.id)
-                                .maybeSingle();
+                      <ProductDetailSummary
+                        product={stockProduct}
+                        companyId={currentCompany?.id}
+                        operationalTypeLabel={operationalTypeLabel(
+                          operationalTypeByProduct[stockProduct.id] ?? null,
+                        )}
+                        composesCmv={productComposesCmv(stockProduct)}
+                        formatCurrency={formatCurrency}
+                        hasTechnicalSheet={Boolean(
+                          outputTechnicalSheetRecipeId,
+                        )}
+                        lotsRefreshKey={lotsRefreshKey}
+                        conversions={stockProductConversions}
+                        conversionsLoading={stockProductConversionsLoading}
+                        conversionsSaving={stockConversionsSaving}
+                        onConversionsChange={(next) => {
+                          void handleSummaryConversionsChange(next);
+                        }}
+                        onPromoteStockUnit={(code) => {
+                          void handleSummaryPromoteStockUnit(code);
+                        }}
+                        onOpenTechnicalSheet={(kind) => {
+                          setTechnicalSheetKind(kind);
+                          setTechnicalSheetOpen(true);
+                        }}
+                        onOpenMerge={(partnerId) => {
+                          setProductMergePartnerId(partnerId ?? null);
+                          setProductMergeOpen(true);
+                        }}
+                        onProductChanged={() => {
+                          void fetchProducts();
+                          void supabase
+                            .from("products")
+                            .select("*")
+                            .eq("id", stockProduct.id)
+                            .maybeSingle()
+                            .then(({ data }) => {
                               if (data) setStockProduct(data as Product);
-                            }}
-                          />
-                        ) : null}
-
-                        {currentCompany?.id ? (
-                          <ProductRecipeLinksSection
-                            companyId={currentCompany.id}
-                            productId={stockProduct.id}
-                            productName={stockProduct.name}
-                            className={SHEET_SECTION}
-                            onChanged={() => {
-                              void fetchProducts();
-                            }}
-                          />
-                        ) : null}
-
-                        <div
-                          className={cn(
-                            SHEET_SECTION,
-                            "flex flex-wrap items-center justify-between gap-3",
-                          )}
-                        >
-                          <div>
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                              Status
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Visível ao vincular em despesas e notas
-                            </p>
-                          </div>
-                          {stockProduct.is_active !== false ? (
-                            <Badge variant="secondary" className="h-8 px-3">
-                              Ativo
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="secondary"
-                              className="h-8 gap-1 px-3"
-                            >
-                              <PowerOff className="h-3.5 w-3.5" />
-                              Inativo
-                            </Badge>
-                          )}
-                        </div>
-
-                        {stockProduct.min_quantity > 0 &&
-                          stockProduct.current_quantity <=
-                            stockProduct.min_quantity && (
-                            <div className="flex items-center gap-3 rounded-2xl border border-destructive/50 bg-card px-4 py-3 text-destructive shadow-sm">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/40 bg-background">
-                                <AlertTriangle className="h-5 w-5" />
-                              </div>
-                              <div>
-                                <p className="text-sm font-semibold">
-                                  Estoque no ou abaixo do mínimo
-                                </p>
-                                <p className="text-xs text-destructive/90">
-                                  Verifique compras ou ajuste o mínimo
-                                  cadastrado.
-                                </p>
-                              </div>
-                            </div>
-                          )}
+                            });
+                        }}
+                      />
+                    ) : productDetailTab === "producao" &&
+                      isIntermediateProduct(stockProduct) &&
+                      currentCompany?.id ? (
+                      <div className="p-6">
+                        <ProductProduceCard
+                          companyId={currentCompany.id}
+                          product={stockProduct}
+                          active={productDetailTab === "producao"}
+                          onProduced={() => {
+                            void fetchProducts();
+                            void supabase
+                              .from("products")
+                              .select("*")
+                              .eq("id", stockProduct.id)
+                              .maybeSingle()
+                              .then(({ data }) => {
+                                if (data) setStockProduct(data as Product);
+                              });
+                          }}
+                        />
                       </div>
                     ) : productDetailTab === "historico" ? (
                       <div className="space-y-4 p-6">
@@ -3007,9 +2900,14 @@ export function Produtos() {
                           </div>
                           {currentCompany?.id ? (
                             <div className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="mb-3 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                                Categorias de produto
-                              </p>
+                              <div className="mb-3 flex flex-wrap items-center gap-2">
+                                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Categorias de produto
+                                </p>
+                                {isPossibleGroupingProduct(stockProduct) ? (
+                                  <PossibleSaleFamilyTag className="h-5 px-2 text-[0.65rem]" />
+                                ) : null}
+                              </div>
                               <ProductCategoryTagsField
                                 companyId={currentCompany.id}
                                 categories={companyProductCategories}
@@ -3331,6 +3229,7 @@ export function Produtos() {
           onOpenChange={setTechnicalSheetOpen}
           companyId={currentCompany.id}
           outputProduct={stockProduct}
+          sheetKind={technicalSheetKind}
           onSaved={(recipeId, backfill) => {
             setOutputTechnicalSheetRecipeId(recipeId);
             closeStockSheet();
@@ -3347,9 +3246,13 @@ export function Produtos() {
       {currentCompany?.id && stockProduct ? (
         <ProductMergeDialog
           open={productMergeOpen}
-          onOpenChange={setProductMergeOpen}
+          onOpenChange={(open) => {
+            setProductMergeOpen(open);
+            if (!open) setProductMergePartnerId(null);
+          }}
           companyId={currentCompany.id}
           sourceProduct={stockProduct}
+          initialPartnerId={productMergePartnerId}
           formatCurrency={formatCurrency}
           onMerged={async (winnerId) => {
             await fetchProducts();

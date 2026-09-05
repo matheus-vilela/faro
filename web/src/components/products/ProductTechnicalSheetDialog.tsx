@@ -3,6 +3,7 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import type { TechnicalSheetKind } from "@/lib/productIntermediate";
 import { fetchProductTechnicalSheet } from "@/lib/productTechnicalSheet";
 import type { Product } from "@/types/product";
 import { Loader2 } from "lucide-react";
@@ -14,6 +15,7 @@ type ProductTechnicalSheetDialogProps = {
   onOpenChange: (open: boolean) => void;
   companyId: string;
   outputProduct: Product;
+  sheetKind?: TechnicalSheetKind;
   onSaved: (
     recipeId: string | null,
     backfill?: { output_out_movements: number; ingredient_movements_created: number },
@@ -25,6 +27,7 @@ export function ProductTechnicalSheetDialog({
   onOpenChange,
   companyId,
   outputProduct,
+  sheetKind = "sale",
   onSaved,
 }: ProductTechnicalSheetDialogProps) {
   const [initLoading, setInitLoading] = useState(false);
@@ -73,6 +76,7 @@ export function ProductTechnicalSheetDialog({
               }
               prefillNewRecipeAutoOpen={false}
               technicalSheetOutputProductId={outputProduct.id}
+              technicalSheetKind={sheetKind}
               onTechnicalSheetSaved={(id, backfill) => {
                 onSaved(id, backfill);
                 handleOpenChange(false);

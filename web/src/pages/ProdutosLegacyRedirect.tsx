@@ -2,7 +2,6 @@ import { ProdutosHome } from "@/pages/ProdutosHome";
 import {
   PRODUCT_CATALOG_PATH,
   PRODUCT_HOME_PATH,
-  RECIPES_MATCH_PATH,
   RECIPES_PATH,
   RECIPES_PENDING_PATH,
   STOCK_COUNT_PATH,
@@ -97,7 +96,7 @@ export function FichasInboxRedirect() {
     return <Navigate to={RECIPES_PENDING_PATH} replace />;
   }
   if (inbox === "vinculos") {
-    return <Navigate to={RECIPES_MATCH_PATH} replace />;
+    return <Navigate to={RECIPES_PATH} replace />;
   }
   return (
     <Navigate

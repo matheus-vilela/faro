@@ -6,7 +6,10 @@ import {
   isOnboardingFiscalFlowCompleted,
   isOnboardingFiscalInterpretConfirmPhase,
   isOnboardingFiscalNfeRecebidasDashboardEnabled,
+  isOnboardingFiscalSearchingNotes,
   isOnboardingFiscalSefazUnavailable,
+  onboardingFiscalFoundNotesLabel,
+  onboardingFiscalProcessedNotesLabel,
   onboardingFiscalSefazRetryAt,
 } from "@/lib/onboardingFiscalDashboard";
 import { cn } from "@/lib/utils";
@@ -20,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 type FiscalCardTheme = {
   card: string;
@@ -159,6 +163,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const sefazUnavailable = isOnboardingFiscalSefazUnavailable(
     company?.onboarding_fiscal,
   );
+  const searchingNotes = isOnboardingFiscalSearchingNotes(
+    company?.onboarding_fiscal,
+  );
   const sefazRetryAt = onboardingFiscalSefazRetryAt(company?.onboarding_fiscal);
   const sefazRetryLabel = formatSefazRetryLabel(sefazRetryAt, nowMs);
 
@@ -166,6 +173,20 @@ export function DashboardFocusNfeRecebidasSyncCard({
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
+
+  const fiscalProgressLive =
+    Boolean(progressPhase) &&
+    !fiscalOnboardingDone &&
+    !interpretConfirmPhase &&
+    !sefazUnavailable;
+
+  useEffect(() => {
+    if (!fiscalProgressLive) return;
+    const poll = window.setInterval(() => {
+      void refetchCompanies();
+    }, 8_000);
+    return () => window.clearInterval(poll);
+  }, [fiscalProgressLive, refetchCompanies]);
 
   const ultimaSyncAt =
     focusnfe && typeof focusnfe === "object" && !Array.isArray(focusnfe)
@@ -179,7 +200,6 @@ export function DashboardFocusNfeRecebidasSyncCard({
   const max = obFiscal.max;
   const done = obFiscal.synced + obFiscal.ignored;
   const barPct = progressPercent(max, obFiscal.synced, obFiscal.ignored);
-  const awaitingSefazEstimate = max === 0 && !sefazUnavailable;
 
   const theme = useMemo((): FiscalCardTheme => {
     if (interpretConfirmPhase) return FISCAL_CARD_THEMES.confirm;
@@ -207,21 +227,21 @@ export function DashboardFocusNfeRecebidasSyncCard({
         icon: "warning" as const,
       };
     }
-    if (awaitingSefazEstimate) {
+    if (searchingNotes) {
       return {
-        title: "A obter dados na SEFAZ",
-        subtitle: `Este processo pode demorar um pouco. Assim que a sincronização terminar, o processamento das notas será iniciado automaticamente.
-            <br /> 
-          <strong>Fornecedores, produtos, despesas e estoque serão criados automaticamente.</strong>`,
+        title: "Buscando notas fiscais",
+        subtitle: onboardingFiscalFoundNotesLabel(max),
         showSpinner: true,
         percent: 0,
         icon: "sync" as const,
       };
     }
     return {
-      title: "Sincronização das NF-e recebidas",
-      subtitle: `${done} de ${max} notas processadas${ultimaSyncLabel ? ` · Última sincronização ${ultimaSyncLabel}` : ""}.`,
-      showSpinner: obFiscal.sync && done < max,
+      title: "Processando notas fiscais",
+      subtitle: `${onboardingFiscalProcessedNotesLabel(done, max)}${
+        ultimaSyncLabel ? ` · Última sincronização ${ultimaSyncLabel}` : ""
+      }`,
+      showSpinner: obFiscal.sync && (max === 0 || done < max),
       percent: barPct,
       icon: "sync" as const,
     };
@@ -229,7 +249,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
     interpretConfirmPhase,
     sefazUnavailable,
     sefazRetryLabel,
-    awaitingSefazEstimate,
+    searchingNotes,
     done,
     max,
     ultimaSyncLabel,
@@ -279,14 +299,11 @@ export function DashboardFocusNfeRecebidasSyncCard({
               <h3 className="text-lg font-black tracking-tight text-foreground sm:text-xl">
                 {title}
               </h3>
-              <p
-                className={theme.subtitle}
-                dangerouslySetInnerHTML={{ __html: subtitle as string }}
-              />
+              <p className={theme.subtitle}>{subtitle}</p>
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:flex-wrap sm:items-end sm:justify-end">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
             {interpretConfirmPhase ? (
               <Button
                 type="button"
@@ -302,9 +319,9 @@ export function DashboardFocusNfeRecebidasSyncCard({
                       await confirmOnboardingFiscalInterpretPhase(companyId);
                     if (res.error) {
                       setInterpretClosing(false);
-                      console.error(
-                        "confirmOnboardingFiscalInterpretPhase",
-                        res.error,
+                      toast.error(
+                        res.error.slice(0, 220) ||
+                          "Não foi possível concluir o onboarding fiscal.",
                       );
                       return;
                     }
@@ -317,7 +334,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
                 ) : (
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
-                Confirmar e fechar
+                Concluir
               </Button>
             ) : null}
             <Button size="sm" className="shrink-0" variant="outline" asChild>
@@ -329,7 +346,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
           </div>
         </div>
 
-        {!awaitingSefazEstimate && !interpretConfirmPhase && (
+        {!interpretConfirmPhase && !searchingNotes && (
           <div className={theme.progressTrack}>
             <div
               className={theme.progressFill}

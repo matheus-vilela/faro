@@ -53,6 +53,7 @@ const REFERENCE_CLASSIFICATION_LABEL: Record<string, string> = {
   manual: "Manual",
   import_breakdown: "Despesa",
   technical_sheet_backfill: "Ficha técnica",
+  intermediate_production: "Produção",
   product_merge: "Unificação de produtos",
   product_merge_undo: "Desfazer unificação",
 };
@@ -135,6 +136,7 @@ export function resolveMovementClassificationFilterKey(
   if (ref === "revenue_entry") return "sale";
   if (ref === "receipt" || ref === "recebimento") return "recebimento";
   if (ref === "recipe") return "recipe";
+  if (ref === "intermediate_production") return "production";
   if (ref === "inventory_count") return "inventory";
   if (ref === "adjustment") return "adjustment";
   if (ref === "manual") return "manual";
@@ -174,7 +176,10 @@ export function applyStockMovementClassificationFilter(
       );
       break;
     case "production":
-      parts.push("metadata_json->>classification.eq.production");
+      parts.push(
+        "metadata_json->>classification.eq.production",
+        "reference_type.eq.intermediate_production",
+      );
       break;
     case "transfer":
       parts.push("metadata_json->>classification.eq.transfer");

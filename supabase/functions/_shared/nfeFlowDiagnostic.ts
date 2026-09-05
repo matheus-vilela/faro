@@ -22,6 +22,8 @@ export type NfeFlowDiagnostic = {
   blocked_at: NfeFlowPhase | null;
   summary: string;
   phases: Record<NfeFlowPhase, NfeFlowPhaseReport>;
+  /** Onboarding: interpretação só depois da listagem Focus esgotar. */
+  list_exhausted?: boolean;
 };
 
 export const NFE_FLOW_PHASE_ORDER: NfeFlowPhase[] = [
@@ -52,8 +54,16 @@ function buildDiagnostic(
   phases: Record<NfeFlowPhase, NfeFlowPhaseReport>,
   blockedAt: NfeFlowPhase | null,
   summary: string,
+  listExhausted?: boolean,
 ): NfeFlowDiagnostic {
-  return { blocked_at: blockedAt, summary, phases };
+  return {
+    blocked_at: blockedAt,
+    summary,
+    phases,
+    ...(typeof listExhausted === "boolean"
+      ? { list_exhausted: listExhausted }
+      : {}),
+  };
 }
 
 export type NfeCycleFlowDiagnosticInput = {
@@ -72,19 +82,23 @@ export type NfeCycleFlowDiagnosticInput = {
   processFailed: number;
   /** Notas ignoradas (não autorizada/completa). */
   ignored?: number;
+  /**
+   * Onboarding: `false` enquanto a Focus ainda tiver páginas.
+   * Interpretação fica em espera até a listagem e o download terminarem.
+   */
+  listExhausted?: boolean;
 };
 
-/** Só fecha o card/onboarding quando a janela Focus acabou e tudo foi interpretado. */
+/**
+ * Captura da janela Focus concluída (listagem esgotada e XMLs interpretados).
+ * Não grava `onboarding_fiscal.completed` — o card espera o botão Concluir.
+ */
 export function canMarkOnboardingFiscalCompleted(input: {
   listExhausted: boolean;
   downloaded: number;
   processed: number;
 }): boolean {
-  return (
-    input.listExhausted &&
-    input.downloaded >= 1 &&
-    input.processed >= input.downloaded
-  );
+  return input.listExhausted && input.processed >= input.downloaded;
 }
 
 /** Diagnóstico inicial ao enfileirar (antes do worker processar). */
@@ -124,12 +138,19 @@ export function buildNfeCycleFlowDiagnostic(
   const ignored = Math.max(0, Number(input.ignored ?? 0) || 0);
   const skipped = (name: NfeFlowPhase) =>
     phase(name, "skipped", "Etapa não executada.");
+  const captureOpen = input.listExhausted === false;
+  const done = (
+    phases: Record<NfeFlowPhase, NfeFlowPhaseReport>,
+    blockedAt: NfeFlowPhase | null,
+    summary: string,
+  ): NfeFlowDiagnostic =>
+    buildDiagnostic(phases, blockedAt, summary, input.listExhausted);
 
   if (input.searchFailed) {
     const msg =
       input.searchError?.trim() ||
       "Falha ao consultar a SEFAZ/Focus (rede, token ou indisponibilidade).";
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: phase("nfe_search", "fail", msg),
         xml_download: skipped("xml_download"),
@@ -141,7 +162,13 @@ export function buildNfeCycleFlowDiagnostic(
   }
 
   const searchMsgParts: string[] = [];
-  if (listed > 0) searchMsgParts.push(`${listed} NF-e elegível(is).`);
+  if (listed > 0) {
+    searchMsgParts.push(
+      captureOpen
+        ? `${listed} NF-e elegível(is); a busca continua.`
+        : `${listed} NF-e elegível(is).`,
+    );
+  }
   if (ignored > 0) searchMsgParts.push(`${ignored} ignorada(s).`);
   const searchMessage =
     listed === 0 && ignored === 0
@@ -150,12 +177,12 @@ export function buildNfeCycleFlowDiagnostic(
 
   const searchPhase = phase(
     "nfe_search",
-    listed === 0 && ignored === 0 ? "warn" : "ok",
+    listed === 0 && ignored === 0 ? "warn" : captureOpen ? "pending" : "ok",
     searchMessage,
   );
 
   if (listed === 0) {
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: skipped("xml_download"),
@@ -168,6 +195,12 @@ export function buildNfeCycleFlowDiagnostic(
     );
   }
 
+  const waitingInterpret = phase(
+    "xml_interpret",
+    "skipped",
+    "Aguardando o fim da listagem e do download de todas as notas.",
+  );
+
   let downloadPhase: NfeFlowPhaseReport;
   if (downloadFailed > 0 && downloaded === 0) {
     downloadPhase = phase(
@@ -175,7 +208,7 @@ export function buildNfeCycleFlowDiagnostic(
       "fail",
       `${downloadFailed} XML(s) falharam no download.`,
     );
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: downloadPhase,
@@ -195,8 +228,14 @@ export function buildNfeCycleFlowDiagnostic(
   } else if (downloaded < listed) {
     downloadPhase = phase(
       "xml_download",
-      "warn",
+      captureOpen ? "pending" : "warn",
       `${downloaded}/${listed} XML(s) baixados.`,
+    );
+  } else if (captureOpen) {
+    downloadPhase = phase(
+      "xml_download",
+      "pending",
+      `${downloaded} XML(s) baixados; a busca na SEFAZ continua.`,
     );
   } else {
     downloadPhase = phase(
@@ -207,19 +246,33 @@ export function buildNfeCycleFlowDiagnostic(
   }
 
   if (downloaded === 0) {
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: downloadPhase,
-        xml_interpret: skipped("xml_interpret"),
+        xml_interpret: captureOpen ? waitingInterpret : skipped("xml_interpret"),
       },
       downloadPhase.status === "fail" ? "xml_download" : null,
-      "Busca concluída, mas nenhum XML foi baixado.",
+      captureOpen
+        ? `A descarregar notas: 0/${listed} XML(s). A busca continua.`
+        : "Busca concluída, mas nenhum XML foi baixado.",
+    );
+  }
+
+  if (captureOpen && processed === 0 && processFailed === 0) {
+    return done(
+      {
+        nfe_search: searchPhase,
+        xml_download: downloadPhase,
+        xml_interpret: waitingInterpret,
+      },
+      null,
+      `A descarregar notas: ${downloaded}/${listed} XML(s). A busca continua.`,
     );
   }
 
   if (processFailed > 0 && processed === 0) {
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: downloadPhase,
@@ -235,7 +288,7 @@ export function buildNfeCycleFlowDiagnostic(
   }
 
   if (processFailed > 0) {
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: downloadPhase,
@@ -251,7 +304,7 @@ export function buildNfeCycleFlowDiagnostic(
   }
 
   if (processed < downloaded) {
-    return buildDiagnostic(
+    return done(
       {
         nfe_search: searchPhase,
         xml_download: downloadPhase,
@@ -266,7 +319,7 @@ export function buildNfeCycleFlowDiagnostic(
     );
   }
 
-  return buildDiagnostic(
+  return done(
     {
       nfe_search: searchPhase,
       xml_download: downloadPhase,

@@ -6,6 +6,7 @@ export const STOCK_PURCHASES_PATH = "/app/produtos/estoque/compras";
 export const RECIPES_PATH = "/app/produtos/fichas";
 export const RECIPES_PENDING_PATH = "/app/produtos/fichas/pendentes";
 export const RECIPES_MATCH_PATH = "/app/produtos/fichas/vinculos";
+export const SALE_FAMILIES_PATH = "/app/produtos/familias";
 export const SERVICES_PATH = "/app/produtos/servicos";
 
 export function productHighlightPath(productId: string): string {
@@ -21,7 +22,7 @@ export function recipesPendingPath(): string {
 }
 
 export function recipesMatchPath(): string {
-  return RECIPES_MATCH_PATH;
+  return RECIPES_PATH;
 }
 
 export function stockLossesPath(): string {

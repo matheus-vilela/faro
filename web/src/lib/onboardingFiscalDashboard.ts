@@ -47,12 +47,12 @@ export function isOnboardingFiscalNfeRecebidasDashboardEnabled(raw: unknown): bo
 }
 
 /**
- * Fase legada de confirmação manual — desativada no pipeline novo
- * (`capture_completed` / `completed` são automáticos).
+ * Captura e interpretação concluídas; o utilizador ainda não fechou o card.
+ * O pipeline grava `capture_completed`; `completed` só no botão Concluir.
  */
 export function isOnboardingFiscalInterpretConfirmPhase(raw: unknown): boolean {
-  void raw;
-  return false;
+  if (isOnboardingFiscalJsonCompleted(raw)) return false;
+  return isOnboardingFiscalCaptureCompleted(raw);
 }
 
 /** Sincronização fiscal em curso (`sync` ativo e captura/conclusão ainda pendentes). */
@@ -65,10 +65,8 @@ export function isFiscalOnboardingSyncInProgress(raw: unknown): boolean {
 }
 
 /**
- * Card de onboarding fiscal no dashboard: some só quando `completed === true`.
- * O pipeline só pode gravar `completed` depois da listagem Focus esgotar
- * e de todas as notas conhecidas serem interpretadas — senão o card some
- * no meio da importação (ex.: após a 1.ª página de ~50 NF-e).
+ * Card de onboarding fiscal no dashboard: some só quando o utilizador
+ * conclui (`completed === true`). A captura automática não esconde o card.
  */
 export function isOnboardingFiscalDashboardCardVisible(raw: unknown): boolean {
   return !isOnboardingFiscalJsonCompleted(raw);
@@ -87,4 +85,37 @@ export function onboardingFiscalSefazRetryAt(raw: unknown): string | null {
   if (!o) return null;
   const v = o.sefaz_retry_at;
   return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/** Listagem Focus/SEFAZ já esgotou as páginas (`list_exhausted`). */
+export function isOnboardingFiscalListExhausted(raw: unknown): boolean {
+  const o = onboardingFiscalObject(raw);
+  if (!o) return false;
+  return o.list_exhausted === true;
+}
+
+/**
+ * Card: ainda a buscar NF-e na SEFAZ (páginas de listagem).
+ * Termina quando `list_exhausted` ou a captura/conclusão fecham.
+ */
+export function isOnboardingFiscalSearchingNotes(raw: unknown): boolean {
+  if (isOnboardingFiscalJsonCompleted(raw)) return false;
+  if (isOnboardingFiscalCaptureCompleted(raw)) return false;
+  if (isOnboardingFiscalSefazUnavailable(raw)) return false;
+  return !isOnboardingFiscalListExhausted(raw);
+}
+
+export function onboardingFiscalFoundNotesLabel(found: number): string {
+  const n = Math.max(0, Math.floor(Number.isFinite(found) ? found : 0));
+  if (n === 1) return "1 nota fiscal encontrada";
+  return `${n} notas fiscais encontradas`;
+}
+
+export function onboardingFiscalProcessedNotesLabel(
+  done: number,
+  max: number,
+): string {
+  const d = Math.max(0, Math.floor(Number.isFinite(done) ? done : 0));
+  const m = Math.max(0, Math.floor(Number.isFinite(max) ? max : 0));
+  return `${d} / ${m} notas processadas, interpretadas`;
 }

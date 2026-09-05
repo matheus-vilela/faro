@@ -91,6 +91,10 @@ verify_jwt = false
 [functions.epoc-export-venda-produtos]
 verify_jwt = false
 
+# Relatório estoque EPOC (dev tools, um dia). JWT no handler.
+[functions.epoc-export-estoque]
+verify_jwt = false
+
 # Retry serviços/faturamento em dias com sync parcial. JWT no handler.
 [functions.epoc-retry-daily-extras]
 verify_jwt = false

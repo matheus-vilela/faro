@@ -10,11 +10,14 @@ import {
   NfeUnitPriceBreakdownCard,
   type NfeUnitPricePreviewResult,
 } from "@/components/desenvolvimento/NfeUnitPriceBreakdownCard";
+import { EpocEstoqueExportCard } from "@/components/desenvolvimento/EpocEstoqueExportCard";
+import { EpocEstoqueVsVendasCard } from "@/components/desenvolvimento/EpocEstoqueVsVendasCard";
 import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFaturamentoExportCard";
 import { EpocSyncDayCard } from "@/components/desenvolvimento/EpocSyncDayCard";
 import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
+import { SyncHistoryPurgeCard } from "@/components/desenvolvimento/SyncHistoryPurgeCard";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -356,6 +359,7 @@ export function Desenvolvimento() {
         <div className="space-y-6">
           <UnitSetupResetCard />
           <OnboardingResetCard />
+          <SyncHistoryPurgeCard />
         </div>
       ) : null}
 
@@ -386,6 +390,18 @@ export function Desenvolvimento() {
               </p>
             </div>
             <EpocFaturamentoExportCard />
+          </section>
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Estoque</h2>
+              <p className="text-muted-foreground text-sm">
+                Relatório de estoque do portal para um dia. Só linhas de
+                Saída.
+              </p>
+            </div>
+            <EpocEstoqueExportCard />
+            <EpocEstoqueVsVendasCard />
           </section>
         </div>
       ) : null}

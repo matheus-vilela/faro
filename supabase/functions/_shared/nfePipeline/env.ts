@@ -36,7 +36,17 @@ export function dispatcherCompaniesPerTick(): number {
 }
 
 export function workerJobsPerTick(): number {
-  return intFromEnv("NFE_WORKER_JOBS_PER_TICK", 8, 1, 50);
+  return intFromEnv("NFE_WORKER_JOBS_PER_TICK", 80, 1, 80);
+}
+
+/** Downloads de XML em paralelo no mesmo tick. */
+export function workerDownloadConcurrency(): number {
+  return intFromEnv("NFE_WORKER_DOWNLOAD_CONCURRENCY", 4, 1, 8);
+}
+
+/** Folga antes do próximo cron `* * * * *` para não sobrepor o tick. */
+export function workerStopBeforeTickMs(): number {
+  return intFromEnv("NFE_WORKER_STOP_BEFORE_TICK_MS", 10_000, 3_000, 20_000);
 }
 
 /** Teto dos GETs automáticos Focus (lista/XML). Máx. 80; 20 ficam para manuais. */

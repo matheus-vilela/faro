@@ -1,61 +1,68 @@
 export interface Product {
-  id: string
-  company_id: string
-  name: string
-  sku: string | null
-  unit: string
-  min_quantity: number
-  current_quantity: number
+  id: string;
+  company_id: string;
+  name: string;
+  sku: string | null;
+  unit: string;
+  min_quantity: number;
+  current_quantity: number;
   /** Último valor pago por unidade de cadastro/referência (mantido para exibição). */
-  last_unit_value: number | null
+  last_unit_value: number | null;
   /** Unidade de referência do último valor pago (ex.: un). */
-  last_unit_value_unit_code?: string | null
+  last_unit_value_unit_code?: string | null;
   /** Último valor pago convertido para unidade de estoque atual (uso interno de cálculo). */
-  last_unit_value_stock?: number | null
+  last_unit_value_stock?: number | null;
   /** Legado; CMV na venda usa a folha CMV padrão da empresa. */
-  cmv_category_id?: string | null
+  cmv_category_id?: string | null;
   /** Última categoria financeira de compra; pré-preenche novas linhas de NF. */
-  default_expense_category_id?: string | null
+  default_expense_category_id?: string | null;
   /** Se true, vendas geram lançamento de CMV; se false, não compõe CMV no DRE. */
-  composes_cmv?: boolean
+  composes_cmv?: boolean;
   /** Custo médio ponderado (CMV), quando houver entradas valoradas */
-  average_cost?: number | null
+  average_cost?: number | null;
   /** Preço unitário derivado para ordenação da listagem (coluna gerada). */
-  catalog_unit_cost?: number | null
+  catalog_unit_cost?: number | null;
   /** Valor em estoque derivado para ordenação da listagem (coluna gerada). */
-  catalog_stock_value?: number | null
+  catalog_stock_value?: number | null;
   /** Código para etiqueta (EAN/Code128) */
-  barcode?: string | null
+  barcode?: string | null;
   /** EAN/GTIN da NF-e ou cadastro (quando distinto de `barcode`). */
-  ean?: string | null
-  is_active?: boolean
+  ean?: string | null;
+  is_active?: boolean;
+  /** DIRECT | RECIPE_CONTROLLED | COMPOSITE | SERVICE | SALE_FAMILY | INTERMEDIATE */
+  stock_control_type?: string | null;
+  /** false = prato de ficha ou agrupamento de venda (oculto na listagem de Produtos). */
   /** Derivado: true se alguma categoria de catálogo marca o produto como não-venda. */
-  exclude_from_sales?: boolean
+  exclude_from_sales?: boolean;
   /** false = prato de ficha técnica (oculto na listagem de Produtos). */
-  listed_in_product_catalog?: boolean
-  created_at: string
-  updated_at: string
+  listed_in_product_catalog?: boolean;
+  /** Saiu só no estoque EPOC — candidato a variante de agrupamento. */
+  stock_only_origin?: boolean;
+  /** Usuário informou que o item não é agrupamento de venda. */
+  not_sale_grouping?: boolean;
+  created_at: string;
+  updated_at: string;
   /** Colunas geradas (migração stock alert) — opcionais até o banco atualizar */
-  stock_is_zero?: boolean
-  stock_below_min_positive?: boolean
-  stock_below_min_inclusive?: boolean
-  stock_has_alert?: boolean
+  stock_is_zero?: boolean;
+  stock_below_min_positive?: boolean;
+  stock_below_min_inclusive?: boolean;
+  stock_has_alert?: boolean;
   /** Unidade trazida do XML quando não mapeada de forma confiável para o catálogo. */
-  import_unit_raw?: string | null
+  import_unit_raw?: string | null;
   /** Sinaliza produto com unidade legada/desconhecida criada via importação. */
-  import_unit_needs_review?: boolean
+  import_unit_needs_review?: boolean;
   /** Conversões entre unidade de estoque e unidades secundárias (JSON no produto). */
-  unit_conversions?: unknown
+  unit_conversions?: unknown;
   /** Nomes de produtos unificados neste cadastro (importação automática). */
-  merged_catalog_names?: string[]
+  merged_catalog_names?: string[];
   /** Histórico de unificações (auditoria / undo). */
-  merge_audit?: unknown
-  ncm?: string | null
-  cfop?: string | null
-  csosn?: string | null
-  canonical_name?: string | null
+  merge_audit?: unknown;
+  ncm?: string | null;
+  cfop?: string | null;
+  csosn?: string | null;
+  canonical_name?: string | null;
   /** Legado; preferir stock_lots. */
-  expiry_date?: string | null
+  expiry_date?: string | null;
   /** Lotes com validade: [{ id, quantity, expiry_date, stock_movement_id?, created_at? }]. */
-  stock_lots?: unknown
+  stock_lots?: unknown;
 }

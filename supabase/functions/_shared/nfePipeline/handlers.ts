@@ -3,17 +3,21 @@ import {
   clearOnboardingSefaz,
   cnpj14,
   companyHasOpenJobs,
-  companyHasOpenJobs,
   enqueueJob,
   enqueuePendingInterpretations,
   enqueueProcessNfe,
-  isOnboardingFiscalOpen,
   loadCompanyFocus,
+  loadReusableOnboardingCycleId,
   loadSyncState,
+  onboardingCaptureStillOpen,
   patchOnboardingCaptureCompleted,
   patchOnboardingSefazUnavailable,
   refreshOnboardingFiscalProgress,
 } from "./db.ts";
+import {
+  maxItemFocusVersion,
+  resolveFetchPageContinuation,
+} from "./listContinuation.ts";
 import {
   NFE_XML_BUCKET,
   focusApiBase,
@@ -111,7 +115,11 @@ async function handleSyncCompany(
 
   const cycleId = state.mode === "onboarding" && existingCycle
     ? existingCycle
-    : payloadCycle || crypto.randomUUID();
+    : payloadCycle ||
+      (state.mode === "onboarding"
+        ? (await loadReusableOnboardingCycleId(admin, companyId, state))
+        : null) ||
+      crypto.randomUUID();
   const { error: updErr } = await admin
     .from("nfe_sync_state")
     .update({
@@ -264,19 +272,27 @@ async function handleFetchPage(
     if (existing?.id) {
       const alreadyDownloaded = existing.fetch_status === "downloaded";
       if (alreadyDownloaded) {
-        // Não recarimba cycle_id: senão o histórico do ciclo novo "rouba"
-        // notas já importadas e o close_cycle pode fechar o onboarding cedo.
+        // No onboarding, alinha cycle_id das notas ainda não interpretadas
+        // ao ciclo corrente — senão o histórico novo fica 0/X e o antigo
+        // nunca avança.
+        const attachCycle =
+          state.mode === "onboarding" &&
+          Boolean(state.cycle_id) &&
+          existing.process_status !== "done" &&
+          existing.process_status !== "skipped";
         await admin.from("nfe_documents").update({
           focus_version: focusVersion,
           situacao,
           nfe_completa: completa,
           focus_payload: cab,
+          ...(attachCycle ? { cycle_id: state.cycle_id } : {}),
           updated_at: nowIso(),
         }).eq("id", existing.id);
         if (
           elegivel &&
           existing.process_status !== "done" &&
-          existing.process_status !== "skipped"
+          existing.process_status !== "skipped" &&
+          state.mode !== "onboarding"
         ) {
           await enqueueProcessNfe(admin, {
             companyId,
@@ -306,33 +322,18 @@ async function handleFetchPage(
     }
   }
 
+  const continuation = resolveFetchPageContinuation({
+    versao,
+    itemCount: page.items.length,
+    xTotalCount: page.xTotalCount,
+    xMaxVersion: page.xMaxVersion,
+    maxItemVersion: maxItemFocusVersion(page.items),
+  });
+  const listDone = continuation.listDone;
+  const nextVersao = continuation.nextVersao;
   let pendingCursor = state.pending_cursor_versao ?? state.cursor_versao;
-  let listDone = false;
-  let nextVersao: number | null = null;
-
-  if (page.xTotalCount === 0) {
-    listDone = true;
-  } else if (page.items.length === 0) {
-    if (
-      page.xMaxVersion != null &&
-      Number.isFinite(page.xMaxVersion) &&
-      page.xMaxVersion > versao
-    ) {
-      nextVersao = page.xMaxVersion;
-      pendingCursor = page.xMaxVersion;
-    } else {
-      listDone = true;
-    }
-  } else if (page.xMaxVersion == null || !Number.isFinite(page.xMaxVersion)) {
-    listDone = true;
-    pendingCursor = versao;
-  } else if (page.xMaxVersion === versao) {
-    listDone = true;
-    pendingCursor = versao;
-  } else {
-    nextVersao = page.xMaxVersion;
-    pendingCursor = page.xMaxVersion;
-  }
+  if (nextVersao != null) pendingCursor = nextVersao;
+  else if (listDone) pendingCursor = versao;
 
   await admin.from("nfe_sync_state").update({
     pending_cursor_versao: pendingCursor,
@@ -357,6 +358,13 @@ async function handleFetchPage(
     });
   }
 
+  await recordConsultaHistory(
+    admin,
+    companyId,
+    state.cycle_id,
+    state.mode === "onboarding",
+  );
+
   if (!listDone && nextVersao != null) {
     await enqueueJob(admin, {
       type: "fetch_page",
@@ -368,7 +376,7 @@ async function handleFetchPage(
     await enqueueJob(admin, {
       type: "close_cycle",
       companyId,
-      payload: { list_done: true },
+      payload: { list_done: listDone },
       priority: state.priority,
     });
   }
@@ -421,8 +429,25 @@ async function handleDownloadXml(
     .maybeSingle();
   if (docErr) return { ok: false, error: docErr.message };
   if (!doc) return { ok: false, error: "documento não encontrado", fatal: true };
+
+  const stateForCycle = await loadSyncState(admin, companyId);
+  const attachCycleId =
+    (typeof doc.cycle_id === "string" && doc.cycle_id.trim()) ||
+    (typeof stateForCycle?.cycle_id === "string" && stateForCycle.cycle_id.trim()) ||
+    "";
+  if (attachCycleId && !(typeof doc.cycle_id === "string" && doc.cycle_id.trim())) {
+    await admin.from("nfe_documents").update({
+      cycle_id: attachCycleId,
+      updated_at: nowIso(),
+    }).eq("id", doc.id);
+    doc.cycle_id = attachCycleId;
+  }
   if (doc.fetch_status === "downloaded") {
-    if (doc.process_status !== "done" && doc.process_status !== "skipped") {
+    if (
+      doc.process_status !== "done" &&
+      doc.process_status !== "skipped" &&
+      stateForCycle?.mode !== "onboarding"
+    ) {
       await enqueueProcessNfe(admin, {
         companyId,
         documentId: String(doc.id),
@@ -527,11 +552,13 @@ async function handleDownloadXml(
     );
   }
 
-  await enqueueProcessNfe(admin, {
-    companyId,
-    documentId: String(doc.id),
-    chave,
-  });
+  if (state?.mode !== "onboarding") {
+    await enqueueProcessNfe(admin, {
+      companyId,
+      documentId: String(doc.id),
+      chave,
+    });
+  }
 
   // Garante close_cycle quando listagem/downloads da rodada estiverem quietos.
   const { count: pendingFetch } = await admin
@@ -571,13 +598,23 @@ async function handleDownloadXml(
     });
   }
 
-  return { ok: true, detail: { chave, path, process_enqueued: true } };
+  return { ok: true, detail: { chave, path, process_enqueued: state?.mode !== "onboarding" } };
 }
 
 async function handleProcessNfe(
   admin: SupabaseClient,
   job: NfeJobRow,
 ): Promise<JobResult> {
+  const state = await loadSyncState(admin, job.company_id);
+  if (state?.mode === "onboarding") {
+    if (await onboardingCaptureStillOpen(admin, job.company_id)) {
+      return {
+        ok: true,
+        detail: { skipped: "aguardando_captura" },
+      };
+    }
+  }
+
   const documentId = String(job.payload?.document_id ?? "").trim();
   if (!documentId) {
     // Fallback: resolve por chave
@@ -607,8 +644,73 @@ async function handleCloseCycle(
   const state = await loadSyncState(admin, companyId);
   if (!state) return { ok: false, error: "nfe_sync_state ausente", fatal: true };
 
+  const isOnboarding = state.mode === "onboarding";
+  const listExhausted = !isOnboarding || job.payload?.list_done === true;
+  const captureOpen = isOnboarding
+    ? await onboardingCaptureStillOpen(admin, companyId)
+    : false;
+
+  const { count: pendingFetch } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("fetch_status", ["listed", "downloading"]);
+
+  if (isOnboarding && !listExhausted) {
+    if (captureOpen || (pendingFetch ?? 0) > 0) {
+      await recordConsultaHistory(
+        admin,
+        companyId,
+        state.cycle_id,
+        true,
+      );
+      return {
+        ok: false,
+        softRequeue: true,
+        error: `aguardando captura (fetch=${pendingFetch ?? 0})`,
+        retryAfterMs: 30_000,
+      };
+    }
+    await refreshOnboardingFiscalProgress(admin, companyId);
+    const pending = Number(state.pending_cursor_versao);
+    const current = Number(state.cursor_versao);
+    if (Number.isFinite(pending) && pending > current) {
+      await enqueueJob(admin, {
+        type: "fetch_page",
+        companyId,
+        payload: { versao: String(Math.max(0, Math.floor(pending))) },
+        priority: state.priority,
+      });
+    }
+    return {
+      ok: true,
+      detail: { skipped: "onboarding_list_open", pending_cursor: pending },
+    };
+  }
+
+  if (captureOpen || (pendingFetch ?? 0) > 0) {
+    await recordConsultaHistory(
+      admin,
+      companyId,
+      state.cycle_id,
+      isOnboarding,
+    );
+    return {
+      ok: false,
+      softRequeue: true,
+      error: `aguardando download (fetch=${pendingFetch ?? 0})`,
+      retryAfterMs: 15_000,
+    };
+  }
+
   const backfilled = await enqueuePendingInterpretations(admin, companyId);
   if (backfilled > 0) {
+    await recordConsultaHistory(
+      admin,
+      companyId,
+      state.cycle_id,
+      isOnboarding,
+    );
     return {
       ok: false,
       softRequeue: true,
@@ -617,29 +719,11 @@ async function handleCloseCycle(
     };
   }
 
-  // Ainda há trabalho aberto? Reagenda close.
-  const { count: pendingFetch } = await admin
-    .from("nfe_documents")
-    .select("id", { count: "exact", head: true })
-    .eq("company_id", companyId)
-    .in("fetch_status", ["listed", "downloading"]);
-
   const { count: pendingProcess } = await admin
     .from("nfe_documents")
     .select("id", { count: "exact", head: true })
     .eq("company_id", companyId)
     .in("process_status", ["pending", "processing"]);
-
-  const hasOpen = await companyHasOpenJobs(admin, companyId, job.id);
-  if ((pendingFetch ?? 0) > 0 || (pendingProcess ?? 0) > 0 || hasOpen) {
-    return {
-      ok: false,
-      softRequeue: true,
-      error:
-        `aguardando pendencias (fetch=${pendingFetch ?? 0}, process=${pendingProcess ?? 0}, open_jobs)`,
-      retryAfterMs: 60_000,
-    };
-  }
 
   const { count: downloaded } = await admin
     .from("nfe_documents")
@@ -673,11 +757,40 @@ async function handleCloseCycle(
     .eq("company_id", companyId)
     .eq("fetch_status", "failed");
 
+  const { count: processSkipped } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("fetch_status", "downloaded")
+    .eq("process_status", "skipped");
+
   const downloadedN = downloaded ?? 0;
   const processedN = processed ?? 0;
   const processFailedN = processFailed ?? 0;
+  const processSkippedN = processSkipped ?? 0;
   const ignoredN = ignored ?? 0;
   const failedN = failed ?? 0;
+
+  const hasOpen = await companyHasOpenJobs(admin, companyId, job.id);
+  const interpretGap =
+    downloadedN - processedN - processFailedN - processSkippedN;
+  if (
+    (pendingFetch ?? 0) > 0 ||
+    (pendingProcess ?? 0) > 0 ||
+    hasOpen ||
+    interpretGap > 0
+  ) {
+    if (interpretGap > 0 && (pendingProcess ?? 0) === 0) {
+      await enqueuePendingInterpretations(admin, companyId);
+    }
+    return {
+      ok: false,
+      softRequeue: true,
+      error:
+        `aguardando pendencias (fetch=${pendingFetch ?? 0}, process=${pendingProcess ?? 0}, interpret_gap=${Math.max(0, interpretGap)}, open_jobs)`,
+      retryAfterMs: 60_000,
+    };
+  }
 
   let cycleId =
     typeof state.cycle_id === "string" && state.cycle_id.trim()
@@ -751,7 +864,7 @@ async function handleCloseCycle(
       last_error: `${processFailedN} xml(s) falharam na interpretação`,
       next_sync_at: addMinutesIso(steadyIntervalMinutes()),
       running_since: null,
-      cycle_id: null,
+      cycle_id: state.mode === "onboarding" ? (cycleId || state.cycle_id) : null,
       pending_cursor_versao: null,
       cursor_versao: Number.isFinite(cursor)
         ? Math.max(0, Math.floor(cursor))
@@ -772,19 +885,6 @@ async function handleCloseCycle(
   }
 
   if (state.mode === "onboarding") {
-    const fiscal = (await loadCompanyFocus(admin, companyId))?.onboarding_fiscal;
-    const listExhausted =
-      job.payload?.list_done === true || fiscal?.list_exhausted === true;
-    const listingStillOpen = isOnboardingFiscalOpen(fiscal) && !listExhausted;
-
-    if (listingStillOpen) {
-      await refreshOnboardingFiscalProgress(admin, companyId);
-      return {
-        ok: true,
-        detail: { skipped: "onboarding_list_open" },
-      };
-    }
-
     if (
       canMarkOnboardingFiscalCompleted({
         listExhausted,
@@ -805,7 +905,6 @@ async function handleCloseCycle(
           nfes_sync: processedN,
           nfes_ignored: ignoredN,
         },
-        { markCompleted: true },
       );
       if (patch.error) {
         return { ok: false, error: patch.error, retryAfterMs: 15_000 };
@@ -824,7 +923,10 @@ async function handleCloseCycle(
     priority: nextPriority,
     cursor_versao: Number.isFinite(cursor) ? Math.max(0, Math.floor(cursor)) : state.cursor_versao,
     pending_cursor_versao: null,
-    cycle_id: null,
+    cycle_id:
+      state.mode === "onboarding" && !completedOk
+        ? (cycleId || state.cycle_id)
+        : null,
     running_since: null,
     last_success_at: nowIso(),
     next_sync_at: nextSyncAt,

@@ -27,9 +27,12 @@ import {
 import { performEpocPortalLogin } from "../_shared/epocPortalLoginSession.ts";
 import { humanizeEpocRemoteError } from "../_shared/epocRemoteErrorMessage.ts";
 import { enqueueAndTriggerEpocCsvImport } from "../_shared/enqueueEpocCsvRevenueImportJob.ts";
+import { epocEstoqueFiltrarAcoesBody } from "../_shared/epocEstoqueCsv.ts";
+import { extractSoldProdutoKeys } from "../_shared/epocProdutoSinteticoCsv.ts";
 import {
   buildPartialSyncSummary,
   listEpocSyncGaps,
+  persistEstoqueVariantOutsFromAcoesHtml,
   upsertEpocSyncDayStatus,
 } from "../_shared/epocPersistDailyExtras.ts";
 import { brDateToIso } from "../_shared/epocPtBrNumber.ts";
@@ -1756,24 +1759,32 @@ Deno.serve(async (req) => {
             suffix,
             ok: false as const,
             message: "validadorOz falhou; dia ignorado.",
+            estoqueHtml: null,
           };
         }
 
-        const acoesDia = await callAcoes(`fase2_${suffix}`, {
-          modulo: MODULO_REL,
-          NaoMenu: naoMenu,
-          token: tokenForBody,
-          data_de: dia,
-          data_ate: dia,
-          busca_grupo_evento: "-1",
-          filtrar: "FORM",
-        });
+        const [acoesDia, acoesEstoque] = await Promise.all([
+          callAcoes(`fase2_${suffix}`, {
+            modulo: MODULO_REL,
+            NaoMenu: naoMenu,
+            token: tokenForBody,
+            data_de: dia,
+            data_ate: dia,
+            busca_grupo_evento: "-1",
+            filtrar: "FORM",
+          }),
+          callAcoes(
+            `fase2_${suffix}_estoque`,
+            epocEstoqueFiltrarAcoesBody(dia, naoMenu, tokenForBody),
+          ),
+        ]);
         if (!acoesDia.ok) {
           return {
             dia,
             suffix,
             ok: false as const,
             message: "acoes.php falhou; dia ignorado.",
+            estoqueHtml: acoesEstoque.ok ? acoesEstoque.text : null,
           };
         }
 
@@ -1786,6 +1797,7 @@ Deno.serve(async (req) => {
             ok: false as const,
             message: portalMsg ?? "Sem id=tblExport para este dia.",
             portal_feedback: portalMsg ?? undefined,
+            estoqueHtml: acoesEstoque.ok ? acoesEstoque.text : null,
           };
         }
 
@@ -1799,6 +1811,7 @@ Deno.serve(async (req) => {
             suffix,
             ok: false as const,
             message: "tblExport não pôde ser extraída do HTML.",
+            estoqueHtml: acoesEstoque.ok ? acoesEstoque.text : null,
           };
         }
         const parsed = extractTableHeaderAndRows(tableHtml);
@@ -1808,6 +1821,7 @@ Deno.serve(async (req) => {
             suffix,
             ok: false as const,
             message: "Tabela sem cabeçalho legível.",
+            estoqueHtml: acoesEstoque.ok ? acoesEstoque.text : null,
           };
         }
         return {
@@ -1816,6 +1830,7 @@ Deno.serve(async (req) => {
           ok: true as const,
           parsed,
           tableHtml,
+          estoqueHtml: acoesEstoque.ok ? acoesEstoque.text : null,
         };
       }),
     );
@@ -1823,7 +1838,7 @@ Deno.serve(async (req) => {
     for (const result of batchResults) {
       const saleDateIso = brDateToIso(result.dia);
       if (saleDateIso) {
-        // Produtos neste request; serviços/faturamento ficam pendentes p/ worker async.
+        // Venda de produtos + estoque neste request; serviços/faturamento ficam no extras.
         await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
           products_ok: result.ok,
           products_error: result.ok
@@ -1834,6 +1849,32 @@ Deno.serve(async (req) => {
           services_error: "pendente (sync async)",
           faturamento_error: "pendente (sync async)",
         });
+        if (result.estoqueHtml) {
+          try {
+            const soldItems = result.ok
+              ? extractSoldProdutoKeys(result.parsed.header, result.parsed.rows)
+              : [];
+            await persistEstoqueVariantOutsFromAcoesHtml(
+              admin,
+              companyId,
+              result.dia,
+              result.estoqueHtml,
+              soldItems,
+            );
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`${LOG} persist estoque`, saleDateIso, msg);
+            await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+              stock_ok: false,
+              stock_error: msg,
+            });
+          }
+        } else {
+          await upsertEpocSyncDayStatus(admin, companyId, saleDateIso, {
+            stock_ok: false,
+            stock_error: "estoque não veio no mesmo ciclo da venda",
+          });
+        }
       }
 
       if (!result.ok) {

@@ -1,3 +1,7 @@
+import {
+  applyProductCatalogKindFilter,
+  type ProductCatalogKind,
+} from "@/lib/productCatalogKind";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import {
@@ -10,21 +14,24 @@ export type CatalogProductFilterParams = {
   companyId: string;
   categoryProductIds: string[] | null;
   search: string;
+  filterCatalogKind: ProductCatalogKind;
   filterActive: "all" | "active" | "inactive";
   filterComposesCmv: "all" | "yes" | "no";
   bounds: { gte?: string; lte?: string } | null;
   lowStockOnly: boolean;
   filterStockAlert: "all" | "zero" | "below_min" | "any";
+  filterStockOnlyOrigin: "all" | "yes";
   purchasesFilter: PurchasesDashboardMetric | null;
 };
 
 function buildCatalogProductsQuery(params: CatalogProductFilterParams) {
-  let q = supabase
-    .from("products")
-    .select("id")
-    .eq("company_id", params.companyId)
-    .eq("listed_in_product_catalog", true)
-    .order("name");
+  let q = applyProductCatalogKindFilter(
+    supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", params.companyId),
+    params.filterCatalogKind,
+  ).order("name");
 
   if (params.categoryProductIds) {
     q = q.in("id", params.categoryProductIds);
@@ -58,6 +65,9 @@ function buildCatalogProductsQuery(params: CatalogProductFilterParams) {
   } else if (params.filterStockAlert === "any") {
     q = q.eq("stock_has_alert", true);
   }
+  if (params.filterStockOnlyOrigin === "yes") {
+    q = q.eq("stock_only_origin", true);
+  }
 
   return q;
 }
@@ -67,12 +77,13 @@ export async function fetchCatalogProductIds(
 ): Promise<string[]> {
   if (params.purchasesFilter) {
     const all = await fetchAllInRange<Product>(
-      supabase
-        .from("products")
-        .select("*")
-        .eq("company_id", params.companyId)
-        .eq("listed_in_product_catalog", true)
-        .order("name"),
+      applyProductCatalogKindFilter(
+        supabase
+          .from("products")
+          .select("*")
+          .eq("company_id", params.companyId),
+        params.filterCatalogKind,
+      ).order("name"),
     );
     return all
       .filter((p) => matchesPurchasesMetric(p, params.purchasesFilter!))

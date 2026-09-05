@@ -1,3 +1,4 @@
+import type { TechnicalSheetKind } from "@/lib/productIntermediate";
 import { supabase } from "@/lib/supabase";
 
 export type TechnicalSheetIngredient = {
@@ -13,6 +14,7 @@ export type TechnicalSheetData = {
   recipe_id: string | null;
   recipe_name: string | null;
   batch_yield: number;
+  sheet_kind: TechnicalSheetKind | null;
   ingredients: TechnicalSheetIngredient[];
 };
 
@@ -33,8 +35,10 @@ export async function fetchProductTechnicalSheet(
       id?: string;
       name?: string;
       batch_yield?: number;
+      recipe_type?: string;
     } | null;
     ingredients?: unknown;
+    sheet_kind?: string | null;
   };
 
   if (!row?.ok) {
@@ -67,6 +71,13 @@ export async function fetchProductTechnicalSheet(
       recipe_id: recipe?.id ? String(recipe.id) : null,
       recipe_name: recipe?.name ? String(recipe.name) : null,
       batch_yield: Number(recipe?.batch_yield ?? 1) || 1,
+      sheet_kind:
+        row.sheet_kind === "intermediate" ||
+        recipe?.recipe_type === "PRODUCTION"
+          ? "intermediate"
+          : recipe?.id
+            ? "sale"
+            : null,
       ingredients,
     },
     error: null,
@@ -82,6 +93,7 @@ export async function saveProductTechnicalSheet(
     input_unit_code: string;
   }>,
   batchYield = 1,
+  sheetKind: TechnicalSheetKind = "sale",
 ): Promise<{
   ok: boolean;
   recipe_id?: string;
@@ -96,6 +108,7 @@ export async function saveProductTechnicalSheet(
     p_output_product_id: outputProductId,
     p_ingredients: ingredients,
     p_batch_yield: batchYield,
+    p_sheet_kind: sheetKind,
   });
   if (error) return { ok: false, error: error.message };
 
@@ -149,6 +162,16 @@ export function technicalSheetErrorMessage(code: string | undefined): string {
       return "Não foi possível converter a unidade de um insumo. Cadastre a conversão no produto.";
     case "ingredient_not_found":
       return "Um dos insumos selecionados não existe nesta unidade.";
+    case "sale_family_forbidden":
+      return "Agrupamento não pode virar ficha nem produto intermediário.";
+    case "invalid_sheet_kind":
+      return "Tipo de ficha inválido.";
+    case "forbidden":
+      return "Sem permissão para salvar a ficha nesta unidade.";
+    case "not_authenticated":
+      return "Sessão expirada. Entre novamente.";
+    case "output_not_found":
+      return "Produto de saída não encontrado. Tente salvar de novo.";
     default:
       if (code?.includes("insufficient_stock")) {
         return "Estoque insuficiente em um ou mais insumos para concluir a saída.";

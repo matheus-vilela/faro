@@ -252,7 +252,8 @@ export async function refreshOnboardingFiscalProgress(
     nfes_sync: processed,
     nfes_ignored: ignored,
   };
-  if (extra?.listExhausted) next.list_exhausted = true;
+  if (extra?.listExhausted === true) next.list_exhausted = true;
+  if (extra?.listExhausted === false) delete next.list_exhausted;
 
   await admin
     .from("companies")
@@ -265,15 +266,98 @@ export async function refreshOnboardingFiscalProgress(
 }
 
 /** Ciclo de onboarding já em curso — não abrir outro exec_id. */
+export async function loadReusableOnboardingCycleId(
+  admin: SupabaseClient,
+  companyId: string,
+  state: NfeSyncStateRow | null,
+): Promise<string | null> {
+  const fromState =
+    typeof state?.cycle_id === "string" && state.cycle_id.trim()
+      ? state.cycle_id.trim()
+      : "";
+  if (fromState) return fromState;
+
+  const { data: rows, error } = await admin
+    .from("nfe_consulta_history")
+    .select("exec_id, listed_count, downloaded_count, processed_count")
+    .eq("company_id", companyId)
+    .eq("onboarding", true)
+    .order("consulta_at", { ascending: false })
+    .limit(20);
+  if (error) {
+    console.warn("[nfe-pipeline] loadReusableOnboardingCycleId", error.message);
+    return null;
+  }
+
+  const pick = (
+    pred: (listed: number, down: number, proc: number) => boolean,
+  ): string | null => {
+    for (const row of rows ?? []) {
+      const listed = Number(row.listed_count ?? 0) || 0;
+      const down = Number(row.downloaded_count ?? 0) || 0;
+      const proc = Number(row.processed_count ?? 0) || 0;
+      const id = typeof row.exec_id === "string" ? row.exec_id.trim() : "";
+      if (!id) continue;
+      if (pred(listed, down, proc)) return id;
+    }
+    return null;
+  };
+
+  return (
+    pick((listed, down, proc) =>
+      (listed > 0 || down > 0) && proc < Math.max(down, listed)
+    ) ||
+    pick((listed, down) => listed > 0 || down > 0)
+  );
+}
+
+export async function companyHasUninterpretedDownloads(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<boolean> {
+  const { count: pending } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("fetch_status", "downloaded")
+    .in("process_status", ["pending", "processing"]);
+  if ((pending ?? 0) > 0) return true;
+
+  const { count: listed } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("fetch_status", ["listed", "downloading"]);
+  return (listed ?? 0) > 0;
+}
+
+export async function onboardingCaptureStillOpen(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<boolean> {
+  const { count: pendingFetch } = await admin
+    .from("nfe_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("fetch_status", ["listed", "downloading"]);
+  if ((pendingFetch ?? 0) > 0) return true;
+
+  const { count: openCapture } = await admin
+    .from("nfe_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("type", ["fetch_page", "download_xml"])
+    .in("status", ["queued", "leased"]);
+  return (openCapture ?? 0) > 0;
+}
+
+/** Ciclo de onboarding já em curso — não abrir outro exec_id. */
 export async function onboardingHasActiveWork(
   admin: SupabaseClient,
   companyId: string,
 ): Promise<{ busy: boolean; cycleId: string | null; reason?: string }> {
   const state = await loadSyncState(admin, companyId);
-  const cycleId =
-    typeof state?.cycle_id === "string" && state.cycle_id.trim()
-      ? state.cycle_id.trim()
-      : null;
+  const cycleId = await loadReusableOnboardingCycleId(admin, companyId, state);
   if (!state || state.mode !== "onboarding") {
     return { busy: false, cycleId };
   }
@@ -283,9 +367,27 @@ export async function onboardingHasActiveWork(
   if (await companyHasOpenJobs(admin, companyId)) {
     return { busy: true, cycleId, reason: "open_jobs" };
   }
+  if (await onboardingCaptureStillOpen(admin, companyId)) {
+    return { busy: true, cycleId, reason: "pending_capture" };
+  }
+  const { data: co } = await admin
+    .from("companies")
+    .select("onboarding_fiscal")
+    .eq("id", companyId)
+    .maybeSingle();
+  const fiscal =
+    co?.onboarding_fiscal && typeof co.onboarding_fiscal === "object" &&
+      !Array.isArray(co.onboarding_fiscal)
+      ? (co.onboarding_fiscal as Record<string, unknown>)
+      : {};
+  const listExhausted = fiscal.list_exhausted === true;
+  if (listExhausted && await companyHasUninterpretedDownloads(admin, companyId)) {
+    return { busy: true, cycleId, reason: "pending_interpret" };
+  }
   return { busy: false, cycleId };
 }
 
+/** Fecha a captura do onboarding (`capture_completed`). `completed` fica para o botão Concluir. */
 export async function patchOnboardingCaptureCompleted(
   admin: SupabaseClient,
   companyId: string,

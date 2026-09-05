@@ -37,8 +37,18 @@ export async function processNfeDocumentById(
   const cycleId =
     typeof doc.cycle_id === "string" ? doc.cycle_id.trim() : "";
   const refreshHistory = async (onboarding: boolean) => {
-    if (!cycleId) return;
-    await recordConsultaHistory(admin, companyId, cycleId, onboarding);
+    const syncState = await loadSyncState(admin, companyId);
+    const id =
+      cycleId ||
+      (typeof syncState?.cycle_id === "string" ? syncState.cycle_id.trim() : "");
+    if (!id) return;
+    if (!cycleId) {
+      await admin.from("nfe_documents").update({
+        cycle_id: id,
+        updated_at: new Date().toISOString(),
+      }).eq("id", documentId);
+    }
+    await recordConsultaHistory(admin, companyId, id, onboarding);
   };
 
   if (doc.process_status === "done") {
