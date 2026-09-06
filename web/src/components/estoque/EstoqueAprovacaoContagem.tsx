@@ -9,6 +9,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { useSheetListView } from "@/hooks/useSheetListView";
@@ -17,12 +24,13 @@ import {
   COUNT_ROW_ACTION_CLASS,
   COUNT_SELECT_TRIGGER_CLASS,
   countClickableRowClass,
+  inventoryCountLineCount,
 } from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { cn } from "@/lib/utils";
 import { CheckCheck, ChevronRight, Loader2, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type PendingSession = {
@@ -78,8 +86,11 @@ export function EstoqueAprovacaoContagem({
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [lines, setLines] = useState<LineRow[]>([]);
+  const [linesLoading, setLinesLoading] = useState(false);
+  const [linesError, setLinesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const openRequestIdRef = useRef<string | null>(null);
 
   const [filterGroup, setFilterGroup] = useState("");
   const [filterListing, setFilterListing] = useState("");
@@ -102,7 +113,8 @@ export function EstoqueAprovacaoContagem({
         assigned_company_member_id,
         inventory_count_groups ( name ),
         inventory_count_listings ( name ),
-        assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name )
+        assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name ),
+        inventory_count_lines ( count )
       `,
       )
       .eq("company_id", companyId)
@@ -115,7 +127,14 @@ export function EstoqueAprovacaoContagem({
       setSessions([]);
       return;
     }
-    setSessions((data ?? []) as unknown as PendingSession[]);
+    const rows = (data ?? []) as unknown as Array<
+      PendingSession & {
+        inventory_count_lines?: { count: number }[] | { count: number };
+      }
+    >;
+    setSessions(
+      rows.filter((s) => inventoryCountLineCount(s.inventory_count_lines) > 0),
+    );
   }, [companyId]);
 
   useEffect(() => {
@@ -180,9 +199,22 @@ export function EstoqueAprovacaoContagem({
     });
   }, [filterGroup, filterListing, filterOperator, periodFrom, periodTo, sessions]);
 
+  const closeSession = () => {
+    openRequestIdRef.current = null;
+    setActiveId(null);
+    setLines([]);
+    setLinesError(null);
+    setLinesLoading(false);
+    setSelected(new Set());
+  };
+
   const openSession = async (id: string) => {
+    openRequestIdRef.current = id;
     setActiveId(id);
     setSelected(new Set());
+    setLines([]);
+    setLinesError(null);
+    setLinesLoading(true);
     const { data, error } = await supabase
       .from("inventory_count_lines")
       .select(
@@ -194,18 +226,53 @@ export function EstoqueAprovacaoContagem({
         counted_unit_code,
         counted_qty_input,
         in_band,
-        tolerance_pct,
-        products ( name, unit )
+        tolerance_pct
       `,
       )
       .eq("session_id", id)
-      .order("sort_order", { ascending: true });
+      .order("sort_order", { ascending: true })
+      .limit(5000);
+    if (openRequestIdRef.current !== id) return;
     if (error) {
-      toast.error("Não foi possível carregar as linhas.");
       setLines([]);
+      setLinesError(error.message);
+      setLinesLoading(false);
+      toast.error("Não foi possível carregar as linhas.");
       return;
     }
-    setLines((data ?? []) as unknown as LineRow[]);
+    const raw = (data ?? []) as Omit<LineRow, "products">[];
+    const ids = [...new Set(raw.map((r) => r.product_id))];
+    const nameById = new Map<string, { name: string; unit: string }>();
+    const chunk = 200;
+    for (let i = 0; i < ids.length; i += chunk) {
+      const slice = ids.slice(i, i + chunk);
+      const { data: prods, error: prodError } = await supabase
+        .from("products")
+        .select("id, name, unit")
+        .in("id", slice);
+      if (openRequestIdRef.current !== id) return;
+      if (prodError) {
+        console.error(prodError);
+        continue;
+      }
+      for (const p of prods ?? []) {
+        nameById.set(p.id, { name: p.name, unit: p.unit });
+      }
+    }
+    if (openRequestIdRef.current !== id) return;
+    if (raw.length === 0) {
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      closeSession();
+      toast.message("Esta sessão não tem itens contados.");
+      return;
+    }
+    setLines(
+      raw.map((row) => ({
+        ...row,
+        products: nameById.get(row.product_id) ?? null,
+      })),
+    );
+    setLinesLoading(false);
   };
 
   const visibleLines = useMemo(() => {
@@ -263,8 +330,7 @@ export function EstoqueAprovacaoContagem({
       return;
     }
     toast.success("Contagem aprovada e estoque atualizado.");
-    setActiveId(null);
-    setLines([]);
+    closeSession();
     await load();
     onChanged?.();
   };
@@ -296,13 +362,22 @@ export function EstoqueAprovacaoContagem({
     } catch {
       /* ignore */
     }
-    setActiveId(null);
-    setLines([]);
+    closeSession();
     await load();
     onChanged?.();
   };
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
+  const sessionTitle = activeSession
+    ? activeSession.kind === "onboarding"
+      ? "Contagem geral (onboarding)"
+      : [
+          activeSession.inventory_count_groups?.name ?? "Contagem",
+          activeSession.inventory_count_listings?.name,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+    : "Conferir contagem";
 
   return (
     <div className="space-y-4">
@@ -441,15 +516,24 @@ export function EstoqueAprovacaoContagem({
         </ul>
       )}
 
-      {activeId && lines.length > 0 ? (
-        <div className="space-y-3 rounded-xl border-2 border-primary/25 bg-primary/5 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold">
+      <Sheet
+        open={!!activeId}
+        onOpenChange={(open) => {
+          if (!open) closeSession();
+        }}
+      >
+        <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden p-0">
+          <SheetHeader className="shrink-0 space-y-1 border-b border-border px-6 pb-4 pt-6 pr-14 text-left">
+            <SheetTitle>{sessionTitle}</SheetTitle>
+            <p className="text-sm text-muted-foreground">
               Esperado × contado
               {activeSession?.kind === "onboarding"
                 ? " · onboarding (obrigatória para o estoque atualizar)"
                 : ""}
             </p>
+          </SheetHeader>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-4">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={onlyDivergent}
@@ -457,129 +541,143 @@ export function EstoqueAprovacaoContagem({
               />
               Só divergentes
             </label>
+
+            {linesLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Carregando linhas…
+              </div>
+            ) : linesError ? (
+              <p className="text-sm text-destructive">
+                Não foi possível carregar as linhas. {linesError}
+              </p>
+            ) : sorted.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {lines.length === 0
+                  ? "Nenhuma linha nesta contagem."
+                  : "Nenhuma linha divergente."}
+              </p>
+            ) : listView === "cards" ? (
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+                {sorted.map((l) => {
+                  const out = l.in_band === false;
+                  const pct = variationPct(l.expected_qty, l.counted_qty);
+                  const hub = l.products?.unit ?? "";
+                  return (
+                    <label
+                      key={l.id}
+                      className={cn(
+                        "flex items-start gap-3 rounded-lg border p-2 text-sm",
+                        out && "border-amber-500/40 bg-amber-500/5",
+                      )}
+                    >
+                      <Checkbox
+                        checked={selected.has(l.product_id)}
+                        onCheckedChange={() => toggle(l.product_id)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">
+                          {l.products?.name ?? l.product_id}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Esperado: {formatQty(l.expected_qty)} {hub} · Contado:{" "}
+                          {formatQty(l.counted_qty)} {hub}
+                          {pct != null
+                            ? ` · ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
+                            : ""}
+                          {out ? " · fora da faixa" : ""}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                      <th className="p-2 w-8" />
+                      <SortableTableHead
+                        label="Produto"
+                        column="name"
+                        sortKey={sortKey}
+                        sortAsc={sortAsc}
+                        onSort={onSort}
+                      />
+                      <SortableTableHead
+                        label="Esperado"
+                        column="expected"
+                        sortKey={sortKey}
+                        sortAsc={sortAsc}
+                        onSort={onSort}
+                        align="right"
+                      />
+                      <SortableTableHead
+                        label="Contado"
+                        column="counted"
+                        sortKey={sortKey}
+                        sortAsc={sortAsc}
+                        onSort={onSort}
+                        align="right"
+                      />
+                      <th className="p-2 font-medium">Unidade estoque</th>
+                      <SortableTableHead
+                        label="% variação"
+                        column="variation"
+                        sortKey={sortKey}
+                        sortAsc={sortAsc}
+                        onSort={onSort}
+                        align="right"
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((l) => {
+                      const out = l.in_band === false;
+                      const pct = variationPct(l.expected_qty, l.counted_qty);
+                      const hub = l.products?.unit ?? "";
+                      return (
+                        <tr
+                          key={l.id}
+                          className={cn(
+                            "border-b border-border/60",
+                            out && "bg-amber-500/5",
+                          )}
+                        >
+                          <td className="p-2">
+                            <Checkbox
+                              checked={selected.has(l.product_id)}
+                              onCheckedChange={() => toggle(l.product_id)}
+                            />
+                          </td>
+                          <td className="p-2 font-medium">
+                            {l.products?.name ?? l.product_id}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">
+                            {formatQty(l.expected_qty)}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">
+                            {formatQty(l.counted_qty)}
+                          </td>
+                          <td className="p-2 text-muted-foreground">
+                            {hub ? systemUnitLabel(hub) : "—"}
+                            {hub ? ` (${hub})` : ""}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">
+                            {pct == null
+                              ? "—"
+                              : `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          {listView === "cards" ? (
-            <div className="max-h-80 space-y-2 overflow-y-auto">
-              {sorted.map((l) => {
-                const out = l.in_band === false;
-                const pct = variationPct(l.expected_qty, l.counted_qty);
-                const hub = l.products?.unit ?? "";
-                return (
-                  <label
-                    key={l.id}
-                    className={cn(
-                      "flex items-start gap-3 rounded-lg border p-2 text-sm",
-                      out && "border-amber-500/40 bg-amber-500/5",
-                    )}
-                  >
-                    <Checkbox
-                      checked={selected.has(l.product_id)}
-                      onCheckedChange={() => toggle(l.product_id)}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium">
-                        {l.products?.name ?? l.product_id}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Esperado: {formatQty(l.expected_qty)} {hub} · Contado:{" "}
-                        {formatQty(l.counted_qty)} {hub}
-                        {pct != null
-                          ? ` · ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
-                          : ""}
-                        {out ? " · fora da faixa" : ""}
-                      </p>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="max-h-80 overflow-auto rounded-md border">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-                    <th className="p-2 w-8" />
-                    <SortableTableHead
-                      label="Produto"
-                      column="name"
-                      sortKey={sortKey}
-                      sortAsc={sortAsc}
-                      onSort={onSort}
-                    />
-                    <SortableTableHead
-                      label="Esperado"
-                      column="expected"
-                      sortKey={sortKey}
-                      sortAsc={sortAsc}
-                      onSort={onSort}
-                      align="right"
-                    />
-                    <SortableTableHead
-                      label="Contado"
-                      column="counted"
-                      sortKey={sortKey}
-                      sortAsc={sortAsc}
-                      onSort={onSort}
-                      align="right"
-                    />
-                    <th className="p-2 font-medium">Unidade estoque</th>
-                    <SortableTableHead
-                      label="% variação"
-                      column="variation"
-                      sortKey={sortKey}
-                      sortAsc={sortAsc}
-                      onSort={onSort}
-                      align="right"
-                    />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((l) => {
-                    const out = l.in_band === false;
-                    const pct = variationPct(l.expected_qty, l.counted_qty);
-                    const hub = l.products?.unit ?? "";
-                    return (
-                      <tr
-                        key={l.id}
-                        className={cn(
-                          "border-b border-border/60",
-                          out && "bg-amber-500/5",
-                        )}
-                      >
-                        <td className="p-2">
-                          <Checkbox
-                            checked={selected.has(l.product_id)}
-                            onCheckedChange={() => toggle(l.product_id)}
-                          />
-                        </td>
-                        <td className="p-2 font-medium">
-                          {l.products?.name ?? l.product_id}
-                        </td>
-                        <td className="p-2 text-right tabular-nums">
-                          {formatQty(l.expected_qty)}
-                        </td>
-                        <td className="p-2 text-right tabular-nums">
-                          {formatQty(l.counted_qty)}
-                        </td>
-                        <td className="p-2 text-muted-foreground">
-                          {hub ? systemUnitLabel(hub) : "—"}
-                          {hub ? ` (${hub})` : ""}
-                        </td>
-                        <td className="p-2 text-right tabular-nums">
-                          {pct == null
-                            ? "—"
-                            : `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
+          <SheetFooter className="shrink-0 flex-row flex-wrap gap-2 border-t border-border">
             <Button
               type="button"
               variant="outline"
@@ -589,7 +687,11 @@ export function EstoqueAprovacaoContagem({
               <RotateCcw className="mr-2 h-4 w-4" />
               Devolver selecionados
             </Button>
-            <Button type="button" disabled={busy} onClick={() => void commit()}>
+            <Button
+              type="button"
+              disabled={busy || linesLoading || lines.length === 0}
+              onClick={() => void commit()}
+            >
               {busy ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
@@ -597,9 +699,9 @@ export function EstoqueAprovacaoContagem({
               )}
               Aprovar e ajustar estoque
             </Button>
-          </div>
-        </div>
-      ) : null}
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

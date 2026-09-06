@@ -25,6 +25,7 @@ import {
   openInventoryCountSessionFallback,
   processDueInventoryCountSchedules,
 } from "@/lib/inventoryCount/createSession";
+import { inventoryCountLineCount } from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyMember } from "@/types/companyMember";
@@ -44,6 +45,7 @@ type SessionSummaryRow = {
   id: string;
   status: string;
   kind: string | null;
+  inventory_count_lines?: { count: number }[];
 };
 
 export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
@@ -121,7 +123,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         .order("next_run_at", { ascending: true }),
       supabase
         .from("inventory_count_sessions")
-        .select("id, status, kind")
+        .select("id, status, kind, inventory_count_lines(count)")
         .eq("company_id", companyId)
         .in("status", ["open", "returned", "pending_approval"]),
     ]);
@@ -170,18 +172,21 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   }, [listingProductRows]);
 
   const pendingApproval = sessionSummary.filter(
-    (s) => s.status === "pending_approval",
+    (s) =>
+      s.status === "pending_approval" &&
+      inventoryCountLineCount(s.inventory_count_lines) > 0,
   ).length;
   const inProgress = sessionSummary.filter(
     (s) => s.status === "open" || s.status === "returned",
   ).length;
-  const onboardingPending = sessionSummary.filter(
-    (s) =>
-      s.kind === "onboarding" &&
-      (s.status === "pending_approval" ||
-        s.status === "open" ||
-        s.status === "returned"),
-  ).length;
+  const onboardingPending = sessionSummary.filter((s) => {
+    if (s.kind !== "onboarding") return false;
+    if (s.status === "open" || s.status === "returned") return true;
+    return (
+      s.status === "pending_approval" &&
+      inventoryCountLineCount(s.inventory_count_lines) > 0
+    );
+  }).length;
 
   const createGroup = async () => {
     const name = newGroupName.trim();

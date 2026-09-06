@@ -12,6 +12,16 @@ export const COUNT_FILTER_INPUT_CLASS = "h-11 w-[14rem] max-w-full shrink-0";
 export const COUNT_ROW_ACTION_CLASS =
   "inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors group-hover:bg-primary/90";
 
+/** Embed PostgREST `inventory_count_lines(count)`. */
+export function inventoryCountLineCount(
+  embed: { count: number }[] | { count: number } | null | undefined,
+): number {
+  if (embed == null) return 0;
+  const row = Array.isArray(embed) ? embed[0] : embed;
+  const n = Number(row?.count);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function countClickableRowClass(active?: boolean): string {
   return cn(
     "group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border-2 px-4 py-3.5 text-left transition-all",
