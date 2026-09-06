@@ -110,7 +110,7 @@ export function EstoqueContagemListasTab({
         );
         const groupSched = nextScheduleFor(g.id);
         return (
-          <Card key={g.id} className="border-2 border-primary/25">
+          <Card key={g.id}>
             <CardHeader className="space-y-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>

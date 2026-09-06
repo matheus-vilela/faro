@@ -31,9 +31,10 @@ export function EstoqueContagemSummaryCards({
       icon: CheckCheck,
       className:
         pendingApproval > 0
-          ? "border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
-          : "border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10",
-      valueClass: pendingApproval > 0 ? "text-amber-900 dark:text-amber-100" : "",
+          ? "border-amber-500/35 bg-amber-500/[0.07] hover:bg-amber-500/15"
+          : "border-border bg-card hover:bg-muted/40",
+      valueClass:
+        pendingApproval > 0 ? "text-amber-900 dark:text-amber-100" : "",
     },
     {
       id: "andamento" as const,
@@ -42,11 +43,8 @@ export function EstoqueContagemSummaryCards({
       value: inProgress,
       hint: "Abertas e recontagens",
       icon: Loader2,
-      className:
-        inProgress > 0
-          ? "border-sky-400/60 bg-sky-500/15 hover:bg-sky-500/25"
-          : "border-sky-500/20 bg-sky-500/5 hover:bg-sky-500/10",
-      valueClass: inProgress > 0 ? "text-sky-900 dark:text-sky-100" : "",
+      className: "border-border bg-card hover:bg-muted/40",
+      valueClass: "",
     },
     {
       id: "agenda" as const,
@@ -55,11 +53,8 @@ export function EstoqueContagemSummaryCards({
       value: scheduled,
       hint: "Próximas datas maleáveis",
       icon: CalendarClock,
-      className:
-        scheduled > 0
-          ? "border-violet-400/60 bg-violet-500/15 hover:bg-violet-500/25"
-          : "border-violet-500/20 bg-violet-500/5 hover:bg-violet-500/10",
-      valueClass: scheduled > 0 ? "text-violet-900 dark:text-violet-100" : "",
+      className: "border-border bg-card hover:bg-muted/40",
+      valueClass: "",
     },
     {
       id: "onboarding" as const,
@@ -73,12 +68,10 @@ export function EstoqueContagemSummaryCards({
       icon: ClipboardList,
       className:
         onboardingPending > 0
-          ? "border-orange-500 bg-orange-500/20 ring-1 ring-orange-500/40 hover:bg-orange-500/30"
-          : "border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10",
+          ? "border-amber-500/35 bg-amber-500/[0.07] hover:bg-amber-500/15"
+          : "border-border bg-card hover:bg-muted/40",
       valueClass:
-        onboardingPending > 0
-          ? "text-orange-950 dark:text-orange-100"
-          : "text-emerald-800 dark:text-emerald-200",
+        onboardingPending > 0 ? "text-amber-900 dark:text-amber-100" : "",
     },
   ];
 
@@ -92,7 +85,7 @@ export function EstoqueContagemSummaryCards({
             type="button"
             onClick={() => onSelect(c.tab, c.id)}
             className={cn(
-              "cursor-pointer rounded-xl border-2 px-4 py-3 text-left shadow-sm transition-colors",
+              "cursor-pointer rounded-xl border px-4 py-3 text-left shadow-sm transition-colors",
               c.className,
             )}
           >

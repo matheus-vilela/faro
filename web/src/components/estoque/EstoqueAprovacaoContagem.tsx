@@ -482,7 +482,7 @@ export function EstoqueAprovacaoContagem({
                     countClickableRowClass(activeId === s.id),
                     highlightOnboarding &&
                       onboarding &&
-                      "border-amber-500 bg-amber-500/15 hover:bg-amber-500/20",
+                      "border-amber-500/40 bg-amber-500/[0.07] hover:bg-amber-500/15",
                   )}
                   onClick={() => void openSession(s.id)}
                 >

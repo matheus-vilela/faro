@@ -45,6 +45,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `movimentacao-detalhe-nfe.md` | Detalhe da movimentação: nota, fornecedor, qtd e item original |
 | `conversao-unidade-dialog-sheet.md` | Diálogo de conversão clicável acima do sheet do produto |
 | `contagem-aprovar-conferir.md` | Aprovar: Conferir abre o sheet da conferência |
+| `contagem-cores-layout.md` | Cores da aba Contagem e Listas alinhadas ao layout |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.
