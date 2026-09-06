@@ -25,13 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -897,11 +891,11 @@ export function Companies() {
               </div> */}
                   <div className="space-y-2">
                     <Label>Regime tributário *</Label>
-                    <Select
+                    <SearchSelect
                       value={
                         editEmpresa.regime_tributario != null
                           ? String(editEmpresa.regime_tributario)
-                          : undefined
+                          : ""
                       }
                       disabled={lockHasEmpresaKey(
                         editFocusCnpjLock,
@@ -913,18 +907,14 @@ export function Companies() {
                           regime_tributario: Number(v),
                         }))
                       }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[200]">
-                        {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={String(o.value)}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={REGIME_TRIBUTARIO_OPTIONS.map((o) => ({
+                        value: String(o.value),
+                        label: o.label,
+                      }))}
+                      placeholder="Selecione"
+                      triggerClassName="w-full"
+                      contentClassName="z-[200]"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="edit-email">Email *</Label>

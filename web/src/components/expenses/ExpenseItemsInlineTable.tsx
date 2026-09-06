@@ -18,13 +18,6 @@ import {
   SearchSelect,
   SEARCH_SELECT_WIDE_POPOVER_CLASS,
 } from "@/components/ui/search-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { getLockedSystemSecondaryQty } from "@/lib/companyUnits/convert";
 import { getSystemProductUnitSelectOptions } from "@/lib/companyUnits/productUnitOptions";
 import {
@@ -481,24 +474,15 @@ function ExpenseItemInlineRow({
                 onDraftChange({ ...draft, newProductName: e.target.value })
               }
             />
-            <Select
+            <SearchSelect
               value={draft.newProductUnit}
               disabled={locked}
               onValueChange={(v) =>
                 onDraftChange({ ...draft, newProductUnit: v })
               }
-            >
-              <SelectTrigger className={cn("w-full", fieldClass)}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {unitOptions.map((u) => (
-                  <SelectItem key={u.value} value={u.value}>
-                    {u.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={unitOptions}
+              triggerClassName={cn("w-full", fieldClass)}
+            />
           </div>
         ) : null}
       </td>

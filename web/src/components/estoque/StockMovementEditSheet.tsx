@@ -14,13 +14,6 @@ import {
   SearchSelect,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -639,31 +632,18 @@ export function StockMovementEditSheet({
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div className="space-y-2">
                             <Label>Entrada / saída</Label>
-                            <Select
+                            <SearchSelect
                               value={movementKind}
                               onValueChange={(v) =>
                                 setMovementKind(v as ManualMovementKind)
                               }
+                              options={MANUAL_MOVEMENT_KIND_OPTIONS}
                               disabled={saving}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {MANUAL_MOVEMENT_KIND_OPTIONS.map((opt) => (
-                                  <SelectItem
-                                    key={opt.value}
-                                    value={opt.value}
-                                  >
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            />
                           </div>
                           <div className="space-y-2">
                             <Label>Classificação</Label>
-                            <Select
+                            <SearchSelect
                               value={
                                 movementKind === "entry"
                                   ? entryClassification
@@ -682,45 +662,27 @@ export function StockMovementEditSheet({
                                   );
                                 }
                               }}
+                              options={
+                                movementKind === "inventory"
+                                  ? [
+                                      {
+                                        value: "__blocked__",
+                                        label: "Não se aplica",
+                                      },
+                                    ]
+                                  : movementKind === "entry"
+                                    ? ENTRY_CLASSIFICATION_OPTIONS
+                                    : EXIT_CLASSIFICATION_OPTIONS
+                              }
+                              placeholder={
+                                movementKind === "inventory"
+                                  ? "Não se aplica"
+                                  : "Selecionar"
+                              }
                               disabled={
                                 movementKind === "inventory" || saving
                               }
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    movementKind === "inventory"
-                                      ? "Não se aplica"
-                                      : "Selecionar"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {movementKind === "inventory" ? (
-                                  <SelectItem value="__blocked__" disabled>
-                                    Não se aplica
-                                  </SelectItem>
-                                ) : movementKind === "entry" ? (
-                                  ENTRY_CLASSIFICATION_OPTIONS.map((opt) => (
-                                    <SelectItem
-                                      key={opt.value}
-                                      value={opt.value}
-                                    >
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))
-                                ) : (
-                                  EXIT_CLASSIFICATION_OPTIONS.map((opt) => (
-                                    <SelectItem
-                                      key={opt.value}
-                                      value={opt.value}
-                                    >
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))
-                                )}
-                              </SelectContent>
-                            </Select>
+                            />
                           </div>
                         </div>
 

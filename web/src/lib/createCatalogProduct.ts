@@ -5,7 +5,7 @@ import type { Product } from "@/types/product";
 
 export function generateProductSku(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let result = "SKU-";
+  let result = "";
   const array = new Uint8Array(8);
   crypto.getRandomValues(array);
   for (let i = 0; i < 8; i++) {
@@ -18,8 +18,7 @@ export async function createCatalogProduct(args: {
   companyId: string;
   name: string;
 }): Promise<{ product: Product | null; error: string | null }> {
-  const catalogName =
-    sanitizeCatalogProductName(args.name) || args.name.trim();
+  const catalogName = sanitizeCatalogProductName(args.name) || args.name.trim();
   if (!catalogName) {
     return { product: null, error: "Informe o nome do produto." };
   }

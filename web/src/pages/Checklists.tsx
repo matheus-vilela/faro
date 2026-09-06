@@ -17,13 +17,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -836,40 +830,29 @@ export function Checklists() {
             </div>
             <div className="space-y-2">
               <Label>Recorrência</Label>
-              <Select
+              <SearchSelect
                 value={recurrenceKind}
                 onValueChange={(v) =>
                   setRecurrenceKind(v as "daily" | "monthly")
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Diária (dias da semana)</SelectItem>
-                  <SelectItem value="monthly">Mensal (até 3×/mês)</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "daily", label: "Diária (dias da semana)" },
+                  { value: "monthly", label: "Mensal (até 3×/mês)" },
+                ]}
+              />
             </div>
             {recurrenceKind === "daily" ? (
               <>
                 <div className="space-y-2">
                   <Label>Execuções em cada dia selecionado</Label>
-                  <Select
+                  <SearchSelect
                     value={dailyExecutionsPerDay}
                     onValueChange={setDailyExecutionsPerDay}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {dailyTimesOptions.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n}× por dia (em cada dia marcado)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={dailyTimesOptions.map((n) => ({
+                      value: String(n),
+                      label: `${n}× por dia (em cada dia marcado)`,
+                    }))}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Dias da semana</Label>
@@ -900,19 +883,15 @@ export function Checklists() {
             ) : (
               <div className="space-y-2">
                 <Label>Execuções por mês</Label>
-                <Select
+                <SearchSelect
                   value={monthlyExecutions}
                   onValueChange={setMonthlyExecutions}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1× por mês</SelectItem>
-                    <SelectItem value="2">2× por mês</SelectItem>
-                    <SelectItem value="3">3× por mês</SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={[
+                    { value: "1", label: "1× por mês" },
+                    { value: "2", label: "2× por mês" },
+                    { value: "3", label: "3× por mês" },
+                  ]}
+                />
                 <p className="text-xs text-muted-foreground">
                   Acima de 3× no mês use recorrência diária com os dias da
                   semana desejados.

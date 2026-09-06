@@ -18,13 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import {
   dismissCompanyAlert,
@@ -307,30 +301,36 @@ export function Alertas() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-md"
         />
-        <Select value={kindFilter} onValueChange={handleKindFilterChange}>
-          <SelectTrigger className="w-full sm:w-[220px]">
-            <SelectValue placeholder="Tipo" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os tipos</SelectItem>
-            <SelectItem value="low_stock">{KIND_LABEL.low_stock}</SelectItem>
-            <SelectItem value="expense_no_boleto">
-              {KIND_LABEL.expense_no_boleto}
-            </SelectItem>
-            <SelectItem value="recebimento_falta">
-              {KIND_LABEL.recebimento_falta}
-            </SelectItem>
-            <SelectItem value="boleto_vencimento_d1">
-              Vencimento D-1 (amanhã)
-            </SelectItem>
-            <SelectItem value="boleto_vencimento_d3">
-              Vencimento D-3 (em 3 dias)
-            </SelectItem>
-            <SelectItem value="import_pending_review">
-              Pendências da importação
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <SearchSelect
+          value={kindFilter}
+          onValueChange={handleKindFilterChange}
+          options={[
+            { value: "all", label: "Todos os tipos" },
+            { value: "low_stock", label: KIND_LABEL.low_stock },
+            {
+              value: "expense_no_boleto",
+              label: KIND_LABEL.expense_no_boleto,
+            },
+            {
+              value: "recebimento_falta",
+              label: KIND_LABEL.recebimento_falta,
+            },
+            {
+              value: "boleto_vencimento_d1",
+              label: "Vencimento D-1 (amanhã)",
+            },
+            {
+              value: "boleto_vencimento_d3",
+              label: "Vencimento D-3 (em 3 dias)",
+            },
+            {
+              value: "import_pending_review",
+              label: "Pendências da importação",
+            },
+          ]}
+          placeholder="Tipo"
+          triggerClassName="w-full sm:w-[220px]"
+        />
       </div>
 
       {loading ? (

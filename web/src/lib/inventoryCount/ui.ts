@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
  * `data-[size=default]:h-11` é necessário porque o SelectTrigger traz `h-9`.
  */
 export const COUNT_SELECT_TRIGGER_CLASS =
-  "h-11 w-[14rem] max-w-full shrink-0 data-[size=default]:h-11";
-export const COUNT_FILTER_INPUT_CLASS = "h-11 w-[14rem] max-w-full shrink-0";
+  "h-11 w-full max-w-full shrink-0 data-[size=default]:h-11";
+export const COUNT_FILTER_INPUT_CLASS = "h-11 w-full max-w-full shrink-0";
 
 /** Chip à direita das linhas clicáveis (Conferir / Abrir). */
 export const COUNT_ROW_ACTION_CLASS =

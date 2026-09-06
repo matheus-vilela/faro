@@ -11,13 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   computePaidAmount,
   competenceDateFromMonthInput,
@@ -34,7 +28,6 @@ import { supabase } from "@/lib/supabase";
 import { bankAccountTypeLabel, type CompanyBankAccount } from "@/types/bankAccount";
 import type { Boleto } from "@/types/expense";
 import { isBoletoTransfer } from "@/types/expense";
-import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -394,32 +387,24 @@ export function PayBoletoDialog({
 
               <div>
                 <Label>Conta usada para pagar</Label>
-                <Select
+                <SearchSelect
                   value={bankAccountId === "__create__" ? "" : bankAccountId}
                   onValueChange={handleBankAccountChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Selecione a conta bancária" />
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    sideOffset={4}
-                    className="z-[90]"
-                  >
-                    {bankAccounts.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name} — {bankAccountTypeLabel(a.tipo)}
-                      </SelectItem>
-                    ))}
-                    <SelectItem
-                      value="__create__"
-                      className="text-primary font-medium"
-                    >
-                      <Plus className="h-4 w-4 inline mr-2" />
-                      Nova conta bancária
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={bankAccounts.map((a) => ({
+                    value: a.id,
+                    label: `${a.name} — ${bankAccountTypeLabel(a.tipo)}`,
+                  }))}
+                  trailingOptions={[
+                    {
+                      value: "__create__",
+                      label: "Nova conta bancária",
+                      accent: true,
+                    },
+                  ]}
+                  placeholder="Selecione a conta bancária"
+                  triggerClassName="w-full"
+                  contentClassName="z-[90]"
+                />
                 {bankAccounts.length === 0 && !bankAccountId && (
                   <p className="text-sm text-muted-foreground mt-1">
                     Nenhuma conta cadastrada.{" "}

@@ -2,13 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { orderedYmdRange } from "@/lib/monthYmdRange";
 import { categoryGroupLabel } from "@/lib/vendasRealizadasResumo";
@@ -317,40 +311,36 @@ export function VendasRealizadasListTable({
         </div>
         <div className="space-y-1.5">
           <Label>Tipo</Label>
-          <Select
+          <SearchSelect
             value={kind}
             onValueChange={(v) => {
               setKind(v as VendasListKindFilter);
               setPage(1);
             }}
-          >
-            <SelectTrigger className="w-[9.5rem]">
-              <SelectValue placeholder="Tipo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="product">Produtos</SelectItem>
-              <SelectItem value="service">Serviços</SelectItem>
-            </SelectContent>
-          </Select>
+            options={[
+              { value: "all", label: "Todos" },
+              { value: "product", label: "Produtos" },
+              { value: "service", label: "Serviços" },
+            ]}
+            placeholder="Tipo"
+            triggerClassName="w-[9.5rem]"
+          />
         </div>
         <div className="space-y-1.5">
           <Label>Agrupamento</Label>
-          <Select
+          <SearchSelect
             value={groupMode}
             onValueChange={(v) => {
               setGroupMode(v as VendasListGroupMode);
               setPage(1);
             }}
-          >
-            <SelectTrigger className="w-[13rem]">
-              <SelectValue placeholder="Agrupamento" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="product">Por período</SelectItem>
-              <SelectItem value="product_day">Diário</SelectItem>
-            </SelectContent>
-          </Select>
+            options={[
+              { value: "product", label: "Por período" },
+              { value: "product_day", label: "Diário" },
+            ]}
+            placeholder="Agrupamento"
+            triggerClassName="w-[13rem]"
+          />
         </div>
         <Button
           type="button"
@@ -530,29 +520,20 @@ export function VendasRealizadasListTable({
                 <Label htmlFor="vendas-list-page-size" className="sr-only">
                   Itens por página
                 </Label>
-                <Select
+                <SearchSelect
+                  id="vendas-list-page-size"
                   value={String(pageSize)}
                   onValueChange={(v) => {
                     setPageSize(Number(v) as TablePageSize);
                     setPage(1);
                   }}
-                >
-                  <SelectTrigger
-                    id="vendas-list-page-size"
-                    size="sm"
-                    className="w-[8.5rem]"
-                    aria-label="Itens por página"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size} por página
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  options={PAGE_SIZE_OPTIONS.map((size) => ({
+                    value: String(size),
+                    label: `${size} por página`,
+                  }))}
+                  size="sm"
+                  triggerClassName="w-[8.5rem]"
+                />
               </div>
               <Button
                 type="button"

@@ -28,6 +28,7 @@ export type RecipePickRow = {
   id: string;
   name: string;
   output_product_id: string | null;
+  recipe_type: string | null;
 };
 
 function parseMatchRow(
@@ -215,7 +216,7 @@ export async function fetchCompanyRecipesForPick(
 ): Promise<{ rows: RecipePickRow[]; error: string | null }> {
   const { data, error } = await client
     .from("recipes")
-    .select("id, name, output_product_id")
+    .select("id, name, output_product_id, recipe_type")
     .eq("company_id", companyId)
     .or("active.is.null,active.eq.true")
     .order("name")
@@ -232,9 +233,67 @@ export async function fetchCompanyRecipesForPick(
           .output_product_id
           ? String((r as { output_product_id: string }).output_product_id)
           : null,
+        recipe_type: (r as { recipe_type?: string | null }).recipe_type ?? null,
       } satisfies RecipePickRow;
     })
     .filter((x): x is RecipePickRow => x != null);
+  return { rows, error: null };
+}
+
+export type DirectProductPickRow = {
+  id: string;
+  name: string;
+  sku: string | null;
+};
+
+function ilikeContains(term: string): string {
+  return `%${term.replace(/[%_\\]/g, "\\$&")}%`;
+}
+
+/** Produtos DIRECT que ainda podem virar ficha técnica ou de produção. */
+export async function searchDirectProductsForFicha(
+  client: SupabaseClient,
+  params: {
+    companyId: string;
+    excludeIds: string[];
+    term: string;
+    limit?: number;
+  },
+): Promise<{ rows: DirectProductPickRow[]; error: string | null }> {
+  const limit = params.limit ?? 80;
+  const exclude = new Set(
+    params.excludeIds.map((id) => id.trim()).filter(Boolean),
+  );
+  const term = params.term.trim();
+
+  let q = client
+    .from("products")
+    .select("id, name, sku, stock_control_type")
+    .eq("company_id", params.companyId)
+    .or("is_active.is.null,is_active.eq.true")
+    .or("stock_control_type.is.null,stock_control_type.eq.DIRECT")
+    .order("name")
+    .limit(limit);
+
+  if (term) q = q.ilike("name", ilikeContains(term));
+
+  const { data, error } = await q;
+  if (error) return { rows: [], error: error.message };
+
+  const rows = (data ?? [])
+    .map((raw) => {
+      const id = String((raw as { id?: string }).id ?? "").trim();
+      if (!id || exclude.has(id)) return null;
+      return {
+        id,
+        name:
+          String((raw as { name?: string }).name ?? "Produto").trim() ||
+          "Produto",
+        sku: (raw as { sku?: string | null }).sku ?? null,
+      } satisfies DirectProductPickRow;
+    })
+    .filter((row): row is DirectProductPickRow => row != null);
+
   return { rows, error: null };
 }
 

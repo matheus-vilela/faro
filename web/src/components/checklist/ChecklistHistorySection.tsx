@@ -10,13 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import {
@@ -240,32 +234,34 @@ export function ChecklistHistorySection({
             onChange={(e) => setRangeTo(e.target.value || monthBounds.max)}
             className="h-8 w-[9.5rem]"
           />
-          <Select value={filterChecklist} onValueChange={setFilterChecklist}>
-            <SelectTrigger size="sm" className="w-[12rem]">
-              <SelectValue placeholder="Checklist" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os checklists</SelectItem>
-              {checklists.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterMember} onValueChange={setFilterMember}>
-            <SelectTrigger size="sm" className="w-[12rem]">
-              <SelectValue placeholder="Operador" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os operadores</SelectItem>
-              {members.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name?.trim() || "Operador"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchSelect
+            value={filterChecklist}
+            onValueChange={setFilterChecklist}
+            options={checklists.map((c) => ({
+              value: c.id,
+              label: c.title,
+            }))}
+            leadingOptions={[
+              { value: "all", label: "Todos os checklists" },
+            ]}
+            placeholder="Checklist"
+            size="sm"
+            triggerClassName="w-[12rem]"
+          />
+          <SearchSelect
+            value={filterMember}
+            onValueChange={setFilterMember}
+            options={members.map((m) => ({
+              value: m.id,
+              label: m.name?.trim() || "Operador",
+            }))}
+            leadingOptions={[
+              { value: "all", label: "Todos os operadores" },
+            ]}
+            placeholder="Operador"
+            size="sm"
+            triggerClassName="w-[12rem]"
+          />
           <Button
             type="button"
             variant="ghost"

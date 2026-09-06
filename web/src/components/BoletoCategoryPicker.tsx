@@ -10,11 +10,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { SEARCH_SELECT_WIDE_POPOVER_CLASS } from "@/components/ui/search-select";
+  SEARCH_SELECT_WIDE_POPOVER_CLASS,
+  SearchSelect,
+} from "@/components/ui/search-select";
 import {
   buildChildrenMap,
   categoryPathLabel,
@@ -26,19 +24,12 @@ import {
   TIPO_LABEL,
 } from "@/lib/companyCategoryLabels";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 import type { CompanyCategory, TipoCategoria } from "@/types/category";
-import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-function normalizeSearch(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .trim();
-}
+const CREATE_VALUE = "__boleto_category_create__";
 
 function buildLeafOptions(
   categories: CompanyCategory[],
@@ -72,7 +63,7 @@ function buildLeafOptions(
       leafLabel,
       parentId: parent?.id ?? null,
       parentLabel,
-      haystack: normalizeSearch(`${parentLabel} ${leafLabel} ${fullPath}`),
+      haystack: `${parentLabel} ${leafLabel} ${fullPath}`,
     };
   });
 }
@@ -116,13 +107,9 @@ export function BoletoCategoryPicker({
     if (excluded.has(c.tipo)) return false;
     return true;
   };
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newParentId, setNewParentId] = useState("");
-  const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  const [parentSearch, setParentSearch] = useState("");
   const [creating, setCreating] = useState(false);
 
   const byId = useMemo(
@@ -156,38 +143,6 @@ export function BoletoCategoryPicker({
     [parentOptions],
   );
 
-  const parentFiltered = useMemo(() => {
-    const q = normalizeSearch(parentSearch);
-    if (!q) return parentOptions;
-    return parentOptions.filter((p) =>
-      normalizeSearch(categoryPathLabel(p.id, byId)).includes(q),
-    );
-  }, [parentOptions, parentSearch, byId]);
-
-  const parentGrouped = useMemo(() => {
-    const groups = new Map<string, { label: string; items: CompanyCategory[] }>();
-    for (const item of parentFiltered) {
-      const key = item.parent_id ?? "__root__";
-      const parent = item.parent_id ? parentById.get(item.parent_id) : null;
-      const label = parent ? categoryPathLabel(parent.id, byId) : "Raiz";
-      const existing = groups.get(key);
-      if (existing) existing.items.push(item);
-      else groups.set(key, { label, items: [item] });
-    }
-    return [...groups.entries()]
-      .map(([key, value]) => ({
-        key,
-        label: value.label,
-        items: value.items.sort((a, b) =>
-          companyCategoryDisplayName(a).localeCompare(
-            companyCategoryDisplayName(b),
-            "pt-BR",
-          ),
-        ),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [parentFiltered, parentById, byId]);
-
   useEffect(() => {
     if (parentOptions.length && !parentOptions.some((g) => g.id === newParentId)) {
       setNewParentId(parentOptions[0]!.id);
@@ -199,54 +154,13 @@ export function BoletoCategoryPicker({
     [categories, byId, isSelectableLeaf],
   );
 
-  const filtered = useMemo(() => {
-    const q = normalizeSearch(search);
-    if (!q) return options;
-    return options.filter(
-      (o) =>
-        o.haystack.includes(q) ||
-        o.leafLabel.toLowerCase().includes(search.toLowerCase().trim()) ||
-        o.parentLabel.toLowerCase().includes(search.toLowerCase().trim()),
-    );
-  }, [options, search]);
-
-  const groupedFiltered = useMemo(() => {
-    const groups = new Map<
-      string,
-      { parentLabel: string; items: typeof filtered }
-    >();
-
-    for (const opt of filtered) {
-      const key = opt.parentId ?? "__root__";
-      const existing = groups.get(key);
-      if (existing) {
-        existing.items.push(opt);
-      } else {
-        groups.set(key, {
-          parentLabel: opt.parentLabel,
-          items: [opt],
-        });
-      }
-    }
-
-    return [...groups.entries()]
-      .map(([key, value]) => ({
-        key,
-        parentLabel: value.parentLabel,
-        items: value.items.sort((a, b) =>
-          a.leafLabel.localeCompare(b.leafLabel, "pt-BR"),
-        ),
-      }))
-      .sort((a, b) => a.parentLabel.localeCompare(b.parentLabel, "pt-BR"));
-  }, [filtered]);
-
   const selectedCategory = value ? byId.get(value) : undefined;
   const selectedLabel = selectedCategory
     ? companyCategoryDisplayName(selectedCategory)
     : "";
   const triggerDisabled = Boolean(disabled) || loading;
 
-  const openCreate = () => {
+  const openCreate = (prefill = "") => {
     if (parentOptions.length === 0) {
       toast.error(
         categoryNatureza === "RECEITA"
@@ -255,7 +169,7 @@ export function BoletoCategoryPicker({
       );
       return;
     }
-    setNewName(search.trim() || "");
+    setNewName(prefill.trim());
     setNewParentId(parentOptions[0]!.id);
     setCreateOpen(true);
   };
@@ -302,150 +216,60 @@ export function BoletoCategoryPicker({
     await onReload();
     onValueChange((data as CompanyCategory).id);
     setCreateOpen(false);
-    setOpen(false);
-    setSearch("");
     setNewName("");
   };
 
+  const naturezaLabel = categoryNatureza === "RECEITA" ? "receita" : "despesa";
+
   return (
     <>
-      <Popover
-        open={open}
-        onOpenChange={(o) => {
-          setOpen(o);
-          if (!o) setSearch("");
+      <SearchSelect
+        value={value}
+        onValueChange={(next) => {
+          if (next === CREATE_VALUE) {
+            openCreate();
+            return;
+          }
+          onValueChange(next);
         }}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            disabled={triggerDisabled}
-            className={cn(
-              "w-full justify-between font-normal px-3",
-              compact ? "h-8 text-xs" : "h-9",
-              !value && "text-muted-foreground",
-            )}
-          >
-            <span className="truncate text-left">
-              {loading
-                ? "Carregando…"
-                : selectedLabel ||
-                  placeholder ||
-                  (categoryNatureza === "RECEITA"
-                    ? "Selecione uma categoria de receita"
-                    : "Selecione uma categoria de despesa")}
-            </span>
-            {allowClear && value && !triggerDisabled ? (
-              <span
-                role="button"
-                tabIndex={0}
-                className="ml-1 rounded p-0.5 hover:bg-muted"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onValueChange("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onValueChange("");
-                  }
-                }}
-              >
-                <X className="h-3.5 w-3.5 opacity-60" />
-              </span>
-            ) : (
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          className={cn(
-            SEARCH_SELECT_WIDE_POPOVER_CLASS,
-            "p-0",
-          )}
-          align="start"
-          collisionPadding={16}
-          onWheel={(e) => e.stopPropagation()}
-        >
-          <div className="flex flex-col gap-2 border-b p-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="Buscar categoria…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 pl-8"
-                autoFocus
-              />
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="w-full gap-1.5"
-              onClick={openCreate}
-              disabled={parentOptions.length === 0}
-            >
-              <Plus className="h-4 w-4 shrink-0" />
-              Nova subcategoria (
-              {categoryNatureza === "RECEITA" ? "receita" : "despesa"})
-            </Button>
-          </div>
-          <div
-            className="max-h-[min(240px,40vh)] overflow-y-auto overscroll-contain p-1"
-            onWheel={(e) => e.stopPropagation()}
-          >
-            {filtered.length === 0 ? (
-              <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-                {options.length === 0
-                  ? "Nenhuma categoria elegível. Use Configurações ou crie acima."
-                  : "Nenhum resultado para esta busca."}
-              </p>
-            ) : (
-              groupedFiltered.map((group) => (
-                <div key={group.key} className="px-1 py-1">
-                  <p className="px-2 text-xs font-semibold text-pretty text-foreground">
-                    {group.parentLabel}
-                  </p>
-                  <div className="relative mt-1 ml-2 pl-4 before:absolute before:left-1 before:top-1 before:bottom-1 before:w-px before:bg-border">
-                    {group.items.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          onValueChange(opt.id);
-                          setOpen(false);
-                          setSearch("");
-                        }}
-                        className={cn(
-                          "relative flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground",
-                          value === opt.id && "bg-accent",
-                        )}
-                      >
-                        <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
-                        <Check
-                          className={cn(
-                            "h-4 w-4 shrink-0",
-                            value === opt.id ? "opacity-100" : "opacity-0",
-                          )}
-                        />
-                        <span className="min-w-0 flex-1 text-pretty whitespace-normal">
-                          {opt.leafLabel}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
+        options={options.map((o) => ({
+          value: o.id,
+          label: o.leafLabel,
+          group: o.parentLabel,
+          keywords: o.haystack,
+        }))}
+        placeholder={
+          loading
+            ? "Carregando…"
+            : placeholder ||
+              (categoryNatureza === "RECEITA"
+                ? "Selecione uma categoria de receita"
+                : "Selecione uma categoria de despesa")
+        }
+        triggerLabel={selectedLabel || undefined}
+        searchPlaceholder="Buscar categoria…"
+        emptyMessage={
+          options.length === 0
+            ? "Nenhuma categoria elegível. Use Configurações ou cadastre abaixo."
+            : "Nenhum resultado para esta busca."
+        }
+        disabled={triggerDisabled}
+        size={compact ? "sm" : "default"}
+        triggerClassName={compact ? "text-xs" : undefined}
+        contentClassName={SEARCH_SELECT_WIDE_POPOVER_CLASS}
+        listMaxHeightClassName="max-h-[min(240px,40vh)]"
+        clearable={allowClear}
+        onCreate={(query) => openCreate(query)}
+        createLabel={(query) => `Cadastrar «${query}»`}
+        trailingOptions={[
+          {
+            value: CREATE_VALUE,
+            label: `Nova subcategoria (${naturezaLabel})`,
+            description: "Cadastrar categoria",
+            accent: true,
+          },
+        ]}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent
@@ -475,83 +299,31 @@ export function BoletoCategoryPicker({
             </div>
             <div className="space-y-2">
               <Label>Categoria pai</Label>
-              <Popover open={parentPickerOpen} onOpenChange={setParentPickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    role="combobox"
-                    disabled={creating || parentOptions.length === 0}
-                    className="w-full justify-between font-normal"
-                  >
-                    <span className="truncate text-left">
-                      {newParentId
-                        ? `${categoryPathLabel(newParentId, byId)} (${NATUREZA_LABEL[parentById.get(newParentId)?.natureza ?? "DESPESA"]} · ${TIPO_LABEL[parentById.get(newParentId)?.tipo ?? "VARIAVEL"]})`
-                        : "Selecione"}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="z-[130] w-[min(28rem,max(22rem,var(--radix-popover-trigger-width)),calc(100vw-1.5rem))] min-w-[min(22rem,calc(100vw-1.5rem))] p-0"
-                  align="start"
-                  collisionPadding={16}
-                  onWheel={(e) => e.stopPropagation()}
-                >
-                  <div className="border-b p-2">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                      <Input
-                        placeholder="Buscar pai..."
-                        value={parentSearch}
-                        onChange={(e) => setParentSearch(e.target.value)}
-                        className="h-9 pl-8"
-                      />
-                    </div>
-                  </div>
-                  <div
-                    className="max-h-[240px] overflow-y-auto overscroll-contain p-1"
-                    onWheel={(e) => e.stopPropagation()}
-                  >
-                    {parentGrouped.length === 0 ? (
-                      <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-                        Nenhum resultado.
-                      </p>
-                    ) : (
-                      parentGrouped.map((group) => (
-                        <div key={group.key} className="px-1 py-1">
-                          <p className="px-2 text-xs font-semibold text-foreground">
-                            {group.label}
-                          </p>
-                          <div className="relative mt-1 ml-2 pl-4 before:absolute before:left-1 before:top-1 before:bottom-1 before:w-px before:bg-border">
-                            {group.items.map((opt) => (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                onClick={() => {
-                                  setNewParentId(opt.id);
-                                  setParentPickerOpen(false);
-                                  setParentSearch("");
-                                }}
-                                className={cn(
-                                  "relative flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
-                                  newParentId === opt.id && "bg-accent",
-                                )}
-                              >
-                                <span className="absolute -left-1 top-1/2 h-px w-3 -translate-y-1/2 bg-border" />
-                                <Check className={cn("h-4 w-4 shrink-0", newParentId === opt.id ? "opacity-100" : "opacity-0")} />
-                                <span className="min-w-0 flex-1 text-pretty whitespace-normal">
-                                  {companyCategoryDisplayName(opt)}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <SearchSelect
+                value={newParentId}
+                onValueChange={setNewParentId}
+                options={parentOptions.map((p) => {
+                  const parent = p.parent_id ? parentById.get(p.parent_id) : null;
+                  return {
+                    value: p.id,
+                    label: companyCategoryDisplayName(p),
+                    group: parent
+                      ? categoryPathLabel(parent.id, byId)
+                      : "Raiz",
+                    description: `${NATUREZA_LABEL[p.natureza]} · ${TIPO_LABEL[p.tipo]}`,
+                    keywords: categoryPathLabel(p.id, byId),
+                  };
+                })}
+                placeholder="Selecione"
+                searchPlaceholder="Buscar pai…"
+                disabled={creating || parentOptions.length === 0}
+                contentClassName="z-[130]"
+                triggerLabel={
+                  newParentId
+                    ? `${categoryPathLabel(newParentId, byId)} (${NATUREZA_LABEL[parentById.get(newParentId)?.natureza ?? "DESPESA"]} · ${TIPO_LABEL[parentById.get(newParentId)?.tipo ?? "VARIAVEL"]})`
+                    : undefined
+                }
+              />
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">

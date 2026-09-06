@@ -27,13 +27,6 @@ import {
   supplierSearchOption,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetFooter,
@@ -934,26 +927,23 @@ export function EstoqueComprasPanel({ companyId }: { companyId: string }) {
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="w-full space-y-1 sm:w-28">
                         <Label className="text-xs text-muted-foreground">Unidade</Label>
-                        <Select
+                        <SearchSelect
                           value={l.unit_code || "__u__"}
                           onValueChange={(v) => {
                             const next = [...lines];
                             next[i] = { ...next[i]!, unit_code: v === "__u__" ? "" : v };
                             setLines(next);
                           }}
-                        >
-                          <SelectTrigger className="w-full sm:w-28">
-                            <SelectValue placeholder="Unid." />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            <SelectItem value="__u__">—</SelectItem>
-                            {allowedUnitsForProduct(l.product_id).map((u) => (
-                              <SelectItem key={`${l.product_id}-${u}`} value={u}>
-                                {u}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={allowedUnitsForProduct(l.product_id).map(
+                            (u) => ({
+                              value: u,
+                              label: u,
+                            }),
+                          )}
+                          leadingOptions={[{ value: "__u__", label: "—" }]}
+                          placeholder="Unid."
+                          triggerClassName="w-full sm:w-28"
+                        />
                       </div>
                       <div className="w-full space-y-1 sm:w-24">
                         <Label className="text-xs text-muted-foreground">Quantidade</Label>

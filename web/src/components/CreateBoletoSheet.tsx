@@ -18,13 +18,6 @@ import {
   supplierSearchOption,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -1062,25 +1055,22 @@ export function CreateBoletoSheet({
                 {!isTransfer && launchType === "recurring" && (
                   <div className="mt-4 space-y-2">
                     <Label>Recorrência</Label>
-                    <Select
+                    <SearchSelect
                       value={recurrenceFrequency}
                       onValueChange={(v) =>
                         setRecurrenceFrequency(v as RecurrenceFrequency)
                       }
-                    >
-                      <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="weekly">Semanal</SelectItem>
-                        <SelectItem value="biweekly">Quinzenal</SelectItem>
-                        <SelectItem value="monthly">Mensal</SelectItem>
-                        <SelectItem value="bimonthly">Bimestral</SelectItem>
-                        <SelectItem value="quarterly">Trimestral</SelectItem>
-                        <SelectItem value="semiannual">Semestral</SelectItem>
-                        <SelectItem value="annual">Anual</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      options={[
+                        { value: "weekly", label: "Semanal" },
+                        { value: "biweekly", label: "Quinzenal" },
+                        { value: "monthly", label: "Mensal" },
+                        { value: "bimonthly", label: "Bimestral" },
+                        { value: "quarterly", label: "Trimestral" },
+                        { value: "semiannual", label: "Semestral" },
+                        { value: "annual", label: "Anual" },
+                      ]}
+                      triggerClassName={PRODUCT_SHEET_SELECT}
+                    />
                     <p className="text-xs text-muted-foreground">
                       De quanto em quanto tempo esta despesa se repete.
                     </p>
@@ -1116,61 +1106,51 @@ export function CreateBoletoSheet({
                 <div className="space-y-4">
                 <div>
                   <Label>Conta origem</Label>
-                  <Select
+                  <SearchSelect
                     value={
                       originBankAccountId === "__create__"
                         ? ""
                         : originBankAccountId
                     }
                     onValueChange={handleOriginBankChange}
-                  >
-                    <SelectTrigger className={cn("w-full", PRODUCT_SHEET_SELECT)}>
-                      <SelectValue placeholder="Selecione a conta de saída" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {bankAccounts.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name} ({bankAccountTypeLabel(a.tipo)})
-                        </SelectItem>
-                      ))}
-                      <SelectItem
-                        value="__create__"
-                        className="text-primary font-medium"
-                      >
-                        <Plus className="h-4 w-4 inline mr-2" />
-                        Criar conta bancária
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={bankAccounts.map((a) => ({
+                      value: a.id,
+                      label: `${a.name} (${bankAccountTypeLabel(a.tipo)})`,
+                    }))}
+                    trailingOptions={[
+                      {
+                        value: "__create__",
+                        label: "Criar conta bancária",
+                        accent: true,
+                      },
+                    ]}
+                    placeholder="Selecione a conta de saída"
+                    triggerClassName={cn("w-full", PRODUCT_SHEET_SELECT)}
+                  />
                 </div>
                 <div>
                   <Label>Conta destino</Label>
-                  <Select
+                  <SearchSelect
                     value={
                       destBankAccountId === "__create__"
                         ? ""
                         : destBankAccountId
                     }
                     onValueChange={handleDestBankChange}
-                  >
-                    <SelectTrigger className={cn("w-full", PRODUCT_SHEET_SELECT)}>
-                      <SelectValue placeholder="Selecione a conta de entrada" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {bankAccounts.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name} ({bankAccountTypeLabel(a.tipo)})
-                        </SelectItem>
-                      ))}
-                      <SelectItem
-                        value="__create__"
-                        className="text-primary font-medium"
-                      >
-                        <Plus className="h-4 w-4 inline mr-2" />
-                        Criar conta bancária
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={bankAccounts.map((a) => ({
+                      value: a.id,
+                      label: `${a.name} (${bankAccountTypeLabel(a.tipo)})`,
+                    }))}
+                    trailingOptions={[
+                      {
+                        value: "__create__",
+                        label: "Criar conta bancária",
+                        accent: true,
+                      },
+                    ]}
+                    placeholder="Selecione a conta de entrada"
+                    triggerClassName={cn("w-full", PRODUCT_SHEET_SELECT)}
+                  />
                 </div>
                 </div>
               </div>
@@ -1447,18 +1427,12 @@ export function CreateBoletoSheet({
               <div className="flex flex-col gap-4 sm:flex-row">
                 <div className="sm:w-44">
                   <Label className="text-xs">Tipo da chave</Label>
-                  <Select value={pixKeyType} onValueChange={setPixKeyType}>
-                    <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PIX_KEY_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchSelect
+                    value={pixKeyType}
+                    onValueChange={setPixKeyType}
+                    options={PIX_KEY_TYPES}
+                    triggerClassName={PRODUCT_SHEET_SELECT}
+                  />
                 </div>
                 <div className="flex-1">
                   <Label className="text-xs">Chave</Label>
@@ -1534,18 +1508,12 @@ export function CreateBoletoSheet({
               </div>
               <div className="mt-4">
                 <Label className="text-xs">Tipo de conta</Label>
-                <Select value={accountType} onValueChange={setAccountType}>
-                  <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ACCOUNT_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchSelect
+                  value={accountType}
+                  onValueChange={setAccountType}
+                  options={ACCOUNT_TYPES}
+                  triggerClassName={PRODUCT_SHEET_SELECT}
+                />
               </div>
               <div className="mt-4">
                 <Label className="text-xs">Beneficiário (opcional)</Label>

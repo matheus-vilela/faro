@@ -22,6 +22,16 @@ export function productUnitCost(
   return cmv ?? lastStock ?? last;
 }
 
+export function productSaleUnitValue(
+  p: Pick<Product, "last_sale_unit_value">,
+): number | null {
+  const sale =
+    p.last_sale_unit_value != null && p.last_sale_unit_value > 0
+      ? Number(p.last_sale_unit_value)
+      : null;
+  return sale != null && Number.isFinite(sale) ? sale : null;
+}
+
 export function productStockValue(
   p: Pick<
     Product,

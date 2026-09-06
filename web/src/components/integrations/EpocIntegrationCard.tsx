@@ -761,18 +761,15 @@ export function EpocIntegrationCard({ companyId }: { companyId: string }) {
                   </div> */}
                   {/* <div className="space-y-2">
                     <Label>Ambiente</Label>
-                    <Select
+                    <SearchSelect
                       value={ambiente}
                       onValueChange={(v) => setAmbiente(v as EpocAmbiente)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="producao">Produção</SelectItem>
-                        <SelectItem value="homologacao">Homologação</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      options={[
+                        { value: "producao", label: "Produção" },
+                        { value: "homologacao", label: "Homologação" },
+                      ]}
+                      triggerClassName="w-full"
+                    />
                   </div> */}
                 </div>
               </>

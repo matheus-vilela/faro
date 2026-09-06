@@ -25,13 +25,6 @@ import {
   supplierSearchOption,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -1177,19 +1170,16 @@ export function ExpenseDetailSheet({
                 <form onSubmit={handleUpdate} className="space-y-6 py-6">
                   <div>
                     <Label>Tipo</Label>
-                    <Select
+                    <SearchSelect
                       value={editType}
                       onValueChange={(v) => setEditType(v as ExpenseType)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nota_fiscal">Nota fiscal</SelectItem>
-                        <SelectItem value="romaneio">Romaneio</SelectItem>
-                        <SelectItem value="recibo">Recibo</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      options={[
+                        { value: "nota_fiscal", label: "Nota fiscal" },
+                        { value: "romaneio", label: "Romaneio" },
+                        { value: "recibo", label: "Recibo" },
+                      ]}
+                      triggerClassName="w-full"
+                    />
                   </div>
                   <div>
                     <Label>Fornecedor</Label>
@@ -1275,22 +1265,19 @@ export function ExpenseDetailSheet({
                     !isOwner && (
                       <div>
                         <Label>Status</Label>
-                        <Select
+                        <SearchSelect
                           value={editStatus}
                           onValueChange={(v) =>
                             setEditStatus(
                               v as "pending" | "approved" | "rejected",
                             )
                           }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending">Pendente</SelectItem>
-                            <SelectItem value="rejected">Recusar</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          options={[
+                            { value: "pending", label: "Pendente" },
+                            { value: "rejected", label: "Recusar" },
+                          ]}
+                          triggerClassName="w-full"
+                        />
                         <p className="text-xs text-muted-foreground mt-1.5">
                           Só o proprietário pode aprovar. Você pode recusar se o
                           lançamento estiver incorreto.
@@ -1304,23 +1291,20 @@ export function ExpenseDetailSheet({
                     ) && (
                       <div>
                         <Label>Status</Label>
-                        <Select
+                        <SearchSelect
                           value={editStatus}
                           onValueChange={(v) =>
                             setEditStatus(
                               v as "pending" | "approved" | "rejected",
                             )
                           }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending">Pendente</SelectItem>
-                            <SelectItem value="approved">Aprovada</SelectItem>
-                            <SelectItem value="rejected">Recusada</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          options={[
+                            { value: "pending", label: "Pendente" },
+                            { value: "approved", label: "Aprovada" },
+                            { value: "rejected", label: "Recusada" },
+                          ]}
+                          triggerClassName="w-full"
+                        />
                       </div>
                     )}
                   <div>

@@ -9,13 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { MonthSelector } from "@/components/MonthSelector";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -224,7 +218,7 @@ export function ExportReportDialog({
         <div className="grid gap-3">
           {showPicker ? (
             <Field label="Relatório">
-              <Select
+              <SearchSelect
                 value={selectedId}
                 onValueChange={(v) => {
                   const id = v as ReportId;
@@ -236,18 +230,12 @@ export function ExportReportDialog({
                     }),
                   );
                 }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {catalog.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={catalog.map((r) => ({
+                  value: r.id,
+                  label: r.title,
+                }))}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : (
             <p className="text-sm font-medium">{definition.title}</p>
@@ -284,184 +272,148 @@ export function ExportReportDialog({
 
           {filterSet.has("dateField") ? (
             <Field label="Data de referência">
-              <Select
+              <SearchSelect
                 value={filters.dateField}
                 onValueChange={(v) =>
                   patch({ dateField: v as ReportFilterState["dateField"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="due_date">Vencimento (competência)</SelectItem>
-                  <SelectItem value="paid_at">Pagamento (caixa)</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "due_date", label: "Vencimento (competência)" },
+                  { value: "paid_at", label: "Pagamento (caixa)" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("openDueBucket") ? (
             <Field label="Situação">
-              <Select
+              <SearchSelect
                 value={filters.openDueBucket}
                 onValueChange={(v) =>
                   patch({
                     openDueBucket: v as ReportFilterState["openDueBucket"],
                   })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas em aberto</SelectItem>
-                  <SelectItem value="overdue">Somente vencidas</SelectItem>
-                  <SelectItem value="upcoming">Somente a vencer</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas em aberto" },
+                  { value: "overdue", label: "Somente vencidas" },
+                  { value: "upcoming", label: "Somente a vencer" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("flowType") ? (
             <Field label="Tipo">
-              <Select
+              <SearchSelect
                 value={filters.flowType}
                 onValueChange={(v) =>
                   patch({ flowType: v as ReportFilterState["flowType"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="both">Pagar e receber</SelectItem>
-                  <SelectItem value="payable">Somente a pagar</SelectItem>
-                  <SelectItem value="receivable">Somente a receber</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "both", label: "Pagar e receber" },
+                  { value: "payable", label: "Somente a pagar" },
+                  { value: "receivable", label: "Somente a receber" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("situation") ? (
             <Field label="Quitação">
-              <Select
+              <SearchSelect
                 value={filters.situation}
                 onValueChange={(v) =>
                   patch({ situation: v as ReportFilterState["situation"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="pending">Em aberto</SelectItem>
-                  <SelectItem value="paid">Pagas / recebidas</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas" },
+                  { value: "pending", label: "Em aberto" },
+                  { value: "paid", label: "Pagas / recebidas" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("basis") ? (
             <Field label="Base">
-              <Select
+              <SearchSelect
                 value={filters.basis}
                 onValueChange={(v) =>
                   patch({ basis: v as ReportFilterState["basis"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="competencia">Competência (vencimento)</SelectItem>
-                  <SelectItem value="caixa">Caixa (pagamento)</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "competencia", label: "Competência (vencimento)" },
+                  { value: "caixa", label: "Caixa (pagamento)" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("natureza") ? (
             <Field label="Natureza">
-              <Select
+              <SearchSelect
                 value={filters.natureza}
                 onValueChange={(v) =>
                   patch({ natureza: v as ReportFilterState["natureza"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="RECEITA">Receita</SelectItem>
-                  <SelectItem value="DESPESA">Despesa</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas" },
+                  { value: "RECEITA", label: "Receita" },
+                  { value: "DESPESA", label: "Despesa" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("category") ? (
             <Field label="Categoria">
-              <Select
+              <SearchSelect
                 value={filters.categoryId}
                 onValueChange={(v) => patch({ categoryId: v })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={categories.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                }))}
+                leadingOptions={[{ value: "all", label: "Todas" }]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("supplier") ? (
             <Field label="Fornecedor">
-              <Select
+              <SearchSelect
                 value={filters.supplierId}
                 onValueChange={(v) => patch({ supplierId: v })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={suppliers.map((s) => ({
+                  value: s.id,
+                  label: s.name,
+                }))}
+                leadingOptions={[{ value: "all", label: "Todos" }]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("bankAccount") ? (
             <Field label="Conta bancária">
-              <Select
+              <SearchSelect
                 value={filters.bankAccountId}
                 onValueChange={(v) => patch({ bankAccountId: v })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {banks.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={banks.map((b) => ({
+                  value: b.id,
+                  label: b.name,
+                }))}
+                leadingOptions={[{ value: "all", label: "Todas" }]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
@@ -477,133 +429,115 @@ export function ExportReportDialog({
 
           {filterSet.has("expenseStatus") ? (
             <Field label="Status da nota">
-              <Select
+              <SearchSelect
                 value={filters.expenseStatus}
                 onValueChange={(v) =>
                   patch({
                     expenseStatus: v as ReportFilterState["expenseStatus"],
                   })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="pending">Pendente</SelectItem>
-                  <SelectItem value="approved">Aprovada</SelectItem>
-                  <SelectItem value="rejected">Rejeitada</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas" },
+                  { value: "pending", label: "Pendente" },
+                  { value: "approved", label: "Aprovada" },
+                  { value: "rejected", label: "Rejeitada" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("expenseOrigin") ? (
             <Field label="Origem">
-              <Select
+              <SearchSelect
                 value={filters.expenseOrigin}
                 onValueChange={(v) =>
                   patch({
                     expenseOrigin: v as ReportFilterState["expenseOrigin"],
                   })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="manual">Manual</SelectItem>
-                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas" },
+                  { value: "manual", label: "Manual" },
+                  { value: "whatsapp", label: "WhatsApp" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("reconStatus") ? (
             <Field label="Situação da linha">
-              <Select
+              <SearchSelect
                 value={filters.reconStatus}
                 onValueChange={(v) =>
                   patch({
                     reconStatus: v as ReportFilterState["reconStatus"],
                   })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="unmatched">A conciliar</SelectItem>
-                  <SelectItem value="matched">Conciliado</SelectItem>
-                  <SelectItem value="ignored">Ignorado</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todas" },
+                  { value: "unmatched", label: "A conciliar" },
+                  { value: "matched", label: "Conciliado" },
+                  { value: "ignored", label: "Ignorado" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("dreView") ? (
             <Field label="Visão">
-              <Select
+              <SearchSelect
                 value={filters.dreView}
                 onValueChange={(v) =>
                   patch({ dreView: v as ReportFilterState["dreView"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="resumo">Resumo</SelectItem>
-                  <SelectItem value="linhas">Com categorias</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "resumo", label: "Resumo" },
+                  { value: "linhas", label: "Com categorias" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("stockMode") ? (
             <Field label="Recorte">
-              <Select
+              <SearchSelect
                 value={filters.stockMode}
                 onValueChange={(v) =>
                   patch({ stockMode: v as ReportFilterState["stockMode"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="filtered">Com filtros atuais</SelectItem>
-                  <SelectItem value="all">Todos os produtos</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "filtered", label: "Com filtros atuais" },
+                  { value: "all", label: "Todos os produtos" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("cmvPeriod") ? (
             <Field label="Período">
-              <Select
+              <SearchSelect
                 value={filters.cmvPeriod}
                 onValueChange={(v) =>
                   patch({ cmvPeriod: v as ReportFilterState["cmvPeriod"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="today">Hoje</SelectItem>
-                  <SelectItem value="last7">Esta semana</SelectItem>
-                  <SelectItem value="month">Este mês</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "today", label: "Hoje" },
+                  { value: "last7", label: "Esta semana" },
+                  { value: "month", label: "Este mês" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("movementDirection") ? (
             <Field label="Tipo de movimento">
-              <Select
+              <SearchSelect
                 value={filters.movementDirection}
                 onValueChange={(v) =>
                   patch({
@@ -611,53 +545,44 @@ export function ExportReportDialog({
                       v as ReportFilterState["movementDirection"],
                   })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="in">Entradas</SelectItem>
-                  <SelectItem value="out">Saídas</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todos" },
+                  { value: "in", label: "Entradas" },
+                  { value: "out", label: "Saídas" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           {filterSet.has("scenario") ? (
             <Field label="Cenário">
-              <Select
+              <SearchSelect
                 value={filters.scenario}
                 onValueChange={(v) =>
                   patch({ scenario: v as ReportFilterState["scenario"] })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="base">Base</SelectItem>
-                  <SelectItem value="optimistic">Otimista</SelectItem>
-                  <SelectItem value="pessimistic">Pessimista</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "base", label: "Base" },
+                  { value: "optimistic", label: "Otimista" },
+                  { value: "pessimistic", label: "Pessimista" },
+                ]}
+                triggerClassName="w-full"
+              />
             </Field>
           ) : null}
 
           <Field label="Formato">
-            <Select
+            <SearchSelect
               value={format}
               onValueChange={(v) => setFormat(v as ExportFormat)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
-                <SelectItem value="csv">CSV</SelectItem>
-                <SelectItem value="pdf">PDF</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "xlsx", label: "Excel (.xlsx)" },
+                { value: "csv", label: "CSV" },
+                { value: "pdf", label: "PDF" },
+              ]}
+              triggerClassName="w-full"
+            />
           </Field>
         </div>
 

@@ -11,13 +11,6 @@ import {
   SearchSelect,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetFooter,
@@ -306,27 +299,17 @@ export function RegisterManualStockMovementSheet({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Entrada / saída</Label>
-                    <Select
+                    <SearchSelect
                       value={movementKind}
                       onValueChange={(v) =>
                         setMovementKind(v as ManualMovementKind)
                       }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MANUAL_MOVEMENT_KIND_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={MANUAL_MOVEMENT_KIND_OPTIONS}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Classificação</Label>
-                    <Select
+                    <SearchSelect
                       value={
                         movementKind === "entry"
                           ? entryClassification
@@ -341,68 +324,52 @@ export function RegisterManualStockMovementSheet({
                           setExitClassification(v as ExitClassification);
                         }
                       }}
+                      options={
+                        movementKind === "inventory"
+                          ? [
+                              {
+                                value: "__blocked__",
+                                label: "Não se aplica",
+                              },
+                            ]
+                          : movementKind === "entry"
+                            ? ENTRY_CLASSIFICATION_OPTIONS
+                            : EXIT_CLASSIFICATION_OPTIONS
+                      }
+                      placeholder={
+                        movementKind === "inventory"
+                          ? "Não se aplica"
+                          : "Selecionar"
+                      }
                       disabled={movementKind === "inventory"}
-                    >
-                      <SelectTrigger>
-                        <SelectValue
-                          placeholder={
-                            movementKind === "inventory"
-                              ? "Não se aplica"
-                              : "Selecionar"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {movementKind === "inventory" ? (
-                          <SelectItem value="__blocked__" disabled>
-                            Não se aplica
-                          </SelectItem>
-                        ) : movementKind === "entry" ? (
-                          ENTRY_CLASSIFICATION_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          EXIT_CLASSIFICATION_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
+                    />
                   </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Unidade de medida</Label>
-                    <Select
+                    <SearchSelect
                       value={unitCode || "__none__"}
                       onValueChange={(v) =>
                         setUnitCode(v === "__none__" ? "" : v)
                       }
+                      options={(productById().get(productId)
+                        ? allowedUnitsForProduct(
+                            productById().get(productId),
+                            conversionsForProduct(productId),
+                          )
+                        : []
+                      ).map((u) => ({
+                        value: u,
+                        label: u,
+                      }))}
+                      leadingOptions={[
+                        { value: "__none__", label: "Selecionar" },
+                      ]}
+                      placeholder="Selecionar"
                       disabled={!productId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Selecionar</SelectItem>
-                        {(productById().get(productId)
-                          ? allowedUnitsForProduct(
-                              productById().get(productId),
-                              conversionsForProduct(productId),
-                            )
-                          : []
-                        ).map((u) => (
-                          <SelectItem key={`${productId}-${u}`} value={u}>
-                            {u}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>

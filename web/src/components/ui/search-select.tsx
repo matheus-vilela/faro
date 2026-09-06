@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/popover";
 import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Loader2, Plus, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -25,6 +25,15 @@ export type SearchSelectOption = {
   keywords?: string;
   /** Destaque visual (ex.: ação "Criar…"). */
   accent?: boolean;
+  /** Cabeçalho de grupo na lista (quando muda entre itens). */
+  group?: string;
+  /** Aba em que a opção aparece (`tabs` no seletor). */
+  tab?: string;
+};
+
+export type SearchSelectTab = {
+  value: string;
+  label: string;
 };
 
 /** Opção de produto com estoque/SKU no description (busca inclui ambos). */
@@ -91,14 +100,16 @@ function optionMatches(option: SearchSelectOption, query: string): boolean {
   return haystack.includes(query);
 }
 
+export const SEARCH_SELECT_CREATE_VALUE = "__search_select_create__";
+
 export type SearchSelectProps = {
   value: string;
   onValueChange: (value: string) => void;
-  options: SearchSelectOption[];
+  options: readonly SearchSelectOption[];
   /** Opções fixas no topo (não filtradas), ex.: "Não vincular". */
-  leadingOptions?: SearchSelectOption[];
+  leadingOptions?: readonly SearchSelectOption[];
   /** Opções fixas no fim (não filtradas), ex.: "Criar fornecedor". */
-  trailingOptions?: SearchSelectOption[];
+  trailingOptions?: readonly SearchSelectOption[];
   placeholder?: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
@@ -114,6 +125,34 @@ export type SearchSelectProps = {
   /** Busca remota em andamento (ou aguardando debounce). */
   loading?: boolean;
   loadingMessage?: string;
+  /** `sm` = filtros `h-8`; `default` = `h-10`. */
+  size?: "sm" | "default";
+  /**
+   * Cadastrar o texto da busca. Mostra «Cadastrar «texto»» se não houver
+   * item com o mesmo rótulo. Não altera `value`.
+   */
+  onCreate?: (query: string) => void;
+  createLabel?: (query: string) => string;
+  allowCreate?: boolean;
+  /** Rodapé do popover (formulário extra ao criar, etc.). */
+  footer?: ReactNode;
+  /** Não fecha ao clicar em Cadastrar (ex.: formulário no `footer`). */
+  keepOpenOnCreate?: boolean;
+  /** Texto do trigger (sobrescreve o rótulo da opção selecionada). */
+  triggerLabel?: string;
+  /** Texto abaixo do campo de busca. */
+  searchHint?: string;
+  /** Filtra a lista no cliente. Desligue se a busca já for remota. */
+  filterLocally?: boolean;
+  /** Scroll da lista (ex.: carregar mais). */
+  onListScroll?: (el: HTMLDivElement) => void;
+  /** X no trigger chama `onValueChange("")`. */
+  clearable?: boolean;
+  /** Abas no popover (ex.: ficha técnica / produção). */
+  tabs?: readonly SearchSelectTab[];
+  tab?: string;
+  defaultTab?: string;
+  onTabChange?: (tab: string) => void;
 };
 
 /** Lista mais larga que o trigger — células estreitas de tabela. */
@@ -138,9 +177,28 @@ export function SearchSelect({
   listMaxHeightClassName = "max-h-64",
   renderOptionLabel,
   onSearchChange,
+  size = "default",
+  onCreate,
+  createLabel,
+  allowCreate,
+  footer,
+  keepOpenOnCreate = false,
+  triggerLabel: triggerLabelOverride,
+  searchHint,
+  filterLocally = true,
+  onListScroll,
+  clearable = false,
+  tabs,
+  tab,
+  defaultTab,
+  onTabChange,
 }: SearchSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [internalTab, setInternalTab] = useState(
+    defaultTab ?? tabs?.[0]?.value ?? "",
+  );
+  const activeTab = tab ?? internalTab;
   const listRef = useRef<HTMLDivElement>(null);
   usePopoverListScrollFix(open, listRef);
 
@@ -158,15 +216,47 @@ export function SearchSelect({
   }, [leadingOptions, trailingOptions, options]);
 
   const selected = value ? allFixed.get(value) : undefined;
-  const triggerLabel = selected?.label ?? placeholder;
+  const triggerLabel =
+    triggerLabelOverride ?? selected?.label ?? placeholder;
+
+  const visibleOptions = useMemo(() => {
+    if (!tabs?.length || !activeTab) return options;
+    return options.filter((o) => !o.tab || o.tab === activeTab);
+  }, [activeTab, options, tabs]);
 
   const filtered = useMemo(() => {
+    if (!filterLocally) return visibleOptions;
     const q = normalizeSearch(search);
-    if (!q) return options;
-    return options.filter((o) => optionMatches(o, q));
-  }, [options, search]);
+    if (!q) return visibleOptions;
+    return visibleOptions.filter((o) => optionMatches(o, q));
+  }, [filterLocally, search, visibleOptions]);
+
+  const createQuery = search.trim();
+  const canOfferCreate =
+    Boolean(onCreate) &&
+    allowCreate !== false &&
+    createQuery.length > 0 &&
+    ![...leadingOptions, ...visibleOptions, ...trailingOptions].some(
+      (o) => normalizeSearch(o.label) === normalizeSearch(createQuery),
+    );
+  const createOption: SearchSelectOption | null = canOfferCreate
+    ? {
+        value: SEARCH_SELECT_CREATE_VALUE,
+        label: createLabel?.(createQuery) ?? `Cadastrar «${createQuery}»`,
+        description: "Novo item",
+        accent: true,
+      }
+    : null;
 
   const pick = (next: string) => {
+    if (next === SEARCH_SELECT_CREATE_VALUE) {
+      if (createQuery) onCreate?.(createQuery);
+      if (!keepOpenOnCreate) {
+        setOpen(false);
+        setSearchAndNotify("");
+      }
+      return;
+    }
     onValueChange(next);
     setOpen(false);
     setSearchAndNotify("");
@@ -228,13 +318,37 @@ export function SearchSelect({
           id={id}
           disabled={disabled}
           className={cn(
-            "h-10 w-full justify-between font-normal",
-            !selected && "text-muted-foreground",
+            "w-full justify-between font-normal",
+            size === "sm" ? "h-8" : "h-10",
+            !selected && !triggerLabelOverride && "text-muted-foreground",
             triggerClassName,
           )}
         >
           <span className="truncate text-left">{triggerLabel}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {clearable && value && !disabled ? (
+            <span
+              role="button"
+              tabIndex={0}
+              className="ml-1 rounded p-0.5 hover:bg-muted"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onValueChange("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onValueChange("");
+                }
+              }}
+              aria-label="Limpar seleção"
+            >
+              <X className="h-3.5 w-3.5 opacity-60" />
+            </span>
+          ) : (
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -247,6 +361,31 @@ export function SearchSelect({
         onWheel={(e) => e.stopPropagation()}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
+        {tabs && tabs.length > 0 ? (
+          <div className="flex gap-1 border-b border-border p-1">
+            {tabs.map((row) => {
+              const active = row.value === activeTab;
+              return (
+                <button
+                  key={row.value}
+                  type="button"
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-muted",
+                  )}
+                  onClick={() => {
+                    if (tab == null) setInternalTab(row.value);
+                    onTabChange?.(row.value);
+                  }}
+                >
+                  {row.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="border-b border-border p-2">
           <div className="relative">
             {loading ? (
@@ -273,6 +412,11 @@ export function SearchSelect({
               aria-busy={loading}
             />
           </div>
+          {searchHint ? (
+            <p className="mt-1.5 px-0.5 text-[11px] leading-snug text-muted-foreground sm:text-xs">
+              {searchHint}
+            </p>
+          ) : null}
         </div>
         <div
           ref={listRef}
@@ -280,6 +424,10 @@ export function SearchSelect({
             "overflow-y-auto overscroll-contain p-1",
             listMaxHeightClassName,
           )}
+          onScroll={() => {
+            const el = listRef.current;
+            if (el) onListScroll?.(el);
+          }}
         >
           {leadingOptions.map(renderRow)}
           {loading && filtered.length === 0 ? (
@@ -299,14 +447,32 @@ export function SearchSelect({
                   {loadingMessage}
                 </p>
               ) : null}
-              {filtered.map(renderRow)}
+              {filtered.map((option, index) => {
+                const prev = filtered[index - 1];
+                const showGroup =
+                  Boolean(option.group) && option.group !== prev?.group;
+                return (
+                  <div key={option.value}>
+                    {showGroup ? (
+                      <p className="px-2 pt-2 pb-1 text-xs font-semibold text-pretty text-foreground">
+                        {option.group}
+                      </p>
+                    ) : null}
+                    {renderRow(option)}
+                  </div>
+                );
+              })}
             </>
           )}
         </div>
-        {trailingOptions.length > 0 ? (
+        {createOption || trailingOptions.length > 0 ? (
           <div className="border-t border-border bg-muted/50 p-1">
+            {createOption ? renderRow(createOption) : null}
             {trailingOptions.map(renderRow)}
           </div>
+        ) : null}
+        {footer ? (
+          <div className="border-t border-border p-2">{footer}</div>
         ) : null}
       </PopoverContent>
     </Popover>

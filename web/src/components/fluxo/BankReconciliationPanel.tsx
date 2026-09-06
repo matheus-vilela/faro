@@ -39,13 +39,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
@@ -96,7 +90,6 @@ import {
   Link2,
   Loader2,
   Percent,
-  Plus,
   Undo2,
   Upload,
 } from "lucide-react";
@@ -902,28 +895,24 @@ export function BankReconciliationPanel({
               <p className="shrink-0 text-sm font-semibold text-foreground">
                 Extrato do banco
               </p>
-              <Select
+              <SearchSelect
                 value={accountId === "__create__" ? "" : accountId}
                 onValueChange={handleAccountChange}
-              >
-                <SelectTrigger className="h-8 min-w-0 flex-1 text-xs">
-                  <SelectValue placeholder="Conta" />
-                </SelectTrigger>
-                <SelectContent>
-                  {bankAccounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name} ({bankAccountTypeLabel(a.tipo)})
-                    </SelectItem>
-                  ))}
-                  <SelectItem
-                    value="__create__"
-                    className="text-primary font-medium"
-                  >
-                    <Plus className="mr-2 inline h-3.5 w-3.5" />
-                    Criar conta bancária
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                options={bankAccounts.map((a) => ({
+                  value: a.id,
+                  label: `${a.name} (${bankAccountTypeLabel(a.tipo)})`,
+                }))}
+                trailingOptions={[
+                  {
+                    value: "__create__",
+                    label: "Criar conta bancária",
+                    accent: true,
+                  },
+                ]}
+                placeholder="Conta"
+                size="sm"
+                triggerClassName="min-w-0 flex-1 text-xs"
+              />
             </div>
             <input
               ref={fileRef}

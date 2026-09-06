@@ -1,13 +1,7 @@
 import { ProductSetupActionPanel } from "@/components/products/ProductSetupActionPanel";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
@@ -21,7 +15,9 @@ import {
 } from "@/lib/productSetupListFilter";
 import {
   formatTurnoverLine,
+  itemTurnoverAmount,
   itemTurnoverQty,
+  partitionSalesThenPurchases,
   setupChoicesForItem,
   suggestedSetupChoice,
   type ProductSetupChoice,
@@ -41,6 +37,8 @@ function compareSetup(
 ): number {
   if (key === "name") return a.name.localeCompare(b.name, "pt-BR");
   if (key === "turnover") {
+    const amount = itemTurnoverAmount(a) - itemTurnoverAmount(b);
+    if (amount !== 0) return amount;
     const d = itemTurnoverQty(a) - itemTurnoverQty(b);
     if (d !== 0) return d;
     return a.name.localeCompare(b.name, "pt-BR");
@@ -110,25 +108,18 @@ function RoleSelect({
       ? value
       : undefined;
   return (
-    <Select
-      value={selectValue}
-      onValueChange={(next) => onChange(next as ProductSetupChoice)}
-    >
-      <SelectTrigger
-        size="sm"
-        className="h-9 w-full min-w-56 bg-background"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <SelectValue placeholder="O que é este item?" />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div onClick={(e) => e.stopPropagation()}>
+      <SearchSelect
+        value={selectValue ?? ""}
+        onValueChange={(next) => onChange(next as ProductSetupChoice)}
+        options={options.map((option) => ({
+          value: option.value,
+          label: option.label,
+        }))}
+        placeholder="O que é este item?"
+        triggerClassName="h-9 w-full min-w-56 bg-background"
+      />
+    </div>
   );
 }
 
@@ -169,6 +160,11 @@ export function ProductSetupInbox({
     ProductSetupItem,
     SortKey
   >(filtered, "turnover", compareSetup, false);
+
+  const listed = useMemo(
+    () => partitionSalesThenPurchases(sorted, (item) => item.kind),
+    [sorted],
+  );
 
   const choiceFor = (item: ProductSetupItem): ProductSetupChoice | undefined => {
     const picked = choices[item.key];
@@ -291,35 +287,30 @@ export function ProductSetupInbox({
                   className="pl-8"
                 />
               </div>
-              <Select
+              <SearchSelect
                 value={origin}
                 onValueChange={(next) =>
                   setOrigin(next as ProductSetupOriginFilter)
                 }
-              >
-                <SelectTrigger className="h-9 w-full bg-background sm:w-44">
-                  <SelectValue placeholder="Origem" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(
-                    Object.keys(
-                      PRODUCT_SETUP_ORIGIN_LABEL,
-                    ) as ProductSetupOriginFilter[]
-                  ).map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {PRODUCT_SETUP_ORIGIN_LABEL[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={(
+                  Object.keys(
+                    PRODUCT_SETUP_ORIGIN_LABEL,
+                  ) as ProductSetupOriginFilter[]
+                ).map((value) => ({
+                  value,
+                  label: PRODUCT_SETUP_ORIGIN_LABEL[value],
+                }))}
+                placeholder="Origem"
+                triggerClassName="h-9 w-full bg-background sm:w-44"
+              />
             </div>
-            {sorted.length === 0 ? (
+            {listed.length === 0 ? (
               <p className="rounded-xl border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
                 Nenhum item neste filtro.
               </p>
             ) : isMobile ? (
               <ul className="space-y-2">
-                {sorted.map((item) => {
+                {listed.map((item) => {
                   const selected = item.key === activeKey;
                   return (
                     <li key={item.key}>
@@ -374,7 +365,7 @@ export function ProductSetupInbox({
                     </tr>
                   </thead>
                   <tbody>
-                    {sorted.map((item) => {
+                    {listed.map((item) => {
                       const selected = item.key === activeKey;
                       return (
                         <tr

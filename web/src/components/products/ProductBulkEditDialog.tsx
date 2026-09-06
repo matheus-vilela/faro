@@ -9,13 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { ProductBulkEditPreviewTable } from "@/components/products/ProductBulkEditPreviewTable";
 import {
   applyProductBulkEdit,
@@ -238,32 +232,21 @@ export function ProductBulkEditDialog({
               />
             ) : null}
             {fieldMeta.inputType === "boolean" ? (
-              <Select
+              <SearchSelect
                 value={boolValue ? "true" : "false"}
                 onValueChange={(v) => setBoolValue(v === "true")}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">Sim</SelectItem>
-                  <SelectItem value="false">Não</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "true", label: "Sim" },
+                  { value: "false", label: "Não" },
+                ]}
+              />
             ) : null}
             {fieldMeta.inputType === "operational_type" ? (
-              <Select value={operationalType} onValueChange={setOperationalType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {operationalTypeOptions().map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={operationalType}
+                onValueChange={setOperationalType}
+                options={operationalTypeOptions()}
+              />
             ) : null}
             {fieldMeta.inputType === "cmv_category" ? (
               cmvCategories.length === 0 ? (
@@ -272,43 +255,33 @@ export function ProductBulkEditDialog({
                   produto e a Conta do DRE.
                 </p>
               ) : (
-              <Select
+              <SearchSelect
                 value={cmvCategoryId || "__none__"}
                 onValueChange={(v) =>
                   setCmvCategoryId(v === "__none__" ? "" : v)
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Nenhuma</SelectItem>
-                  {cmvCategories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={cmvCategories.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                }))}
+                leadingOptions={[{ value: "__none__", label: "Nenhuma" }]}
+                placeholder="Selecione"
+              />
               )
             ) : null}
             {fieldMeta.inputType === "categories" ? (
               <div className="space-y-3">
-                <Select
+                <SearchSelect
                   value={categoryMode}
                   onValueChange={(v) =>
                     setCategoryMode(v as "replace" | "add" | "remove")
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="replace">Substituir categorias</SelectItem>
-                    <SelectItem value="add">Adicionar categorias</SelectItem>
-                    <SelectItem value="remove">Remover categorias</SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={[
+                    { value: "replace", label: "Substituir categorias" },
+                    { value: "add", label: "Adicionar categorias" },
+                    { value: "remove", label: "Remover categorias" },
+                  ]}
+                />
                 <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border p-2">
                   {companyProductCategories.length === 0 ? (
                     <p className="text-sm text-muted-foreground">

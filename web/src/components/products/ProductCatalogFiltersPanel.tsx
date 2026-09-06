@@ -8,13 +8,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -176,23 +170,18 @@ export function ProductCatalogFiltersPanel({
           : "space-y-1.5"
       }
     >
-      <Select
+      <SearchSelect
         value={filterCatalogKind}
         onValueChange={(v) =>
           onFilterCatalogKindChange(v as ProductCatalogKind)
         }
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PRODUCT_CATALOG_KINDS.map((kind) => (
-            <SelectItem key={kind} value={kind}>
-              {PRODUCT_CATALOG_KIND_LABELS[kind]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        options={PRODUCT_CATALOG_KINDS.map((kind) => ({
+          value: kind,
+          label: PRODUCT_CATALOG_KIND_LABELS[kind],
+        }))}
+        size="sm"
+        triggerClassName="w-full"
+      />
     </FilterField>
   );
 
@@ -205,19 +194,18 @@ export function ProductCatalogFiltersPanel({
           : "space-y-1.5"
       }
     >
-      <Select value={filterCategoryId} onValueChange={onFilterCategoryIdChange}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="Todas" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Todas</SelectItem>
-          {companyProductCategories.map((c) => (
-            <SelectItem key={c.id} value={c.id}>
-              {c.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <SearchSelect
+        value={filterCategoryId}
+        onValueChange={onFilterCategoryIdChange}
+        options={companyProductCategories.map((c) => ({
+          value: c.id,
+          label: c.name,
+        }))}
+        leadingOptions={[{ value: "all", label: "Todas" }]}
+        placeholder="Todas"
+        size="sm"
+        triggerClassName="w-full"
+      />
     </FilterField>
   );
 
@@ -235,22 +223,20 @@ export function ProductCatalogFiltersPanel({
           Apenas ≤ mínimo
         </p>
       ) : (
-        <Select
+        <SearchSelect
           value={filterStockAlert}
           onValueChange={(v) =>
             onFilterStockAlertChange(v as "all" | "zero" | "below_min" | "any")
           }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="any">Com alerta</SelectItem>
-            <SelectItem value="zero">Estoque zerado</SelectItem>
-            <SelectItem value="below_min">Abaixo do mínimo</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: "all", label: "Todos" },
+            { value: "any", label: "Com alerta" },
+            { value: "zero", label: "Estoque zerado" },
+            { value: "below_min", label: "Abaixo do mínimo" },
+          ]}
+          size="sm"
+          triggerClassName="w-full"
+        />
       )}
     </FilterField>
   );
@@ -261,75 +247,67 @@ export function ProductCatalogFiltersPanel({
       {!showCategory ? categoryField(false) : null}
       {!showAlert ? alertField(false) : null}
       <FilterField label="Situação">
-        <Select
+        <SearchSelect
           value={filterActive}
           onValueChange={(v) =>
             onFilterActiveChange(v as "all" | "active" | "inactive")
           }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Ativos</SelectItem>
-            <SelectItem value="inactive">Inativos</SelectItem>
-            <SelectItem value="all">Todos</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: "active", label: "Ativos" },
+            { value: "inactive", label: "Inativos" },
+            { value: "all", label: "Todos" },
+          ]}
+          size="sm"
+          triggerClassName="w-full"
+        />
       </FilterField>
       <FilterField label="Origem">
-        <Select
+        <SearchSelect
           value={filterStockOnlyOrigin}
           onValueChange={(v) =>
             onFilterStockOnlyOriginChange(v as "all" | "yes")
           }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="yes">Somente estoque</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: "all", label: "Todas" },
+            { value: "yes", label: "Somente estoque" },
+          ]}
+          size="sm"
+          triggerClassName="w-full"
+        />
       </FilterField>
       <FilterField label="Compõe CMV">
-        <Select
+        <SearchSelect
           value={filterComposesCmv}
           onValueChange={(v) =>
             onFilterComposesCmvChange(v as "all" | "yes" | "no")
           }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="yes">Sim</SelectItem>
-            <SelectItem value="no">Não</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: "all", label: "Todos" },
+            { value: "yes", label: "Sim" },
+            { value: "no", label: "Não" },
+          ]}
+          size="sm"
+          triggerClassName="w-full"
+        />
       </FilterField>
       <FilterField label="Atualizado em">
-        <Select
+        <SearchSelect
           value={filterUpdatedPreset}
           onValueChange={(v) =>
             onFilterUpdatedPresetChange(
               v as "all" | "today" | "7d" | "30d" | "custom",
             )
           }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Qualquer data</SelectItem>
-            <SelectItem value="today">Hoje</SelectItem>
-            <SelectItem value="7d">Últimos 7 dias</SelectItem>
-            <SelectItem value="30d">Últimos 30 dias</SelectItem>
-            <SelectItem value="custom">Entre datas</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: "all", label: "Qualquer data" },
+            { value: "today", label: "Hoje" },
+            { value: "7d", label: "Últimos 7 dias" },
+            { value: "30d", label: "Últimos 30 dias" },
+            { value: "custom", label: "Entre datas" },
+          ]}
+          size="sm"
+          triggerClassName="w-full"
+        />
       </FilterField>
       {filterUpdatedPreset === "custom" ? (
         <>

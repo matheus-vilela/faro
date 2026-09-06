@@ -8,13 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { cn } from "@/lib/utils";
 import {
   INVENTORY_COUNT_WEEKDAY_LABELS,
@@ -152,21 +146,20 @@ export function EstoqueContagemScheduleDialog({
           </div>
           <div className="space-y-2">
             <Label>Recorrência</Label>
-            <Select
+            <SearchSelect
               value={kind}
               onValueChange={(v) => setKind(v as InventoryCountRecurrenceKind)}
-            >
-              <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="once">Única</SelectItem>
-                <SelectItem value="every_n_days">A cada N dias</SelectItem>
-                <SelectItem value="alt_weeks">
-                  Semana sim / semana não
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              searchPlaceholder="Buscar recorrência…"
+              triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+              options={[
+                { value: "once", label: "Única" },
+                { value: "every_n_days", label: "A cada N dias" },
+                {
+                  value: "alt_weeks",
+                  label: "Semana sim / semana não",
+                },
+              ]}
+            />
           </div>
           {kind === "every_n_days" ? (
             <div className="space-y-2">
@@ -205,22 +198,20 @@ export function EstoqueContagemScheduleDialog({
           ) : null}
           <div className="space-y-2">
             <Label>Operador</Label>
-            <Select
+            <SearchSelect
               value={memberId || "__none__"}
               onValueChange={(v) => setMemberId(v === "__none__" ? "" : v)}
-            >
-              <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-                <SelectValue placeholder="Operador da listagem" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Usar operador da lista</SelectItem>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Operador da listagem"
+              searchPlaceholder="Buscar operador…"
+              triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+              leadingOptions={[
+                { value: "__none__", label: "Usar operador da lista" },
+              ]}
+              options={members.map((m) => ({
+                value: m.id,
+                label: m.name,
+              }))}
+            />
           </div>
         </div>
         <DialogFooter>

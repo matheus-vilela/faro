@@ -44,7 +44,6 @@ import { PoliticaPrivacidade } from "@/pages/PoliticaPrivacidade";
 import { ProdutosLegacyRedirect, FichasInboxRedirect } from "@/pages/ProdutosLegacyRedirect";
 import { ProdutosEstoqueLayout } from "@/components/ProdutosEstoqueLayout";
 import { Produtos } from "@/pages/Produtos";
-import { ProdutosCorrelacao2 } from "@/pages/ProdutosCorrelacao2";
 import { Estoque } from "@/pages/Estoque";
 import { EstoqueContagem } from "@/pages/EstoqueContagem";
 import { EstoqueCompras } from "@/pages/EstoqueCompras";
@@ -210,7 +209,10 @@ function AuthenticatedLayout() {
             }
           >
             <Route index element={<ProdutosLegacyRedirect />} />
-            <Route path="correlacao-2" element={<ProdutosCorrelacao2 />} />
+            <Route
+              path="correlacao-2"
+              element={<Navigate to="/app/produtos" replace />}
+            />
             <Route path="catalogo" element={<Produtos />} />
             <Route path="estoque" element={<Estoque />} />
             <Route path="estoque/compras" element={<EstoqueCompras />} />

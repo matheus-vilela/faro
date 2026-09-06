@@ -1,7 +1,7 @@
 # Feature: Correlação 2 — fila + inspector
 
 - **Slug:** `correlacao-2`
-- **Status:** pronto
+- **Status:** removida
 - **Área:** `/app/produtos/correlacao-2`
 
 ## Problema
@@ -29,9 +29,10 @@ Aba **Correlação 2**: uma fila de casos e um inspector. Intent como ação; co
 
 ## Comportamento esperado
 
-- Aba **Correlação 2** ao lado de Correlação.
+- Aba **Correlação 2** ao lado de Correlação. A fila + inspector (`CorrelationCaseWorkbench`) também é o «Para corrigir» da Correlação.
 - Uma fila: todos os itens pendentes. Score da IA ordena; não esconde ninguém.
-- Inspector à direita: header do item, seletor de intent já marcado, workspace abaixo conforme a opção.
+- Tabela unificada (`correlacao-tabela-unificada`): item · o que é · fluxo · ação.
+- Sem coluna Volume na fila (continua ordenando por giro).
 - Se o intent veio da IA, o card da direita mostra que é sugestão do agente.
 - Workspace reutiliza as ações atuais (unificar, ficha, agrupamento, variante, insumo, produto interno).
 - Tag **Somente estoque** só com intent variante.
@@ -46,7 +47,7 @@ Aba **Correlação 2**: uma fila de casos e um inspector. Intent como ação; co
 - [x] Existe a aba e a rota `/app/produtos/correlacao-2`.
 - [x] A tela original de correlação continua igual.
 - [x] Lista única; não há bloco «≥ 90%» separado de «Para corrigir».
-- [x] Sem coluna Par. Intent no inspector é um seletor, já pré-marcado.
+- [x] Sem coluna Par. Intent na coluna Sugerido da lista, já pré-marcado.
 - [x] Indicação da IA aparece no card da direita.
 - [x] Confirmar um intent grava pelo mesmo caminho da correlação atual.
 - [x] Depois de vincular/atribuir/confirmar, o item some da listagem.

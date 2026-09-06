@@ -2,13 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -19,6 +13,7 @@ import {
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { useSheetListView } from "@/hooks/useSheetListView";
+import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import {
   COUNT_FILTER_INPUT_CLASS,
   COUNT_ROW_ACTION_CLASS,
@@ -27,7 +22,6 @@ import {
   inventoryCountLineCount,
 } from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
-import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { cn } from "@/lib/utils";
 import { CheckCheck, ChevronRight, Loader2, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -180,7 +174,8 @@ export function EstoqueAprovacaoContagem({
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((s) => {
-      if (filterGroup && s.inventory_count_group_id !== filterGroup) return false;
+      if (filterGroup && s.inventory_count_group_id !== filterGroup)
+        return false;
       if (filterListing && s.inventory_count_listing_id !== filterListing) {
         return false;
       }
@@ -197,7 +192,14 @@ export function EstoqueAprovacaoContagem({
       }
       return true;
     });
-  }, [filterGroup, filterListing, filterOperator, periodFrom, periodTo, sessions]);
+  }, [
+    filterGroup,
+    filterListing,
+    filterOperator,
+    periodFrom,
+    periodTo,
+    sessions,
+  ]);
 
   const closeSession = () => {
     openRequestIdRef.current = null;
@@ -384,63 +386,51 @@ export function EstoqueAprovacaoContagem({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="space-y-1">
           <Label>Grupo</Label>
-          <Select
+          <SearchSelect
             value={filterGroup || "__all__"}
             onValueChange={(v) => {
               setFilterGroup(v === "__all__" ? "" : v);
               setFilterListing("");
             }}
-          >
-            <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-              <SelectValue placeholder="Todos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos</SelectItem>
-              {groupOptions.map(([id, name]) => (
-                <SelectItem key={id} value={id}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder="Todos"
+            searchPlaceholder="Buscar grupo…"
+            triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+            leadingOptions={[{ value: "__all__", label: "Todos" }]}
+            options={groupOptions.map(([id, name]) => ({
+              value: id,
+              label: name,
+            }))}
+          />
         </div>
         <div className="space-y-1">
           <Label>Listagem</Label>
-          <Select
+          <SearchSelect
             value={filterListing || "__all__"}
             onValueChange={(v) => setFilterListing(v === "__all__" ? "" : v)}
-          >
-            <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-              <SelectValue placeholder="Todas" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todas</SelectItem>
-              {listingOptions.map(([id, name]) => (
-                <SelectItem key={id} value={id}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder="Todas"
+            searchPlaceholder="Buscar listagem…"
+            triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+            leadingOptions={[{ value: "__all__", label: "Todas" }]}
+            options={listingOptions.map(([id, name]) => ({
+              value: id,
+              label: name,
+            }))}
+          />
         </div>
         <div className="space-y-1">
           <Label>Operador</Label>
-          <Select
+          <SearchSelect
             value={filterOperator || "__all__"}
             onValueChange={(v) => setFilterOperator(v === "__all__" ? "" : v)}
-          >
-            <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-              <SelectValue placeholder="Todos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Todos</SelectItem>
-              {operatorOptions.map(([id, name]) => (
-                <SelectItem key={id} value={id}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder="Todos"
+            searchPlaceholder="Buscar operador…"
+            triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+            leadingOptions={[{ value: "__all__", label: "Todos" }]}
+            options={operatorOptions.map(([id, name]) => ({
+              value: id,
+              label: name,
+            }))}
+          />
         </div>
         <div className="space-y-1">
           <Label>De</Label>

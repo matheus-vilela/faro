@@ -12,6 +12,10 @@ export interface Product {
   last_unit_value_unit_code?: string | null;
   /** Último valor pago convertido para unidade de estoque atual (uso interno de cálculo). */
   last_unit_value_stock?: number | null;
+  /** Último preço unitário de venda (PDV/EPOC). Distinto do preço de compra. */
+  last_sale_unit_value?: number | null;
+  /** Unidade do último preço de venda. */
+  last_sale_unit_value_unit_code?: string | null;
   /** Legado; CMV na venda usa a folha CMV padrão da empresa. */
   cmv_category_id?: string | null;
   /** Última categoria financeira de compra; pré-preenche novas linhas de NF. */

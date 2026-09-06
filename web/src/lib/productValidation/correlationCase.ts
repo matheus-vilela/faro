@@ -1,12 +1,18 @@
 import {
   PRODUCT_SETUP_CHOICE_LABEL,
+  isPurchaseSetupItem,
+  itemTurnoverAmount,
   itemTurnoverQty,
+  partitionSalesThenPurchases,
   setupChoicesForItem,
   type ProductSetupChoice,
   type ProductSetupItem,
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
-import type { ProductValidationResult } from "@/lib/productValidation/types";
+import {
+  isInitialUnifyMatch,
+  type ProductValidationResult,
+} from "@/lib/productValidation/types";
 
 export type CorrelationIntent =
   | "unify"
@@ -32,6 +38,8 @@ export type CorrelationCase = {
   availableIntents: CorrelationIntent[];
   /** Intent que a IA propôs; null se só há sinal local (estoque, tipo). */
   aiIntent: CorrelationIntent | null;
+  /** Vendido do bloco Mesmo produto (same-item alto, sem ficha). */
+  isUnifyMatch: boolean;
 };
 
 export const INTENT_TO_CHOICE: Record<CorrelationIntent, ProductSetupChoice> = {
@@ -135,6 +143,11 @@ export function buildCorrelationCases(
     let aiHint: CorrelationIntent | undefined;
 
     const same = sameBySold.get(item.productId);
+    const sameAsPurchase = (result?.sameItem ?? []).find((row) =>
+      row.candidates.some(
+        (candidate) => candidate.purchase.productId === item.productId,
+      ),
+    );
     const recipe = recipeBySold.get(item.productId);
     if (same) {
       counterparts = same.candidates.map((candidate) => ({
@@ -143,6 +156,18 @@ export function buildCorrelationCases(
       }));
       score = Math.max(0, ...counterparts.map((row) => row.score));
       aiHint = same.conflictWithRecipe ? "recipe" : "unify";
+    } else if (sameAsPurchase) {
+      const match = sameAsPurchase.candidates.find(
+        (candidate) => candidate.purchase.productId === item.productId,
+      );
+      counterparts = [
+        {
+          item: sameAsPurchase.sold,
+          score: match?.score ?? 0,
+        },
+      ];
+      score = counterparts[0]?.score ?? 0;
+      aiHint = sameAsPurchase.conflictWithRecipe ? "recipe" : "unify";
     } else if (recipe) {
       counterparts = recipe.ingredients.map((ingredient) => ({
         item: ingredient.purchase,
@@ -166,11 +191,19 @@ export function buildCorrelationCases(
       recommendedIntents: recommendIntents(suggestedIntent, available),
       availableIntents: available,
       aiIntent: aiHint && available.includes(aiHint) ? aiHint : null,
+      isUnifyMatch: Boolean(same && isInitialUnifyMatch(same)),
     };
   });
 
   cases.sort((a, b) => {
+    if (a.isUnifyMatch !== b.isUnifyMatch) return a.isUnifyMatch ? -1 : 1;
+    const aPurchase = isPurchaseSetupItem(a.subject);
+    const bPurchase = isPurchaseSetupItem(b.subject);
+    if (aPurchase !== bPurchase) return aPurchase ? 1 : -1;
     if (b.score !== a.score) return b.score - a.score;
+    const amount =
+      itemTurnoverAmount(b.subject) - itemTurnoverAmount(a.subject);
+    if (amount !== 0) return amount;
     const turnover =
       itemTurnoverQty(b.subject) - itemTurnoverQty(a.subject);
     if (turnover !== 0) return turnover;
@@ -184,6 +217,23 @@ export function casesFromQueue(
   result: ProductValidationResult | null,
 ): CorrelationCase[] {
   return buildCorrelationCases(queue.items, result);
+}
+
+/** Matches de unificar no topo; o resto mantém a ordem recebida (vendas, depois compras). */
+export function listCorrelationCases(
+  rows: CorrelationCase[],
+): CorrelationCase[] {
+  const unify: CorrelationCase[] = [];
+  const rest: CorrelationCase[] = [];
+  for (const row of rows) {
+    if (row.isUnifyMatch) unify.push(row);
+    else rest.push(row);
+  }
+  const kindOf = (row: CorrelationCase) => row.subject.kind;
+  return [
+    ...partitionSalesThenPurchases(unify, kindOf),
+    ...partitionSalesThenPurchases(rest, kindOf),
+  ];
 }
 
 export function excludeResolvedCases(

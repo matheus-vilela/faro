@@ -1,13 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { isLockedSystemConversionPair } from "@/lib/companyUnits/convert";
 import {
   buildLockedProductConversionRows,
@@ -181,18 +175,17 @@ export function MergeProductConversionsEditor({
               />
             </div>
           </div>
-          <Select value={secondaryCode} onValueChange={setSecondaryCode}>
-            <SelectTrigger size="sm" className="h-8 w-full">
-              <SelectValue placeholder="Unidade equivalente" />
-            </SelectTrigger>
-            <SelectContent>
-              {secondaryOptions.map((u) => (
-                <SelectItem key={u.code} value={u.code}>
-                  {u.label} ({u.code})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchSelect
+            value={secondaryCode}
+            onValueChange={setSecondaryCode}
+            options={secondaryOptions.map((u) => ({
+              value: u.code,
+              label: `${u.label} (${u.code})`,
+            }))}
+            placeholder="Unidade equivalente"
+            size="sm"
+            triggerClassName="w-full"
+          />
           <div className="flex justify-end gap-2">
             <Button
               type="button"

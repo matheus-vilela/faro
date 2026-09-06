@@ -1,11 +1,5 @@
+import { CorrelationCaseWorkbench } from "@/components/products/correlacao2/CorrelationCaseWorkbench";
 import { ProductCorrelationKpis } from "@/components/products/ProductCorrelationKpis";
-import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
-import { ProductSetupInbox } from "@/components/products/ProductSetupInbox";
-import {
-  RecipeRow,
-  SameItemRow,
-  ValidationMatchListHeader,
-} from "@/components/products/ProductValidationCards";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
@@ -15,38 +9,17 @@ import {
   type CorrelationOnboardingStepStatus,
 } from "@/lib/correlationOnboardingPrereqs";
 import {
-  dashboardImportReviewFinalizeRecipeProductSales,
-  dashboardImportReviewMarkTechSheetSaved,
-} from "@/lib/dashboardImportReview";
-import {
   fetchProductSetupQueue,
-  maxTurnoverQty,
-  type ProductSetupItem,
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
-import {
-  applySoldAsGrouping,
-  applySoldAsProduct,
-  applySoldAsVariant,
-} from "@/lib/productValidation/applySoldRole";
 import { filterValidationToQueue } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
   patchProductValidationSession,
-  samePickIds,
   startProductValidationSession,
   useProductValidationSession,
 } from "@/lib/productValidation/session";
-import {
-  defaultSoldRoleForSameItem,
-  type CorrelationSoldRole,
-} from "@/lib/productValidation/soldRole";
-import type {
-  RecipeSuggestion,
-  SameItemSuggestion,
-} from "@/lib/productValidation/types";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Product } from "@/types/product";
 import {
   AlertCircle,
   AlertTriangle,
@@ -55,30 +28,9 @@ import {
   Loader2,
   Sparkles,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-
-async function fetchProductById(productId: string): Promise<Product | null> {
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("id", productId)
-    .maybeSingle();
-  if (error || !data) return null;
-  return data as Product;
-}
-
-function formatCurrency(v: number): string {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
 function PrerequisiteStatusIcon({
   status,
@@ -178,16 +130,9 @@ function CorrelationIdleCard({
 
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const { currentCompany, refetchCompanies } = useCompany();
-  const { running, result, samePick, soldPick, recipePicks, soldRole, familyPick } =
-    useProductValidationSession(companyId);
+  const { running, result } = useProductValidationSession(companyId);
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [mergeProduct, setMergeProduct] = useState<Product | null>(null);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
-  const mergePartnerQueueRef = useRef<string[]>([]);
-  const continuingMergeRef = useRef(false);
 
   const loadQueue = useCallback(async () => {
     const next = await fetchProductSetupQueue(supabase, companyId);
@@ -231,222 +176,14 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     }));
   };
 
-  const openUnify = async (soldId: string, partnerIds: string[]) => {
-    if (partnerIds.length === 0 || !soldId) return;
-    setBusy(true);
-    const product = await fetchProductById(soldId);
-    setBusy(false);
-    if (!product) {
-      toast.error("Não foi possível carregar o produto do PDV.");
-      return;
-    }
-    setMergeProduct(product);
-    mergePartnerQueueRef.current = partnerIds;
-    setMergePartnerId(partnerIds[0] ?? null);
-    setMergeOpen(true);
-  };
-
-  const confirmSameItem = async (suggestionId: string) => {
-    const suggestion = result?.sameItem.find((row) => row.id === suggestionId);
-    if (!suggestion) return;
-    const partnerIds = samePickIds(samePick, suggestionId);
-    const soldId = soldPick[suggestionId] ?? suggestion.sold.productId;
-    await openUnify(soldId, partnerIds);
-  };
-
-  const addSamePurchase = (suggestionId: string, purchaseId: string) => {
-    if (!purchaseId) return;
-    patchProductValidationSession(companyId, (current) => {
-      const prev = samePickIds(current.samePick, suggestionId);
-      if (prev.includes(purchaseId)) return {};
-      return {
-        samePick: { ...current.samePick, [suggestionId]: [...prev, purchaseId] },
-      };
-    });
-  };
-
-  const removeSamePurchase = (suggestionId: string, purchaseId: string) => {
-    patchProductValidationSession(companyId, (current) => ({
-      samePick: {
-        ...current.samePick,
-        [suggestionId]: samePickIds(current.samePick, suggestionId).filter(
-          (id) => id !== purchaseId,
-        ),
-      },
-    }));
-  };
-
-  const finishSoldRecipe = async (soldId: string) => {
-    await dashboardImportReviewMarkTechSheetSaved(supabase, companyId, soldId);
-    await dashboardImportReviewFinalizeRecipeProductSales(
-      supabase,
-      companyId,
-      soldId,
-    );
-    await reloadAfterConfirm();
-  };
-
-  const resolveSoldItem = (
-    soldId: string,
-    fallback: ProductSetupItem,
-  ): ProductSetupItem =>
-    soldItems.find((item) => item.productId === soldId) ?? fallback;
-
-  const setSoldRole = (suggestionId: string, role: CorrelationSoldRole) => {
-    patchProductValidationSession(companyId, (current) => ({
-      soldRole: { ...current.soldRole, [suggestionId]: role },
-    }));
-  };
-
-  const setFamilyPick = (suggestionId: string, familyId: string) => {
-    patchProductValidationSession(companyId, (current) => ({
-      familyPick: { ...current.familyPick, [suggestionId]: familyId },
-    }));
-  };
-
-  const confirmSoldAsProduct = async (sold: ProductSetupItem) => {
-    setBusy(true);
-    const res = await applySoldAsProduct(supabase, companyId, sold);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error ?? "Não foi possível registrar o produto.");
-      return;
-    }
-    toast.success("Registrado como produto interno, sem unificar.");
-    await reloadAfterConfirm();
-  };
-
-  const confirmSoldAsGrouping = async (
-    sold: ProductSetupItem,
-    purchases: ProductSetupItem[],
-  ) => {
-    setBusy(true);
-    const res = await applySoldAsGrouping(supabase, companyId, sold, purchases);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error ?? "Não foi possível tornar agrupamento.");
-      return;
-    }
-    toast.success(
-      purchases.length > 0
-        ? "Agrupamento confirmado. As compras da nota viraram variantes."
-        : "Este item agora é o agrupamento.",
-    );
-    await reloadAfterConfirm();
-  };
-
-  const confirmSoldAsVariant = async (
-    sold: ProductSetupItem,
-    familyId: string,
-    newFamilyName = "",
-  ) => {
-    if (!familyId && !newFamilyName.trim()) return;
-    setBusy(true);
-    const res = await applySoldAsVariant(
-      supabase,
-      companyId,
-      sold,
-      familyId,
-      newFamilyName,
-    );
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error ?? "Não foi possível vincular ao agrupamento.");
-      return;
-    }
-    toast.success(
-      familyId
-        ? "Produto ligado ao agrupamento. Continua no cadastro."
-        : "Agrupamento cadastrado e produto ligado como variante.",
-    );
-    await reloadAfterConfirm();
-  };
-
-  const confirmRows = useMemo(() => {
-    if (!result) return [];
-    const rows: Array<
-      | {
-          kind: "same";
-          id: string;
-          turnover: number;
-          suggestion: SameItemSuggestion;
-        }
-      | {
-          kind: "recipe";
-          id: string;
-          turnover: number;
-          suggestion: RecipeSuggestion;
-        }
-    > = [];
-    for (const row of result.sameItem) {
-      if (row.band !== "high") continue;
-      rows.push({
-        kind: "same",
-        id: row.id,
-        turnover: maxTurnoverQty(
-          row.sold,
-          ...row.candidates.map((c) => c.purchase),
-        ),
-        suggestion: row,
-      });
-    }
-    for (const row of result.recipes) {
-      if (row.band !== "high") continue;
-      rows.push({
-        kind: "recipe",
-        id: row.id,
-        turnover: maxTurnoverQty(
-          row.sold,
-          ...row.ingredients.map((i) => i.purchase),
-        ),
-        suggestion: row,
-      });
-    }
-    rows.sort(
-      (a, b) => b.turnover - a.turnover || a.id.localeCompare(b.id, "pt-BR"),
-    );
-    return rows;
-  }, [result]);
-
-  const soldItems = useMemo(
-    () =>
-      (queue?.items ?? []).filter(
-        (item) =>
-          item.kind === "sold_unlinked" ||
-          item.kind === "recipe_without_ingredients",
-      ),
-    [queue],
-  );
-  const purchaseItems = useMemo(
-    () =>
-      (queue?.items ?? []).filter((item) => item.kind === "purchase_unlinked"),
-    [queue],
-  );
-
-  const residualKeys = useMemo(() => {
-    if (!queue || !result) return [];
-    const covered = new Set<string>();
-    for (const row of confirmRows) {
-      if (row.kind === "same") {
-        const soldId = soldPick[row.id] ?? row.suggestion.sold.productId;
-        if (soldId) covered.add(soldId);
-        for (const purchaseId of samePickIds(samePick, row.id)) {
-          covered.add(purchaseId);
-        }
-      } else {
-        covered.add(row.suggestion.sold.productId);
-        for (const id of recipePicks[row.id] ?? []) covered.add(id);
-      }
-    }
-    return queue.items
-      .filter((item) => !covered.has(item.productId))
-      .map((item) => item.key);
-  }, [queue, result, confirmRows, soldPick, samePick, recipePicks]);
+  const inboxItemCount = queue?.items.length ?? 0;
 
   const fiscalStatus = correlationFiscalStepStatus(
     currentCompany?.onboarding_fiscal,
   );
+
   const pdvStatus = correlationPdvStepStatus(currentCompany?.onboarding_pdv);
+
   const canStart = correlationOnboardingCanStart(
     currentCompany?.onboarding_fiscal,
     currentCompany?.onboarding_pdv,
@@ -570,24 +307,20 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
 
   if (!result) return null;
 
-  const hasConfirm = confirmRows.length > 0;
-  const hasResidual = residualKeys.length > 0;
+  const hasInbox = inboxItemCount > 0;
 
   return wrap(
     <div className="space-y-6">
       <div className="rounded-xl border border-border/80 bg-card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold">Sugestões para confirmar</p>
+            <p className="text-sm font-semibold">
+              {inboxItemCount.toLocaleString("pt-BR")}{" "}
+              {inboxItemCount === 1 ? "item na fila" : "itens na fila"}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {result.stats.sameItem} vínculo
-              {result.stats.sameItem === 1 ? "" : "s"} compra ↔ venda e{" "}
-              {result.stats.recipes} ficha
-              {result.stats.recipes === 1 ? "" : "s"} com 90% ou mais. Diga o que
-              o vendido é: produto, ficha, agrupamento ou variante. Unificar só
-              vale entre produtos. Os demais (
-              {result.stats.residual.toLocaleString("pt-BR")}) vão para correção.
-              Nada é gravado até você confirmar.
+              Diga o que é cada item. Pares iguais já vêm como unificar. Nada é
+              gravado até você confirmar a ação.
             </p>
           </div>
           <Button
@@ -601,217 +334,16 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
         </div>
       </div>
 
-      {!hasConfirm && !hasResidual ? (
+      {!hasInbox ? (
         <p className="text-sm text-muted-foreground">
           Nada pendente depois desta leitura.
         </p>
-      ) : null}
-
-      {hasConfirm ? (
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold">Configurar o vendido (≥ 90%)</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              À esquerda, o que o vendido é. A direita muda com o papel:
-              unificar com a nota, montar a ficha (busca, quantidade e
-              unidade), virar agrupamento ou só produto interno.
-            </p>
-          </div>
-          <ValidationMatchListHeader />
-          <ul className="space-y-2">
-            {confirmRows.map((row) => {
-              if (row.kind === "recipe") {
-                const recipePurchaseIds =
-                  recipePicks[row.id] ??
-                  row.suggestion.ingredients.map(
-                    (ingredient) => ingredient.purchase.productId,
-                  );
-                const recipePurchases = row.suggestion.ingredients
-                  .filter((ingredient) =>
-                    recipePurchaseIds.includes(ingredient.purchase.productId),
-                  )
-                  .map((ingredient) => ingredient.purchase);
-                return (
-                  <RecipeRow
-                    key={row.id}
-                    companyId={companyId}
-                    suggestion={row.suggestion}
-                    selectedIngredientIds={new Set(recipePicks[row.id] ?? [])}
-                    role={soldRole[row.id] ?? "recipe"}
-                    onRoleChange={(role) => setSoldRole(row.id, role)}
-                    familyId={familyPick[row.id] ?? ""}
-                    onFamilyChange={(id) => setFamilyPick(row.id, id)}
-                    onUnify={() =>
-                      void openUnify(
-                        row.suggestion.sold.productId,
-                        recipePicks[row.id] ?? [],
-                      )
-                    }
-                    onConfirmProduct={() =>
-                      void confirmSoldAsProduct(row.suggestion.sold)
-                    }
-                    onConfirmGrouping={() =>
-                      void confirmSoldAsGrouping(
-                        row.suggestion.sold,
-                        recipePurchases,
-                      )
-                    }
-                    onConfirmVariant={(name) =>
-                      void confirmSoldAsVariant(
-                        row.suggestion.sold,
-                        familyPick[row.id] ?? "",
-                        name,
-                      )
-                    }
-                    onRecipeSaved={() =>
-                      void finishSoldRecipe(row.suggestion.sold.productId)
-                    }
-                    busy={busy}
-                  />
-                );
-              }
-              const currentSoldId =
-                soldPick[row.id] ?? row.suggestion.sold.productId;
-              const currentPurchaseIds = samePickIds(samePick, row.id);
-              const takenSolds = new Set<string>();
-              const takenPurchases = new Set<string>();
-              for (const other of confirmRows) {
-                if (other.kind === "same" && other.id !== row.id) {
-                  takenSolds.add(
-                    soldPick[other.id] ?? other.suggestion.sold.productId,
-                  );
-                  for (const purchaseId of samePickIds(samePick, other.id)) {
-                    takenPurchases.add(purchaseId);
-                  }
-                }
-                if (other.kind === "recipe") {
-                  takenSolds.add(other.suggestion.sold.productId);
-                  for (const id of recipePicks[other.id] ?? []) {
-                    takenPurchases.add(id);
-                  }
-                }
-              }
-              const currentSold = resolveSoldItem(
-                currentSoldId,
-                row.suggestion.sold,
-              );
-              const currentPurchases = currentPurchaseIds
-                .map(
-                  (id) =>
-                    purchaseItems.find((item) => item.productId === id) ??
-                    row.suggestion.candidates.find(
-                      (candidate) => candidate.purchase.productId === id,
-                    )?.purchase,
-                )
-                .filter((item): item is ProductSetupItem => Boolean(item));
-              return (
-                <SameItemRow
-                  key={row.id}
-                  companyId={companyId}
-                  suggestion={row.suggestion}
-                  selectedPurchaseIds={currentPurchaseIds}
-                  onAddPurchase={(id) => addSamePurchase(row.id, id)}
-                  onRemovePurchase={(id) => removeSamePurchase(row.id, id)}
-                  selectedSoldId={currentSoldId}
-                  onSelectSold={(id) =>
-                    patchProductValidationSession(companyId, (current) => ({
-                      soldPick: { ...current.soldPick, [row.id]: id },
-                    }))
-                  }
-                  purchaseChoices={[
-                    ...row.suggestion.candidates.map(
-                      (candidate) => candidate.purchase,
-                    ),
-                    ...purchaseItems,
-                  ].filter(
-                    (item, index, list) =>
-                      list.findIndex((other) => other.productId === item.productId) ===
-                        index &&
-                      (currentPurchaseIds.includes(item.productId) ||
-                        !takenPurchases.has(item.productId)),
-                  )}
-                  soldChoices={soldItems.filter(
-                    (item) =>
-                      item.productId === currentSoldId ||
-                      !takenSolds.has(item.productId),
-                  )}
-                  role={
-                    soldRole[row.id] ??
-                    defaultSoldRoleForSameItem(row.suggestion.conflictWithRecipe)
-                  }
-                  onRoleChange={(role) => setSoldRole(row.id, role)}
-                  familyId={familyPick[row.id] ?? ""}
-                  onFamilyChange={(id) => setFamilyPick(row.id, id)}
-                  onConfirm={() => void confirmSameItem(row.id)}
-                  onConfirmProduct={() => void confirmSoldAsProduct(currentSold)}
-                  onConfirmGrouping={() =>
-                    void confirmSoldAsGrouping(currentSold, currentPurchases)
-                  }
-                  onConfirmVariant={(name) =>
-                    void confirmSoldAsVariant(
-                      currentSold,
-                      familyPick[row.id] ?? "",
-                      name,
-                    )
-                  }
-                  onRecipeSaved={() => void finishSoldRecipe(currentSold.productId)}
-                  busy={busy}
-                />
-              );
-            })}
-          </ul>
-        </section>
-      ) : null}
-
-      {hasResidual && queue ? (
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold">Para corrigir</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Abaixo de 90% ou sem par. Filtre e diga o que é: produto, ficha,
-              intermediário, agrupamento ou unificar.
-            </p>
-          </div>
-          <ProductSetupInbox
-            companyId={companyId}
-            queue={queue}
-            onlyKeys={residualKeys}
-            compact
-            onResolved={() => void reloadAfterConfirm()}
-          />
-        </section>
-      ) : null}
-
-      {mergeProduct ? (
-        <ProductMergeDialog
-          open={mergeOpen}
-          onOpenChange={(open) => {
-            setMergeOpen(open);
-            if (!open && !continuingMergeRef.current) {
-              mergePartnerQueueRef.current = [];
-            }
-          }}
+      ) : queue ? (
+        <CorrelationCaseWorkbench
           companyId={companyId}
-          sourceProduct={mergeProduct}
-          formatCurrency={formatCurrency}
-          initialPartnerId={mergePartnerId}
-          initialSurvivorIsSource
-          onMerged={() => {
-            const remaining = mergePartnerQueueRef.current.slice(1);
-            mergePartnerQueueRef.current = remaining;
-            if (remaining[0]) {
-              continuingMergeRef.current = true;
-              setMergePartnerId(remaining[0]);
-              setMergeOpen(false);
-              window.setTimeout(() => {
-                continuingMergeRef.current = false;
-                setMergeOpen(true);
-              }, 0);
-              return;
-            }
-            setMergeOpen(false);
-            void reloadAfterConfirm();
-          }}
+          queue={queue}
+          result={result}
+          onResolved={() => void reloadAfterConfirm()}
         />
       ) : null}
     </div>,

@@ -28,13 +28,6 @@ import {
   supplierSearchOption,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -1484,49 +1477,42 @@ export function Despesas() {
             }
             className="h-8 w-[9.5rem]"
           />
-          <Select
+          <SearchSelect
             value={boletoFilter}
             onValueChange={(v) => setBoletoFilter(v as NotasBoletoFilter)}
-          >
-            <SelectTrigger size="sm" className="w-[8.5rem]">
-              <SelectValue placeholder="Boleto" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Boleto: todos</SelectItem>
-              <SelectItem value="with">Com boleto</SelectItem>
-              <SelectItem value="without">Sem boleto</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
+            placeholder="Boleto"
+            size="sm"
+            triggerClassName="w-[8.5rem]"
+            options={[
+              { value: "all", label: "Boleto: todos" },
+              { value: "with", label: "Com boleto" },
+              { value: "without", label: "Sem boleto" },
+            ]}
+          />
+          <SearchSelect
             value={origemFilter}
             onValueChange={(v) => setOrigemFilter(v as NotasOrigemFilter)}
-          >
-            <SelectTrigger size="sm" className="w-[8.5rem]">
-              <SelectValue placeholder="Origem" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Origem: todas</SelectItem>
-              <SelectItem value="whatsapp">WhatsApp</SelectItem>
-              <SelectItem value="manual">Plataforma</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
+            placeholder="Origem"
+            size="sm"
+            triggerClassName="w-[8.5rem]"
+            options={[
+              { value: "all", label: "Origem: todas" },
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "manual", label: "Plataforma" },
+            ]}
+          />
+          <SearchSelect
             value={atencaoFilter}
             onValueChange={(v) => setAtencaoFilter(v as NotasAtencaoFilter)}
-          >
-            <SelectTrigger size="sm" className="w-[10.5rem]">
-              <SelectValue placeholder="Atenção" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Atenção: todas</SelectItem>
-              <SelectItem value="unlinked_product">
-                Produto sem vínculo
-              </SelectItem>
-              <SelectItem value="value_risk">
-                Divergência de valores
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            placeholder="Atenção"
+            size="sm"
+            triggerClassName="w-[10.5rem]"
+            options={[
+              { value: "all", label: "Atenção: todas" },
+              { value: "unlinked_product", label: "Produto sem vínculo" },
+              { value: "value_risk", label: "Divergência de valores" },
+            ]}
+          />
           <label
             htmlFor="filter-pending-approval"
             className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-input px-2 text-xs text-muted-foreground"
@@ -1841,19 +1827,16 @@ export function Despesas() {
               <>
                 <div>
                   <Label>Tipo</Label>
-                  <Select
+                  <SearchSelect
                     value={type}
                     onValueChange={(v) => setType(v as ExpenseType)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nota_fiscal">Nota fiscal</SelectItem>
-                      <SelectItem value="romaneio">Romaneio</SelectItem>
-                      <SelectItem value="recibo">Recibo</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    triggerClassName="w-full"
+                    options={[
+                      { value: "nota_fiscal", label: "Nota fiscal" },
+                      { value: "romaneio", label: "Romaneio" },
+                      { value: "recibo", label: "Recibo" },
+                    ]}
+                  />
                 </div>
 
                 <div>
@@ -2063,7 +2046,7 @@ export function Despesas() {
                         {it.product_id && (
                           <div>
                             <Label className="text-xs">Unidade de medida</Label>
-                            <Select
+                            <SearchSelect
                               value={it.invoice_unit ?? "__none__"}
                               onValueChange={(v) =>
                                 updateItem(i, {
@@ -2071,26 +2054,14 @@ export function Despesas() {
                                     v === "__none__" ? undefined : v,
                                 })
                               }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Selecione a unidade" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">
-                                  Selecione
-                                </SelectItem>
-                                {allowedUnitsForProduct(it.product_id).map(
-                                  (u) => (
-                                    <SelectItem
-                                      key={`${it.product_id}-${u}`}
-                                      value={u}
-                                    >
-                                      {u}
-                                    </SelectItem>
-                                  ),
-                                )}
-                              </SelectContent>
-                            </Select>
+                              placeholder="Selecione a unidade"
+                              options={[
+                                { value: "__none__", label: "Selecione" },
+                                ...allowedUnitsForProduct(it.product_id).map(
+                                  (u) => ({ value: u, label: u }),
+                                ),
+                              ]}
+                            />
                           </div>
                         )}
                       </div>
@@ -2241,23 +2212,16 @@ export function Despesas() {
           </DialogHeader>
           <div>
             <Label>Boleto</Label>
-            <Select
+            <SearchSelect
               value={selectedBoletoId}
               onValueChange={setSelectedBoletoId}
-            >
-              <SelectTrigger className="w-full mt-2">
-                <SelectValue placeholder="Selecione um boleto" />
-              </SelectTrigger>
-              <SelectContent>
-                {unlinkedBoletos.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    [{formatBoletoCategoryLabel(b, categoriesById)}]{" "}
-                    {b.description} - {formatCurrency(b.amount)} (venc.{" "}
-                    {formatDate(b.due_date)})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Selecione um boleto"
+              triggerClassName="w-full mt-2"
+              options={unlinkedBoletos.map((b) => ({
+                value: b.id,
+                label: `[${formatBoletoCategoryLabel(b, categoriesById)}] ${b.description} - ${formatCurrency(b.amount)} (venc. ${formatDate(b.due_date)})`,
+              }))}
+            />
             {unlinkedBoletos.length === 0 && (
               <p className="text-sm text-muted-foreground mt-2">
                 Não há contas a pagar disponíveis. Cadastre no Fluxo de Caixa.

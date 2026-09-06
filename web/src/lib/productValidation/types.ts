@@ -54,6 +54,11 @@ export type ProductValidationResult = {
   };
 };
 
+/** Match do bloco inicial: mesmo produto, sem sinal de ficha. */
+export function isInitialUnifyMatch(row: SameItemSuggestion): boolean {
+  return row.band === "high" && !row.conflictWithRecipe;
+}
+
 export const VALIDATION_HIGH_MIN = 90;
 export const VALIDATION_REVIEW_MIN = 55;
 export const VALIDATION_INGREDIENT_MIN = 70;

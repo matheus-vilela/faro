@@ -1,13 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -486,36 +480,25 @@ export function CreateSupplierSheet({
                 </div>
                 <div className="mt-4">
                   <Label className="text-xs">Tipo de conta</Label>
-                  <Select value={accountType} onValueChange={setAccountType}>
-                    <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ACCOUNT_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchSelect
+                    value={accountType}
+                    onValueChange={setAccountType}
+                    options={ACCOUNT_TYPES}
+                    triggerClassName={PRODUCT_SHEET_SELECT}
+                  />
                 </div>
                 <div className="mt-4 border-t border-border pt-4">
                   <Label className="text-xs font-medium">PIX</Label>
                   <div className="mt-2 flex flex-col gap-4 sm:flex-row">
                     <div className="sm:w-44">
                       <Label className="text-xs">Tipo da chave</Label>
-                      <Select value={pixType} onValueChange={setPixType}>
-                        <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                          <SelectValue placeholder="Tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PIX_TYPES.map((t) => (
-                            <SelectItem key={t.value} value={t.value}>
-                              {t.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <SearchSelect
+                        value={pixType}
+                        onValueChange={setPixType}
+                        options={PIX_TYPES}
+                        placeholder="Tipo"
+                        triggerClassName={PRODUCT_SHEET_SELECT}
+                      />
                     </div>
                     <div className="flex-1">
                       <Label className="text-xs">Chave PIX</Label>

@@ -18,13 +18,6 @@ import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
 import { ExportButton, HeaderExportActions } from "@/components/reports/ExportButton";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   applyStockMovementClassificationFilter,
   MOVEMENT_CLASSIFICATION_FILTER_OPTIONS,
   movementClassificationDisplayLabel,
@@ -466,43 +459,31 @@ export function EstoqueMovimentacoesPanel({
           </div>
           <div className="w-full min-w-[150px] max-w-[200px] space-y-1.5 sm:w-auto">
             <Label className="text-xs text-muted-foreground">Tipo</Label>
-            <Select
+            <SearchSelect
               value={directionFilter}
               onValueChange={(v) =>
                 setDirectionFilter(v as MovementDirectionFilter)
               }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="in">Entrada</SelectItem>
-                <SelectItem value="out">Saída</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "all", label: "Todos" },
+                { value: "in", label: "Entrada" },
+                { value: "out", label: "Saída" },
+              ]}
+              triggerClassName="w-full"
+            />
           </div>
           <div className="w-full min-w-[150px] max-w-[220px] space-y-1.5 sm:w-auto">
             <Label className="text-xs text-muted-foreground">
               Classificação
             </Label>
-            <Select
+            <SearchSelect
               value={classificationFilter}
               onValueChange={(v) =>
                 setClassificationFilter(v as MovementClassificationFilter)
               }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MOVEMENT_CLASSIFICATION_FILTER_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={MOVEMENT_CLASSIFICATION_FILTER_OPTIONS}
+              triggerClassName="w-full"
+            />
           </div>
           {hasActiveFilters ? (
             <Button

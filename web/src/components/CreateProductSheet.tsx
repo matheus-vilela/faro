@@ -1,15 +1,14 @@
-import { ProductUnitConversionsSection } from '@/components/products/ProductUnitConversionsSection'
+import { ProductCategoryTagsField } from "@/components/products/ProductCategoryTagsField";
+import { ProductUnitConversionsSection } from "@/components/products/ProductUnitConversionsSection";
 import {
   PRODUCT_SHEET_INPUT,
   PRODUCT_SHEET_SECTION,
   PRODUCT_SHEET_SELECT,
-} from '@/components/products/productSheetStyles'
-import { ProductCategoryTagsField } from '@/components/products/ProductCategoryTagsField'
-import { composesCmvFromCatalogNames } from '@/lib/companyProductCategories/catalogSeed'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { SearchSelect } from '@/components/ui/search-select'
+} from "@/components/products/productSheetStyles";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -17,56 +16,38 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-} from '@/components/ui/sheet'
+} from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
+import { composesCmvFromCatalogNames } from "@/lib/companyProductCategories/catalogSeed";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import {
-  getLockedSystemSecondaryQty,
-  convertUnitPriceForProduct,
   convertQuantityForProduct,
+  convertUnitPriceForProduct,
+  getLockedSystemSecondaryQty,
   rebaseProductConversionsToHub,
-} from '@/lib/companyUnits/convert'
-import { sanitizeCatalogProductName } from '@/lib/productImport/canonicalName'
+} from "@/lib/companyUnits/convert";
 import {
   defaultProductStockUnitCode,
   getSystemProductUnitSelectOptionsWithLegacy,
-} from '@/lib/companyUnits/productUnitOptions'
-import { supabase } from '@/lib/supabase'
-import type { CompanyProductCategory } from '@/types/companyProductCategory'
-import type { Product } from '@/types/product'
-import {
-  prepareProductUnitConversionsForPersist,
-} from '@/lib/productUnitConversionsService'
-import { toProductUnitConversionsJson } from '@/lib/productUnitConversionsJson'
-import type { ProductUnitConversionDraft } from '@/types/productUnitConversion'
-import { Package, Plus } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
-
-function generateRandomSku(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let result = 'SKU-'
-  const array = new Uint8Array(8)
-  crypto.getRandomValues(array)
-  for (let i = 0; i < 8; i++) {
-    result += chars[array[i]! % chars.length]
-  }
-  return result
-}
+} from "@/lib/companyUnits/productUnitOptions";
+import { generateProductSku } from "@/lib/createCatalogProduct";
+import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
+import { toProductUnitConversionsJson } from "@/lib/productUnitConversionsJson";
+import { prepareProductUnitConversionsForPersist } from "@/lib/productUnitConversionsService";
+import { supabase } from "@/lib/supabase";
+import type { CompanyProductCategory } from "@/types/companyProductCategory";
+import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
+import { Package, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 interface CreateProductSheetProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  companyId: string
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  companyId: string;
   /** Nome sugerido ao abrir (ex.: termo da busca no seletor de insumos). */
-  defaultName?: string
-  onSuccess?: (product: Product) => void
+  defaultName?: string;
+  onSuccess?: (product: Product) => void;
 }
 
 export function CreateProductSheet({
@@ -77,118 +58,128 @@ export function CreateProductSheet({
   onSuccess,
 }: CreateProductSheetProps) {
   const roundUnitPrice = (value: number) =>
-    Math.round((value + Number.EPSILON) * 1e8) / 1e8
+    Math.round((value + Number.EPSILON) * 1e8) / 1e8;
   const formatCurrencyInput = (raw: string) => {
-    const digits = raw.replace(/\D/g, '')
-    if (!digits) return ''
-    const cents = Number(digits) / 100
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    const cents = Number(digits) / 100;
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(cents)
-  }
+    }).format(cents);
+  };
   const parseCurrencyInput = (raw: string): number | null => {
-    const digits = raw.replace(/\D/g, '')
-    if (!digits) return null
-    return Number(digits) / 100
-  }
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return null;
+    return Number(digits) / 100;
+  };
 
-  const [name, setName] = useState('')
-  const [sku, setSku] = useState('')
-  const [unit, setUnit] = useState('un')
-  const [minQuantity, setMinQuantity] = useState('')
-  const [currentQuantity, setCurrentQuantity] = useState('')
-  const [lastUnitValue, setLastUnitValue] = useState('')
-  const [lastUnitValueUnitCode, setLastUnitValueUnitCode] = useState('un')
-  const [barcode, setBarcode] = useState('')
-  const [composesCmv, setComposesCmv] = useState(true)
+  const [name, setName] = useState("");
+  const [sku, setSku] = useState("");
+  const [unit, setUnit] = useState("un");
+  const [minQuantity, setMinQuantity] = useState("");
+  const [currentQuantity, setCurrentQuantity] = useState("");
+  const [lastUnitValue, setLastUnitValue] = useState("");
+  const [lastUnitValueUnitCode, setLastUnitValueUnitCode] = useState("un");
+  const [barcode, setBarcode] = useState("");
+  const [composesCmv, setComposesCmv] = useState(true);
   const [companyProductCategories, setCompanyProductCategories] = useState<
     CompanyProductCategory[]
-  >([])
-  const [productCategoryIds, setProductCategoryIds] = useState<string[]>([])
+  >([]);
+  const [productCategoryIds, setProductCategoryIds] = useState<string[]>([]);
   const [pendingConversions, setPendingConversions] = useState<
     ProductUnitConversionDraft[]
-  >([])
-  const [loading, setLoading] = useState(false)
+  >([]);
+  const [loading, setLoading] = useState(false);
 
   const loadCompanyProductCategories = useCallback(async () => {
-    if (!companyId) return
+    if (!companyId) return;
     const { data, error } = await supabase
-      .from('company_product_categories')
-      .select('*')
-      .eq('company_id', companyId)
-      .order('name', { ascending: true })
+      .from("company_product_categories")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true });
     if (error) {
-      console.error(error)
-      setCompanyProductCategories([])
-      return
+      console.error(error);
+      setCompanyProductCategories([]);
+      return;
     }
-    setCompanyProductCategories((data ?? []) as CompanyProductCategory[])
-  }, [companyId])
+    setCompanyProductCategories((data ?? []) as CompanyProductCategory[]);
+  }, [companyId]);
 
   useEffect(() => {
-    if (!open || !companyId) return
-    void loadCompanyProductCategories()
-    setUnit(defaultProductStockUnitCode())
-    setLastUnitValueUnitCode(defaultProductStockUnitCode())
-    setComposesCmv(true)
-    setPendingConversions([])
-    const suggested = defaultName?.trim()
+    if (!open || !companyId) return;
+    void loadCompanyProductCategories();
+    setUnit(defaultProductStockUnitCode());
+    setLastUnitValueUnitCode(defaultProductStockUnitCode());
+    setComposesCmv(true);
+    setPendingConversions([]);
+    const suggested = defaultName?.trim();
     if (suggested) {
-      setName(sanitizeCatalogProductName(suggested) || suggested)
+      setName(sanitizeCatalogProductName(suggested) || suggested);
     } else {
-      setName('')
+      setName("");
     }
-    setSku('')
-    setMinQuantity('')
-    setCurrentQuantity('')
-    setLastUnitValue('')
-    setBarcode('')
-    setProductCategoryIds([])
-  }, [open, companyId, defaultName, loadCompanyProductCategories])
+    setSku("");
+    setMinQuantity("");
+    setCurrentQuantity("");
+    setLastUnitValue("");
+    setBarcode("");
+    setProductCategoryIds([]);
+  }, [open, companyId, defaultName, loadCompanyProductCategories]);
 
   const unitOptions = useMemo(
     () => getSystemProductUnitSelectOptionsWithLegacy(unit),
     [unit],
-  )
+  );
   const lastUnitValueUnitOptions = useMemo(() => {
-    const allowed = new Set<string>([unit])
+    const allowed = new Set<string>([unit]);
     for (const r of pendingConversions) {
-      if (r.primary_unit_code.trim().toLowerCase() === unit.trim().toLowerCase()) {
-        allowed.add(r.secondary_unit_code)
+      if (
+        r.primary_unit_code.trim().toLowerCase() === unit.trim().toLowerCase()
+      ) {
+        allowed.add(r.secondary_unit_code);
       }
     }
-    for (const candidate of ['mg', 'g', 'kg', 'ml', 'l']) {
-      if (candidate.toLowerCase() === unit.trim().toLowerCase()) continue
+    for (const candidate of ["mg", "g", "kg", "ml", "l"]) {
+      if (candidate.toLowerCase() === unit.trim().toLowerCase()) continue;
       if (getLockedSystemSecondaryQty(1, unit, candidate) != null) {
-        allowed.add(candidate)
+        allowed.add(candidate);
       }
     }
-    const base = getSystemProductUnitSelectOptionsWithLegacy(lastUnitValueUnitCode)
-    return base.filter((o) => allowed.has(o.value))
-  }, [lastUnitValueUnitCode, pendingConversions, unit])
+    const base = getSystemProductUnitSelectOptionsWithLegacy(
+      lastUnitValueUnitCode,
+    );
+    return base.filter((o) => allowed.has(o.value));
+  }, [lastUnitValueUnitCode, pendingConversions, unit]);
 
   const handleUnitChange = (next: string) => {
-    const prev = unit
-    if (prev === next) return
-    const raw = minQuantity.trim().replace(/\s/g, '').replace(',', '.')
-    const m = parseFloat(raw)
-    const mOk = raw !== '' && Number.isFinite(m) && m >= 0
+    const prev = unit;
+    if (prev === next) return;
+    const raw = minQuantity.trim().replace(/\s/g, "").replace(",", ".");
+    const m = parseFloat(raw);
+    const mOk = raw !== "" && Number.isFinite(m) && m >= 0;
     const convRows = pendingConversions.map((r) => ({
       primary_unit_code: r.primary_unit_code,
       secondary_unit_code: r.secondary_unit_code,
       primary_qty: Number(r.primary_qty),
       secondary_qty: Number(r.secondary_qty),
-    }))
+    }));
     const cm = mOk
       ? convertQuantityForProduct(m, prev, next, prev, convRows)
-      : null
-    const rebasedConversions = rebaseProductConversionsToHub(convRows, prev, next)
-    setUnit(next)
+      : null;
+    const rebasedConversions = rebaseProductConversionsToHub(
+      convRows,
+      prev,
+      next,
+    );
+    setUnit(next);
     if (pendingConversions.length > 0 && rebasedConversions.length === 0) {
-      toast.message('Não foi possível reaproveitar as conversões com a nova unidade.')
+      toast.message(
+        "Não foi possível reaproveitar as conversões com a nova unidade.",
+      );
     }
     setPendingConversions(
       rebasedConversions.map((r) => ({
@@ -198,23 +189,23 @@ export function CreateProductSheet({
         secondary_qty: r.secondary_qty,
         secondary_unit_code: r.secondary_unit_code,
       })),
-    )
+    );
     if (cm != null) {
-      setMinQuantity(String(cm))
+      setMinQuantity(String(cm));
     }
-  }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const catalogName = sanitizeCatalogProductName(name)
-    if (!companyId || !catalogName) return
-    setLoading(true)
-    const finalSku = sku.trim() || generateRandomSku()
-    const parsedLast = parseCurrencyInput(lastUnitValue)
+    e.preventDefault();
+    const catalogName = sanitizeCatalogProductName(name);
+    if (!companyId || !catalogName) return;
+    setLoading(true);
+    const finalSku = sku.trim() || generateProductSku();
+    const parsedLast = parseCurrencyInput(lastUnitValue);
     const lastUnitValueToSave =
       parsedLast != null && !Number.isNaN(parsedLast) && parsedLast >= 0
         ? parsedLast
-        : null
+        : null;
     const lastUnitValueStockToSave =
       lastUnitValueToSave != null
         ? roundUnitPrice(
@@ -231,7 +222,7 @@ export function CreateProductSheet({
               })),
             ) ?? lastUnitValueToSave,
           )
-        : null
+        : null;
     const toPersistConversions =
       pendingConversions.length > 0
         ? prepareProductUnitConversionsForPersist(
@@ -239,24 +230,24 @@ export function CreateProductSheet({
             pendingConversions.map((r) => ({
               ...r,
               company_id: companyId,
-              product_id: '',
+              product_id: "",
             })),
           )
-        : []
+        : [];
     const selectedCats = companyProductCategories.filter((c) =>
       productCategoryIds.includes(c.id),
-    )
+    );
     const dreId = selectedCats
       .map((c) => c.default_dre_category_id)
-      .find((id) => Boolean(id))
+      .find((id) => Boolean(id));
     const { data, error } = await supabase
-      .from('products')
+      .from("products")
       .insert({
         company_id: companyId,
         name: catalogName,
         sku: finalSku,
         unit,
-        min_quantity: parseFloat(minQuantity || '0') || 0,
+        min_quantity: parseFloat(minQuantity || "0") || 0,
         current_quantity: parseFloat(currentQuantity || "0") || 0,
         barcode: barcode.trim() || null,
         composes_cmv: composesCmv,
@@ -272,46 +263,46 @@ export function CreateProductSheet({
           : {}),
       })
       .select()
-      .single()
+      .single();
     if (error) {
-      console.error(error)
-      setLoading(false)
-      return
+      console.error(error);
+      setLoading(false);
+      return;
     }
-    const product = data as Product
+    const product = data as Product;
     if (productCategoryIds.length > 0) {
       const { error: linkErr } = await supabase
-        .from('product_category_assignments')
+        .from("product_category_assignments")
         .insert(
           productCategoryIds.map((category_id) => ({
             company_id: companyId,
             product_id: product.id,
             category_id,
           })),
-        )
+        );
       if (linkErr) {
-        console.error(linkErr)
-        setLoading(false)
-        return
+        console.error(linkErr);
+        setLoading(false);
+        return;
       }
     }
-    setLoading(false)
-    setName('')
-    setSku('')
-    setUnit(defaultProductStockUnitCode())
-    setLastUnitValueUnitCode(defaultProductStockUnitCode())
-    setMinQuantity('')
-    setCurrentQuantity('')
-    setLastUnitValue('')
-    setBarcode('')
-    setComposesCmv(true)
-    setProductCategoryIds([])
-    setPendingConversions([])
-    onOpenChange(false)
-    onSuccess?.(product)
-  }
+    setLoading(false);
+    setName("");
+    setSku("");
+    setUnit(defaultProductStockUnitCode());
+    setLastUnitValueUnitCode(defaultProductStockUnitCode());
+    setMinQuantity("");
+    setCurrentQuantity("");
+    setLastUnitValue("");
+    setBarcode("");
+    setComposesCmv(true);
+    setProductCategoryIds([]);
+    setPendingConversions([]);
+    onOpenChange(false);
+    onSuccess?.(product);
+  };
 
-  const canSubmit = !!name.trim() && !loading
+  const canSubmit = !!name.trim() && !loading;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -335,10 +326,7 @@ export function CreateProductSheet({
           </div>
         </SheetHeader>
 
-        <form
-          onSubmit={handleSubmit}
-          className="flex min-h-0 flex-1 flex-col"
-        >
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
             <div className="space-y-4 p-6">
               <div className={PRODUCT_SHEET_SECTION}>
@@ -406,15 +394,15 @@ export function CreateProductSheet({
                   categories={companyProductCategories}
                   selectedIds={productCategoryIds}
                   onChange={(ids) => {
-                    setProductCategoryIds(ids)
+                    setProductCategoryIds(ids);
                     const names = ids
                       .map(
                         (id) =>
                           companyProductCategories.find((c) => c.id === id)
                             ?.name,
                       )
-                      .filter((n): n is string => Boolean(n))
-                    setComposesCmv(composesCmvFromCatalogNames(names))
+                      .filter((n): n is string => Boolean(n));
+                    setComposesCmv(composesCmvFromCatalogNames(names));
                   }}
                   onCategoriesChange={() => void loadCompanyProductCategories()}
                   disabled={loading}
@@ -463,21 +451,12 @@ export function CreateProductSheet({
                   </div>
                   <div>
                     <Label>Unidade do valor</Label>
-                    <Select
+                    <SearchSelect
                       value={lastUnitValueUnitCode}
                       onValueChange={setLastUnitValueUnitCode}
-                    >
-                      <SelectTrigger className={PRODUCT_SHEET_SELECT}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {lastUnitValueUnitOptions.map((u) => (
-                          <SelectItem key={u.value} value={u.value}>
-                            {u.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={lastUnitValueUnitOptions}
+                      triggerClassName={PRODUCT_SHEET_SELECT}
+                    />
                   </div>
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     Referência manual por {lastUnitValueUnitCode}. O sistema
@@ -505,7 +484,9 @@ export function CreateProductSheet({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="create-min">Quantidade mínima (alerta)</Label>
+                    <Label htmlFor="create-min">
+                      Quantidade mínima (alerta)
+                    </Label>
                     <Input
                       id="create-min"
                       type="number"
@@ -545,13 +526,17 @@ export function CreateProductSheet({
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={!canSubmit} className="w-full sm:w-auto">
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              className="w-full sm:w-auto"
+            >
               <Plus className="h-4 w-4 mr-2" />
-              {loading ? 'Cadastrando...' : 'Cadastrar produto'}
+              {loading ? "Cadastrando..." : "Cadastrar produto"}
             </Button>
           </SheetFooter>
         </form>
       </SheetContent>
     </Sheet>
-  )
+  );
 }

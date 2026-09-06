@@ -59,13 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -2884,28 +2878,20 @@ export function Produtos() {
                             <Label htmlFor="stock-operational-type">
                               Tipo operacional
                             </Label>
-                            <Select
+                            <SearchSelect
+                              id="stock-operational-type"
                               value={stockOperationalType}
                               onValueChange={(v) =>
                                 setStockOperationalType(
                                   v as OperationalTypeValue,
                                 )
                               }
-                            >
-                              <SelectTrigger
-                                id="stock-operational-type"
-                                className={SHEET_SELECT}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {OPERATIONAL_TYPE_OPTIONS.map((t) => (
-                                  <SelectItem key={t} value={t}>
-                                    {operationalTypeLabel(t)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              options={OPERATIONAL_TYPE_OPTIONS.map((t) => ({
+                                value: t,
+                                label: operationalTypeLabel(t),
+                              }))}
+                              triggerClassName={SHEET_SELECT}
+                            />
                           </div>
                           {currentCompany?.id ? (
                             <div className="rounded-xl border border-border bg-background px-4 py-3">
@@ -3021,21 +3007,15 @@ export function Produtos() {
                           </div>
                           <div>
                             <Label>Unidade do valor</Label>
-                            <Select
+                            <SearchSelect
                               value={stockLastUnitValueUnitCode}
                               onValueChange={setStockLastUnitValueUnitCode}
-                            >
-                              <SelectTrigger className={SHEET_SELECT}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {lastUnitValueUnitOptions.map((u) => (
-                                  <SelectItem key={u.value} value={u.value}>
-                                    {u.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              options={lastUnitValueUnitOptions.map((u) => ({
+                                value: u.value,
+                                label: u.label,
+                              }))}
+                              triggerClassName={SHEET_SELECT}
+                            />
                           </div>
                           <p className="sm:col-span-2 mt-1.5 text-xs text-muted-foreground">
                             Referência manual por {stockLastUnitValueUnitCode}.

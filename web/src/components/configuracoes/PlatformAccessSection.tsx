@@ -17,13 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
@@ -329,25 +323,19 @@ export function PlatformAccessSection() {
                         </p>
                       </TableField>
                       <TableField label="Perfil">
-                        <Select
-                          value={a.permission_profile_id}
+                        <SearchSelect
+                          value={a.permission_profile_id || ""}
                           disabled={updatingAccessId === a.id}
                           onValueChange={(profileId) =>
                             void handleProfileChange(a, profileId)
                           }
-                        >
-                          <SelectTrigger className="h-9 w-full">
-                            <SelectValue placeholder="Perfil" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {profiles.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>
-                                {p.name}
-                                {p.is_system ? " (padrão)" : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={profiles.map((p) => ({
+                            value: p.id,
+                            label: `${p.name}${p.is_system ? " (padrão)" : ""}`,
+                          }))}
+                          placeholder="Perfil"
+                          triggerClassName="h-9 w-full"
+                        />
                       </TableField>
                       <TableField label="Status" className="md:text-center">
                         <div className="flex md:justify-center">
@@ -414,19 +402,16 @@ export function PlatformAccessSection() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="access-profile">Perfil</Label>
-              <Select value={inviteProfileId} onValueChange={setInviteProfileId}>
-                <SelectTrigger id="access-profile">
-                  <SelectValue placeholder="Perfil" />
-                </SelectTrigger>
-                <SelectContent>
-                  {profiles.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                      {p.is_system ? " (padrão)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                id="access-profile"
+                value={inviteProfileId}
+                onValueChange={setInviteProfileId}
+                options={profiles.map((p) => ({
+                  value: p.id,
+                  label: `${p.name}${p.is_system ? " (padrão)" : ""}`,
+                }))}
+                placeholder="Perfil"
+              />
             </div>
           </div>
           <DialogFooter>

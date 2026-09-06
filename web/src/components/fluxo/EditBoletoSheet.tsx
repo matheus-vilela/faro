@@ -10,13 +10,6 @@ import {
   supplierSearchOption,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -542,25 +535,17 @@ export function EditBoletoSheet({
               <>
                 <div>
                   <Label>Forma de pagamento</Label>
-                  <Select
+                  <SearchSelect
                     value={paymentType}
                     onValueChange={(v) => setPaymentType(v as PaymentType)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="z-[80]">
-                      <SelectItem value="boleto">
-                        {PAYMENT_TYPE_LABELS.boleto}
-                      </SelectItem>
-                      <SelectItem value="pix">
-                        {PAYMENT_TYPE_LABELS.pix}
-                      </SelectItem>
-                      <SelectItem value="ted">
-                        {PAYMENT_TYPE_LABELS.ted}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={[
+                      { value: "boleto", label: PAYMENT_TYPE_LABELS.boleto },
+                      { value: "pix", label: PAYMENT_TYPE_LABELS.pix },
+                      { value: "ted", label: PAYMENT_TYPE_LABELS.ted },
+                    ]}
+                    triggerClassName="w-full"
+                    contentClassName="z-[80]"
+                  />
                 </div>
                 <div className="space-y-3">
                   {allowRateio ? (
@@ -731,18 +716,12 @@ export function EditBoletoSheet({
                 <div className="flex gap-4">
                   <div>
                     <Label className="text-xs">Tipo da chave</Label>
-                    <Select value={pixKeyType} onValueChange={setPixKeyType}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="z-[80]">
-                        {PIX_KEY_TYPES.map((t) => (
-                          <SelectItem key={t.value} value={t.value}>
-                            {t.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchSelect
+                      value={pixKeyType}
+                      onValueChange={setPixKeyType}
+                      options={PIX_KEY_TYPES}
+                      contentClassName="z-[80]"
+                    />
                   </div>
                   <div className="flex-1">
                     <Label className="text-xs">Chave</Label>
@@ -800,18 +779,12 @@ export function EditBoletoSheet({
                 </div>
                 <div>
                   <Label className="text-xs">Tipo de conta</Label>
-                  <Select value={accountType} onValueChange={setAccountType}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="z-[80]">
-                      {ACCOUNT_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchSelect
+                    value={accountType}
+                    onValueChange={setAccountType}
+                    options={ACCOUNT_TYPES}
+                    contentClassName="z-[80]"
+                  />
                 </div>
                 <div>
                   <Label className="text-xs">Beneficiário (opcional)</Label>

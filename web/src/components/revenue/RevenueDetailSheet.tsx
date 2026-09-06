@@ -15,13 +15,6 @@ import {
   SearchSelect,
 } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -690,7 +683,7 @@ export function RevenueDetailSheet({
                 <form onSubmit={handleUpdate} className="space-y-5 py-4">
                   <div>
                     <Label>Modo de lançamento</Label>
-                    <Select
+                    <SearchSelect
                       value={entryMode}
                       onValueChange={(v) => {
                         const m = v as
@@ -710,45 +703,35 @@ export function RevenueDetailSheet({
                           setQuantity("1");
                         }
                       }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">
-                          Lançamento por período
-                        </SelectItem>
-                        <SelectItem value="product_sale">
-                          Venda de produto
-                        </SelectItem>
-                        <SelectItem value="recipe_sale">
-                          Venda por receita (ficha)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
+                      options={[
+                        { value: "manual", label: "Lançamento por período" },
+                        { value: "product_sale", label: "Venda de produto" },
+                        {
+                          value: "recipe_sale",
+                          label: "Venda por receita (ficha)",
+                        },
+                      ]}
+                      triggerClassName="w-full"
+                    />
                   </div>
 
                   {entryMode === "manual" && (
                     <div>
                       <Label>Tipo da receita</Label>
-                      <Select
+                      <SearchSelect
                         value={revenueType}
                         onValueChange={(v) =>
                           setRevenueType(v as "operational" | "non_operational")
                         }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="operational">
-                            Operacional
-                          </SelectItem>
-                          <SelectItem value="non_operational">
-                            Não operacional
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                        options={[
+                          { value: "operational", label: "Operacional" },
+                          {
+                            value: "non_operational",
+                            label: "Não operacional",
+                          },
+                        ]}
+                        triggerClassName="w-full"
+                      />
                     </div>
                   )}
 
@@ -874,50 +857,37 @@ export function RevenueDetailSheet({
                         </div>
                         <div>
                           <Label>Unidade</Label>
-                          <Select
+                          <SearchSelect
                             value={saleUnitCode || "__none__"}
                             onValueChange={(v) =>
                               setSaleUnitCode(v === "__none__" ? "" : v)
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Unidade" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">
-                                Selecione
-                              </SelectItem>
-                              {productId
-                                ? allowedUnitsForProduct(productId).map((u) => (
-                                    <SelectItem
-                                      key={`${productId}-${u}`}
-                                      value={u}
-                                    >
-                                      {u}
-                                    </SelectItem>
-                                  ))
-                                : null}
-                            </SelectContent>
-                          </Select>
+                            options={
+                              productId
+                                ? allowedUnitsForProduct(productId).map((u) => ({
+                                    value: u,
+                                    label: u,
+                                  }))
+                                : []
+                            }
+                            leadingOptions={[
+                              { value: "__none__", label: "Selecione" },
+                            ]}
+                            placeholder="Unidade"
+                          />
                         </div>
                         <div>
                           <Label>Preço</Label>
-                          <Select
+                          <SearchSelect
                             value={pricingMode}
                             onValueChange={(v) =>
                               setPricingMode(v as "unit" | "total")
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unit">
-                                Valor unitário
-                              </SelectItem>
-                              <SelectItem value="total">Valor total</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            options={[
+                              { value: "unit", label: "Valor unitário" },
+                              { value: "total", label: "Valor total" },
+                            ]}
+                          />
                         </div>
                       </div>
                       {pricingMode === "unit" ? (
@@ -1002,22 +972,16 @@ export function RevenueDetailSheet({
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label>Preço</Label>
-                          <Select
+                          <SearchSelect
                             value={pricingMode}
                             onValueChange={(v) =>
                               setPricingMode(v as "unit" | "total")
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unit">
-                                Valor por porção
-                              </SelectItem>
-                              <SelectItem value="total">Valor total</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            options={[
+                              { value: "unit", label: "Valor por porção" },
+                              { value: "total", label: "Valor total" },
+                            ]}
+                          />
                         </div>
                       </div>
                       {pricingMode === "unit" ? (

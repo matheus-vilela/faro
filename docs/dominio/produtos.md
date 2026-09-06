@@ -52,7 +52,7 @@ Caminhos corretos para um par «vendido (esquerda) × compra(s) da nota (direita
 3. **Intermediário** → o vendido é produzido e estocado. À direita o mesmo fluxo de ficha, tipo produção. A nota não unifica.
 4. **Agrupamento / variante** → cardápio sem estoque × SKUs reais. Não é unificar nem ficha.
 5. **É um produto interno** → sem par; fica `DIRECT` e sai da fila.
-6. **Insumo de ficha** (só compra) → entra numa ficha já existente, sem unificar com o prato.
+6. **Insumo de ficha** → o item da fila (compra, ou produto que é insumo) entra numa ficha técnica ou de produção, sem unificar com o prato. Se a ficha ainda não existe, cria.
 
 Um vendido pode ter **várias** compras da nota (fornecedores/EANs). No mesmo item, unificar em sequência. Na ficha, todas viram insumos.
 

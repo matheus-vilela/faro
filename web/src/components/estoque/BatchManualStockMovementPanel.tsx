@@ -7,13 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   defaultBatchLineDraft,
   filterProductsForBatchPicker,
@@ -570,30 +564,22 @@ export const BatchManualStockMovementPanel = forwardRef<
               <Label className="text-xs">
                 Tipo <span className="text-destructive">*</span>
               </Label>
-              <Select
+              <SearchSelect
                 value={movementKind || "__none__"}
                 onValueChange={(v) =>
                   setMovementKind(
                     v === "__none__" ? "" : (v as ManualMovementKind),
                   )
                 }
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Entrada, saída ou inventário" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Selecionar</SelectItem>
-                  {MANUAL_MOVEMENT_KIND_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={MANUAL_MOVEMENT_KIND_OPTIONS}
+                leadingOptions={[{ value: "__none__", label: "Selecionar" }]}
+                placeholder="Entrada, saída ou inventário"
+                triggerClassName="h-9"
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Classificação</Label>
-              <Select
+              <SearchSelect
                 value={
                   movementKind === "entry"
                     ? entryClassification
@@ -608,33 +594,28 @@ export const BatchManualStockMovementPanel = forwardRef<
                     setExitClassification(v as ExitClassification);
                   }
                 }}
-                disabled={!movementKind || movementKind === "inventory"}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue
-                    placeholder={
-                      movementKind === "inventory"
-                        ? "Não se aplica"
-                        : "Selecionar"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {movementKind === "entry"
-                    ? ENTRY_CLASSIFICATION_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))
+                options={
+                  movementKind === "entry"
+                    ? ENTRY_CLASSIFICATION_OPTIONS
                     : movementKind === "exit"
-                      ? EXIT_CLASSIFICATION_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))
-                      : null}
-                </SelectContent>
-              </Select>
+                      ? EXIT_CLASSIFICATION_OPTIONS
+                      : movementKind === "inventory"
+                        ? [
+                            {
+                              value: "__blocked__",
+                              label: "Não se aplica",
+                            },
+                          ]
+                        : []
+                }
+                placeholder={
+                  movementKind === "inventory"
+                    ? "Não se aplica"
+                    : "Selecionar"
+                }
+                disabled={!movementKind || movementKind === "inventory"}
+                triggerClassName="h-9"
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Data das movimentações</Label>
@@ -692,25 +673,19 @@ export const BatchManualStockMovementPanel = forwardRef<
                           <Label className="text-xs text-muted-foreground">
                             Unidade
                           </Label>
-                          <Select
+                          <SearchSelect
                             value={line.unitCode || "__u__"}
                             onValueChange={(v) =>
                               updateLine(p.id, {
                                 unitCode: v === "__u__" ? "" : v,
                               })
                             }
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {units.map((u) => (
-                                <SelectItem key={u} value={u}>
-                                  {u}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            options={units.map((u) => ({
+                              value: u,
+                              label: u,
+                            }))}
+                            size="sm"
+                          />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">

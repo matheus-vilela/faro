@@ -139,6 +139,19 @@ export function isSaleFamilyCandidate(
   return saleNameKeys.has(product.name.trim().toLowerCase());
 }
 
+/** Destino de «Faz parte de um agrupamento»: nunca variante, ficha ou intermediário. */
+export function filterSaleFamilyDestinationOptions(
+  rows: SaleFamilyProductOption[],
+  linkedVariantIds: ReadonlySet<string>,
+): SaleFamilyProductOption[] {
+  return rows.filter((p) => {
+    if (p.stock_control_type === "RECIPE_CONTROLLED") return false;
+    if (p.stock_control_type === "INTERMEDIATE") return false;
+    if (linkedVariantIds.has(p.id)) return false;
+    return true;
+  });
+}
+
 export function saleNameKeys(saleNames: string[]): Set<string> {
   return new Set(saleNames.map((n) => n.trim().toLowerCase()).filter(Boolean));
 }
@@ -156,11 +169,12 @@ export async function fetchSaleFamilyCandidates(
     .order("name");
   if (error) throw new Error(rpcError(error, "Não foi possível listar produtos."));
   const rows = (data ?? []) as SaleFamilyProductOption[];
-  if (saleNames.length === 0) {
-    return rows.filter((p) => p.stock_control_type !== "RECIPE_CONTROLLED");
-  }
-  const keys = saleNameKeys(saleNames);
-  return rows.filter((p) => isSaleFamilyCandidate(p, keys));
+  const linked = await fetchLinkedVariantIds(companyId);
+  const eligible =
+    saleNames.length === 0
+      ? rows
+      : rows.filter((p) => isSaleFamilyCandidate(p, saleNameKeys(saleNames)));
+  return filterSaleFamilyDestinationOptions(eligible, linked);
 }
 
 export function shouldShowPossibleSaleFamilyTag(input: {

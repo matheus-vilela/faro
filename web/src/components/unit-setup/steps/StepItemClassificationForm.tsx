@@ -11,13 +11,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { evaluateConfigurationCompleteness } from "@/lib/itemClassification/evaluateConfigurationCompleteness";
 import {
   buildProductUnitSelectOptions,
@@ -1025,19 +1018,18 @@ export function StepItemClassificationForm({
         </div>
         <div className="min-w-[200px] space-y-1">
           <Label>Filtro</Label>
-          <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-            <SelectTrigger>
-              <ListFilter className="mr-1 h-4 w-4 opacity-50" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" sideOffset={4} className="z-[220]">
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="incomplete">Não concluídos</SelectItem>
-              <SelectItem value="blocked">Bloqueados (dependência)</SelectItem>
-              <SelectItem value="recipe_suggest">Sugestão receita/ficha</SelectItem>
-              <SelectItem value="reviewed">Revisados neste passo</SelectItem>
-            </SelectContent>
-          </Select>
+          <SearchSelect
+            value={filter}
+            onValueChange={(v) => setFilter(v as typeof filter)}
+            options={[
+              { value: "all", label: "Todos" },
+              { value: "incomplete", label: "Não concluídos" },
+              { value: "blocked", label: "Bloqueados (dependência)" },
+              { value: "recipe_suggest", label: "Sugestão receita/ficha" },
+              { value: "reviewed", label: "Revisados neste passo" },
+            ]}
+            contentClassName="z-[220]"
+          />
         </div>
         <Button type="button" variant="outline" size="icon" onClick={() => void load()}>
           <RefreshCcw className="h-4 w-4" />
@@ -1186,7 +1178,8 @@ export function StepItemClassificationForm({
                     <Label htmlFor={`type-${product.id}`} className="text-xs text-muted-foreground">
                       Tipo final
                     </Label>
-                    <Select
+                    <SearchSelect
+                      id={`type-${product.id}`}
                       value={finalT}
                       onValueChange={(v) => {
                         const nt = v as OperationalItemType;
@@ -1198,27 +1191,14 @@ export function StepItemClassificationForm({
                               : null,
                         });
                       }}
+                      options={OPERATIONAL_ITEM_TYPES.map((t) => ({
+                        value: t,
+                        label: TYPE_LABEL[t],
+                      }))}
                       disabled={busyId === product.id}
-                    >
-                      <SelectTrigger
-                        id={`type-${product.id}`}
-                        className="h-9 w-full min-w-0 text-left text-sm"
-                        size="default"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent
-                        position="popper"
-                        className="z-[200] max-w-[min(100vw-2rem,28rem)]"
-                        sideOffset={4}
-                      >
-                        {OPERATIONAL_ITEM_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {TYPE_LABEL[t]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      triggerClassName="h-9 w-full min-w-0 text-left text-sm"
+                      contentClassName="z-[200] max-w-[min(100vw-2rem,28rem)]"
+                    />
                     {finalT === "RECEITA_FICHA" ? (
                       <div className="space-y-1 pt-0.5">
                         <Label className="text-xs text-muted-foreground">Ficha de entrada (desmonte)</Label>

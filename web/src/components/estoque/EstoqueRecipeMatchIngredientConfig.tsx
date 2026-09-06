@@ -75,7 +75,6 @@ export function EstoqueRecipeMatchIngredientConfig({
     setLoading(false);
     if (error) {
       console.error(error);
-      toast.error("Não foi possível carregar conversões do produto.");
       setConversions([]);
       return;
     }

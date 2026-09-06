@@ -1,11 +1,5 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Tooltip,
   TooltipContent,
@@ -14,7 +8,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { CompanyProductCategory } from "@/types/companyProductCategory";
-import { ChevronDown, ChevronsUpDown, Loader2, Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const TAG_PALETTE = [
@@ -62,8 +56,6 @@ export function ProductCategoryTagsField({
     hint === undefined
       ? "Adicione quantas quiser. Busque, selecione ou crie uma nova categoria. Categorias marcadas como não-venda não entram em vendas nem na correlação."
       : hint;
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
 
   const byId = useMemo(
@@ -78,38 +70,30 @@ export function ProductCategoryTagsField({
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [selectedIds, byId]);
 
-  const q = query.trim().toLowerCase();
   const available = useMemo(() => {
     const sel = new Set(selectedIds);
     return categories
       .filter((c) => c.ativo !== false)
       .filter((c) => !sel.has(c.id))
-      .filter((c) =>
-        q ? c.name.toLowerCase().normalize("NFD").includes(q.normalize("NFD")) : true,
-      )
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-  }, [categories, selectedIds, q]);
-
-  const canCreate = useMemo(() => {
-    const t = query.trim();
-    if (!t) return false;
-    const n = t.toLowerCase();
-    return !categories.some((c) => c.name.trim().toLowerCase() === n);
-  }, [query, categories]);
+  }, [categories, selectedIds]);
 
   const addId = (id: string) => {
     if (selectedIds.includes(id)) return;
     onChange([...selectedIds, id]);
-    setQuery("");
   };
 
   const removeId = (id: string) => {
     onChange(selectedIds.filter((x) => x !== id));
   };
 
-  const createCategory = async () => {
-    const name = query.trim();
+  const createCategory = async (rawName: string) => {
+    const name = rawName.trim();
     if (!name || creating || disabled) return;
+    const exists = categories.some(
+      (c) => c.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (exists) return;
     setCreating(true);
     const { data, error } = await supabase
       .from("company_product_categories")
@@ -127,100 +111,50 @@ export function ProductCategoryTagsField({
     }
     onCategoriesChange();
     if (data?.id) addId(data.id as string);
-    setOpen(false);
-    setQuery("");
   };
 
-  const pickerContent = (
-    <PopoverContent
-      className={
+  const selector = (
+    <SearchSelect
+      value=""
+      onValueChange={addId}
+      options={available.map((c) => ({
+        value: c.id,
+        label: c.name,
+        description: c.exclude_from_sales ? "Não é venda" : undefined,
+      }))}
+      placeholder={
         compact
-          ? "z-[200] flex max-h-[min(22rem,70vh)] w-[min(28rem,max(22rem,var(--radix-popover-trigger-width)),calc(100vw-1.5rem))] min-w-[min(22rem,calc(100vw-1.5rem))] max-w-[min(28rem,calc(100vw-1.5rem))] flex-col gap-0 overflow-hidden p-0"
-          : "z-[200] flex max-h-[min(22rem,70vh)] w-[min(100vw-2rem,22rem)] flex-col gap-0 overflow-hidden p-0"
+          ? selectedOrdered.length === 0
+            ? placeholder
+            : "Adicionar categoria…"
+          : "Adicionar categoria…"
       }
-      align="start"
-      sideOffset={6}
-      collisionPadding={16}
-      onOpenAutoFocus={(e) => e.preventDefault()}
-    >
-      <div className="shrink-0 border-b border-border p-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar ou digitar nome novo…"
-          className={cn(compact ? "h-8 text-sm" : "h-10")}
-          disabled={creating}
-        />
-      </div>
-      <div
-        className="min-h-0 max-h-60 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
-        onWheel={(e) => e.stopPropagation()}
-      >
-        {available.length === 0 && !canCreate ? (
-          <p className="px-2 py-3 text-center text-sm text-muted-foreground">
-            {q
-              ? "Nada encontrado — crie uma nova abaixo."
-              : "Todas as categorias já foram adicionadas."}
-          </p>
-        ) : (
-          available.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
-              onClick={() => {
-                addId(c.id);
-                setOpen(false);
-              }}
-            >
-              <span>{c.name}</span>
-              {c.exclude_from_sales ? (
-                <span className="shrink-0 text-[11px] text-amber-800 dark:text-amber-200">
-                  Não é venda
-                </span>
-              ) : null}
-            </button>
-          ))
-        )}
-      </div>
-      {canCreate ? (
-        <div className="shrink-0 border-t border-border p-2">
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            disabled={creating}
-            onClick={() => void createCategory()}
-          >
-            {creating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="mr-2 h-4 w-4" />
-            )}
-            Criar &quot;{query.trim()}&quot;
-          </Button>
-        </div>
-      ) : null}
-    </PopoverContent>
+      searchPlaceholder="Buscar ou digitar nome novo…"
+      emptyMessage={
+        available.length === 0
+          ? "Todas as categorias já foram adicionadas."
+          : "Nada encontrado — cadastre o texto digitado."
+      }
+      disabled={disabled || creating}
+      size={compact ? "sm" : "default"}
+      triggerClassName={
+        compact ? undefined : "h-11 rounded-xl border-dashed"
+      }
+      onCreate={(query) => void createCategory(query)}
+      createLabel={(query) => `Criar «${query}»`}
+      loading={creating}
+      loadingMessage="Criando…"
+    />
   );
 
   if (compact) {
     const first = selectedOrdered[0];
     const extra = selectedOrdered.length - 1;
     const allNames = selectedOrdered.map((c) => c.name).join(", ");
-    const trigger = (
-      <Button
-        type="button"
-        variant="outline"
-        className="h-9 w-full justify-between gap-1 px-2 font-normal"
-        disabled={disabled}
-      >
-        {selectedOrdered.length === 0 ? (
-          <span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
-            {placeholder}
-          </span>
-        ) : (
-          <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+    return (
+      <div className="space-y-1.5">
+        {selectedOrdered.length > 0 ? (
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
             {first ? (
               <span
                 title={
@@ -236,35 +170,23 @@ export function ProductCategoryTagsField({
                 )}
               >
                 <span className="truncate">{first.name}</span>
-                <span
-                  role="button"
-                  tabIndex={disabled ? -1 : 0}
+                <button
+                  type="button"
                   className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                  disabled={disabled}
+                  onClick={() => {
                     if (!disabled) removeId(first.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!disabled) removeId(first.id);
-                    }
                   }}
                   aria-label={`Remover ${first.name}`}
                 >
                   <X className="h-3 w-3 shrink-0 opacity-70" />
-                </span>
+                </button>
               </span>
             ) : null}
             {extra > 0 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span
-                    className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                     +{extra}
                   </span>
                 </TooltipTrigger>
@@ -273,24 +195,10 @@ export function ProductCategoryTagsField({
                 </TooltipContent>
               </Tooltip>
             ) : null}
-          </span>
-        )}
-        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-      </Button>
-    );
-
-    return (
-      <Popover
-        open={open}
-        onOpenChange={(next) => {
-          if (disabled) return;
-          setOpen(next);
-          if (!next) setQuery("");
-        }}
-      >
-        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-        {pickerContent}
-      </Popover>
+          </div>
+        ) : null}
+        {selector}
+      </div>
     );
   }
 
@@ -333,10 +241,7 @@ export function ProductCategoryTagsField({
                 <button
                   type="button"
                   className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeId(c.id);
-                  }}
+                  onClick={() => removeId(c.id)}
                   aria-label={`Remover ${c.name}`}
                 >
                   <X className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -347,23 +252,7 @@ export function ProductCategoryTagsField({
         )}
       </div>
 
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 w-full justify-between rounded-xl border-dashed font-normal text-muted-foreground hover:text-foreground"
-            disabled={disabled}
-          >
-            <span className="flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              Adicionar categoria…
-            </span>
-            <ChevronDown className="h-4 w-4 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        {pickerContent}
-      </Popover>
+      {selector}
 
       {resolvedHint.trim() ? (
         <p className="text-xs leading-relaxed text-muted-foreground">

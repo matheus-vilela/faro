@@ -2,8 +2,9 @@ import {
   EstoqueRecipeMatchIngredientConfig,
   type IngredientLinkConfig,
 } from "@/components/estoque/EstoqueRecipeMatchIngredientConfig";
-import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
+import { CorrelationRecipeComposer } from "@/components/products/CorrelationRecipeComposer";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
+import { SaleFamilyDestinationFields } from "@/components/products/SaleFamilyDestinationFields";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,44 +15,65 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { SaleFamilyDestinationFields } from "@/components/products/SaleFamilyDestinationFields";
 import { Button } from "@/components/ui/button";
 import {
   SearchSelect,
   type SearchSelectOption,
 } from "@/components/ui/search-select";
 import { useDebounce } from "@/hooks/useDebounce";
+import { createCatalogProduct } from "@/lib/createCatalogProduct";
 import {
   dashboardImportReviewEpocRecipeRevertToProduct,
   dashboardImportReviewFinalizeRecipeProductSales,
   dashboardImportReviewMarkTechSheetSaved,
   dashboardImportReviewSetResolution,
 } from "@/lib/dashboardImportReview";
+import { hasMergedCatalogItems } from "@/lib/mergeSurvivorLock";
 import {
   addPurchaseAsRecipeIngredient,
   bestSoldSuggestionForPurchase,
+  searchDirectProductsForFicha,
+  type DirectProductPickRow,
   type ProductRecipeMatchRow,
   type PurchaseMatchRow,
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
+import type { TechnicalSheetKind } from "@/lib/productIntermediate";
 import {
   fetchSaleFamilyCandidates,
   linkSaleFamilyVariant,
   promoteProductToSaleFamily,
 } from "@/lib/productSaleFamily";
-import { ensureSaleFamilyProductId } from "@/lib/resolveSaleFamilyTarget";
+import type { ProductSetupPrimaryAction } from "@/lib/productSetupPrimaryAction";
 import {
-  setupItemAsMatchRow,
   PRODUCT_SETUP_CHOICE_LABEL,
+  setupItemAsMatchRow,
   type ProductSetupChoice,
   type ProductSetupItem,
 } from "@/lib/productSetupQueue";
+import { saveProductTechnicalSheet } from "@/lib/productTechnicalSheet";
+import { ensureSaleFamilyProductId } from "@/lib/resolveSaleFamilyTarget";
 import { searchProductsForUnify } from "@/lib/searchProductsForUnify";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
+const FICHA_RECIPE_PREFIX = "recipe:";
+const FICHA_PRODUCT_PREFIX = "product:";
+
+function parseFichaPick(
+  value: string,
+): { type: "recipe" | "product"; id: string } | null {
+  if (value.startsWith(FICHA_RECIPE_PREFIX)) {
+    return { type: "recipe", id: value.slice(FICHA_RECIPE_PREFIX.length) };
+  }
+  if (value.startsWith(FICHA_PRODUCT_PREFIX)) {
+    return { type: "product", id: value.slice(FICHA_PRODUCT_PREFIX.length) };
+  }
+  return null;
+}
 
 function formatQty(n: number, unit: string): string {
   const q = Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
@@ -72,6 +94,22 @@ async function fetchProductById(productId: string): Promise<Product | null> {
   return data as Product;
 }
 
+function uniquePartners(
+  rows: { id: string; label: string }[],
+): { id: string; label: string }[] {
+  const seen = new Set<string>();
+  const next: { id: string; label: string }[] = [];
+  for (const row of rows) {
+    const id = row.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    next.push({ id, label: row.label.trim() || id });
+  }
+  return next;
+}
+
+export type { ProductSetupPrimaryAction } from "@/lib/productSetupPrimaryAction";
+
 export function ProductSetupActionPanel({
   companyId,
   item,
@@ -81,6 +119,10 @@ export function ProductSetupActionPanel({
   purchases,
   onResolved,
   hideTitle = false,
+  hidePrimaryAction = false,
+  onPrimaryActionChange,
+  suggestedUnifyPartners = [],
+  suggestedRecipeIngredients = [],
 }: {
   companyId: string;
   item: ProductSetupItem;
@@ -90,13 +132,28 @@ export function ProductSetupActionPanel({
   purchases: PurchaseMatchRow[];
   onResolved: () => void;
   hideTitle?: boolean;
+  hidePrimaryAction?: boolean;
+  onPrimaryActionChange?: (action: ProductSetupPrimaryAction | null) => void;
+  /** Pares que o agente já apontou (unificar). */
+  suggestedUnifyPartners?: { id: string; label: string }[];
+  /** Compras da nota / pares para pré-preencher insumos da ficha. */
+  suggestedRecipeIngredients?: { id: string; name: string; unit: string }[];
 }) {
   const [busy, setBusy] = useState(false);
   const [mergeProduct, setMergeProduct] = useState<Product | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergePartnerId, setMergePartnerId] = useState<string | null>(null);
   const [mergeSurvivorIsSource, setMergeSurvivorIsSource] = useState(false);
-  const [pickedPartnerId, setPickedPartnerId] = useState("");
+  const [pickedPartners, setPickedPartners] = useState<
+    { id: string; label: string }[]
+  >(() =>
+    choice === "link_item"
+      ? uniquePartners(suggestedUnifyPartners).filter(
+          (row) => row.id !== item.productId,
+        )
+      : [],
+  );
+  const [mergeQueue, setMergeQueue] = useState<string[]>([]);
   const [unifySearch, setUnifySearch] = useState("");
   const debouncedUnifySearch = useDebounce(unifySearch, 300);
   const [unifyFetching, setUnifyFetching] = useState(false);
@@ -109,13 +166,28 @@ export function ProductSetupActionPanel({
   const [confirmPromote, setConfirmPromote] = useState(false);
   const [ingredientConfig, setIngredientConfig] =
     useState<IngredientLinkConfig | null>(null);
+  const [createFichaName, setCreateFichaName] = useState("");
+  const [fichaTab, setFichaTab] = useState<TechnicalSheetKind>("sale");
+  const [fichaSearch, setFichaSearch] = useState("");
+  const debouncedFichaSearch = useDebounce(fichaSearch, 300);
+  const [fichaProducts, setFichaProducts] = useState<DirectProductPickRow[]>(
+    [],
+  );
+  const [fichaProductsLoading, setFichaProductsLoading] = useState(false);
 
   useEffect(() => {
     setBusy(false);
     setMergeProduct(null);
     setMergeOpen(false);
     setMergePartnerId(null);
-    setPickedPartnerId("");
+    setPickedPartners(
+      choice === "link_item"
+        ? uniquePartners(suggestedUnifyPartners).filter(
+            (row) => row.id !== item.productId,
+          )
+        : [],
+    );
+    setMergeQueue([]);
     setUnifySearch("");
     setCatalogOptions([]);
     setRecipeId("");
@@ -123,6 +195,10 @@ export function ProductSetupActionPanel({
     setNewFamilyName("");
     setConfirmPromote(false);
     setIngredientConfig(null);
+    setCreateFichaName("");
+    setFichaTab("sale");
+    setFichaSearch("");
+    setFichaProducts([]);
   }, [item.key, choice]);
 
   const suggestion = useMemo(() => {
@@ -130,8 +206,95 @@ export function ProductSetupActionPanel({
     return bestSoldSuggestionForPurchase(setupItemAsMatchRow(item), soldOnly);
   }, [item, soldOnly]);
 
-  const recipeOptions = useMemo(
-    () => recipes.map((row) => ({ value: row.id, label: row.name })),
+  const recipeOutputIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of recipes) {
+      if (row.output_product_id) ids.add(row.output_product_id);
+    }
+    return ids;
+  }, [recipes]);
+
+  useEffect(() => {
+    if (choice !== "ingredient") return;
+    let cancelled = false;
+    setFichaProductsLoading(true);
+    void searchDirectProductsForFicha(supabase, {
+      companyId,
+      excludeIds: [item.productId, ...recipeOutputIds],
+      term: debouncedFichaSearch,
+      limit: 80,
+    }).then((res) => {
+      if (cancelled) return;
+      setFichaProducts(res.rows);
+      setFichaProductsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    choice,
+    companyId,
+    debouncedFichaSearch,
+    item.productId,
+    recipeOutputIds,
+  ]);
+
+  const recipeOptions = useMemo(() => {
+    const convertHint =
+      fichaTab === "intermediate"
+        ? "Converter em ficha de produção"
+        : "Converter em ficha técnica";
+    const fichas: SearchSelectOption[] = recipes
+      .filter((row) => row.output_product_id !== item.productId)
+      .map((row) => ({
+        value: `${FICHA_RECIPE_PREFIX}${row.id}`,
+        label: row.name,
+        group: "Fichas cadastradas",
+        tab: row.recipe_type === "PRODUCTION" ? "intermediate" : "sale",
+      }));
+
+    const seen = new Set(fichaProducts.map((row) => row.id));
+    const extras: DirectProductPickRow[] = [];
+    for (const row of [...soldOnly, ...purchases]) {
+      if (
+        !row.product_id ||
+        row.product_id === item.productId ||
+        recipeOutputIds.has(row.product_id) ||
+        seen.has(row.product_id)
+      ) {
+        continue;
+      }
+      seen.add(row.product_id);
+      extras.push({
+        id: row.product_id,
+        name: row.name,
+        sku: row.sku ?? null,
+      });
+    }
+
+    const products: SearchSelectOption[] = [...fichaProducts, ...extras]
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+      .map((row) => ({
+        value: `${FICHA_PRODUCT_PREFIX}${row.id}`,
+        label: row.sku ? `${row.name} (${row.sku})` : row.name,
+        description: convertHint,
+        group: "Produtos",
+        keywords: [row.name, row.sku].filter(Boolean).join(" "),
+      }));
+
+    return [...fichas, ...products];
+  }, [
+    fichaProducts,
+    fichaTab,
+    item.productId,
+    purchases,
+    recipeOutputIds,
+    recipes,
+    soldOnly,
+  ]);
+
+  const recipeById = useMemo(
+    () => new Map(recipes.map((row) => [row.id, row])),
     [recipes],
   );
 
@@ -155,32 +318,34 @@ export function ProductSetupActionPanel({
       excludeId: item.productId,
       term: debouncedUnifySearch,
       limit: 80,
-    }).then((rows) => {
-      if (cancelled) return;
-      setCatalogOptions(
-        rows.map((row) => ({
-          value: row.id,
-          label: row.name,
-          description:
-            (row.merged_catalog_names?.length ?? 0) > 0
-              ? `Já unificou ${row.merged_catalog_names!.length} ${
-                  row.merged_catalog_names!.length === 1 ? "item" : "itens"
-                }`
-              : formatQty(row.current_quantity, row.unit),
-          keywords: [
-            row.name,
-            row.sku,
-            row.ean,
-            row.barcode,
-            ...(row.merged_catalog_names ?? []),
-          ]
-            .filter(Boolean)
-            .join(" "),
-        })),
-      );
-    }).finally(() => {
-      if (!cancelled) setUnifyFetching(false);
-    });
+    })
+      .then((rows) => {
+        if (cancelled) return;
+        setCatalogOptions(
+          rows.map((row) => ({
+            value: row.id,
+            label: row.name,
+            description:
+              (row.merged_catalog_names?.length ?? 0) > 0
+                ? `Já unificou ${row.merged_catalog_names!.length} ${
+                    row.merged_catalog_names!.length === 1 ? "item" : "itens"
+                  }`
+                : formatQty(row.current_quantity, row.unit),
+            keywords: [
+              row.name,
+              row.sku,
+              row.ean,
+              row.barcode,
+              ...(row.merged_catalog_names ?? []),
+            ]
+              .filter(Boolean)
+              .join(" "),
+          })),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setUnifyFetching(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -212,20 +377,61 @@ export function ProductSetupActionPanel({
 
   const matchRow = setupItemAsMatchRow(item);
 
-  const openMerge = async (
-    partnerId: string | null,
+  const openMergeFrom = async (
+    sourceId: string,
+    partnerIds: string[],
     survivorIsSource: boolean,
   ) => {
+    const [first, ...rest] = partnerIds;
+    if (!first) return;
     setBusy(true);
-    const product = await fetchProductById(item.productId);
+    const product = await fetchProductById(sourceId);
     setBusy(false);
     if (!product) {
       toast.error("Não foi possível carregar o produto.");
       return;
     }
+    setMergeQueue(rest);
     setMergeProduct(product);
-    setMergePartnerId(partnerId);
+    setMergePartnerId(first);
     setMergeSurvivorIsSource(survivorIsSource);
+    setMergeOpen(true);
+  };
+
+  const startUnify = async () => {
+    const ids = pickedPartners.map((row) => row.id);
+    const fallback =
+      ids.length === 0 && isPurchase
+        ? (suggestion?.sold.product_id ?? null)
+        : null;
+    const partnerIds = fallback ? [fallback] : ids;
+    if (partnerIds.length === 0) {
+      toast.error("Escolha ao menos um produto para unificar.");
+      return;
+    }
+    await openMergeFrom(item.productId, partnerIds, !isPurchase);
+  };
+
+  const continueUnify = async (winnerId: string) => {
+    if (mergeQueue.length === 0) {
+      onResolved();
+      return;
+    }
+    const [next, ...rest] = mergeQueue;
+    setBusy(true);
+    const product = await fetchProductById(winnerId);
+    setBusy(false);
+    if (!product || !next) {
+      toast.error(
+        "Unificação parcial. Não foi possível seguir para o próximo.",
+      );
+      onResolved();
+      return;
+    }
+    setMergeQueue(rest);
+    setMergeProduct(product);
+    setMergePartnerId(next);
+    setMergeSurvivorIsSource(hasMergedCatalogItems(product));
     setMergeOpen(true);
   };
 
@@ -300,27 +506,114 @@ export function ProductSetupActionPanel({
     onResolved();
   };
 
-  const linkToRecipe = async () => {
-    if (!recipeId || !ingredientConfig?.isValid) return;
+  const finishIngredientLink = async (alreadyLinked: boolean) => {
+    const dismissed = await dismissFromQueue();
+    if (!dismissed.ok) {
+      toast.error(
+        dismissed.error ?? "Insumo vinculado, mas a fila não atualizou.",
+      );
+    } else {
+      toast.success(
+        alreadyLinked
+          ? "Este item já estava na ficha."
+          : "Insumo vinculado. A próxima entrada neste item alimenta a ficha.",
+      );
+    }
+    onResolved();
+  };
+
+  const linkToRecipe = async (existingRecipeId: string) => {
+    if (!existingRecipeId || !ingredientConfig?.isValid) return;
     setBusy(true);
     const res = await addPurchaseAsRecipeIngredient(supabase, {
       companyId,
-      recipeId,
+      recipeId: existingRecipeId,
       ingredientProductId: item.productId,
       inputQuantity: ingredientConfig.inputQuantity,
       inputUnitCode: ingredientConfig.inputUnitCode,
     });
-    setBusy(false);
     if (!res.ok) {
+      setBusy(false);
       toast.error(res.error ?? "Não foi possível vincular o insumo.");
       return;
     }
-    toast.success(
-      res.already_linked
-        ? "Este item já estava na ficha."
-        : "Insumo vinculado. A próxima entrada neste item alimenta a ficha.",
+    await finishIngredientLink(res.already_linked === true);
+    setBusy(false);
+  };
+
+  const createFichaAndLink = async () => {
+    const name = createFichaName.trim();
+    if (!name || !ingredientConfig?.isValid) return;
+    setBusy(true);
+    const created = await createCatalogProduct({ companyId, name });
+    if (!created.product) {
+      setBusy(false);
+      toast.error(created.error ?? "Não foi possível cadastrar a ficha.");
+      return;
+    }
+    const saved = await saveProductTechnicalSheet(
+      companyId,
+      created.product.id,
+      [
+        {
+          product_id: item.productId,
+          input_quantity: ingredientConfig.inputQuantity,
+          input_unit_code: ingredientConfig.inputUnitCode,
+        },
+      ],
+      1,
+      fichaTab,
     );
-    onResolved();
+    if (!saved.ok) {
+      setBusy(false);
+      toast.error(saved.error ?? "Não foi possível criar a ficha.");
+      return;
+    }
+    await finishIngredientLink(false);
+    setBusy(false);
+  };
+
+  const convertProductAndLink = async (outputProductId: string) => {
+    if (!outputProductId || !ingredientConfig?.isValid) return;
+    setBusy(true);
+    const saved = await saveProductTechnicalSheet(
+      companyId,
+      outputProductId,
+      [
+        {
+          product_id: item.productId,
+          input_quantity: ingredientConfig.inputQuantity,
+          input_unit_code: ingredientConfig.inputUnitCode,
+        },
+      ],
+      1,
+      fichaTab,
+    );
+    if (!saved.ok) {
+      setBusy(false);
+      toast.error(
+        saved.error ?? "Não foi possível converter o produto em ficha.",
+      );
+      return;
+    }
+    await finishIngredientLink(false);
+    setBusy(false);
+  };
+
+  const confirmIngredientLink = async () => {
+    if (!ingredientConfig?.isValid) return;
+    if (createFichaName.trim()) {
+      await createFichaAndLink();
+      return;
+    }
+    const pick = parseFichaPick(recipeId);
+    if (pick?.type === "recipe") {
+      await linkToRecipe(pick.id);
+      return;
+    }
+    if (pick?.type === "product") {
+      await convertProductAndLink(pick.id);
+    }
   };
 
   const confirmAsGrouping = async () => {
@@ -334,7 +627,9 @@ export function ProductSetupActionPanel({
       await promoteProductToSaleFamily(item.productId);
       const dismissed = await dismissFromQueue();
       if (!dismissed.ok) {
-        toast.error(dismissed.error ?? "Agrupamento criado, mas a fila não atualizou.");
+        toast.error(
+          dismissed.error ?? "Agrupamento criado, mas a fila não atualizou.",
+        );
       } else {
         toast.success(
           "Este item agora é o agrupamento. A venda não baixa estoque neste SKU.",
@@ -382,7 +677,9 @@ export function ProductSetupActionPanel({
       });
       const dismissed = await dismissFromQueue();
       if (!dismissed.ok) {
-        toast.error(dismissed.error ?? "Variante ligada, mas a fila não atualizou.");
+        toast.error(
+          dismissed.error ?? "Variante ligada, mas a fila não atualizou.",
+        );
       } else {
         toast.success(
           familyId
@@ -392,7 +689,9 @@ export function ProductSetupActionPanel({
       }
       onResolved();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Não foi possível vincular.");
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível vincular.",
+      );
     } finally {
       setBusy(false);
     }
@@ -400,6 +699,87 @@ export function ProductSetupActionPanel({
 
   const isPurchase = item.kind === "purchase_unlinked";
   const title = PRODUCT_SETUP_CHOICE_LABEL[choice];
+
+  useEffect(() => {
+    if (!onPrimaryActionChange) return;
+    if (choice === "recipe" || choice === "intermediate") {
+      return;
+    }
+    if (choice === "link_item") {
+      onPrimaryActionChange({
+        label:
+          pickedPartners.length > 1
+            ? `Unificar ${pickedPartners.length} produtos`
+            : "Vincular",
+        disabled:
+          busy ||
+          (pickedPartners.length === 0 &&
+            !(isPurchase && suggestion?.sold.product_id)),
+        busy,
+        run: () => void startUnify(),
+      });
+      return;
+    }
+    if (choice === "ingredient") {
+      onPrimaryActionChange({
+        label: createFichaName.trim()
+          ? "Criar ficha e vincular"
+          : parseFichaPick(recipeId)?.type === "product"
+            ? "Converter e vincular"
+            : "Vincular à ficha",
+        disabled:
+          busy ||
+          !ingredientConfig?.isValid ||
+          (createFichaName.trim() ? false : !parseFichaPick(recipeId)),
+        busy,
+        run: () => void confirmIngredientLink(),
+      });
+      return;
+    }
+    if (choice === "sale_family") {
+      onPrimaryActionChange({
+        label: "Confirmar agrupamento",
+        disabled: busy,
+        busy,
+        run: () => setConfirmPromote(true),
+      });
+      return;
+    }
+    if (choice === "sale_family_variant") {
+      onPrimaryActionChange({
+        label: "Ligar ao agrupamento",
+        disabled: busy || (!familyId && !newFamilyName.trim()),
+        busy,
+        run: () => void linkAsVariant(),
+      });
+      return;
+    }
+    if (choice === "skip") {
+      onPrimaryActionChange({
+        label: "Confirmar",
+        disabled: busy,
+        busy,
+        run: () =>
+          void (isPurchase ? dismissPurchase() : dismissSoldAsProduct()),
+      });
+      return;
+    }
+    onPrimaryActionChange(null);
+    // run() usa os handlers do render atual; incluir as funções recria o efeito em loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver acima
+  }, [
+    busy,
+    choice,
+    createFichaName,
+    familyId,
+    ingredientConfig?.isValid,
+    isPurchase,
+    newFamilyName,
+    onPrimaryActionChange,
+    pickedPartners.length,
+    recipeId,
+    suggestion?.sold.product_id,
+  ]);
 
   if (choice === "recipe" || choice === "intermediate") {
     const finishRecipeSetup = async () => {
@@ -420,19 +800,16 @@ export function ProductSetupActionPanel({
       onResolved();
     };
     return (
-      <EstoqueReceitasPanel
+      <CorrelationRecipeComposer
         key={item.key}
         companyId={companyId}
-        sheetOnly
-        embedInline
-        ingredientsOnly
-        initialOpenRecipeId={item.recipeId}
-        prefillNewRecipeOutputProductId={item.recipeId ? null : item.productId}
-        prefillNewRecipeAutoOpen={false}
-        technicalSheetOutputProductId={item.productId}
-        technicalSheetKind={choice === "intermediate" ? "intermediate" : "sale"}
-        contextOutputProductId={item.productId}
-        onTechnicalSheetSaved={() => void finishRecipeSetup()}
+        outputProductId={item.productId}
+        outputName={item.name}
+        kind={choice === "intermediate" ? "intermediate" : "sale"}
+        suggestedIngredients={suggestedRecipeIngredients}
+        hidePrimaryAction={hidePrimaryAction}
+        onPrimaryActionChange={onPrimaryActionChange}
+        onSaved={finishRecipeSetup}
       />
     );
   }
@@ -448,21 +825,54 @@ export function ProductSetupActionPanel({
 
       {choice === "link_item" ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Une este cadastro a outro produto — da fila ou do catálogo, inclusive
-            um que já unificou outros itens. Nesse caso ele permanece e não dá
-            para inverter quem fica.
-          </p>
           {isPurchase && suggestion ? (
             <p className="text-sm">
-              Sugestão: <span className="font-medium">{suggestion.sold.name}</span>
+              Sugestão:{" "}
+              <span className="font-medium">{suggestion.sold.name}</span>
             </p>
           ) : null}
+          {pickedPartners.length > 0 ? (
+            <ul className="space-y-2">
+              {pickedPartners.map((row) => {
+                return (
+                  <li key={row.id} className="flex w-full items-center gap-2">
+                    <div className="flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background px-3 text-sm font-normal">
+                      <span className="truncate">{row.label}</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() =>
+                        setPickedPartners((prev) =>
+                          prev.filter((p) => p.id !== row.id),
+                        )
+                      }
+                      aria-label={`Remover ${row.label}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
           <SearchSelect
-            value={pickedPartnerId}
-            onValueChange={setPickedPartnerId}
-            options={unifyOptions}
-            placeholder="Escolher produto do catálogo"
+            value=""
+            onValueChange={(next) => {
+              if (!next || pickedPartners.some((row) => row.id === next))
+                return;
+              const opt = unifyOptions.find((row) => row.value === next);
+              setPickedPartners((prev) => [
+                ...prev,
+                { id: next, label: opt?.label ?? next },
+              ]);
+            }}
+            options={unifyOptions.filter(
+              (row) => !pickedPartners.some((p) => p.id === row.value),
+            )}
+            placeholder="Adicionar produto…"
             searchPlaceholder="Buscar no catálogo…"
             emptyMessage="Nenhum produto encontrado no catálogo."
             loading={
@@ -471,76 +881,131 @@ export function ProductSetupActionPanel({
             }
             onSearchChange={setUnifySearch}
           />
-          <Button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void openMerge(
-                pickedPartnerId ||
-                  (isPurchase ? suggestion?.sold.product_id ?? null : null),
-                !isPurchase,
-              )
-            }
-          >
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Vincular
-          </Button>
+          {hidePrimaryAction ? null : (
+            <Button
+              type="button"
+              disabled={
+                busy ||
+                (pickedPartners.length === 0 &&
+                  !(isPurchase && suggestion?.sold.product_id))
+              }
+              onClick={() => void startUnify()}
+            >
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {pickedPartners.length > 1
+                ? `Unificar ${pickedPartners.length} produtos`
+                : "Vincular"}
+            </Button>
+          )}
         </div>
       ) : null}
 
       {choice === "ingredient" ? (
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            A entrada neste item passa a alimentar a ficha do prato.
-          </p>
           <SearchSelect
             value={recipeId}
-            onValueChange={setRecipeId}
+            onValueChange={(next) => {
+              setRecipeId(next);
+              setCreateFichaName("");
+            }}
             options={recipeOptions}
-            placeholder="Escolher ficha"
-            searchPlaceholder="Buscar ficha…"
-            emptyMessage="Nenhuma ficha cadastrada."
+            tabs={[
+              { value: "sale", label: "Ficha técnica" },
+              { value: "intermediate", label: "Ficha de produção" },
+            ]}
+            tab={fichaTab}
+            onTabChange={(next) => {
+              const kind = next as TechnicalSheetKind;
+              setFichaTab(kind);
+              const pick = parseFichaPick(recipeId);
+              if (pick?.type === "recipe") {
+                const selected = recipeById.get(pick.id);
+                const selectedKind =
+                  selected?.recipe_type === "PRODUCTION"
+                    ? "intermediate"
+                    : "sale";
+                if (selected && selectedKind !== kind) setRecipeId("");
+              }
+            }}
+            placeholder={
+              fichaTab === "intermediate"
+                ? "Escolher ficha de produção ou produto"
+                : "Escolher ficha técnica ou produto"
+            }
+            searchPlaceholder="Buscar ficha, produto ou digitar um nome novo…"
+            emptyMessage="Nada nesta aba — cadastre o texto digitado."
+            loading={
+              fichaProductsLoading ||
+              fichaSearch.trim() !== debouncedFichaSearch.trim()
+            }
+            onSearchChange={setFichaSearch}
+            triggerLabel={
+              createFichaName.trim()
+                ? `Nova ${fichaTab === "intermediate" ? "ficha de produção" : "ficha técnica"}: ${createFichaName.trim()}`
+                : undefined
+            }
+            onCreate={(query) => {
+              setCreateFichaName(query);
+              setRecipeId("");
+            }}
+            createLabel={(query) =>
+              fichaTab === "intermediate"
+                ? `Cadastrar ficha de produção «${query}»`
+                : `Cadastrar ficha técnica «${query}»`
+            }
           />
+          <p className="text-sm text-muted-foreground">
+            Este cadastro continua sendo o produto de estoque e entra como
+            insumo. Escolha uma ficha já cadastrada ou um produto para
+            converter. A aba define se é ficha técnica ou de produção.
+          </p>
           <EstoqueRecipeMatchIngredientConfig
             companyId={companyId}
             ingredient={matchRow}
             onChange={setIngredientConfig}
           />
-          <Button
-            type="button"
-            disabled={busy || !recipeId || !ingredientConfig?.isValid}
-            onClick={() => void linkToRecipe()}
-          >
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Vincular à ficha
-          </Button>
+          {hidePrimaryAction ? null : (
+            <Button
+              type="button"
+              disabled={
+                busy ||
+                !ingredientConfig?.isValid ||
+                (createFichaName.trim() ? false : !parseFichaPick(recipeId))
+              }
+              onClick={() => void confirmIngredientLink()}
+            >
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {createFichaName.trim()
+                ? "Criar ficha e vincular"
+                : parseFichaPick(recipeId)?.type === "product"
+                  ? "Converter e vincular"
+                  : "Vincular à ficha"}
+            </Button>
+          )}
         </div>
       ) : null}
 
       {choice === "sale_family" ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            A venda de «{item.name}» gera receita e não baixa estoque neste
-            SKU. A baixa vem das variantes ligadas (estoque do dia).
+            A venda de «{item.name}» gera receita e não baixa estoque neste SKU.
+            A baixa vem das variantes ligadas (estoque do dia).
           </p>
-          <Button
-            type="button"
-            disabled={busy}
-            onClick={() => setConfirmPromote(true)}
-          >
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Confirmar agrupamento
-          </Button>
+          {hidePrimaryAction ? null : (
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmPromote(true)}
+            >
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirmar agrupamento
+            </Button>
+          )}
         </div>
       ) : null}
 
       {choice === "sale_family_variant" ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Este cadastro continua sendo produto de estoque, ligado a um
-            agrupamento de cardápio. Se o nome ainda não existe, cadastre no
-            próprio seletor.
-          </p>
           <SaleFamilyDestinationFields
             companyId={companyId}
             excludeProductId={item.productId}
@@ -550,14 +1015,21 @@ export function ProductSetupActionPanel({
             onNewFamilyNameChange={setNewFamilyName}
             disabled={busy}
           />
-          <Button
-            type="button"
-            disabled={busy || (!familyId && !newFamilyName.trim())}
-            onClick={() => void linkAsVariant()}
-          >
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Ligar ao agrupamento
-          </Button>
+          <p className="text-sm text-muted-foreground">
+            Este cadastro continua sendo produto de estoque, ligado a um
+            agrupamento de cardápio. Se o nome ainda não existe, cadastre no
+            próprio seletor.
+          </p>
+          {hidePrimaryAction ? null : (
+            <Button
+              type="button"
+              disabled={busy || (!familyId && !newFamilyName.trim())}
+              onClick={() => void linkAsVariant()}
+            >
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Ligar ao agrupamento
+            </Button>
+          )}
         </div>
       ) : null}
 
@@ -568,17 +1040,19 @@ export function ProductSetupActionPanel({
               ? "Fica como produto interno. Entradas da nota continuam neste cadastro, sem unificar e sem entrar em ficha."
               : "Fica como produto interno. Sem ficha, sem agrupamento e sem unificar agora."}
           </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              void (isPurchase ? dismissPurchase() : dismissSoldAsProduct())
-            }
-          >
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Confirmar
-          </Button>
+          {hidePrimaryAction ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void (isPurchase ? dismissPurchase() : dismissSoldAsProduct())
+              }
+            >
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirmar
+            </Button>
+          )}
         </div>
       ) : null}
 
@@ -587,8 +1061,8 @@ export function ProductSetupActionPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Este produto é o agrupamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              A venda de «{item.name}» gera receita e não baixa estoque. A
-              baixa vem do relatório do dia, nos produtos ligados.
+              A venda de «{item.name}» gera receita e não baixa estoque. A baixa
+              vem do relatório do dia, nos produtos ligados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -615,9 +1089,9 @@ export function ProductSetupActionPanel({
           formatCurrency={formatCurrency}
           initialPartnerId={mergePartnerId}
           initialSurvivorIsSource={mergeSurvivorIsSource}
-          onMerged={() => {
+          onMerged={(winnerId) => {
             setMergeOpen(false);
-            onResolved();
+            void continueUnify(winnerId);
           }}
         />
       ) : null}

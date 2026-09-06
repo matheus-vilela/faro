@@ -1,4 +1,10 @@
 import { MergeFactorChoiceList, MergeProductConversionsEditor } from "@/components/products/MergeProductConversionsEditor";
+import { ProductMergeIncomingRow } from "@/components/products/ProductMergeIncomingPanel";
+import {
+  emptyIncomingFactor,
+  incomingEffectiveFactor,
+  type IncomingFactorDraft,
+} from "@/lib/mergeIncomingFactor";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +62,8 @@ type ProductMergeDialogProps = {
   onMerged: (winnerId: string) => void;
   /** Pré-seleciona o outro produto (ex.: par sugerido no dashboard). */
   initialPartnerId?: string | null;
+  /** Vários cadastros da nota no mesmo fluxo (o source permanece). */
+  initialPartnerIds?: string[];
   /**
    * Se true, o source permanece no catálogo (ex.: produto vendido/PDV).
    * Default false = partner permanece.
@@ -163,6 +171,7 @@ export function ProductMergeDialog({
   formatCurrency,
   onMerged,
   initialPartnerId = null,
+  initialPartnerIds,
   initialSurvivorIsSource = false,
 }: ProductMergeDialogProps) {
   const [search, setSearch] = useState("");
@@ -189,18 +198,44 @@ export function ProductMergeDialog({
   const [factorMode, setFactorMode] = useState<"candidate" | "manual">(
     "candidate",
   );
+  const [incoming, setIncoming] = useState<Product[]>([]);
+  const [incomingDrafts, setIncomingDrafts] = useState<
+    Record<string, IncomingFactorDraft>
+  >({});
+  const [multiMode, setMultiMode] = useState(false);
+
+  const seededPartnerIds = useMemo(() => {
+    const raw =
+      initialPartnerIds && initialPartnerIds.length > 0
+        ? initialPartnerIds
+        : initialPartnerId
+          ? [initialPartnerId]
+          : [];
+    return [
+      ...new Set(raw.filter((id) => id && id !== sourceProduct.id)),
+    ];
+  }, [initialPartnerIds, initialPartnerId, sourceProduct.id]);
 
   useEffect(() => {
     if (!open) return;
     setSurvivorIsSource(initialSurvivorIsSource);
-    if (initialPartnerId && initialPartnerId !== sourceProduct.id) {
-      setPartnerId(initialPartnerId);
+    if (seededPartnerIds.length > 1) {
+      setMultiMode(true);
+      setSurvivorIsSource(true);
+      setStep("confirm");
+      setPartnerId(null);
+      setPartner(null);
+      return;
+    }
+    setMultiMode(false);
+    if (seededPartnerIds[0]) {
+      setPartnerId(seededPartnerIds[0]);
       setStep("confirm");
     }
-  }, [open, initialPartnerId, sourceProduct.id, initialSurvivorIsSource]);
+  }, [open, seededPartnerIds, initialSurvivorIsSource]);
 
   useEffect(() => {
-    if (!open || !companyId) return;
+    if (!open || !companyId || multiMode) return;
     let cancelled = false;
     const load = async () => {
       setCandidatesLoading(true);
@@ -218,7 +253,7 @@ export function ProductMergeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, companyId, sourceProduct.id, debouncedSearch]);
+  }, [open, companyId, sourceProduct.id, debouncedSearch, multiMode]);
 
   useEffect(() => {
     if (!partnerId) {
@@ -264,7 +299,45 @@ export function ProductMergeDialog({
   );
 
   useEffect(() => {
-    if (!open || step !== "confirm" || !winner || !loser) return;
+    if (!open || step !== "confirm" || !multiMode) return;
+    if (seededPartnerIds.length < 2) return;
+    let cancelled = false;
+    void (async () => {
+      setConversionsLoading(true);
+      const [{ data }, winnerRows] = await Promise.all([
+        supabase.from("products").select("*").in("id", seededPartnerIds),
+        loadProductUnitConversions(companyId, sourceProduct.id),
+      ]);
+      if (cancelled) return;
+      const rows = ((data ?? []) as Product[]).filter(
+        (p) => p.id !== sourceProduct.id,
+      );
+      const ordered = seededPartnerIds
+        .map((id) => rows.find((p) => p.id === id))
+        .filter((p): p is Product => !!p);
+      const loserRows = await Promise.all(
+        ordered.map((p) => loadProductUnitConversions(companyId, p.id)),
+      );
+      if (cancelled) return;
+      const drafts: Record<string, IncomingFactorDraft> = {};
+      ordered.forEach((p, index) => {
+        drafts[p.id] = {
+          ...emptyIncomingFactor(),
+          conversions: loserRows[index]?.rows ?? [],
+        };
+      });
+      setIncoming(ordered);
+      setIncomingDrafts(drafts);
+      setWinnerConversions(winnerRows.rows);
+      setConversionsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, step, multiMode, companyId, sourceProduct.id, seededPartnerIds]);
+
+  useEffect(() => {
+    if (!open || step !== "confirm" || multiMode || !winner || !loser) return;
     let cancelled = false;
     void (async () => {
       setConversionsLoading(true);
@@ -280,7 +353,7 @@ export function ProductMergeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, step, companyId, winner?.id, loser?.id]);
+  }, [open, step, multiMode, companyId, winner?.id, loser?.id]);
 
   const unitResolution = useMemo(() => {
     if (!winner || !loser) return null;
@@ -305,6 +378,7 @@ export function ProductMergeDialog({
   }, [winner, loser, winnerConversions, loserConversions]);
 
   useEffect(() => {
+    if (multiMode) return;
     if (step !== "confirm" || !winner || !loser || conversionsLoading) return;
     if (factorMode === "manual") return;
     if (factorCandidates.length === 0) {
@@ -332,6 +406,7 @@ export function ProductMergeDialog({
     }
     setSelectedFactorId(factorCandidates[0]!.id);
   }, [
+    multiMode,
     step,
     winner,
     loser,
@@ -376,15 +451,72 @@ export function ProductMergeDialog({
     return { loserAdj, total };
   }, [winner, loser, effectiveFactor]);
 
+  const multiPreview = useMemo(() => {
+    if (!multiMode) return null;
+    let added = 0;
+    const parts: { name: string; qty: number; unit: string; adj: number }[] = [];
+    for (const item of incoming) {
+      const draft = incomingDrafts[item.id] ?? emptyIncomingFactor();
+      const factor = incomingEffectiveFactor(
+        sourceProduct,
+        item,
+        winnerConversions,
+        draft,
+      );
+      if (factor == null) return null;
+      const adj = convertLoserQuantityToWinner(
+        Number(item.current_quantity),
+        factor,
+      );
+      if (adj == null) return null;
+      added += adj;
+      parts.push({
+        name: item.name,
+        qty: Number(item.current_quantity),
+        unit: item.unit,
+        adj,
+      });
+    }
+    return {
+      added,
+      total: Number(sourceProduct.current_quantity) + added,
+      parts,
+    };
+  }, [
+    multiMode,
+    incoming,
+    incomingDrafts,
+    sourceProduct,
+    winnerConversions,
+  ]);
+
   const needsManualUnit = factorMode === "manual";
 
-  const canConfirm =
+  const canConfirmSingle =
     !!winner &&
     !!loser &&
     !conversionsLoading &&
     effectiveFactor != null &&
     effectiveFactor > 0 &&
     (!needsManualUnit || manualFactor != null);
+
+  const canConfirmMulti =
+    multiMode &&
+    incoming.length > 1 &&
+    !conversionsLoading &&
+    incoming.every((item) => {
+      const draft = incomingDrafts[item.id];
+      if (!draft) return false;
+      const factor = incomingEffectiveFactor(
+        sourceProduct,
+        item,
+        winnerConversions,
+        draft,
+      );
+      return factor != null && factor > 0;
+    });
+
+  const canConfirm = multiMode ? canConfirmMulti : canConfirmSingle;
 
   const reset = () => {
     setSearch("");
@@ -401,6 +533,9 @@ export function ProductMergeDialog({
     setManualWinnerQty("1");
     setSelectedFactorId(null);
     setFactorMode("candidate");
+    setIncoming([]);
+    setIncomingDrafts({});
+    setMultiMode(false);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -408,7 +543,72 @@ export function ProductMergeDialog({
     onOpenChange(next);
   };
 
+  const handleConfirmMulti = async () => {
+    if (!canConfirmMulti) return;
+    setMerging(true);
+    let winnerId = sourceProduct.id;
+    let winnerConv = winnerConversions;
+    const names: string[] = [];
+    for (const item of incoming) {
+      const draft = incomingDrafts[item.id];
+      if (!draft) {
+        setMerging(false);
+        toast.error(`Conversão pendente em «${item.name}».`);
+        return;
+      }
+      const factor = incomingEffectiveFactor(
+        sourceProduct,
+        item,
+        winnerConv,
+        draft,
+      );
+      if (factor == null) {
+        setMerging(false);
+        toast.error(`Informe a conversão de «${item.name}».`);
+        return;
+      }
+      const mergedConversions = buildMergedUnitConversionsForMerge({
+        winnerHub: sourceProduct.unit,
+        winnerConversions: draftsToConversionRows(winnerConv),
+        loserHub: item.unit,
+        loserConversions: draftsToConversionRows(draft.conversions),
+        loserToWinnerFactor: factor,
+      });
+      const result = await mergeCompanyProducts(companyId, winnerId, item.id, {
+        loserToWinnerFactor: factor,
+        mergedUnitConversions: mergedConversionsToJson(mergedConversions),
+      });
+      if (!result.ok) {
+        setMerging(false);
+        toast.error(
+          names.length > 0
+            ? `Parou em «${item.name}»: ${result.error}. Os anteriores já foram unificados.`
+            : result.error,
+        );
+        return;
+      }
+      winnerId = result.winnerId;
+      names.push(item.name);
+      const reloaded = await loadProductUnitConversions(companyId, winnerId);
+      winnerConv = reloaded.rows;
+    }
+    setMerging(false);
+    toast.success(
+      `${names.length} cadastros unificados em «${sourceProduct.name}».`,
+      {
+        description:
+          "O histórico do produto registra cada unificação — você pode desfazê-las na aba Resumo ou Histórico.",
+      },
+    );
+    onMerged(winnerId);
+    handleOpenChange(false);
+  };
+
   const handleConfirm = async () => {
+    if (multiMode) {
+      await handleConfirmMulti();
+      return;
+    }
     if (!winner || !loser || effectiveFactor == null) return;
     setMerging(true);
     const mergedConversions = buildMergedUnitConversionsForMerge({
@@ -440,13 +640,20 @@ export function ProductMergeDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] overflow-y-auto",
+          multiMode ? "sm:max-w-3xl" : "sm:max-w-2xl",
+        )}
+      >
         <DialogHeader>
           <DialogTitle>Unificar produtos</DialogTitle>
           <DialogDescription>
             {step === "pick"
               ? "Escolha o outro cadastro que é o mesmo item — inclusive um que já unificou outros produtos."
-              : "Revise o resultado: estoque, histórico de movimentações e vínculos vão para o produto que permanece."}
+              : multiMode
+                ? "O vendido permanece. Cada cadastro da nota entra com a própria conversão para a unidade que fica."
+                : "Revise o resultado: estoque, histórico de movimentações e vínculos vão para o produto que permanece."}
           </DialogDescription>
         </DialogHeader>
 
@@ -517,6 +724,117 @@ export function ProductMergeDialog({
                 ))
               )}
             </div>
+          </div>
+        ) : multiMode ? (
+          <div className="space-y-4">
+            <ProductMergeCard
+              product={sourceProduct}
+              formatCurrency={formatCurrency}
+              variant="survivor"
+              lockReason="Produto vendido (PDV): permanece no catálogo."
+            />
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Scale className="h-4 w-4 text-muted-foreground" />
+                Conversão do cadastro que fica
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Regras do vendido. Cada item da nota abaixo usa a própria
+                proporção para esta unidade.
+              </p>
+              {conversionsLoading ? (
+                <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando conversões…
+                </p>
+              ) : (
+                <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+                  <MergeProductConversionsEditor
+                    companyId={companyId}
+                    productId={sourceProduct.id}
+                    productName={sourceProduct.name}
+                    stockUnitCode={sourceProduct.unit}
+                    value={winnerConversions}
+                    onChange={setWinnerConversions}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                Entram neste cadastro ({incoming.length})
+              </p>
+              {conversionsLoading && incoming.length === 0 ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando itens…
+                </p>
+              ) : (
+                incoming.map((item) => (
+                  <ProductMergeIncomingRow
+                    key={item.id}
+                    companyId={companyId}
+                    winner={sourceProduct}
+                    loser={item}
+                    winnerConversions={winnerConversions}
+                    draft={incomingDrafts[item.id] ?? emptyIncomingFactor()}
+                    onChange={(next) =>
+                      setIncomingDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: next,
+                      }))
+                    }
+                    conversionsLoading={conversionsLoading}
+                  />
+                ))
+              )}
+            </div>
+            {multiPreview ? (
+              <p className="rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-muted-foreground">
+                Estoque após unificação:{" "}
+                <span className="font-medium text-foreground">
+                  {Number(sourceProduct.current_quantity).toLocaleString(
+                    "pt-BR",
+                  )}{" "}
+                  {sourceProduct.unit}
+                </span>
+                {multiPreview.parts.map((part) => (
+                  <span key={part.name}>
+                    {" + "}
+                    <span className="font-medium text-foreground">
+                      {part.qty.toLocaleString("pt-BR")} {part.unit}
+                    </span>
+                    {" → "}
+                    <span className="font-medium text-foreground">
+                      {part.adj.toLocaleString("pt-BR", {
+                        maximumFractionDigits: 4,
+                      })}{" "}
+                      {sourceProduct.unit}
+                    </span>
+                  </span>
+                ))}
+                {" = "}
+                <span className="font-semibold text-foreground">
+                  {multiPreview.total.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 4,
+                  })}{" "}
+                  {sourceProduct.unit}
+                </span>
+              </p>
+            ) : null}
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              <li>
+                Cada cadastro da nota some no vendido, com a conversão
+                escolhida
+              </li>
+              <li>
+                Histórico, movimentações e vínculos passam para o produto que
+                permanece
+              </li>
+              <li>
+                Nomes removidos ficam no histórico para a próxima importação
+              </li>
+            </ul>
           </div>
         ) : winner && loser ? (
           <div className="space-y-4">
@@ -694,7 +1012,7 @@ export function ProductMergeDialog({
         ) : null}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {step === "confirm" ? (
+          {step === "confirm" && !multiMode ? (
             <Button
               type="button"
               variant="outline"
@@ -734,7 +1052,9 @@ export function ProductMergeDialog({
                   Unificando…
                 </>
               ) : (
-                "Confirmar unificação"
+                multiMode
+                  ? `Confirmar unificação (${incoming.length})`
+                  : "Confirmar unificação"
               )}
             </Button>
           )}

@@ -1,12 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import type { FocusNfeMap } from "@/types/companySetup";
 import {
   FOCUS_NFE_MODELO_NFCE,
@@ -31,22 +25,18 @@ export function StepFiscalForm({
     <div className="space-y-4">
       <div className="space-y-2">
         <Label>Modelo da nota</Label>
-        <Select
-          value={modeloSelectValue}
+        <SearchSelect
+          value={modeloSelectValue ?? ""}
           onValueChange={(v) => onChange({ modelo: v })}
-        >
-          <SelectTrigger className="w-full min-w-0">
-            <SelectValue placeholder="Selecione NFC-e ou NF-e" />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            sideOffset={4}
-            className="z-[200] max-h-[min(280px,50vh)]"
-          >
-            <SelectItem value={FOCUS_NFE_MODELO_NFCE}>NFC-e</SelectItem>
-            <SelectItem value={FOCUS_NFE_MODELO_NFE}>NF-e</SelectItem>
-          </SelectContent>
-        </Select>
+          options={[
+            { value: FOCUS_NFE_MODELO_NFCE, label: "NFC-e" },
+            { value: FOCUS_NFE_MODELO_NFE, label: "NF-e" },
+          ]}
+          placeholder="Selecione NFC-e ou NF-e"
+          triggerClassName="w-full min-w-0"
+          contentClassName="z-[200]"
+          listMaxHeightClassName="max-h-[min(280px,50vh)]"
+        />
       </div>
 
       {isNfce ? (

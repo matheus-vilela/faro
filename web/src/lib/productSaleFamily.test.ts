@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterSaleFamilyDestinationOptions,
   groupingDetailTitle,
   isPossibleGroupingProduct,
   isSaleFamilyCandidate,
@@ -60,6 +61,29 @@ describe("isSaleFamilyCandidate", () => {
     expect(
       isSaleFamilyCandidate(product({ name: "Cachaça" }), keys),
     ).toBe(false);
+  });
+});
+
+describe("filterSaleFamilyDestinationOptions", () => {
+  it("tira variante, ficha e intermediário; deixa agrupamento e produto livre", () => {
+    const variantId = "var-1";
+    const rows = [
+      product({ id: "fam", name: "Bolinhos", stock_control_type: "SALE_FAMILY" }),
+      product({ id: variantId, name: "Bolinho queijo" }),
+      product({ id: "livre", name: "Água" }),
+      product({
+        id: "ficha",
+        name: "Dose",
+        stock_control_type: "RECIPE_CONTROLLED",
+      }),
+      product({
+        id: "inter",
+        name: "Molho",
+        stock_control_type: "INTERMEDIATE",
+      }),
+    ];
+    const out = filterSaleFamilyDestinationOptions(rows, new Set([variantId]));
+    expect(out.map((p) => p.id)).toEqual(["fam", "livre"]);
   });
 });
 

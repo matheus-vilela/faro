@@ -35,9 +35,14 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-corrigir-origem-agrupamento.md` | Badge PDV/nota; possível agrupamento já selecionado |
 | `correlacao-corrigir-somente-estoque.md` | «Para corrigir»: tag Somente estoque ao lado da origem |
 | `correlacao-direita-por-papel.md` | Card de correlação: direita muda com o papel (ficha no card) |
-| `correlacao-2.md` | Aba Correlação 2: fila + inspector, sem corte de 90% |
+| `correlacao-2.md` | Aba Correlação 2 (removida; ver `correlacao-remover-v2`) |
+| `correlacao-remover-v2.md` | Remove aba Correlação 2; grupo Correlação sem tabs |
 | `correlacao-2-variante-fila.md` | Variante já ligada não volta na fila da Correlação 2 |
 | `vendas-calendario-abas.md` | Vendas: Calendário com abas internas calendário / listagem |
+| `correlacao-match-so-unificar.md` | Correlação: match inicial só unifica produtos iguais |
+| `correlacao-ordenar-valor-giro.md` | Fila da correlação: volume × valor de compra/venda |
+| `produto-preco-venda-epoc.md` | Preço de venda no cadastro (separado da compra da NF) |
+| `ferramentas-limpar-unidade.md` | Ferramentas: limpar dados operacionais da unidade ativa |
 | `ncm-rpc-acesso-admin.md` | Aba NCMs: admin Faro deixa de levar «Acesso negado» |
 | `unificar-com-produto.md` | Unificar com qualquer produto; hub não inverte |
 | `produto-ultimo-preco-por-unidade.md` | Detalhe: último preço + proporcional por unidade de estoque |
@@ -46,6 +51,11 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `conversao-unidade-dialog-sheet.md` | Diálogo de conversão clicável acima do sheet do produto |
 | `contagem-aprovar-conferir.md` | Aprovar: Conferir abre o sheet da conferência |
 | `contagem-cores-layout.md` | Cores da aba Contagem e Listas alinhadas ao layout |
+| `agrupamento-destino-sem-variante.md` | Destino de agrupamento não lista variantes |
+| `search-select-padrao.md` | SearchSelect único em formulário e filtro |
+| `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |
+| `correlacao-2-unificar-varios.md` | Correlação 2: unificar com vários produtos |
+| `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

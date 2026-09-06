@@ -17,7 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { DashboardImportReviewProductCadastroModal } from "@/components/dashboard/DashboardImportReviewProductCadastroModal";
 import { ImportPendingProductMatchDetail } from "@/components/dashboard/ImportPendingProductMatchDetail";
@@ -711,27 +711,34 @@ export function DashboardAlertsCard({
                         <CardTitle>Filtros</CardTitle>
                       </CardHeader>
                       <CardContent className="flex flex-wrap gap-3">
-                        <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todos status</SelectItem>
-                            <SelectItem value="OPEN">Abertos</SelectItem>
-                            <SelectItem value="RESOLVED">Resolvidos</SelectItem>
-                            <SelectItem value="IGNORED">Ignorados</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={kind} onValueChange={setKind}>
-                          <SelectTrigger className="w-[240px]">
-                            <SelectValue placeholder="Tipo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todos tipos</SelectItem>
-                            <SelectItem value="missing_conversion">Revisão de linha / conversão</SelectItem>
-                            <SelectItem value="missing_product_match">Vínculo NF → catálogo</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <SearchSelect
+                          value={status}
+                          onValueChange={(v) => setStatus(v as typeof status)}
+                          options={[
+                            { value: "all", label: "Todos status" },
+                            { value: "OPEN", label: "Abertos" },
+                            { value: "RESOLVED", label: "Resolvidos" },
+                            { value: "IGNORED", label: "Ignorados" },
+                          ]}
+                          triggerClassName="w-[180px]"
+                        />
+                        <SearchSelect
+                          value={kind}
+                          onValueChange={setKind}
+                          options={[
+                            { value: "all", label: "Todos tipos" },
+                            {
+                              value: "missing_conversion",
+                              label: "Revisão de linha / conversão",
+                            },
+                            {
+                              value: "missing_product_match",
+                              label: "Vínculo NF → catálogo",
+                            },
+                          ]}
+                          placeholder="Tipo"
+                          triggerClassName="w-[240px]"
+                        />
                       </CardContent>
                     </Card>
                     <Card>
@@ -890,22 +897,14 @@ export function DashboardAlertsCard({
                                       </div>
                                       <div className="grid gap-1.5">
                                         <Label className="text-xs text-muted-foreground">Unidade de estoque</Label>
-                                        <Select
-                                          value={selectedUnit || undefined}
+                                        <SearchSelect
+                                          value={selectedUnit || ""}
                                           onValueChange={(v) => void persistProductUnit(productId, v)}
                                           disabled={busyProductId === productId}
-                                        >
-                                          <SelectTrigger className="h-9">
-                                            <SelectValue placeholder="Selecione a unidade" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {unitOptions.map((option) => (
-                                              <SelectItem key={`${r.id}-unit-${option.value}`} value={option.value}>
-                                                {option.label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                          options={unitOptions}
+                                          placeholder="Selecione a unidade"
+                                          triggerClassName="h-9"
+                                        />
                                         <div className="flex gap-2">
                                           <Button
                                             type="button"
@@ -931,24 +930,18 @@ export function DashboardAlertsCard({
                                       </div>
                                       <div className="grid gap-1.5">
                                         <Label className="text-xs text-muted-foreground">Tipo final</Label>
-                                        <Select
+                                        <SearchSelect
                                           value={resolvedType}
                                           onValueChange={(v) =>
                                             void persistProductType(productId, v as OperationalItemType)
                                           }
                                           disabled={busyProductId === productId}
-                                        >
-                                          <SelectTrigger className="h-9">
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {OPERATIONAL_ITEM_TYPES.map((type) => (
-                                              <SelectItem key={`${r.id}-type-${type}`} value={type}>
-                                                {TYPE_LABEL[type]}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                          options={OPERATIONAL_ITEM_TYPES.map((type) => ({
+                                            value: type,
+                                            label: TYPE_LABEL[type],
+                                          }))}
+                                          triggerClassName="h-9"
+                                        />
                                       </div>
                                     </div>
                                   ) : null}

@@ -1,11 +1,5 @@
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   EXPENSE_DIVERGENCE_REASONS,
   valuesDivergeCents,
@@ -111,24 +105,22 @@ export function ExpenseImportAttentionPanel({
                 >
                   Motivo provável da divergência (opcional)
                 </Label>
-                <Select
+                <SearchSelect
+                  id="divergence-reason"
                   value={divergenceReasonValue || "__none__"}
                   onValueChange={(v) =>
                     onDivergenceReasonChange(v === "__none__" ? "" : v)
                   }
-                >
-                  <SelectTrigger id="divergence-reason" className="w-full">
-                    <SelectValue placeholder="Selecione se souber o motivo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Não informar</SelectItem>
-                    {EXPENSE_DIVERGENCE_REASONS.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  options={[
+                    { value: "__none__", label: "Não informar" },
+                    ...EXPENSE_DIVERGENCE_REASONS.map((r) => ({
+                      value: r.value,
+                      label: r.label,
+                    })),
+                  ]}
+                  placeholder="Selecione se souber o motivo"
+                  triggerClassName="w-full"
+                />
               </div>
             </div>
           </div>

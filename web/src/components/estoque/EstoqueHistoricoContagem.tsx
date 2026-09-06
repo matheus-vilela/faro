@@ -1,12 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { useSheetListView } from "@/hooks/useSheetListView";
@@ -254,18 +248,16 @@ export function EstoqueHistoricoContagem({
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label>Status</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchSelect
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            searchPlaceholder="Buscar status…"
+            triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+            options={STATUS_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+            }))}
+          />
         </div>
         <div className="space-y-1">
           <Label>De</Label>

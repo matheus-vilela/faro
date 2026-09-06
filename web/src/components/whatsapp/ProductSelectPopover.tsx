@@ -1,22 +1,10 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { SearchSelect } from "@/components/ui/search-select";
 import { supabasePublic } from "@/lib/supabasePublic";
-import { cn } from "@/lib/utils";
-import { ChevronsUpDown, Loader2, Search } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const PAGE_SIZE = 30;
+const NEW_VALUE = "__new__";
+const NONE_VALUE = "__none__";
 
 type CatalogRow = { id: string; name: string };
 
@@ -68,15 +56,14 @@ export function ProductSelectPopover({
   onPick,
   id,
 }: ProductSelectPopoverProps) {
-  const [open, setOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [items, setItems] = useState<CatalogRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const skipSearchDebounceRef = useRef(false);
-  const listRef = useRef<HTMLDivElement>(null);
   const loadMoreInFlightRef = useRef(false);
+  const primedRef = useRef(false);
 
   const reloadFromStart = useCallback(
     async (q: string) => {
@@ -91,7 +78,8 @@ export function ProductSelectPopover({
   );
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || loading || loadingMore || loadMoreInFlightRef.current) return;
+    if (!hasMore || loading || loadingMore || loadMoreInFlightRef.current)
+      return;
     loadMoreInFlightRef.current = true;
     const q = searchInput.trim();
     setLoadingMore(true);
@@ -112,17 +100,14 @@ export function ProductSelectPopover({
     loadMoreInFlightRef.current = false;
   }, [hasMore, loading, loadingMore, searchInput, token, items]);
 
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (next) {
-      skipSearchDebounceRef.current = true;
-      setSearchInput("");
-      void reloadFromStart("");
-    }
-  };
+  useEffect(() => {
+    if (primedRef.current) return;
+    primedRef.current = true;
+    skipSearchDebounceRef.current = true;
+    void reloadFromStart("");
+  }, [reloadFromStart]);
 
   useEffect(() => {
-    if (!open) return;
     if (skipSearchDebounceRef.current) {
       skipSearchDebounceRef.current = false;
       return;
@@ -131,161 +116,78 @@ export function ProductSelectPopover({
       void reloadFromStart(searchInput.trim());
     }, 300);
     return () => window.clearTimeout(t);
-  }, [searchInput, open, reloadFromStart]);
-
-  const onScrollList = () => {
-    const el = listRef.current;
-    if (!el || loading || loadingMore || !hasMore) return;
-    const threshold = 72;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < threshold) {
-      void loadMore();
-    }
-  };
+  }, [searchInput, reloadFromStart]);
 
   const triggerText = (() => {
-    if (selectVal === "__new__") return "+ Criar produto novo";
-    if (selectVal === "__none__")
+    if (selectVal === NEW_VALUE) return "+ Criar produto novo";
+    if (selectVal === NONE_VALUE)
       return "— Escolher depois (obrigatório antes de salvar)";
     if (catalogProductName) return catalogProductName;
     return "Produto no Faro";
   })();
 
-  const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-  };
+  const selectedInList = items.some((p) => p.id === selectVal);
+  const selectedOption =
+    catalogProductName &&
+    selectVal &&
+    selectVal !== NEW_VALUE &&
+    selectVal !== NONE_VALUE &&
+    !selectedInList
+      ? [{ value: selectVal, label: catalogProductName }]
+      : [];
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          id={id}
-          className={cn(
-            "h-auto min-h-10 w-full max-w-full justify-between gap-2 py-2 font-normal",
-            "text-left whitespace-normal",
-          )}
-        >
-          <span className="min-w-0 flex-1 wrap-break-word text-left leading-snug">
-            {triggerText}
-          </span>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className={cn(
-          "z-50 w-[min(100vw-2rem,var(--radix-popover-trigger-width))] max-w-[min(100vw-2rem,28rem)] p-0",
-          "origin-(--radix-popover-content-transform-origin)",
-        )}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <div className="flex flex-col gap-0">
-          <div className="border-b border-border p-2">
-            <div className="relative">
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Buscar produto…"
-                className="h-9 pl-8"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <p className="mt-1.5 px-0.5 text-[11px] leading-snug text-muted-foreground sm:text-xs">
-              Digite para filtrar ou role a lista para carregar mais.
-            </p>
-          </div>
-
-          <div
-            ref={listRef}
-            onScroll={onScrollList}
-            className="max-h-[min(50vh,280px)] overflow-y-auto overscroll-contain p-1"
-          >
-            <button
-              type="button"
-              className={cn(
-                "flex w-full rounded-sm px-2 py-2 text-left text-sm outline-none transition-colors",
-                "hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                selectVal === "__new__" && "bg-accent/80",
-              )}
-              onClick={() => {
-                onPick({ kind: "new" });
-                setOpen(false);
-              }}
-            >
-              + Criar produto novo
-            </button>
-
-            {loading && items.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Carregando…
-              </div>
-            ) : items.length === 0 ? (
-              <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-                Nenhum produto encontrado.
-              </p>
-            ) : (
-              items.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={cn(
-                    "flex w-full rounded-sm px-2 py-2 text-left text-sm outline-none transition-colors",
-                    "hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                    selectVal === p.id && "bg-accent/80",
-                  )}
-                  onClick={() => {
-                    onPick({
-                      kind: "product",
-                      productId: p.id,
-                      productName: p.name,
-                    });
-                    setOpen(false);
-                  }}
-                >
-                  <span className="min-w-0 wrap-break-word leading-snug">
-                    {p.name}
-                  </span>
-                </button>
-              ))
-            )}
-
-            {loadingMore && (
-              <div className="flex justify-center py-2">
-                <Loader2
-                  className="h-4 w-4 animate-spin text-muted-foreground"
-                  aria-hidden
-                />
-              </div>
-            )}
-
-            <button
-              type="button"
-              className={cn(
-                "mt-0.5 flex w-full rounded-sm px-2 py-2 text-left text-sm text-muted-foreground outline-none transition-colors",
-                "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                selectVal === "__none__" && "bg-accent/80 text-foreground",
-              )}
-              onClick={() => {
-                onPick({ kind: "none" });
-                setOpen(false);
-              }}
-            >
-              — Escolher depois (obrigatório antes de salvar)
-            </button>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <SearchSelect
+      id={id}
+      value={selectVal}
+      onValueChange={(next) => {
+        if (next === NEW_VALUE) {
+          onPick({ kind: "new" });
+          return;
+        }
+        if (next === NONE_VALUE) {
+          onPick({ kind: "none" });
+          return;
+        }
+        const name =
+          items.find((p) => p.id === next)?.name ??
+          catalogProductName ??
+          next;
+        onPick({ kind: "product", productId: next, productName: name });
+      }}
+      options={[
+        ...selectedOption,
+        ...items.map((p) => ({ value: p.id, label: p.name })),
+      ]}
+      leadingOptions={[
+        {
+          value: NEW_VALUE,
+          label: "+ Criar produto novo",
+          accent: true,
+        },
+      ]}
+      trailingOptions={[
+        {
+          value: NONE_VALUE,
+          label: "— Escolher depois (obrigatório antes de salvar)",
+        },
+      ]}
+      placeholder="Produto no Faro"
+      triggerLabel={triggerText}
+      searchPlaceholder="Buscar produto…"
+      searchHint="Digite para filtrar ou role a lista para carregar mais."
+      emptyMessage="Nenhum produto encontrado."
+      loading={loading || loadingMore}
+      loadingMessage={loadingMore ? "Carregando mais…" : "Carregando…"}
+      filterLocally={false}
+      onSearchChange={setSearchInput}
+      onListScroll={(el) => {
+        const threshold = 72;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < threshold) {
+          void loadMore();
+        }
+      }}
+      triggerClassName="h-auto min-h-10 max-w-full gap-2 py-2 text-left whitespace-normal"
+    />
   );
 }

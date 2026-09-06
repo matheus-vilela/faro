@@ -1,13 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -293,7 +287,7 @@ export function EstoqueContagemListingSheet({
             </div>
             <div className="space-y-2">
               <Label>Grupo</Label>
-              <Select
+              <SearchSelect
                 value={groupId || "__none__"}
                 onValueChange={(v) => {
                   const next = v === "__none__" ? "" : v;
@@ -302,48 +296,41 @@ export function EstoqueContagemListingSheet({
                     void saveHeader({ groupId: next });
                   }
                 }}
-              >
-                <SelectTrigger className={COUNT_SELECT_TRIGGER_CLASS}>
-                  <SelectValue placeholder="Grupo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Selecione</SelectItem>
-                  {groups.map((g) => (
-                    <SelectItem key={g.id} value={g.id}>
-                      {g.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Grupo"
+                searchPlaceholder="Buscar grupo…"
+                triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+                leadingOptions={[{ value: "__none__", label: "Selecione" }]}
+                options={groups.map((g) => ({
+                  value: g.id,
+                  label: g.name,
+                }))}
+              />
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label>Operador</Label>
-              <Select
+              <SearchSelect
                 value={memberId || "__none__"}
                 onValueChange={(v) =>
                   void saveOperator(v === "__none__" ? "" : v)
                 }
-              >
-                <SelectTrigger
-                  className={cn(
-                    COUNT_SELECT_TRIGGER_CLASS,
-                    "border-primary/50 bg-primary/10",
-                    savingOperator && "opacity-70",
-                  )}
-                >
-                  <SelectValue placeholder="Qualquer pessoa com o link" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">
-                    Qualquer pessoa com o link
-                  </SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Qualquer pessoa com o link"
+                searchPlaceholder="Buscar operador…"
+                triggerClassName={cn(
+                  COUNT_SELECT_TRIGGER_CLASS,
+                  "border-primary/50 bg-primary/10",
+                  savingOperator && "opacity-70",
+                )}
+                leadingOptions={[
+                  {
+                    value: "__none__",
+                    label: "Qualquer pessoa com o link",
+                  },
+                ]}
+                options={members.map((m) => ({
+                  value: m.id,
+                  label: m.name,
+                }))}
+              />
               <p className="text-[11px] text-muted-foreground">
                 A troca de operador vale na hora, sem salvar o resto da ficha.
               </p>

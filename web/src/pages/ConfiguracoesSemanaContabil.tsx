@@ -9,13 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import {
@@ -91,42 +85,30 @@ export function ConfiguracoesSemanaContabil() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="week-start">Começa em</Label>
-              <Select
+              <SearchSelect
+                id="week-start"
                 value={String(weekStartsOn)}
                 onValueChange={(v) => setWeekStartsOn(Number(v))}
-              >
-                <SelectTrigger id="week-start">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEEKDAY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={String(opt.value)}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={WEEKDAY_OPTIONS.map((opt) => ({
+                  value: String(opt.value),
+                  label: opt.label,
+                }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="week-end">Termina em</Label>
-              <Select
+              <SearchSelect
+                id="week-end"
                 value={String(weekEndsOn)}
                 onValueChange={(v) => {
                   const end = Number(v);
                   setWeekStartsOn((end + 1) % 7);
                 }}
-              >
-                <SelectTrigger id="week-end">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEEKDAY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={String(opt.value)}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={WEEKDAY_OPTIONS.map((opt) => ({
+                  value: String(opt.value),
+                  label: opt.label,
+                }))}
+              />
             </div>
           </div>
 

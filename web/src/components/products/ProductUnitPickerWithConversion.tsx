@@ -1,18 +1,12 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { SearchSelect } from "@/components/ui/search-select";
 import { UnitConversionDialog } from "@/components/units/UnitConversionDialog";
-import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { cn } from "@/lib/utils";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { ChevronsUpDown, Plus, Search } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useProductUnitConversionQuickAdd } from "./useProductUnitConversionQuickAdd";
+
+const NEW_CONVERSION = "__new_conversion__";
 
 export interface ProductUnitPickerWithConversionProps {
   companyId: string;
@@ -32,6 +26,7 @@ export interface ProductUnitPickerWithConversionProps {
   className?: string;
   triggerClassName?: string;
   triggerId?: string;
+  size?: "sm" | "default";
 }
 
 export function ProductUnitPickerWithConversion({
@@ -49,12 +44,8 @@ export function ProductUnitPickerWithConversion({
   className,
   triggerClassName,
   triggerId,
+  size = "default",
 }: ProductUnitPickerWithConversionProps) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const listRef = useRef<HTMLDivElement>(null);
-  usePopoverListScrollFix(open, listRef);
-
   const quickAdd = useProductUnitConversionQuickAdd({
     companyId,
     stockUnitCode,
@@ -68,115 +59,52 @@ export function ProductUnitPickerWithConversion({
 
   const hub = (hubUnitCode ?? stockUnitCode).trim().toLowerCase();
 
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
+  const options = useMemo(() => {
     const unique = [
       ...new Set(unitCodes.map((u) => u.trim().toLowerCase())),
     ].filter(Boolean);
-    if (!t) return unique;
-    return unique.filter((code) => {
-      const label = systemUnitLabel(code).toLowerCase();
-      return code.includes(t) || label.includes(t);
-    });
-  }, [unitCodes, q]);
-
-  const selectedLabel = value
-    ? value.trim().toLowerCase() === hub
-      ? `${systemUnitLabel(value)} (estoque)`
-      : systemUnitLabel(value)
-    : null;
-
-  const searchActive = q.trim().length > 0;
-  const showRegisterInList = quickAdd.canAddConversion && !disabled;
+    return unique.map((code) => ({
+      value: code,
+      label:
+        code === hub
+          ? `${systemUnitLabel(code)} (estoque)`
+          : systemUnitLabel(code),
+      keywords: code,
+    }));
+  }, [hub, unitCodes]);
 
   return (
     <div className={className}>
-      <Popover
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) setQ("");
+      <SearchSelect
+        id={triggerId}
+        value={value}
+        onValueChange={(next) => {
+          if (next === NEW_CONVERSION) {
+            quickAdd.setDialogOpen(true);
+            return;
+          }
+          onValueChange(next);
         }}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            id={triggerId}
-            type="button"
-            variant="outline"
-            disabled={disabled}
-            className={cn(
-              "w-full justify-between font-normal",
-              triggerClassName,
-            )}
-          >
-            <span className="truncate text-left">
-              {selectedLabel ?? placeholder}
-            </span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-[var(--radix-popover-trigger-width)] p-0"
-          onWheel={(e) => e.stopPropagation()}
-        >
-          <div className="border-b p-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar unidade..."
-                className="h-9 pl-8"
-                autoFocus
-              />
-            </div>
-          </div>
-          <div ref={listRef} className="max-h-56 overflow-y-auto p-1">
-            {filtered.map((code) => (
-              <button
-                key={code}
-                type="button"
-                className={cn(
-                  "w-full rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
-                  value.trim().toLowerCase() === code && "bg-accent/80",
-                )}
-                onClick={() => {
-                  onValueChange(code);
-                  setOpen(false);
-                  setQ("");
-                }}
-              >
-                {code === hub
-                  ? `${systemUnitLabel(code)} (estoque)`
-                  : systemUnitLabel(code)}
-              </button>
-            ))}
-            {filtered.length === 0 && searchActive ? (
-              <p className="px-2 py-2 text-sm text-muted-foreground">
-                Nenhuma unidade encontrada.
-              </p>
-            ) : null}
-            {showRegisterInList ? (
-              <div className="mt-1 border-t border-border p-1">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm font-medium text-primary hover:bg-accent"
-                  disabled={quickAdd.saving}
-                  onClick={() => {
-                    setOpen(false);
-                    setQ("");
-                    quickAdd.setDialogOpen(true);
-                  }}
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  Nova conversão
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </PopoverContent>
-      </Popover>
+        options={options}
+        placeholder={placeholder}
+        searchPlaceholder="Buscar unidade…"
+        emptyMessage="Nenhuma unidade encontrada."
+        disabled={disabled}
+        size={size}
+        triggerClassName={cn("w-full", triggerClassName)}
+        trailingOptions={
+          quickAdd.canAddConversion && !disabled
+            ? [
+                {
+                  value: NEW_CONVERSION,
+                  label: "Nova conversão",
+                  description: "Cadastrar outra unidade",
+                  accent: true,
+                },
+              ]
+            : []
+        }
+      />
 
       <UnitConversionDialog
         open={quickAdd.dialogOpen}

@@ -2,13 +2,7 @@ import { Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { tipoBadge } from "@/lib/companyCategoryLabels";
@@ -727,35 +721,29 @@ export function RevenueSalesList(props: RevenueSalesListProps) {
                   className="h-10 w-full pl-9"
                 />
               </div>
-              <Select
+              <SearchSelect
                 value={entryModeFilter}
                 onValueChange={onEntryModeFilterChange}
-              >
-                <SelectTrigger className="h-10 w-full sm:w-44">
-                  <SelectValue placeholder="Origem" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as origens</SelectItem>
-                  <SelectItem value="manual">Lançamento manual</SelectItem>
-                  <SelectItem value="product_sale">Venda de produto</SelectItem>
-                  <SelectItem value="recipe_sale">Venda por ficha</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
+                options={[
+                  { value: "all", label: "Todas as origens" },
+                  { value: "manual", label: "Lançamento manual" },
+                  { value: "product_sale", label: "Venda de produto" },
+                  { value: "recipe_sale", label: "Venda por ficha" },
+                ]}
+                placeholder="Origem"
+                triggerClassName="w-full sm:w-44"
+              />
+              <SearchSelect
                 value={revenueTypeFilter}
                 onValueChange={onRevenueTypeFilterChange}
-              >
-                <SelectTrigger className="h-10 w-full sm:w-44">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os tipos</SelectItem>
-                  <SelectItem value="operational">Operacional</SelectItem>
-                  <SelectItem value="non_operational">
-                    Não operacional
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "Todos os tipos" },
+                  { value: "operational", label: "Operacional" },
+                  { value: "non_operational", label: "Não operacional" },
+                ]}
+                placeholder="Tipo"
+                triggerClassName="w-full sm:w-44"
+              />
               {hasActiveFilters ? (
                 <Button
                   type="button"

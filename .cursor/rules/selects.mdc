@@ -1,0 +1,19 @@
+---
+description: Select de formulário é sempre o SearchSelect
+alwaysApply: true
+---
+
+# Selects
+
+Todo select de **formulário ou filtro** usa `SearchSelect` (`@/components/ui/search-select`).
+
+Não use `Select` / `SelectTrigger` / `SelectContent` / `SelectItem` (`ui/select`). Não monte outro Popover + busca.
+
+- Filtro compacto: `size="sm"` (barra `h-8`).
+- Demais: `size="default"`.
+- Criar na lista: `onCreate` (texto digitado). Campos extras: `footer` no popover ou dialog do pai — não um picker novo.
+- Duas listas no mesmo seletor (ex.: ficha técnica / produção): `tabs` + `option.tab`.
+- Ação fixa «Criar…» sem texto: `trailingOptions` com `accent`.
+- Multi-valor (tags): `SearchSelect` para adicionar + chips fora.
+- Ações (não escolhem valor): `DropdownMenu`.
+- Mês com setas: `MonthSelector` / `ReferencePeriodCard`.

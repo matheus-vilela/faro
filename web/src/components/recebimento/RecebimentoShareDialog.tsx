@@ -9,13 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -249,7 +243,7 @@ export function RecebimentoShareDialog({
             ) : null}
             <div className="space-y-2">
               <Label>Operador</Label>
-              <Select
+              <SearchSelect
                 value={memberId || NONE_MEMBER_SELECT_VALUE}
                 onValueChange={(v) => {
                   if (v === ADD_MEMBER_SELECT_VALUE) {
@@ -258,24 +252,27 @@ export function RecebimentoShareDialog({
                   }
                   setMemberId(v === NONE_MEMBER_SELECT_VALUE ? "" : v);
                 }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione o operador" />
-                </SelectTrigger>
-                <SelectContent className="z-[90]">
-                  <SelectItem value={NONE_MEMBER_SELECT_VALUE}>
-                    Sem atribuir (só o link)
-                  </SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value={ADD_MEMBER_SELECT_VALUE}>
-                    + Cadastrar operador
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                options={members.map((m) => ({
+                  value: m.id,
+                  label: m.name,
+                }))}
+                leadingOptions={[
+                  {
+                    value: NONE_MEMBER_SELECT_VALUE,
+                    label: "Sem atribuir (só o link)",
+                  },
+                ]}
+                trailingOptions={[
+                  {
+                    value: ADD_MEMBER_SELECT_VALUE,
+                    label: "+ Cadastrar operador",
+                    accent: true,
+                  },
+                ]}
+                placeholder="Selecione o operador"
+                triggerClassName="w-full"
+                contentClassName="z-[90]"
+              />
               <p className="text-xs text-muted-foreground">
                 Se o operador tiver WhatsApp cadastrado no Faro, ele também
                 consegue iniciar o recebimento por lá, sem precisar do link.

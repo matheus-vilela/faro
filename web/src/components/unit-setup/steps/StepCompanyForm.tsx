@@ -1,12 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { maskCpfCnpj } from "@/lib/masks";
 import type { EmpresaMap } from "@/types/companySetup";
 import { REGIME_TRIBUTARIO_OPTIONS } from "@/types/companySetup";
@@ -114,31 +108,24 @@ export function StepCompanyForm({
           </div>
           <div className="space-y-2">
             <Label>Regime tributário *</Label>
-            <Select
-              value={normalizeRegimeValue(empresa.regime_tributario)}
+            <SearchSelect
+              value={normalizeRegimeValue(empresa.regime_tributario) ?? ""}
               onValueChange={(v) =>
                 onEmpresaChange({ regime_tributario: Number(v) })
               }
+              options={REGIME_TRIBUTARIO_OPTIONS.map((o) => ({
+                value: String(o.value),
+                label: o.label,
+              }))}
+              placeholder="Selecione"
               disabled={isEmpresaKeyLocked(
                 "regime_tributario",
                 lockedEmpresaKeys,
               )}
-            >
-              <SelectTrigger className="w-full min-w-0">
-                <SelectValue placeholder="Selecione" />
-              </SelectTrigger>
-              <SelectContent
-                position="popper"
-                sideOffset={4}
-                className="z-[200] max-h-[min(280px,50vh)]"
-              >
-                {REGIME_TRIBUTARIO_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={String(o.value)}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-full min-w-0"
+              contentClassName="z-[200]"
+              listMaxHeightClassName="max-h-[min(280px,50vh)]"
+            />
           </div>
         </>
       ) : null}

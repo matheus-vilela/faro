@@ -9,13 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
@@ -431,21 +425,16 @@ export function ContagemEstoquePublic() {
                   }
                 }}
               />
-              <Select
+              <SearchSelect
                 value={unitDraft || current.unit}
                 onValueChange={setUnitDraft}
-              >
-                <SelectTrigger className="h-16 w-[7.5rem] shrink-0 text-base">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {currentUnits.map((u) => (
-                    <SelectItem key={u.code} value={u.code}>
-                      {systemUnitLabel(u.code)} ({u.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                searchPlaceholder="Buscar unidade…"
+                triggerClassName="h-16 w-[7.5rem] shrink-0 text-base"
+                options={currentUnits.map((u) => ({
+                  value: u.code,
+                  label: `${systemUnitLabel(u.code)} (${u.code})`,
+                }))}
+              />
             </div>
             {currentHint ? (
               <p className="mt-2 text-xs text-muted-foreground">{currentHint}</p>

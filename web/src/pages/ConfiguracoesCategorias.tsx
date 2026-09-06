@@ -24,13 +24,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -755,27 +749,20 @@ export function ConfiguracoesCategorias() {
                 <Label>
                   Tipo ({formNatureza === "RECEITA" ? "Receita" : "Despesa"})
                 </Label>
-                <Select
+                <SearchSelect
                   value={formTipo}
                   onValueChange={(v) => setFormTipo(v as TipoCategoria)}
                   disabled={
                     saving || (formKind === "subcategoria" && !!selectedParent)
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(formNatureza === "RECEITA"
-                      ? TIPOS_RECEITA
-                      : TIPOS_DESPESA
-                    ).map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {TIPO_LABEL[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  options={(formNatureza === "RECEITA"
+                    ? TIPOS_RECEITA
+                    : TIPOS_DESPESA
+                  ).map((t) => ({
+                    value: t,
+                    label: TIPO_LABEL[t],
+                  }))}
+                />
               </div>
             </div>
 
@@ -934,25 +921,21 @@ export function ConfiguracoesCategorias() {
             {formNatureza === "RECEITA" && formTipo === "OPERACIONAL" ? (
               <div className="space-y-2">
                 <Label>Papel na DRE (receita operacional)</Label>
-                <Select
+                <SearchSelect
                   value={formPapelReceitaDre}
                   onValueChange={(v) =>
                     setFormPapelReceitaDre(v as PapelReceitaDre)
                   }
                   disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BRUTA">
-                      Vendas brutas (padrão)
-                    </SelectItem>
-                    <SelectItem value="DEDUCAO">
-                      {ptBrUi.configuracoesCategorias.deducaoReceitaSelectItem}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={[
+                    { value: "BRUTA", label: "Vendas brutas (padrão)" },
+                    {
+                      value: "DEDUCAO",
+                      label:
+                        ptBrUi.configuracoesCategorias.deducaoReceitaSelectItem,
+                    },
+                  ]}
+                />
                 <p className="text-xs text-muted-foreground">
                   {ptBrUi.configuracoesCategorias.deducoesHelp}
                 </p>

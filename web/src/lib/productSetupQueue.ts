@@ -9,6 +9,7 @@ import {
   type PurchaseMatchRow,
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
+import { productSaleUnitValue, productUnitCost } from "@/lib/productCatalogValue";
 import { fetchExcludedFromSalesProductIds } from "@/lib/productExcludeFromSales";
 import {
   fetchResolvedSaleFamilyProductIds,
@@ -39,6 +40,10 @@ export type ProductSetupItem = {
   priorityEpoc?: boolean;
   /** Volume de giro: saídas (venda) ou entradas (compra), para ordenar correção. */
   turnoverQty?: number;
+  /** Preço unitário de referência (compra ou venda). */
+  referenceUnitValue?: number;
+  /** Giro em valor: volume × preço, ou total já agregado das movimentações. */
+  turnoverAmount?: number;
   possibleGrouping?: boolean;
 };
 
@@ -64,11 +69,21 @@ export const PRODUCT_SETUP_CHOICE_LABEL: Record<ProductSetupChoice, string> = {
   intermediate: "Ficha de produção",
   sale_family: "É um agrupamento",
   sale_family_variant: "Faz parte de um agrupamento",
-  ingredient: "Insumo de uma ficha",
+  ingredient: "É um insumo",
   skip: "É um produto interno",
 };
 
 const SOLD_SETUP_CHOICES: ProductSetupChoice[] = [
+  "link_item",
+  "recipe",
+  "intermediate",
+  "sale_family",
+  "sale_family_variant",
+  "ingredient",
+  "skip",
+];
+
+const FICHA_INCOMPLETE_SETUP_CHOICES: ProductSetupChoice[] = [
   "link_item",
   "recipe",
   "intermediate",
@@ -96,6 +111,15 @@ export function itemTurnoverQty(item: ProductSetupItem): number {
   return Number(item.turnoverQty ?? 0);
 }
 
+export function itemTurnoverAmount(item: ProductSetupItem): number {
+  const stored = Number(item.turnoverAmount ?? 0);
+  if (stored > 0) return stored;
+  const qty = itemTurnoverQty(item);
+  const unit = Number(item.referenceUnitValue ?? 0);
+  if (qty > 0 && unit > 0) return qty * unit;
+  return 0;
+}
+
 async function attachProductTurnover(
   client: SupabaseClient,
   companyId: string,
@@ -103,40 +127,104 @@ async function attachProductTurnover(
 ): Promise<ProductSetupItem[]> {
   const ids = [...new Set(items.map((item) => item.productId))];
   if (ids.length === 0) return items;
-  const totals = new Map<string, { inQty: number; outQty: number }>();
+  const totals = new Map<
+    string,
+    { inQty: number; outQty: number; inValue: number; saleValue: number }
+  >();
+  const purchaseUnitPrices = new Map<string, number>();
+  const saleUnitPrices = new Map<string, number>();
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
-    const { data, error } = await client.rpc("product_movement_totals", {
-      p_company_id: companyId,
-      p_product_ids: chunk,
-    });
-    if (error) break;
-    for (const row of data ?? []) {
+    const [{ data, error }, products] = await Promise.all([
+      client.rpc("product_movement_totals", {
+        p_company_id: companyId,
+        p_product_ids: chunk,
+      }),
+      client
+        .from("products")
+        .select(
+          "id, average_cost, last_unit_value, last_unit_value_stock, last_sale_unit_value",
+        )
+        .in("id", chunk),
+    ]);
+    if (!error) {
+      for (const row of data ?? []) {
+        const rec = row as {
+          product_id?: string;
+          in_qty?: number;
+          out_qty?: number;
+          in_value?: number;
+          sale_value?: number;
+        };
+        const id = String(rec.product_id ?? "").trim();
+        if (!id) continue;
+        totals.set(id, {
+          inQty: Number(rec.in_qty ?? 0),
+          outQty: Number(rec.out_qty ?? 0),
+          inValue: Number(rec.in_value ?? 0),
+          saleValue: Number(rec.sale_value ?? 0),
+        });
+      }
+    }
+    for (const row of products.data ?? []) {
       const rec = row as {
-        product_id?: string;
-        in_qty?: number;
-        out_qty?: number;
+        id: string;
+        average_cost?: number | null;
+        last_unit_value?: number | null;
+        last_unit_value_stock?: number | null;
+        last_sale_unit_value?: number | null;
       };
-      const id = String(rec.product_id ?? "").trim();
-      if (!id) continue;
-      totals.set(id, {
-        inQty: Number(rec.in_qty ?? 0),
-        outQty: Number(rec.out_qty ?? 0),
+      const purchaseUnit = productUnitCost({
+        average_cost: rec.average_cost ?? null,
+        last_unit_value: rec.last_unit_value ?? null,
+        last_unit_value_stock: rec.last_unit_value_stock ?? null,
       });
+      if (purchaseUnit != null && purchaseUnit > 0) {
+        purchaseUnitPrices.set(rec.id, purchaseUnit);
+      }
+      const saleUnit = productSaleUnitValue({
+        last_sale_unit_value: rec.last_sale_unit_value ?? null,
+      });
+      if (saleUnit != null && saleUnit > 0) {
+        saleUnitPrices.set(rec.id, saleUnit);
+      }
     }
   }
   return items.map((item) => {
     const t = totals.get(item.productId);
     const inQty = t?.inQty ?? 0;
     const outQty = t?.outQty ?? 0;
-    const turnoverQty =
-      item.kind === "purchase_unlinked"
-        ? inQty
-        : item.kind === "sold_unlinked" ||
-            item.kind === "recipe_without_ingredients"
-          ? outQty
-          : Math.max(inQty, outQty);
-    return { ...item, turnoverQty };
+    const isPurchase = item.kind === "purchase_unlinked";
+    const isSold =
+      item.kind === "sold_unlinked" ||
+      item.kind === "recipe_without_ingredients";
+    const turnoverQty = isPurchase
+      ? inQty
+      : isSold
+        ? outQty
+        : Math.max(inQty, outQty);
+    const rpcAmount = isPurchase ? (t?.inValue ?? 0) : (t?.saleValue ?? 0);
+    const fallbackUnit = isPurchase
+      ? (purchaseUnitPrices.get(item.productId) ?? 0)
+      : (saleUnitPrices.get(item.productId) ?? 0);
+    const turnoverAmount =
+      rpcAmount > 0
+        ? rpcAmount
+        : turnoverQty > 0 && fallbackUnit > 0
+          ? turnoverQty * fallbackUnit
+          : 0;
+    const referenceUnitValue =
+      turnoverQty > 0 && turnoverAmount > 0
+        ? turnoverAmount / turnoverQty
+        : fallbackUnit > 0
+          ? fallbackUnit
+          : undefined;
+    return {
+      ...item,
+      turnoverQty,
+      turnoverAmount,
+      referenceUnitValue,
+    };
   });
 }
 
@@ -224,12 +312,46 @@ export function maxTurnoverQty(
   );
 }
 
+export function maxTurnoverAmount(
+  ...items: Array<ProductSetupItem | undefined>
+): number {
+  return Math.max(
+    0,
+    ...items.map((item) => (item ? itemTurnoverAmount(item) : 0)),
+  );
+}
+
+export function isPurchaseSetupItem(
+  item: Pick<ProductSetupItem, "kind">,
+): boolean {
+  return item.kind === "purchase_unlinked";
+}
+
+/** Vendas (PDV/ficha) primeiro; compras da nota depois. Mantém a ordem de `rows`. */
+export function partitionSalesThenPurchases<T>(
+  rows: T[],
+  kindOf: (row: T) => ProductSetupItem["kind"],
+): T[] {
+  const sales: T[] = [];
+  const purchases: T[] = [];
+  for (const row of rows) {
+    if (kindOf(row) === "purchase_unlinked") purchases.push(row);
+    else sales.push(row);
+  }
+  return [...sales, ...purchases];
+}
+
 export function compareTurnoverDesc(
   a: ProductSetupItem,
   b: ProductSetupItem,
 ): number {
-  const d = itemTurnoverQty(b) - itemTurnoverQty(a);
-  if (d !== 0) return d;
+  const aPurchase = isPurchaseSetupItem(a);
+  const bPurchase = isPurchaseSetupItem(b);
+  if (aPurchase !== bPurchase) return aPurchase ? 1 : -1;
+  const amount = itemTurnoverAmount(b) - itemTurnoverAmount(a);
+  if (amount !== 0) return amount;
+  const qty = itemTurnoverQty(b) - itemTurnoverQty(a);
+  if (qty !== 0) return qty;
   return a.name.localeCompare(b.name, "pt-BR");
 }
 
@@ -258,7 +380,9 @@ export function setupChoicesForItem(
       ? PURCHASE_SETUP_CHOICES
       : item.kind === "recipe_sales_unlinked"
         ? FICHA_SALES_SETUP_CHOICES
-        : SOLD_SETUP_CHOICES;
+        : item.kind === "recipe_without_ingredients"
+          ? FICHA_INCOMPLETE_SETUP_CHOICES
+          : SOLD_SETUP_CHOICES;
   return values.map((value) => ({
     value,
     label: PRODUCT_SETUP_CHOICE_LABEL[value],

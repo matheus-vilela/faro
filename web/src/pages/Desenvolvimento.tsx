@@ -16,6 +16,7 @@ import { EpocFaturamentoExportCard } from "@/components/desenvolvimento/EpocFatu
 import { EpocSyncDayCard } from "@/components/desenvolvimento/EpocSyncDayCard";
 import { EpocVendaProdutosExportCard } from "@/components/desenvolvimento/EpocVendaProdutosExportCard";
 import { EpocVendaServicosExportCard } from "@/components/desenvolvimento/EpocVendaServicosExportCard";
+import { CompanyOperationalPurgeCard } from "@/components/desenvolvimento/CompanyOperationalPurgeCard";
 import { OnboardingResetCard } from "@/components/desenvolvimento/OnboardingResetCard";
 import { SyncHistoryPurgeCard } from "@/components/desenvolvimento/SyncHistoryPurgeCard";
 import { PageHeader } from "@/components/PageHeader";
@@ -360,6 +361,7 @@ export function Desenvolvimento() {
           <UnitSetupResetCard />
           <OnboardingResetCard />
           <SyncHistoryPurgeCard />
+          <CompanyOperationalPurgeCard />
         </div>
       ) : null}
 

@@ -6,13 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { ListChecks, Loader2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import type {
@@ -204,21 +198,19 @@ export function ChecklistPerformanceSection({
           </div>
           <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
             <span className="text-xs text-muted-foreground">Período</span>
-            <Select
+            <SearchSelect
               value={period}
               onValueChange={(v) =>
                 onPeriodChange(v as ChecklistPerformancePeriod)
               }
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Período" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">Últimos 7 dias</SelectItem>
-                <SelectItem value="30">Últimos 30 dias</SelectItem>
-                <SelectItem value="both">7 e 30 dias (comparar)</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "7", label: "Últimos 7 dias" },
+                { value: "30", label: "Últimos 30 dias" },
+                { value: "both", label: "7 e 30 dias (comparar)" },
+              ]}
+              placeholder="Período"
+              triggerClassName="w-[220px]"
+            />
           </div>
         </div>
       </CardHeader>

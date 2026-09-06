@@ -303,7 +303,7 @@ export function DashboardFocusNfeRecebidasSyncCard({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-col sm:items-end sm:justify-end">
             {interpretConfirmPhase ? (
               <Button
                 type="button"

@@ -5,13 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -384,26 +378,19 @@ export function FormasPagamento() {
             </div>
             <div className="space-y-1.5">
               <Label>Adquirente</Label>
-              <Select
+              <SearchSelect
                 value={createAcquirerId ?? NO_ACQUIRER}
                 onValueChange={(v) =>
                   setCreateAcquirerId(v === NO_ACQUIRER ? null : v)
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Nenhuma" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_ACQUIRER}>Nenhuma</SelectItem>
-                  {acquirers
+                options={[
+                  { value: NO_ACQUIRER, label: "Nenhuma" },
+                  ...acquirers
                     .filter((a) => a.is_active)
-                    .map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                    .map((a) => ({ value: a.id, label: a.name })),
+                ]}
+                placeholder="Nenhuma"
+              />
               {acquirers.filter((a) => a.is_active).length === 0 ? (
                 <p className="text-muted-foreground text-xs">
                   Cadastre em{" "}
@@ -465,7 +452,7 @@ export function FormasPagamento() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Adquirente</Label>
-                  <Select
+                  <SearchSelect
                     value={detail.acquirer_id ?? NO_ACQUIRER}
                     onValueChange={(v) =>
                       setDetail({
@@ -473,24 +460,19 @@ export function FormasPagamento() {
                         acquirer_id: v === NO_ACQUIRER ? null : v,
                       })
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Nenhuma" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_ACQUIRER}>Nenhuma</SelectItem>
-                      {acquirers
+                    options={[
+                      { value: NO_ACQUIRER, label: "Nenhuma" },
+                      ...acquirers
                         .filter(
                           (a) => a.is_active || a.id === detail.acquirer_id,
                         )
-                        .map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.name}
-                            {!a.is_active ? " (inativa)" : ""}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                        .map((a) => ({
+                          value: a.id,
+                          label: `${a.name}${!a.is_active ? " (inativa)" : ""}`,
+                        })),
+                    ]}
+                    placeholder="Nenhuma"
+                  />
                   <p className="text-muted-foreground text-xs">
                     <Link
                       to="/app/configuracoes/adquirentes"

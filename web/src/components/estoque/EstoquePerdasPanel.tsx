@@ -12,13 +12,6 @@ import {
   productSearchOption,
   SearchSelect,
 } from "@/components/ui/search-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   convertQuantityForProduct,
@@ -281,22 +274,16 @@ export function EstoquePerdasPanel({ companyId }: { companyId: string }) {
           </div>
           <div className="space-y-2">
             <Label>Unidade</Label>
-            <Select
+            <SearchSelect
               value={unitCode || "__"}
               onValueChange={(v) => setUnitCode(v === "__" ? "" : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__">—</SelectItem>
-                {allowedUnitsForProduct(productId).map((u) => (
-                  <SelectItem key={`${productId}-${u}`} value={u}>
-                    {u}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={allowedUnitsForProduct(productId).map((u) => ({
+                value: u,
+                label: u,
+              }))}
+              leadingOptions={[{ value: "__", label: "—" }]}
+              placeholder="Selecionar"
+            />
           </div>
           <div className="space-y-2 sm:col-span-2">
             <Label>Motivo (opcional)</Label>

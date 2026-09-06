@@ -10,13 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -384,22 +378,15 @@ export function ConfiguracoesContasBancarias() {
             </div>
             <div className="space-y-2">
               <Label>Tipo</Label>
-              <Select
+              <SearchSelect
                 value={tipo}
                 onValueChange={(v) => setTipo(v as BankAccountType)}
                 disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BANK_ACCOUNT_TYPE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={BANK_ACCOUNT_TYPE_OPTIONS.map((opt) => ({
+                  value: opt.value,
+                  label: opt.label,
+                }))}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="bank-account-balance">Saldo atual</Label>
@@ -434,28 +421,23 @@ export function ConfiguracoesContasBancarias() {
             </div>
             <div className="space-y-2">
               <Label>Adquirente</Label>
-              <Select
+              <SearchSelect
                 value={acquirerId ?? NO_ACQUIRER}
                 onValueChange={(v) =>
                   setAcquirerId(v === NO_ACQUIRER ? null : v)
                 }
                 disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Nenhuma" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_ACQUIRER}>Nenhuma</SelectItem>
-                  {acquirers
+                options={[
+                  { value: NO_ACQUIRER, label: "Nenhuma" },
+                  ...acquirers
                     .filter((a) => a.is_active || a.id === acquirerId)
-                    .map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name}
-                        {!a.is_active ? " (inativa)" : ""}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                    .map((a) => ({
+                      value: a.id,
+                      label: `${a.name}${!a.is_active ? " (inativa)" : ""}`,
+                    })),
+                ]}
+                placeholder="Nenhuma"
+              />
               {acquirers.filter((a) => a.is_active).length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Cadastre em{" "}

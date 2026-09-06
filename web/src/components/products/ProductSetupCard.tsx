@@ -197,9 +197,7 @@ export function ProductSetupCard({
 
   const familyOptions = useMemo(
     () =>
-      families
-        .filter((p) => p.stock_control_type !== "INTERMEDIATE")
-        .map((p) => ({
+      families.map((p) => ({
           value: p.id,
           label: p.name,
           description:

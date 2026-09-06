@@ -1,13 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -132,29 +126,25 @@ export function SeriesBoletoActionsSheet({
         <div className="space-y-4 py-4">
           <div className="space-y-2">
             <Label>Como aplicar esta alteração</Label>
-            <Select
+            <SearchSelect
               value={scope}
               onValueChange={(v) => setScope(v as SeriesEditScope)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Escolha o escopo" />
-              </SelectTrigger>
-              <SelectContent
-                position="popper"
-                sideOffset={4}
-                className="z-[200] max-h-[min(280px,50vh)]"
-              >
-                <SelectItem value="single_month">
-                  Somente este mês
-                </SelectItem>
-                <SelectItem value="from_month">
-                  A partir deste mês em diante
-                </SelectItem>
-                <SelectItem value="until_next_adjustment">
-                  Até a próxima alteração já cadastrada
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "single_month", label: "Somente este mês" },
+                {
+                  value: "from_month",
+                  label: "A partir deste mês em diante",
+                },
+                {
+                  value: "until_next_adjustment",
+                  label: "Até a próxima alteração já cadastrada",
+                },
+              ]}
+              placeholder="Escolha o escopo"
+              triggerClassName="w-full"
+              contentClassName="z-[200]"
+              listMaxHeightClassName="max-h-[min(280px,50vh)]"
+            />
           </div>
           <div className="space-y-2">
             <Label>Valor (R$)</Label>

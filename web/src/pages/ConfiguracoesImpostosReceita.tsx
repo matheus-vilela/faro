@@ -9,13 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
 import {
   buildChildrenMap,
@@ -235,26 +229,19 @@ export function ConfiguracoesImpostosReceita() {
                             </p>
                           </td>
                           <td className="p-3 align-top">
-                            <Select
+                            <SearchSelect
                               value={row.tax_type}
                               onValueChange={(v) =>
                                 updateDraft(leaf.id, {
                                   tax_type: v as RevenueTaxType,
                                 })
                               }
-                            >
-                              <SelectTrigger className="h-9">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="percentage">
-                                  Percentual (%)
-                                </SelectItem>
-                                <SelectItem value="currency">
-                                  Valor (R$)
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
+                              options={[
+                                { value: "percentage", label: "Percentual (%)" },
+                                { value: "currency", label: "Valor (R$)" },
+                              ]}
+                              triggerClassName="h-9"
+                            />
                           </td>
                           <td className="p-3 align-top">
                             <Input

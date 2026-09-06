@@ -14,13 +14,6 @@ import {
   productSearchOption,
   SearchSelect,
 } from "@/components/ui/search-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useCompany } from "@/contexts/CompanyContext";
 import { canonicalProductName } from "@/lib/productImport/canonicalName";
@@ -411,18 +404,11 @@ export function ConfiguracoesImportacaoProdutos() {
             </div>
             <div className="space-y-2">
               <Label>Unidade na nota (código)</Label>
-              <Select value={newUnit} onValueChange={setNewUnit}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {UNIT_CODES.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={newUnit}
+                onValueChange={setNewUnit}
+                options={UNIT_CODES.map((u) => ({ value: u, label: u }))}
+              />
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label>Produto no Faro</Label>

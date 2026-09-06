@@ -9,13 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { formatUnitLabelFromCodes } from "@/lib/companyUnits/convert";
 import { useEffect, useMemo, useState } from "react";
 
@@ -140,18 +134,18 @@ export function UnitConversionDialog({
               </div>
               <div>
                 <Label>Unidade secundária</Label>
-                <Select value={secondaryCode} onValueChange={setSecondaryCode}>
-                  <SelectTrigger className="mt-1.5">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent className="z-[90]" position="popper">
-                    {secondaryUnits.map((u) => (
-                      <SelectItem key={u.code} value={u.code}>
-                        {formatUnitLabelFromCodes(u.code)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchSelect
+                  value={secondaryCode}
+                  onValueChange={setSecondaryCode}
+                  placeholder="Selecione"
+                  searchPlaceholder="Buscar unidade…"
+                  triggerClassName="mt-1.5"
+                  contentClassName="z-[90]"
+                  options={secondaryUnits.map((u) => ({
+                    value: u.code,
+                    label: formatUnitLabelFromCodes(u.code),
+                  }))}
+                />
               </div>
             </div>
           </div>

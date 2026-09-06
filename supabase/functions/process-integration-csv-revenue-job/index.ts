@@ -1200,7 +1200,7 @@ async function runCsvRevenueImportForJob(
             quantity,
             sale_unit_code: "un",
             pricing_mode: "total",
-            unit_value: null,
+            unit_value: quantity > 0 ? gross / quantity : null,
             _csv_import_job_id: job.id,
             integration_import_batch_id: batchId,
           },

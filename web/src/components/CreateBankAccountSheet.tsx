@@ -1,13 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -111,21 +105,12 @@ export function CreateBankAccountSheet({
           </div>
           <div>
             <Label>Tipo</Label>
-            <Select
+            <SearchSelect
               value={tipo}
               onValueChange={(v) => setTipo(v as BankAccountType)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BANK_ACCOUNT_TYPE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={BANK_ACCOUNT_TYPE_OPTIONS}
+              triggerClassName="w-full"
+            />
           </div>
           <SheetFooter>
             <Button type="submit" disabled={loading || !name.trim()}>

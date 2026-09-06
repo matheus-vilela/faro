@@ -8,13 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import { maskCpfCnpj, maskPhone } from "@/lib/masks";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
@@ -272,36 +266,29 @@ export function AtualizarPagamento() {
             </div>
             <div>
               <Label>Tipo de conta</Label>
-              <Select value={accountType} onValueChange={setAccountType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ACCOUNT_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={accountType}
+                onValueChange={setAccountType}
+                options={ACCOUNT_TYPES.map((t) => ({
+                  value: t.value,
+                  label: t.label,
+                }))}
+              />
             </div>
             <div className="border-t pt-4">
               <Label className="text-sm font-medium">PIX</Label>
               <div className="flex gap-2 mt-2">
                 <div>
                   <Label className="text-xs">Tipo da chave</Label>
-                  <Select value={pixType} onValueChange={setPixType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Tipo" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PIX_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchSelect
+                    value={pixType}
+                    onValueChange={setPixType}
+                    options={PIX_TYPES.map((t) => ({
+                      value: t.value,
+                      label: t.label,
+                    }))}
+                    placeholder="Tipo"
+                  />
                 </div>
                 <div className="flex-1">
                   <Label className="text-xs">Chave PIX</Label>

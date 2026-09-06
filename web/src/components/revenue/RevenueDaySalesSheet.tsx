@@ -1,12 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchSelect } from "@/components/ui/search-select";
 import {
   Sheet,
   SheetContent,
@@ -414,42 +408,32 @@ export function RevenueDaySalesSheet({
                 className="h-9 pl-8"
               />
             </div>
-            <Select
+            <SearchSelect
               value={originFilter}
               onValueChange={(v) => setOriginFilter(v as OriginFilter)}
-            >
-              <SelectTrigger className="h-9 w-full sm:w-48" aria-label="Origem">
-                <SelectValue placeholder="Origem" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as origens</SelectItem>
-                <SelectItem value="sale">Venda</SelectItem>
-                <SelectItem value="stock_only">
-                  {STOCK_ONLY_ORIGIN_LABEL}
-                  {stockOnlyCount > 0 ? ` (${stockOnlyCount})` : ""}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "all", label: "Todas as origens" },
+                { value: "sale", label: "Venda" },
+                {
+                  value: "stock_only",
+                  label: `${STOCK_ONLY_ORIGIN_LABEL}${stockOnlyCount > 0 ? ` (${stockOnlyCount})` : ""}`,
+                },
+              ]}
+              placeholder="Origem"
+              triggerClassName="h-9 w-full sm:w-48"
+            />
             {viewMode === "cards" ? (
               <div className="flex w-full items-center gap-2 sm:w-auto">
-                <Select
+                <SearchSelect
                   value={sortKey}
                   onValueChange={(v) => {
                     const key = v as SortKey;
                     if (key !== sortKey) onSort(key);
                   }}
-                >
-                  <SelectTrigger className="h-9 w-full sm:w-44" aria-label="Ordenar por">
-                    <SelectValue placeholder="Ordenar por" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SORT_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  options={SORT_OPTIONS}
+                  placeholder="Ordenar por"
+                  triggerClassName="h-9 w-full sm:w-44"
+                />
                 <Button
                   type="button"
                   variant="outline"

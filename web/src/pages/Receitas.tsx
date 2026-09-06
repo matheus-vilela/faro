@@ -24,13 +24,6 @@ import {
 } from "@/components/ui/popover";
 import { SearchSelect } from "@/components/ui/search-select";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -1144,7 +1137,7 @@ export function Receitas() {
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-4">
                   <div>
                     <Label>Modo de lançamento</Label>
-                    <Select
+                    <SearchSelect
                       value={baseMode}
                       onValueChange={(v) => {
                         const m = v as LaunchMode;
@@ -1155,40 +1148,31 @@ export function Receitas() {
                           setPontualItems([createPontualSaleDraft()]);
                         }
                       }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">
-                          Lançamento por período
-                        </SelectItem>
-                        <SelectItem value="pontual">Venda pontual</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      options={[
+                        { value: "manual", label: "Lançamento por período" },
+                        { value: "pontual", label: "Venda pontual" },
+                      ]}
+                      triggerClassName="w-full"
+                    />
                   </div>
 
                   {baseMode === "manual" && (
                     <div>
                       <Label>Tipo da receita</Label>
-                      <Select
+                      <SearchSelect
                         value={revenueType}
                         onValueChange={(v) =>
                           setRevenueType(v as "operational" | "non_operational")
                         }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="operational">
-                            Operacional
-                          </SelectItem>
-                          <SelectItem value="non_operational">
-                            Não operacional
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                        options={[
+                          { value: "operational", label: "Operacional" },
+                          {
+                            value: "non_operational",
+                            label: "Não operacional",
+                          },
+                        ]}
+                        triggerClassName="w-full"
+                      />
                     </div>
                   )}
 
@@ -1365,7 +1349,7 @@ export function Receitas() {
                               </div>
                               <div>
                                 <Label>Unidade</Label>
-                                <Select
+                                <SearchSelect
                                   value={item.saleUnitCode || "__none__"}
                                   onValueChange={(v) =>
                                     setPontualItems((prev) =>
@@ -1380,28 +1364,19 @@ export function Receitas() {
                                       ),
                                     )
                                   }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Unidade" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">
-                                      Selecione
-                                    </SelectItem>
-                                    {item.productId
+                                  options={[
+                                    { value: "__none__", label: "Selecione" },
+                                    ...(item.productId
                                       ? allowedUnitsForProduct(
                                           item.productId,
-                                        ).map((u) => (
-                                          <SelectItem
-                                            key={`${item.productId}-${u}`}
-                                            value={u}
-                                          >
-                                            {u}
-                                          </SelectItem>
-                                        ))
-                                      : null}
-                                  </SelectContent>
-                                </Select>
+                                        ).map((u) => ({
+                                          value: u,
+                                          label: u,
+                                        }))
+                                      : []),
+                                  ]}
+                                  placeholder="Unidade"
+                                />
                               </div>
                             </>
                           ) : item.isRecipeSale ? (
@@ -1422,7 +1397,7 @@ export function Receitas() {
                             }
                           >
                             <Label>Preço</Label>
-                            <Select
+                            <SearchSelect
                               value={item.pricingMode}
                               onValueChange={(v) =>
                                 setPontualItems((prev) =>
@@ -1436,21 +1411,16 @@ export function Receitas() {
                                   ),
                                 )
                               }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unit">
-                                  {item.isRecipeSale
+                              options={[
+                                {
+                                  value: "unit",
+                                  label: item.isRecipeSale
                                     ? "Valor por porção"
-                                    : "Valor unitário"}
-                                </SelectItem>
-                                <SelectItem value="total">
-                                  Valor total
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
+                                    : "Valor unitário",
+                                },
+                                { value: "total", label: "Valor total" },
+                              ]}
+                            />
                           </div>
                         </div>
 

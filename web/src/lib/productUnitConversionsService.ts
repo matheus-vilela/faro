@@ -34,24 +34,74 @@ export function prepareProductUnitConversionsForPersist(
   }));
 }
 
+function isMissingRowError(error: { code?: string; message?: string }): boolean {
+  return (
+    error.code === "PGRST116" ||
+    /0 rows|multiple \(or no\) rows/i.test(error.message ?? "")
+  );
+}
+
+export async function loadProductUnitConversionsByIds(
+  companyId: string,
+  productIds: string[],
+): Promise<{
+  byId: Record<string, ProductUnitConversionDraft[]>;
+  error: string | null;
+}> {
+  const ids = [
+    ...new Set(productIds.map((id) => id.trim()).filter(Boolean)),
+  ];
+  const byId: Record<string, ProductUnitConversionDraft[]> = {};
+  for (const id of ids) byId[id] = [];
+  if (ids.length === 0) return { byId, error: null };
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, unit_conversions")
+    .eq("company_id", companyId)
+    .in("id", ids);
+
+  if (error) {
+    if (isMissingRowError(error)) return { byId, error: null };
+    return { byId, error: error.message };
+  }
+
+  for (const row of data ?? []) {
+    const r = row as { id: string; unit_conversions?: unknown };
+    if (!r.id) continue;
+    byId[r.id] = parseProductUnitConversionsJson(
+      r.unit_conversions,
+      companyId,
+      r.id,
+    );
+  }
+  return { byId, error: null };
+}
+
 export async function loadProductUnitConversions(
   companyId: string,
   productId: string,
 ): Promise<{ rows: ProductUnitConversionDraft[]; error: string | null }> {
+  const id = productId.trim();
+  if (!companyId.trim() || !id) return { rows: [], error: null };
+
   const { data, error } = await supabase
     .from("products")
     .select("unit_conversions")
     .eq("company_id", companyId)
-    .eq("id", productId)
-    .maybeSingle();
+    .eq("id", id)
+    .limit(1);
 
-  if (error) return { rows: [], error: error.message };
+  if (error) {
+    if (isMissingRowError(error)) return { rows: [], error: null };
+    return { rows: [], error: error.message };
+  }
 
   return {
     rows: parseProductUnitConversionsJson(
-      data?.unit_conversions,
+      data?.[0]?.unit_conversions,
       companyId,
-      productId,
+      id,
     ),
     error: null,
   };
