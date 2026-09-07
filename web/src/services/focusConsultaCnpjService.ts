@@ -9,15 +9,62 @@ function onlyDigitsCnpj(raw: string): string {
   return raw.replace(/\D/g, "").slice(0, 14);
 }
 
+function asRecord(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  return data as Record<string, unknown>;
+}
+
+function focusPayloadMessage(focus: unknown): string | null {
+  const o = asRecord(focus);
+  if (!o) {
+    if (typeof focus === "string" && focus.trim()) return focus.trim();
+    return null;
+  }
+  if (typeof o.mensagem === "string" && o.mensagem.trim()) {
+    return o.mensagem.trim();
+  }
+  if (typeof o.message === "string" && o.message.trim()) {
+    return o.message.trim();
+  }
+  if (typeof o.raw === "string" && /access denied/i.test(o.raw)) {
+    return "A Focus recusou o token (HTTP Basic). Confira FOCUS_NFE_TOKEN e o ambiente (produção vs homologação).";
+  }
+  return null;
+}
+
+/** Mensagem para toast quando a edge/Focus devolve erro. */
+export function messageFromConsultaCnpjFailure(
+  body: unknown,
+  httpStatus: number,
+): string {
+  const o = asRecord(body);
+  if (typeof o?.error === "string" && o.error.trim()) return o.error.trim();
+  if (typeof o?.message === "string" && o.message.trim()) {
+    return o.message.trim();
+  }
+  const fromFocus = focusPayloadMessage(o?.focus);
+  if (fromFocus) return fromFocus;
+  if (httpStatus === 401) {
+    return "Sessão inválida ou expirada. Entre novamente e tente validar o CNPJ.";
+  }
+  if (httpStatus === 403) {
+    return "A Focus recusou a consulta de CNPJ (permissão). Confira o token da conta e se a aplicação não está bloqueada.";
+  }
+  if (httpStatus === 502) {
+    return "A consulta de CNPJ na Focus falhou. Tente de novo; se persistir, o token ou o ambiente (homologação/produção) está incorreto.";
+  }
+  return "Falha ao consultar CNPJ.";
+}
+
 function parseJsonBody(data: unknown): {
   ok?: boolean;
   error?: string;
   data?: FocusCnpjConsultaData;
 } {
-  if (!data || typeof data !== "object") {
+  const o = asRecord(data);
+  if (!o) {
     return { ok: false, error: "Resposta inválida do servidor." };
   }
-  const o = data as Record<string, unknown>;
   return {
     ok: o.ok === true,
     error: typeof o.error === "string" ? o.error : undefined,
@@ -30,8 +77,7 @@ function parseJsonBody(data: unknown): {
 
 /**
  * Consulta CNPJ na Focus via edge function `focus-consulta-cnpj`.
- * Autenticação: JWT do usuário (mesmo padrão de `parse-expense-document`).
- * Tenta GET `?cnpj=` e, em caso de método não permitido, POST JSON `{ cnpj }`.
+ * Autenticação: JWT do usuário. Sempre POST — GET com `?cnpj=` costuma levar 403 no gateway.
  */
 export async function consultarCnpjNaFocus(
   cnpj: string,
@@ -57,46 +103,36 @@ export async function consultarCnpjNaFocus(
   }
 
   const base = supabaseUrl.replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    apikey: supabaseAnonKey,
-  };
-
-  const urlGet = `${base}${FN_PATH}?cnpj=${encodeURIComponent(digits)}`;
-
-  let res = await fetch(urlGet, { method: "GET", headers });
-
-  if (res.status === 405) {
-    res = await fetch(`${base}${FN_PATH}`, {
-      method: "POST",
-      headers: {
-        ...headers,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ cnpj: digits }),
-    });
-  }
+  const res = await fetch(`${base}${FN_PATH}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      apikey: supabaseAnonKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ cnpj: digits }),
+  });
 
   let body: unknown;
   try {
     body = await res.json();
   } catch {
+    if (res.status === 403) {
+      return {
+        ok: false,
+        error:
+          "A Focus recusou a consulta de CNPJ (permissão). Confira o token da conta e se a aplicação não está bloqueada.",
+      };
+    }
     return { ok: false, error: "Resposta inválida do servidor." };
   }
 
   const parsed = parseJsonBody(body);
   if (!res.ok) {
-    const msg =
-      parsed.error ||
-      (typeof body === "object" &&
-      body !== null &&
-      "message" in body &&
-      typeof (body as { message: unknown }).message === "string"
-        ? (body as { message: string }).message
-        : null) ||
-      res.statusText ||
-      "Falha ao consultar CNPJ.";
-    return { ok: false, error: msg };
+    return {
+      ok: false,
+      error: messageFromConsultaCnpjFailure(body, res.status),
+    };
   }
 
   if (!parsed.ok || !parsed.data) {
