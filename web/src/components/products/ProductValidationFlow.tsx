@@ -1,6 +1,7 @@
 import { CorrelationCaseWorkbench } from "@/components/products/correlacao2/CorrelationCaseWorkbench";
 import { ProductCorrelationKpis } from "@/components/products/ProductCorrelationKpis";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useCompany } from "@/contexts/CompanyContext";
 import {
   correlationFiscalStepStatus,
@@ -96,6 +97,58 @@ function correlationGateHeaderIcon(
   return <Sparkles className="h-8 w-8 text-muted-foreground" />;
 }
 
+function CorrelationQueueSkeleton() {
+  return (
+    <div
+      className="correlation-queue-skeleton space-y-6"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span className="sr-only">Carregando itens para classificar.</span>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-border/80 bg-card px-3 py-3 sm:px-4"
+          >
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-2 h-7 w-12" />
+          </div>
+        ))}
+      </div>
+      <Skeleton className="h-18 w-full rounded-xl" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Skeleton className="h-8 min-w-48 flex-1 md:max-w-xs" />
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-8 w-20" />
+      </div>
+      <div className="overflow-hidden rounded-md border">
+        <div className="flex gap-4 border-b bg-muted/40 px-3 py-2.5">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 flex-1" />
+          <Skeleton className="h-3 w-12" />
+        </div>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-4 border-b px-3 py-3 last:border-0"
+          >
+            <div className="w-[25%] space-y-1.5">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+            <Skeleton className="h-9 w-[20%]" />
+            <Skeleton className="h-9 flex-1" />
+            <Skeleton className="h-8 w-24" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CorrelationAiTableLoading() {
   return (
     <div
@@ -184,6 +237,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     setLoading(true);
+    setQueue(null);
     void loadQueue();
   }, [loadQueue]);
 
@@ -257,20 +311,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     </div>
   );
 
-  if (loading && !queue && !result && !running) {
-    return (
-      <CorrelationIdleCard
-        tone="muted"
-        icon={
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        }
-        title="Carregando itens"
-        description="Buscando produtos da nota e do PDV para classificar."
-      />
-    );
-  }
-
-  if (queue?.error && !result && !running) {
+  if (queue?.error && !result && !running && !loading) {
     return (
       <p className="text-sm text-destructive">
         Não foi possível carregar os produtos. {queue.error}
@@ -305,6 +346,10 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     );
   }
 
+  if (loading || !queue) {
+    return <CorrelationQueueSkeleton />;
+  }
+
   if (pending === 0 && !running) {
     return wrap(
       <CorrelationIdleCard
@@ -315,8 +360,6 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       />,
     );
   }
-
-  if (!queue) return null;
 
   const canVerify = canStart && pendingAiCount > 0 && !running;
 

@@ -57,6 +57,8 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |
 | `correlacao-2-unificar-varios.md` | Correlação 2: unificar com vários produtos |
 | `classificar-renomear-aba.md` | Aba Correlação passa a Classificar |
+| `classificar-skeleton-loader.md` | Classificar: skeleton enquanto a fila carrega |
+| `classificar-insumo-consumo-depois.md` | Insumo: consumo só depois de escolher a ficha |
 | `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 

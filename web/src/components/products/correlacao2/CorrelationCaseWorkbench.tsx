@@ -165,7 +165,7 @@ function RowFlow({
   const [visited, setVisited] = useState(active);
   const choice = INTENT_TO_CHOICE[intent];
   const isRecipe = intent === "recipe" || intent === "produce";
-  const loadsConversions = isRecipe || intent === "ingredient";
+  const loadsConversions = isRecipe;
 
   useEffect(() => {
     if (active) setVisited(true);
@@ -206,11 +206,9 @@ function RowFlow({
         />
       ) : (
         <p className="text-sm text-muted-foreground">
-          {isRecipe
-            ? hintCount > 0
-              ? `${hintCount} ${hintCount === 1 ? "insumo sugerido" : "insumos sugeridos"}`
-              : "Clique para montar a ficha"
-            : "Clique para informar quantidade e vincular"}
+          {hintCount > 0
+            ? `${hintCount} ${hintCount === 1 ? "insumo sugerido" : "insumos sugeridos"}`
+            : "Clique para montar a ficha"}
         </p>
       )}
     </div>

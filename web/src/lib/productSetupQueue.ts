@@ -9,7 +9,10 @@ import {
   type PurchaseMatchRow,
   type RecipePickRow,
 } from "@/lib/onboardingProductRecipeMatch";
-import { productSaleUnitValue, productUnitCost } from "@/lib/productCatalogValue";
+import {
+  productSaleUnitValue,
+  productUnitCost,
+} from "@/lib/productCatalogValue";
 import { fetchExcludedFromSalesProductIds } from "@/lib/productExcludeFromSales";
 import {
   fetchResolvedSaleFamilyProductIds,
@@ -96,7 +99,7 @@ const PURCHASE_SETUP_CHOICES: ProductSetupChoice[] = [
   "link_item",
   "ingredient",
   "sale_family_variant",
-  "intermediate",
+  // "intermediate",
   "skip",
 ];
 
@@ -265,7 +268,9 @@ async function attachPossibleGrouping(
   }
   return items.map((item) => ({
     ...item,
-    possibleGrouping: isPossibleGroupingProduct(flags.get(item.productId) ?? {}),
+    possibleGrouping: isPossibleGroupingProduct(
+      flags.get(item.productId) ?? {},
+    ),
   }));
 }
 
@@ -434,18 +439,18 @@ export async function fetchProductSetupQueue(
     excludedIds,
     saleFamilyResolvedIds,
   ] = await Promise.all([
-      fetchProductRecipeMatchLists(client, companyId, {
-        purchaseLimit: 2000,
-        purchaseOffset: 0,
-        soldLimit: 2000,
-        soldOffset: 0,
-      }),
-      fetchDashboardImportReviewEpocRecipesNoIngredients(client, companyId),
-      fetchDashboardImportReviewPendingRevenueLink(client, companyId),
-      fetchCompanyRecipesForPick(client, companyId),
-      fetchExcludedFromSalesProductIds(companyId),
-      fetchResolvedSaleFamilyProductIds(companyId),
-    ]);
+    fetchProductRecipeMatchLists(client, companyId, {
+      purchaseLimit: 2000,
+      purchaseOffset: 0,
+      soldLimit: 2000,
+      soldOffset: 0,
+    }),
+    fetchDashboardImportReviewEpocRecipesNoIngredients(client, companyId),
+    fetchDashboardImportReviewPendingRevenueLink(client, companyId),
+    fetchCompanyRecipesForPick(client, companyId),
+    fetchExcludedFromSalesProductIds(companyId),
+    fetchResolvedSaleFamilyProductIds(companyId),
+  ]);
 
   const error =
     lists.error ??

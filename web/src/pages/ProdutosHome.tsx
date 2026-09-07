@@ -20,7 +20,10 @@ export function ProdutosHome() {
         description="Defina o que cada item é — unificar, ficha, agrupamento ou insumo — para o estoque bater com a nota e a venda."
       />
 
-      <ProductValidationFlow companyId={currentCompany.id} />
+      <ProductValidationFlow
+        key={currentCompany.id}
+        companyId={currentCompany.id}
+      />
     </div>
   );
 }

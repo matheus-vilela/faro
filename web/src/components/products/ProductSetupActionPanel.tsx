@@ -1,8 +1,8 @@
-import {
-  EstoqueRecipeMatchIngredientConfig,
-  type IngredientLinkConfig,
-} from "@/components/estoque/EstoqueRecipeMatchIngredientConfig";
 import { CorrelationRecipeComposer } from "@/components/products/CorrelationRecipeComposer";
+import {
+  CorrelationRecipeIngredientRow,
+  recipeLineUnitIsAllowed,
+} from "@/components/products/CorrelationRecipeIngredientRow";
 import { ProductMergeDialog } from "@/components/products/ProductMergeDialog";
 import { SaleFamilyDestinationFields } from "@/components/products/SaleFamilyDestinationFields";
 import {
@@ -52,10 +52,12 @@ import {
   type ProductSetupItem,
 } from "@/lib/productSetupQueue";
 import { saveProductTechnicalSheet } from "@/lib/productTechnicalSheet";
+import { loadProductUnitConversions } from "@/lib/productUnitConversionsService";
 import { ensureSaleFamilyProductId } from "@/lib/resolveSaleFamilyTarget";
 import { searchProductsForUnify } from "@/lib/searchProductsForUnify";
 import { supabase } from "@/lib/supabase";
 import type { Product } from "@/types/product";
+import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
 import { Loader2, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -73,6 +75,11 @@ function parseFichaPick(
     return { type: "product", id: value.slice(FICHA_PRODUCT_PREFIX.length) };
   }
   return null;
+}
+
+function parseQty(raw: string): number | null {
+  const n = Number.parseFloat(raw.replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function formatQty(n: number, unit: string): string {
@@ -164,8 +171,11 @@ export function ProductSetupActionPanel({
   const [familyId, setFamilyId] = useState("");
   const [newFamilyName, setNewFamilyName] = useState("");
   const [confirmPromote, setConfirmPromote] = useState(false);
-  const [ingredientConfig, setIngredientConfig] =
-    useState<IngredientLinkConfig | null>(null);
+  const [ingredientQty, setIngredientQty] = useState("");
+  const [ingredientUnitCode, setIngredientUnitCode] = useState("");
+  const [ingredientConversions, setIngredientConversions] = useState<
+    ProductUnitConversionDraft[]
+  >([]);
   const [createFichaName, setCreateFichaName] = useState("");
   const [fichaTab, setFichaTab] = useState<TechnicalSheetKind>("sale");
   const [fichaSearch, setFichaSearch] = useState("");
@@ -194,7 +204,9 @@ export function ProductSetupActionPanel({
     setFamilyId("");
     setNewFamilyName("");
     setConfirmPromote(false);
-    setIngredientConfig(null);
+    setIngredientQty("");
+    setIngredientUnitCode((item.unit || "un").trim().toLowerCase() || "un");
+    setIngredientConversions([]);
     setCreateFichaName("");
     setFichaTab("sale");
     setFichaSearch("");
@@ -375,7 +387,33 @@ export function ProductSetupActionPanel({
     return [...byId.values()];
   }, [catalogOptions, item.kind, purchaseOptions, soldOptions]);
 
-  const matchRow = setupItemAsMatchRow(item);
+  const fichaPicked = Boolean(
+    createFichaName.trim() || parseFichaPick(recipeId),
+  );
+  const ingredientStockUnit = (item.unit || "un").trim().toLowerCase() || "un";
+  const ingredientInputQty = parseQty(ingredientQty);
+  const ingredientInputUnit = ingredientUnitCode.trim().toLowerCase() || ingredientStockUnit;
+  const ingredientValid = Boolean(
+    fichaPicked &&
+      ingredientInputQty != null &&
+      recipeLineUnitIsAllowed(
+        ingredientStockUnit,
+        ingredientInputUnit,
+        ingredientConversions,
+      ),
+  );
+
+  useEffect(() => {
+    if (choice !== "ingredient" || !fichaPicked) return;
+    let cancelled = false;
+    void loadProductUnitConversions(companyId, item.productId).then((res) => {
+      if (cancelled) return;
+      setIngredientConversions(res.rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [choice, companyId, fichaPicked, item.productId]);
 
   const openMergeFrom = async (
     sourceId: string,
@@ -523,14 +561,15 @@ export function ProductSetupActionPanel({
   };
 
   const linkToRecipe = async (existingRecipeId: string) => {
-    if (!existingRecipeId || !ingredientConfig?.isValid) return;
+    if (!existingRecipeId || !ingredientValid || ingredientInputQty == null)
+      return;
     setBusy(true);
     const res = await addPurchaseAsRecipeIngredient(supabase, {
       companyId,
       recipeId: existingRecipeId,
       ingredientProductId: item.productId,
-      inputQuantity: ingredientConfig.inputQuantity,
-      inputUnitCode: ingredientConfig.inputUnitCode,
+      inputQuantity: ingredientInputQty,
+      inputUnitCode: ingredientInputUnit,
     });
     if (!res.ok) {
       setBusy(false);
@@ -543,7 +582,7 @@ export function ProductSetupActionPanel({
 
   const createFichaAndLink = async () => {
     const name = createFichaName.trim();
-    if (!name || !ingredientConfig?.isValid) return;
+    if (!name || !ingredientValid || ingredientInputQty == null) return;
     setBusy(true);
     const created = await createCatalogProduct({ companyId, name });
     if (!created.product) {
@@ -557,8 +596,8 @@ export function ProductSetupActionPanel({
       [
         {
           product_id: item.productId,
-          input_quantity: ingredientConfig.inputQuantity,
-          input_unit_code: ingredientConfig.inputUnitCode,
+          input_quantity: ingredientInputQty,
+          input_unit_code: ingredientInputUnit,
         },
       ],
       1,
@@ -574,7 +613,8 @@ export function ProductSetupActionPanel({
   };
 
   const convertProductAndLink = async (outputProductId: string) => {
-    if (!outputProductId || !ingredientConfig?.isValid) return;
+    if (!outputProductId || !ingredientValid || ingredientInputQty == null)
+      return;
     setBusy(true);
     const saved = await saveProductTechnicalSheet(
       companyId,
@@ -582,8 +622,8 @@ export function ProductSetupActionPanel({
       [
         {
           product_id: item.productId,
-          input_quantity: ingredientConfig.inputQuantity,
-          input_unit_code: ingredientConfig.inputUnitCode,
+          input_quantity: ingredientInputQty,
+          input_unit_code: ingredientInputUnit,
         },
       ],
       1,
@@ -601,7 +641,7 @@ export function ProductSetupActionPanel({
   };
 
   const confirmIngredientLink = async () => {
-    if (!ingredientConfig?.isValid) return;
+    if (!ingredientValid) return;
     if (createFichaName.trim()) {
       await createFichaAndLink();
       return;
@@ -727,10 +767,7 @@ export function ProductSetupActionPanel({
           : parseFichaPick(recipeId)?.type === "product"
             ? "Converter e vincular"
             : "Vincular à ficha",
-        disabled:
-          busy ||
-          !ingredientConfig?.isValid ||
-          (createFichaName.trim() ? false : !parseFichaPick(recipeId)),
+        disabled: busy || !ingredientValid,
         busy,
         run: () => void confirmIngredientLink(),
       });
@@ -772,7 +809,7 @@ export function ProductSetupActionPanel({
     choice,
     createFichaName,
     familyId,
-    ingredientConfig?.isValid,
+    ingredientValid,
     isPurchase,
     newFamilyName,
     onPrimaryActionChange,
@@ -955,19 +992,28 @@ export function ProductSetupActionPanel({
             }
           />
 
-          <EstoqueRecipeMatchIngredientConfig
-            companyId={companyId}
-            ingredient={matchRow}
-            onChange={setIngredientConfig}
-          />
+          {fichaPicked ? (
+            <ul className="space-y-1.5">
+              <CorrelationRecipeIngredientRow
+                companyId={companyId}
+                line={{
+                  productId: item.productId,
+                  name: item.name,
+                  stockUnit: ingredientStockUnit,
+                  qty: ingredientQty,
+                  unitCode: ingredientInputUnit,
+                }}
+                conversions={ingredientConversions}
+                onQtyChange={setIngredientQty}
+                onUnitChange={setIngredientUnitCode}
+                onConversionsChange={setIngredientConversions}
+              />
+            </ul>
+          ) : null}
           {hidePrimaryAction ? null : (
             <Button
               type="button"
-              disabled={
-                busy ||
-                !ingredientConfig?.isValid ||
-                (createFichaName.trim() ? false : !parseFichaPick(recipeId))
-              }
+              disabled={busy || !ingredientValid}
               onClick={() => void confirmIngredientLink()}
             >
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

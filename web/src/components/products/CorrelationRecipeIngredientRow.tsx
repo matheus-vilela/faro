@@ -59,7 +59,7 @@ export function CorrelationRecipeIngredientRow({
   onQtyChange: (qty: string) => void;
   onUnitChange: (unitCode: string) => void;
   onConversionsChange: (next: ProductUnitConversionDraft[]) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
   const hub = line.stockUnit.trim().toLowerCase() || "un";
   const [saving, setSaving] = useState(false);
@@ -139,16 +139,18 @@ export function CorrelationRecipeIngredientRow({
         className="w-[12rem] shrink-0"
         triggerClassName="h-8 bg-background"
       />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-        onClick={onRemove}
-        aria-label={`Remover ${line.name}`}
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
+      {onRemove ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+          aria-label={`Remover ${line.name}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      ) : null}
     </li>
   );
 }
