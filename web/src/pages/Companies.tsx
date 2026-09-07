@@ -45,8 +45,10 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import {
-  hasDuplicateUnitNameInGroup,
+  DUPLICATE_UNIT_NAME_MSG,
+  hasDuplicateUnitName,
   mapCompanyUnitMutationError,
+  unitRowsForOwner,
 } from "@/lib/companyUnitName";
 import { resolveFocusCnpjLockForResume } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
@@ -60,6 +62,7 @@ import {
 } from "@/services/focusAtualizarCertificadoService";
 import { fileToPureBase64 } from "@/services/focusCriaEmpresaService";
 import { focusDeleteEmpresa } from "@/services/focusDeleteEmpresaService";
+import { deleteCompanyUnit } from "@/services/deleteCompanyUnit";
 import { validateCertificateWithFocusNfe } from "@/services/focusNfeService";
 import { normalizeSetupMap } from "@/services/unitSetupService";
 import type { CompanyGroup } from "@/types/companyGroup";
@@ -399,18 +402,14 @@ export function Companies() {
       setError("Informe o nome da unidade.");
       return;
     }
-    const gwcEdit = groupsWithCompanies.find(
+    const ownerId = groupsWithCompanies.find(
       (g) => g.group.id === editingCompany.group_id,
-    );
-    if (
-      hasDuplicateUnitNameInGroup(
-        trimmedName,
-        editingCompany.group_id,
-        gwcEdit?.companies ?? [],
-        editingCompany.id,
-      )
-    ) {
-      setError("Já existe uma unidade com este nome neste grupo.");
+    )?.group.owner_user_id;
+    const ownedUnits = ownerId
+      ? unitRowsForOwner(groupsWithCompanies, ownerId)
+      : [];
+    if (hasDuplicateUnitName(trimmedName, ownedUnits, editingCompany.id)) {
+      setError(DUPLICATE_UNIT_NAME_MSG);
       return;
     }
     setLoading(true);
@@ -560,16 +559,9 @@ export function Companies() {
           return;
         }
       }
-      const { data: deletedRows, error: dErr } = await supabase
-        .from("companies")
-        .delete()
-        .eq("id", deleteTarget.company.id)
-        .select("id");
-      if (dErr) throw dErr;
-      if (!deletedRows?.length) {
-        setError(
-          "Não foi possível remover a unidade. Só o dono do grupo (ou dono da unidade) pode excluir, ou a linha não existe mais.",
-        );
+      const removed = await deleteCompanyUnit(deleteTarget.company.id);
+      if (!removed.ok) {
+        setError(removed.error);
         return;
       }
       await refetchCompanies();
@@ -726,6 +718,7 @@ export function Companies() {
                               title="Remover unidade"
                               onClick={(ev) => {
                                 ev.stopPropagation();
+                                setError(null);
                                 setDeleteTarget({
                                   company,
                                   groupName: group.name,

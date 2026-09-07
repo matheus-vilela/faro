@@ -18,6 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { mapCompanyMemberMutationError } from "@/lib/companyMemberError";
 import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import {
@@ -33,19 +34,6 @@ type CompanyMemberRow = { id: string; name: string };
 
 const ADD_MEMBER_SELECT_VALUE = "__add_member__";
 const NONE_MEMBER_SELECT_VALUE = "__none__";
-
-function mapCompanyMemberError(message: string): string {
-  if (message.includes("Limite de 3")) {
-    return "Limite de 3 operadores ativos por empresa.";
-  }
-  if (message.includes("proprietário")) {
-    return "Este número já é o do proprietário ou conflita com ele.";
-  }
-  if (message.includes("23505")) {
-    return "Já existe um operador ativo com este telefone.";
-  }
-  return message;
-}
 
 export type RecebimentoShareDialogProps = {
   open: boolean;
@@ -189,7 +177,7 @@ export function RecebimentoShareDialog({
       .single();
     setCreatingMember(false);
     if (error) {
-      toast.error(mapCompanyMemberError(error.message));
+      toast.error(mapCompanyMemberMutationError(error));
       return;
     }
     toast.success("Operador cadastrado.");

@@ -110,9 +110,20 @@ DROP INDEX IF EXISTS idx_company_ncm_category_rules_category;
 ALTER TABLE public.company_ncm_category_rules
   DROP COLUMN IF EXISTS company_category_id;
 
-ALTER TABLE public.company_ncm_category_rules
-  ADD COLUMN product_category_id UUID NOT NULL
-    REFERENCES public.company_product_categories(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'company_ncm_category_rules'
+      AND column_name = 'product_category_id'
+  ) THEN
+    ALTER TABLE public.company_ncm_category_rules
+      ADD COLUMN product_category_id UUID NOT NULL
+        REFERENCES public.company_product_categories(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_company_ncm_category_rules_product_category
   ON public.company_ncm_category_rules (product_category_id);

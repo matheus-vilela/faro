@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useCompany } from "@/contexts/CompanyContext";
+import { mapCompanyMemberMutationError } from "@/lib/companyMemberError";
 import { supabase } from "@/lib/supabase";
 import {
   applyWhatsappPhoneMaskChange,
@@ -43,19 +44,6 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 type UsuariosTab = "acessos" | "permissoes";
-
-function mapSupabaseError(message: string): string {
-  if (message.includes("Limite de 3")) {
-    return "Limite de 3 operadores ativos por empresa.";
-  }
-  if (message.includes("proprietário")) {
-    return "Este número já é o do proprietário ou conflita com ele.";
-  }
-  if (message.includes("23505")) {
-    return "Já existe um operador ativo com este telefone.";
-  }
-  return message;
-}
 
 export function ConfiguracoesUsuarios() {
   const { currentCompany, isCompanyOwner, refetchCompanies } = useCompany();
@@ -190,7 +178,7 @@ export function ConfiguracoesUsuarios() {
       setSaving(false);
       setMemberSheetOpen(false);
       if (error) {
-        toast.error(mapSupabaseError(error.message));
+        toast.error(mapCompanyMemberMutationError(error));
         return;
       }
       toast.success("Operador atualizado.");
@@ -206,7 +194,7 @@ export function ConfiguracoesUsuarios() {
       setSaving(false);
       setMemberSheetOpen(false);
       if (error) {
-        toast.error(mapSupabaseError(error.message));
+        toast.error(mapCompanyMemberMutationError(error));
         return;
       }
       toast.success("Operador adicionado.");
@@ -231,7 +219,7 @@ export function ConfiguracoesUsuarios() {
       .eq("company_id", currentCompany.id);
     setSaving(false);
     if (error) {
-      toast.error(mapSupabaseError(error.message));
+      toast.error(mapCompanyMemberMutationError(error));
       return;
     }
     toast.success(active ? "Operador ativado." : "Operador desativado.");
@@ -251,7 +239,7 @@ export function ConfiguracoesUsuarios() {
       .eq("company_id", currentCompany.id);
     setSaving(false);
     if (error) {
-      toast.error(mapSupabaseError(error.message));
+      toast.error(mapCompanyMemberMutationError(error));
       return;
     }
     toast.success(
@@ -341,7 +329,9 @@ export function ConfiguracoesUsuarios() {
               Ao adicionar um operador, informe o{" "}
               <strong>número do WhatsApp</strong> (com DDD).
               <br />
-              Esse número será validado nas mensagens recebidas
+              Esse número será validado nas mensagens recebidas. Se o mesmo
+              WhatsApp estiver em mais de uma unidade, o Faro pergunta qual
+              loja.
             </p>
           </div>
         </CardHeader>

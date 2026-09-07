@@ -1,4 +1,14 @@
 import type { Company } from "@/contexts/CompanyContext";
+import { isValidCnpj } from "@/lib/cnpj";
+import {
+  DUPLICATE_UNIT_CNPJ_MSG,
+  DUPLICATE_UNIT_NAME_MSG,
+  hasDuplicateUnitDocument,
+  hasDuplicateUnitName,
+  INVALID_CNPJ_DIGITS_MSG,
+  mapCompanyUnitMutationError,
+  type UnitRow,
+} from "@/lib/companyUnitName";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import {
   calculateSetupProgress,
@@ -204,6 +214,28 @@ export type CreateUnitStep1ExistingGroup = CreateUnitStep1Maps & {
   empresa: EmpresaMap;
 };
 
+async function loadOwnerUnitRows(
+  ownerUserId: string,
+): Promise<{ rows: UnitRow[] } | { error: string }> {
+  const { data: groups, error: gErr } = await supabase
+    .from("company_groups")
+    .select("id")
+    .eq("owner_user_id", ownerUserId);
+  if (gErr) return { error: gErr.message };
+  const groupIds = (groups ?? []).map((g) => g.id as string);
+  if (groupIds.length === 0) return { rows: [] };
+  const { data: companies, error: cErr } = await supabase
+    .from("companies")
+    .select("id, name, document, group_id")
+    .in("group_id", groupIds);
+  if (cErr) return { error: cErr.message };
+  return {
+    rows: (companies ?? []).map((company) => ({
+      company: company as UnitRow["company"],
+    })),
+  };
+}
+
 export async function createCompanyFromSetupStep1(
   input: CreateUnitStep1NewGroup | CreateUnitStep1ExistingGroup,
 ): Promise<{ companyId: string } | { error: string }> {
@@ -213,6 +245,35 @@ export async function createCompanyFromSetupStep1(
   const displayName =
     (e.nome_fantasia ?? "").trim() || (e.nome_razao_social ?? "").trim();
   const phoneDigits = (e.telefone ?? "").replace(/\D/g, "");
+
+  if (!isValidCnpj(docDigits)) {
+    return { error: INVALID_CNPJ_DIGITS_MSG };
+  }
+  if (!displayName) {
+    return { error: "Informe o nome da unidade." };
+  }
+
+  let ownerForUniqueness = input.ownerUserId;
+  if (input.mode === "existing_group") {
+    const { data: groupRow, error: ownerErr } = await supabase
+      .from("company_groups")
+      .select("owner_user_id")
+      .eq("id", input.groupId)
+      .single();
+    if (ownerErr || !groupRow?.owner_user_id) {
+      return { error: ownerErr?.message ?? "Grupo inválido." };
+    }
+    ownerForUniqueness = groupRow.owner_user_id as string;
+  }
+
+  const existing = await loadOwnerUnitRows(ownerForUniqueness);
+  if ("error" in existing) return existing;
+  if (hasDuplicateUnitName(displayName, existing.rows)) {
+    return { error: DUPLICATE_UNIT_NAME_MSG };
+  }
+  if (hasDuplicateUnitDocument(docDigits, existing.rows)) {
+    return { error: DUPLICATE_UNIT_CNPJ_MSG };
+  }
 
   let groupId: string;
   if (input.mode === "new_group") {
@@ -268,7 +329,14 @@ export async function createCompanyFromSetupStep1(
     onboarding_fiscal: defaultOnboardingFiscalRecord(),
     onboarding_pdv: defaultOnboardingPdvRecord(),
   });
-  if (cErr) return { error: cErr.message };
+  if (cErr) {
+    if (input.mode === "new_group") {
+      await supabase.from("company_groups").delete().eq("id", groupId);
+    }
+    return {
+      error: mapCompanyUnitMutationError(cErr, "Erro ao criar unidade"),
+    };
+  }
 
   const { error: uErr } = await supabase.from("user_companies").insert({
     user_id: input.ownerUserId,

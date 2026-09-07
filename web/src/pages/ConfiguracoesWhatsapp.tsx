@@ -82,6 +82,11 @@ export function ConfiguracoesWhatsapp() {
               . Por isso o celular precisa ser o mesmo que envia as mensagens.
             </p>
             <p>
+              Se o mesmo número estiver em <strong>mais de uma unidade</strong>,
+              o Faro pergunta qual loja e lembra a escolha neste turno. Envie{" "}
+              <span className={cmdPill}>loja</span> para trocar.
+            </p>
+            <p>
               Mensagens de números não cadastrados não são associadas à sua
               empresa.
             </p>
@@ -185,6 +190,12 @@ export function ConfiguracoesWhatsapp() {
               <li>
                 <span className={cmdPill}>comandos</span> — mostra a lista de
                 comandos disponíveis para o seu perfil.
+              </li>
+              <li>
+                <span className={cmdPill}>loja</span> ou{" "}
+                <span className={cmdPill}>unidade</span> — se o número estiver
+                em mais de uma unidade, escolhe ou troca a loja. A escolha vale
+                12 horas.
               </li>
               <li>
                 <span className={cmdPill}>estoque</span> ou{" "}

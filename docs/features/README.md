@@ -52,6 +52,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `conversao-unidade-dialog-sheet.md` | Diálogo de conversão clicável acima do sheet do produto |
 | `contagem-aprovar-conferir.md` | Aprovar: Conferir abre o sheet da conferência |
 | `contagem-cores-layout.md` | Cores da aba Contagem e Listas alinhadas ao layout |
+| `contagem-listagem-colunas.md` | Sheet da listagem: catálogo à esquerda, itens à direita |
 | `agrupamento-destino-sem-variante.md` | Destino de agrupamento não lista variantes |
 | `search-select-padrao.md` | SearchSelect único em formulário e filtro |
 | `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |
@@ -60,6 +61,9 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `classificar-skeleton-loader.md` | Classificar: skeleton enquanto a fila carrega |
 | `classificar-insumo-consumo-depois.md` | Insumo: consumo só depois de escolher a ficha |
 | `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
+| `unidade-cnpj-nome.md` | Unidade: CNPJ com dígitos verificadores; nome e CNPJ únicos por dono |
+| `unidade-remover.md` | Excluir unidade: RPC em vez do DELETE direto (RLS/CASCADE) |
+| `whatsapp-escolher-unidade.md` | WhatsApp: número em duas unidades pergunta a loja |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.
