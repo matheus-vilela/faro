@@ -26,7 +26,7 @@ import {
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
 import {
-  attachRevenueSaleDates,
+  attachStockMovementSourceDates,
   formatStockMovementListDate,
   sortStockMovementsByEffectiveDate,
 } from "@/lib/stockMovementSaleDate";
@@ -225,7 +225,7 @@ export function EstoqueMovimentacoesPanel({
       "expense_id"
     >[];
     const withExpenses = await resolveExpenseIdsForStockMovements(base);
-    const enriched = await attachRevenueSaleDates(withExpenses);
+    const enriched = await attachStockMovementSourceDates(withExpenses);
     setRows(sortStockMovementsByEffectiveDate(enriched) as Row[]);
 
     const productIds = (productsRes.data ?? []).map((p) => p.id);

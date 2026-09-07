@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
 import {
-  attachRevenueSaleDates,
+  attachStockMovementSourceDates,
   formatStockMovementListDate,
   sortStockMovementsByEffectiveDate,
 } from "@/lib/stockMovementSaleDate";
@@ -84,7 +84,7 @@ export function ProductStockMovementHistorySection({
           .order("created_at", { ascending: false }),
       );
       const withExpenses = await resolveExpenseIdsForStockMovements(data);
-      const enriched = await attachRevenueSaleDates(withExpenses);
+      const enriched = await attachStockMovementSourceDates(withExpenses);
       setAllRows(sortStockMovementsByEffectiveDate(enriched));
     } catch (error) {
       console.error(error);

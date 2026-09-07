@@ -1,4 +1,3 @@
-import { EstoqueFichasPendentesPanel } from "@/components/estoque/EstoqueFichasPendentesPanel";
 import { EstoqueReceitasPanel } from "@/components/estoque/EstoqueReceitasPanel";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useCallback } from "react";
@@ -10,7 +9,7 @@ export function FichasTecnicas() {
   const [searchParams, setSearchParams] = useSearchParams();
   const recipeOutputProductId =
     searchParams.get("recipeOutputProduct")?.trim() || undefined;
-  const isPendentes = pathname.endsWith("/pendentes");
+  const listKind = pathname.endsWith("/producao") ? "production" : "sale";
 
   const clearRecipeOutputProductParam = useCallback(() => {
     const next = new URLSearchParams(searchParams);
@@ -25,13 +24,10 @@ export function FichasTecnicas() {
     );
   }
 
-  if (isPendentes) {
-    return <EstoqueFichasPendentesPanel companyId={currentCompany.id} />;
-  }
-
   return (
     <EstoqueReceitasPanel
       companyId={currentCompany.id}
+      listKind={listKind}
       prefillNewRecipeOutputProductId={recipeOutputProductId}
       onPrefillConsumed={clearRecipeOutputProductParam}
     />

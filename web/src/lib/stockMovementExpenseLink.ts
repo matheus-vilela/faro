@@ -1,8 +1,8 @@
 import { supabase } from "@/lib/supabase";
 
 export type StockMovementReferenceRow = {
-  reference_type: string | null;
-  reference_id: string | null;
+  reference_type?: string | null;
+  reference_id?: string | null;
 };
 
 export function stockMovementExpenseHref(expenseId: string): string {

@@ -12,6 +12,7 @@ export type StockMovementEditMetadata = StockMovementProductMergeMeta & {
   movement_kind?: string;
   movement_at?: string;
   sale_date?: string;
+  purchase_date?: string;
   unit_price_input?: number;
   last_edit?: unknown;
 };

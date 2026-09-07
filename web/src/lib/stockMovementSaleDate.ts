@@ -1,3 +1,7 @@
+import {
+  isExpenseStockMovementReference,
+  resolveExpenseIdsForStockMovements,
+} from "@/lib/stockMovementExpenseLink";
 import { supabase } from "@/lib/supabase";
 
 const YMD = /^(\d{4})-(\d{2})-(\d{2})/;
@@ -13,26 +17,39 @@ export type StockMovementDateRow = {
   created_at: string;
   reference_type?: string | null;
   reference_id?: string | null;
-  /** JSON livre; só `sale_date` entra na data efetiva. */
+  expense_id?: string | null;
+  /** JSON livre; `sale_date` (PDV) e `purchase_date` (nota) entram na data efetiva. */
   metadata_json?: unknown;
 };
 
 const IN_CHUNK = 200;
 
-function metadataRecord(
-  metadata: unknown,
-): Record<string, unknown> {
+function metadataRecord(metadata: unknown): Record<string, unknown> {
   if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
     return metadata as Record<string, unknown>;
   }
   return {};
 }
 
-export function stockMovementSaleDateYmd(metadata: unknown): string | null {
-  const raw = metadataRecord(metadata).sale_date;
+function ymdFromUnknown(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const ymd = raw.trim().slice(0, 10);
   return YMD.test(ymd) ? ymd : null;
+}
+
+export function stockMovementSaleDateYmd(metadata: unknown): string | null {
+  return ymdFromUnknown(metadataRecord(metadata).sale_date);
+}
+
+export function stockMovementPurchaseDateYmd(metadata: unknown): string | null {
+  return ymdFromUnknown(metadataRecord(metadata).purchase_date);
+}
+
+/** Data de negócio: venda PDV, senão compra da nota. */
+export function stockMovementSourceDateYmd(metadata: unknown): string | null {
+  return (
+    stockMovementSaleDateYmd(metadata) ?? stockMovementPurchaseDateYmd(metadata)
+  );
 }
 
 function dateFromYmd(ymd: string): Date | null {
@@ -42,7 +59,7 @@ function dateFromYmd(ymd: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatSaleDate(ymd: string, withYear: boolean): string {
+function formatSourceDate(ymd: string, withYear: boolean): string {
   const date = dateFromYmd(ymd);
   if (!date) return ymd;
   return date.toLocaleDateString("pt-BR", {
@@ -52,13 +69,13 @@ function formatSaleDate(ymd: string, withYear: boolean): string {
   });
 }
 
-/** Data exibida: `sale_date` (ou entry_date anexado) tem prioridade sobre `created_at`. */
+/** Data exibida: venda, senão compra, senão `created_at`. */
 export function formatStockMovementListDate(
   row: StockMovementDateRow,
   opts?: { withYear?: boolean },
 ): string {
-  const sale = stockMovementSaleDateYmd(row.metadata_json);
-  if (sale) return formatSaleDate(sale, opts?.withYear === true);
+  const source = stockMovementSourceDateYmd(row.metadata_json);
+  if (source) return formatSourceDate(source, opts?.withYear === true);
   return new Date(row.created_at).toLocaleString("pt-BR", {
     day: "2-digit",
     month: "short",
@@ -81,9 +98,12 @@ function createdAtLocalYmd(iso: string): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Dia usado na ordem da lista: sale_date, senão o dia local de created_at. */
+/** Dia usado na ordem da lista: venda, senão compra, senão o dia local de created_at. */
 export function stockMovementEffectiveYmd(row: StockMovementDateRow): string {
-  return stockMovementSaleDateYmd(row.metadata_json) ?? createdAtLocalYmd(row.created_at);
+  return (
+    stockMovementSourceDateYmd(row.metadata_json) ??
+    createdAtLocalYmd(row.created_at)
+  );
 }
 
 export function sortStockMovementsByEffectiveDate<T extends StockMovementDateRow>(
@@ -132,9 +152,7 @@ export async function attachRevenueSaleDates<T extends StockMovementDateRow>(
       return rows;
     }
     for (const e of data ?? []) {
-      const ymd =
-        typeof e.entry_date === "string" ? e.entry_date.slice(0, 10) : "";
-      byId.set(e.id as string, YMD.test(ymd) ? ymd : null);
+      byId.set(e.id as string, ymdFromUnknown(e.entry_date));
     }
   }
 
@@ -150,4 +168,87 @@ export async function attachRevenueSaleDates<T extends StockMovementDateRow>(
       },
     };
   });
+}
+
+function rowKey(row: StockMovementDateRow): string | null {
+  return row.id ?? row.reference_id ?? null;
+}
+
+/** Completa `purchase_date` com `expenses.reference_date` (emissão/competência da NF). */
+export async function attachExpensePurchaseDates<T extends StockMovementDateRow>(
+  rows: T[],
+): Promise<T[]> {
+  const needPurchase = rows.filter(
+    (r) =>
+      !stockMovementSourceDateYmd(r.metadata_json) &&
+      (r.expense_id ||
+        (isExpenseStockMovementReference(r.reference_type ?? null) &&
+          r.reference_id)),
+  );
+  if (needPurchase.length === 0) return rows;
+
+  const needResolve = needPurchase.filter(
+    (r) =>
+      !r.expense_id &&
+      isExpenseStockMovementReference(r.reference_type ?? null) &&
+      r.reference_id,
+  );
+  const resolved =
+    needResolve.length > 0
+      ? await resolveExpenseIdsForStockMovements(needResolve)
+      : [];
+
+  const expenseIdByKey = new Map<string, string>();
+  for (const r of needPurchase) {
+    const key = rowKey(r);
+    if (r.expense_id && key) expenseIdByKey.set(key, r.expense_id);
+  }
+  for (const r of resolved) {
+    const key = rowKey(r);
+    if (r.expense_id && key) expenseIdByKey.set(key, r.expense_id);
+  }
+
+  const expenseIds = [...new Set(expenseIdByKey.values())];
+  if (expenseIds.length === 0) return rows;
+
+  const dateByExpenseId = new Map<string, string | null>();
+  for (let i = 0; i < expenseIds.length; i += IN_CHUNK) {
+    const chunk = expenseIds.slice(i, i + IN_CHUNK);
+    const { data, error } = await supabase
+      .from("expenses")
+      .select("id, reference_date")
+      .in("id", chunk);
+    if (error) {
+      console.error(error);
+      return rows;
+    }
+    for (const e of data ?? []) {
+      dateByExpenseId.set(e.id as string, ymdFromUnknown(e.reference_date));
+    }
+  }
+
+  return rows.map((r) => {
+    if (stockMovementSourceDateYmd(r.metadata_json)) return r;
+    const key = rowKey(r);
+    const expenseId = key ? expenseIdByKey.get(key) : undefined;
+    const purchaseDate = expenseId
+      ? dateByExpenseId.get(expenseId) ?? undefined
+      : undefined;
+    if (!purchaseDate) return r;
+    return {
+      ...r,
+      metadata_json: {
+        ...metadataRecord(r.metadata_json),
+        purchase_date: purchaseDate,
+      },
+    };
+  });
+}
+
+/** Anexa data da venda (PDV) e da compra (nota) para exibição e ordem. */
+export async function attachStockMovementSourceDates<
+  T extends StockMovementDateRow,
+>(rows: T[]): Promise<T[]> {
+  const withSales = await attachRevenueSaleDates(rows);
+  return attachExpensePurchaseDates(withSales);
 }

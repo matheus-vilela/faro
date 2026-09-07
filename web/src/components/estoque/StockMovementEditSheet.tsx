@@ -1,4 +1,4 @@
-import { ProductMergeMovementPair } from "@/components/estoque/ProductMergeMovementPair";
+import { StockMovementDetailSummary } from "@/components/estoque/StockMovementDetailSummary";
 import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
 import { ExpenseDetailSheet } from "@/components/expenses/ExpenseDetailSheet";
 import { ProductMergeMovementUndoButton } from "@/components/products/ProductMergeAuditSection";
@@ -37,15 +37,11 @@ import {
 } from "@/lib/manualStockMovementUnits";
 import { flattenProductUnitConversionsDrafts } from "@/lib/productUnitConversionsJson";
 import { persistProductUnitConversions } from "@/lib/productUnitConversionsService";
-import { maskCpfCnpj } from "@/lib/masks";
 import {
-  isExpenseStockMovementReference,
-} from "@/lib/stockMovementExpenseLink";
-import {
-  fetchStockMovementInvoiceContext,
-  formatInvoiceLabel,
-  type StockMovementInvoiceContext,
-} from "@/lib/stockMovementInvoiceContext";
+  fetchStockMovementDetailContext,
+  type StockMovementDetailContext,
+} from "@/lib/stockMovementDetailContext";
+import { isExpenseStockMovementReference } from "@/lib/stockMovementExpenseLink";
 import {
   movementDateInputFromIso,
   stockMovementEditMode,
@@ -53,9 +49,8 @@ import {
   stockMovementOriginLabel,
   type StockMovementEditRow,
 } from "@/lib/stockMovementEdit";
-import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
 import { formatStockMovementListDate } from "@/lib/stockMovementSaleDate";
-import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
+import { stockMovementTypeDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { updateStockMovement } from "@/lib/updateStockMovement";
@@ -64,7 +59,7 @@ import {
 } from "@/types/productMergeAudit";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { ArrowRightLeft, FileText, Loader2, Save } from "lucide-react";
+import { ArrowRightLeft, CircleDollarSign, FileText, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -137,9 +132,9 @@ export function StockMovementEditSheet({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [revenueDetailId, setRevenueDetailId] = useState<string | null>(null);
-  const [invoiceContext, setInvoiceContext] =
-    useState<StockMovementInvoiceContext | null>(null);
-  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [detailContext, setDetailContext] =
+    useState<StockMovementDetailContext | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const mode = movement ? stockMovementEditMode(movement) : "readonly";
   const editable = movement ? stockMovementIsEditable(movement) : false;
@@ -242,22 +237,23 @@ export function StockMovementEditSheet({
 
   useEffect(() => {
     if (!open || !movement) {
-      setInvoiceContext(null);
+      setDetailContext(null);
       return;
     }
     let cancelled = false;
-    setInvoiceLoading(true);
-    void fetchStockMovementInvoiceContext({
+    setDetailLoading(true);
+    void fetchStockMovementDetailContext({
       companyId,
       productId: movement.product_id,
+      type: movement.type,
       referenceType: movement.reference_type,
       referenceId: movement.reference_id,
       createdAt: movement.created_at,
       unitCost: movement.unit_cost,
     }).then((ctx) => {
       if (cancelled) return;
-      setInvoiceLoading(false);
-      setInvoiceContext(ctx);
+      setDetailLoading(false);
+      setDetailContext(ctx);
     });
     return () => {
       cancelled = true;
@@ -267,6 +263,7 @@ export function StockMovementEditSheet({
     companyId,
     movement?.id,
     movement?.product_id,
+    movement?.type,
     movement?.reference_type,
     movement?.reference_id,
     movement?.created_at,
@@ -303,13 +300,8 @@ export function StockMovementEditSheet({
         ? exitClassification
         : null;
 
-  const mergePair = movement
-    ? stockMovementMergePairDisplay(
-        movement,
-        movement.products?.name ?? selectedProduct?.name ?? "—",
-      )
-    : null;
   const mergeUndo = movement ? stockMovementMergeUndoProps(movement) : null;
+  const typeDisplay = movement ? stockMovementTypeDisplay(movement) : null;
   const registeredBy = movement
     ? manualStockMovementRegisteredByLabel(movement.metadata_json)
     : null;
@@ -318,17 +310,23 @@ export function StockMovementEditSheet({
     : false;
 
   const linkedExpenseId =
-    movement?.expense_id ?? invoiceContext?.expenseId ?? null;
+    movement?.expense_id ?? detailContext?.invoice?.expenseId ?? null;
   const hasExpense =
     linkedExpenseId != null &&
     (isExpenseStockMovementReference(movement?.reference_type ?? null) ||
-      invoiceContext?.expenseId != null);
+      detailContext?.invoice?.expenseId != null);
+  const showExpenseFallback =
+    hasExpense &&
+    linkedExpenseId != null &&
+    !detailContext?.invoice?.expenseId;
 
   const revenueEntryId =
     movement?.reference_type === "revenue_entry" ||
     movement?.reference_type === "revenue_entry_update"
       ? movement.reference_id
       : null;
+  const showRevenueFallback =
+    Boolean(revenueEntryId) && !detailContext?.revenue;
 
   const mergeSourceProduct =
     (movement ? productById.get(movement.product_id) : undefined) ??
@@ -436,114 +434,47 @@ export function StockMovementEditSheet({
 
       <Sheet open={open && movement != null} onOpenChange={onOpenChange}>
         <SheetContent
-          className={cn(
-            "flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md",
-            zSheet,
-          )}
+          className={cn("flex w-full flex-col gap-0 overflow-hidden p-0", zSheet)}
           overlayClassName={overlayClass}
         >
           {movement ? (
             <>
               <SheetHeader className="border-b border-border px-6 py-5 text-left">
-                <div className="flex flex-wrap items-center gap-2 pr-6">
-                  <SheetTitle>Movimentação de estoque</SheetTitle>
+                <div className="flex flex-wrap items-center gap-2 pr-10">
+                  <StockMovementTypeBadge row={movement} />
                   <Badge variant="outline" className="font-normal">
                     {stockMovementOriginLabel(movement)}
                   </Badge>
                 </div>
+                <SheetTitle className="text-xl">
+                  {typeDisplay?.label ?? "Movimentação de estoque"}
+                </SheetTitle>
                 <SheetDescription>
                   {formatStockMovementListDate(movement, { withYear: true })}
                 </SheetDescription>
               </SheetHeader>
 
               <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-                <div>
-                  <p className="text-xs text-muted-foreground">Tipo</p>
-                  <div className="mt-1">
-                    <StockMovementTypeBadge row={movement} />
-                  </div>
-                </div>
-
-                {invoiceLoading ? (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Carregando dados da nota…
-                  </p>
-                ) : invoiceContext ? (
-                  <div className="rounded-xl border border-border bg-muted/30 p-3">
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Nota fiscal
-                    </p>
-                    <dl className="mt-2 grid gap-2 text-sm">
-                      <div>
-                        <dt className="text-xs text-muted-foreground">
-                          Documento
-                        </dt>
-                        <dd className="mt-0.5 font-medium">
-                          {formatInvoiceLabel(
-                            invoiceContext.invoiceNumber,
-                            invoiceContext.invoiceSeries,
-                          ) ?? "Cadastro pela NF-e"}
-                        </dd>
-                      </div>
-                      {invoiceContext.supplierName ? (
-                        <div>
-                          <dt className="text-xs text-muted-foreground">
-                            Fornecedor
-                          </dt>
-                          <dd className="mt-0.5 font-medium">
-                            {invoiceContext.supplierName}
-                            {invoiceContext.supplierDocument ? (
-                              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                                {maskCpfCnpj(invoiceContext.supplierDocument)}
-                              </span>
-                            ) : null}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {invoiceContext.originalItemName ? (
-                        <div>
-                          <dt className="text-xs text-muted-foreground">
-                            Item original na nota
-                          </dt>
-                          <dd className="mt-0.5 font-medium leading-snug">
-                            {invoiceContext.originalItemName}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {invoiceContext.invoiceQuantity != null ? (
-                        <div>
-                          <dt className="text-xs text-muted-foreground">
-                            Quantidade na nota
-                          </dt>
-                          <dd className="mt-0.5 font-medium tabular-nums">
-                            {invoiceContext.invoiceQuantity.toLocaleString(
-                              "pt-BR",
-                            )}
-                            {invoiceContext.invoiceUnit
-                              ? ` ${invoiceContext.invoiceUnit}`
-                              : ""}
-                          </dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                  </div>
-                ) : null}
-
-                {mergePair ? (
-                  <div>
-                    <p className="text-xs text-muted-foreground">Produtos</p>
-                    <div className="mt-1">
-                      <ProductMergeMovementPair {...mergePair} />
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {movementClassificationDisplayLabel(movement)}
-                    </p>
-                  </div>
-                ) : null}
+                <StockMovementDetailSummary
+                  movement={movement}
+                  context={detailContext}
+                  loading={detailLoading}
+                  formatCurrency={formatCurrency}
+                  onOpenExpense={setExpenseDetailId}
+                  onOpenRevenue={setRevenueDetailId}
+                  productDisplayName={
+                    movement.products?.name ??
+                    detailContext?.product?.name ??
+                    selectedProduct?.name ??
+                    "—"
+                  }
+                />
 
                 {editable ? (
-                  <>
+                  <section className="space-y-5 rounded-2xl border border-border bg-card p-4 shadow-sm">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Alterar
+                    </p>
                     <div className="space-y-2">
                       <Label>Produto (vínculo)</Label>
                       <SearchSelect
@@ -720,63 +651,17 @@ export function StockMovementEditSheet({
                         </p>
                       </div>
                     ) : null}
-                  </>
-                ) : (
-                  <dl className="grid gap-3 text-sm">
-                    {!mergePair ? (
-                      <div>
-                        <dt className="text-xs text-muted-foreground">
-                          Produto
-                        </dt>
-                        <dd className="mt-1 font-medium">
-                          {movement.products?.name ??
-                            selectedProduct?.name ??
-                            "—"}
-                        </dd>
-                      </div>
-                    ) : null}
-                    <div>
-                      <dt className="text-xs text-muted-foreground">
-                        Quantidade
-                      </dt>
-                      <dd className="mt-1 font-medium tabular-nums">
-                        {Number(movement.quantity).toLocaleString("pt-BR")}{" "}
-                        {movement.metadata_json?.quantity_unit?.trim() ||
-                          movement.products?.unit ||
-                          "un"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted-foreground">
-                        Classificação
-                      </dt>
-                      <dd className="mt-1 text-muted-foreground">
-                        {movementClassificationDisplayLabel(movement)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted-foreground">
-                        Custo unitário
-                      </dt>
-                      <dd className="mt-1 tabular-nums">
-                        {movement.unit_cost != null
-                          ? formatCurrency(Number(movement.unit_cost))
-                          : "—"}
-                      </dd>
-                    </div>
-                    {mode === "revenue" ? (
-                      <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                        Movimentações de venda não são editadas aqui. Abra a
-                        venda para alterar produto ou quantidade.
-                      </p>
-                    ) : null}
-                    {mode === "readonly" ? (
-                      <p className="text-sm text-muted-foreground">
-                        Esta origem não permite edição direta nesta tela.
-                      </p>
-                    ) : null}
-                  </dl>
-                )}
+                  </section>
+                ) : mode === "revenue" ? (
+                  <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                    Movimentações de venda não são editadas aqui. Abra a venda
+                    para alterar produto ou quantidade.
+                  </p>
+                ) : mode === "readonly" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Esta origem não permite edição direta nesta tela.
+                  </p>
+                ) : null}
 
                 {isManualMeta && registeredBy ? (
                   <div>
@@ -787,25 +672,25 @@ export function StockMovementEditSheet({
                   </div>
                 ) : null}
 
-                {hasExpense && linkedExpenseId ? (
+                {showExpenseFallback && linkedExpenseId ? (
                   <Button
                     type="button"
-                    variant={editable ? "outline" : "default"}
-                    className="w-full gap-2"
+                    variant="outline"
+                    className="w-full gap-2 sm:w-auto"
                     onClick={() => setExpenseDetailId(linkedExpenseId)}
                   >
                     <FileText className="h-4 w-4" />
-                    Visualizar despesa / nota
+                    Visualizar nota
                   </Button>
                 ) : null}
 
-                {mode === "revenue" && revenueEntryId ? (
+                {showRevenueFallback && revenueEntryId ? (
                   <Button
                     type="button"
-                    className="w-full gap-2"
+                    className="w-full gap-2 sm:w-auto"
                     onClick={() => setRevenueDetailId(revenueEntryId)}
                   >
-                    <FileText className="h-4 w-4" />
+                    <CircleDollarSign className="h-4 w-4" />
                     Abrir venda
                   </Button>
                 ) : null}

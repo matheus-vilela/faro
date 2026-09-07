@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   formatStockMovementListDate,
   sortStockMovementsByEffectiveDate,
+  stockMovementPurchaseDateYmd,
   stockMovementSaleDateYmd,
+  stockMovementSourceDateYmd,
 } from "@/lib/stockMovementSaleDate";
 
 describe("stockMovementSaleDateYmd", () => {
@@ -22,6 +24,31 @@ describe("stockMovementSaleDateYmd", () => {
   });
 });
 
+describe("stockMovementPurchaseDateYmd", () => {
+  it("lê yyyy-MM-dd do metadata", () => {
+    expect(stockMovementPurchaseDateYmd({ purchase_date: "2026-07-03" })).toBe(
+      "2026-07-03",
+    );
+  });
+});
+
+describe("stockMovementSourceDateYmd", () => {
+  it("prioriza venda sobre compra", () => {
+    expect(
+      stockMovementSourceDateYmd({
+        sale_date: "2026-08-15",
+        purchase_date: "2026-07-03",
+      }),
+    ).toBe("2026-08-15");
+  });
+
+  it("usa compra quando não há venda", () => {
+    expect(stockMovementSourceDateYmd({ purchase_date: "2026-07-03" })).toBe(
+      "2026-07-03",
+    );
+  });
+});
+
 describe("formatStockMovementListDate", () => {
   it("prioriza sale_date e não desloca o dia", () => {
     const formatted = formatStockMovementListDate({
@@ -33,7 +60,17 @@ describe("formatStockMovementListDate", () => {
     expect(formatted).not.toMatch(/\d{2}:\d{2}/);
   });
 
-  it("cai em created_at sem sale_date", () => {
+  it("usa purchase_date quando não há venda", () => {
+    const formatted = formatStockMovementListDate({
+      created_at: "2026-09-07T17:00:00.000Z",
+      metadata_json: { purchase_date: "2026-07-03" },
+    });
+    expect(formatted).toMatch(/03/);
+    expect(formatted.toLowerCase()).toMatch(/jul/);
+    expect(formatted).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("cai em created_at sem venda nem compra", () => {
     const formatted = formatStockMovementListDate({
       created_at: "2026-09-07T15:30:00.000-03:00",
       metadata_json: null,
@@ -43,7 +80,7 @@ describe("formatStockMovementListDate", () => {
 });
 
 describe("sortStockMovementsByEffectiveDate", () => {
-  it("ordena por sale_date e não por created_at", () => {
+  it("ordena por data efetiva e não por created_at", () => {
     const sorted = sortStockMovementsByEffectiveDate([
       {
         id: "a",
@@ -53,7 +90,7 @@ describe("sortStockMovementsByEffectiveDate", () => {
       {
         id: "b",
         created_at: "2026-09-07T17:00:00.000Z",
-        metadata_json: { sale_date: "2026-08-20" },
+        metadata_json: { purchase_date: "2026-08-20" },
       },
       {
         id: "c",

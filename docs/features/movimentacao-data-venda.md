@@ -1,16 +1,16 @@
-# Feature: Data da venda na movimentação de estoque
+# Feature: Data da venda ou da compra na movimentação
 
 - **Slug:** `movimentacao-data-venda`
-- **Status:** feita
+- **Status:** feito
 - **Área:** `/app/produtos` · aba Histórico · `/app/estoque` · Movimentações
 
 ## Problema
 
-A coluna Data das movimentações usa só `created_at`. No onboarding PDV isso é o dia em que o import rodou, não o dia da venda. Algumas baixas EPOC já gravam `metadata_json.sale_date`.
+A coluna Data usava `created_at` (dia do import) ou só a data da venda. Entrada de nota fiscal também precisa da data da compra, não do momento em que o estoque foi lançado.
 
 ## Objetivo
 
-Se a movimentação tiver `sale_date`, a UI mostra e ordena por essa data no lugar de `created_at`.
+A coluna Data mostra a data da venda (PDV), senão a da compra (nota), senão `created_at`.
 
 ## Fora de escopo
 
@@ -20,21 +20,21 @@ Se a movimentação tiver `sale_date`, a UI mostra e ordena por essa data no lug
 
 ## Contexto no código
 
-- `web/src/components/products/ProductStockMovementHistorySection.tsx`
-- `web/src/components/estoque/EstoqueMovimentacoesPanel.tsx`
 - `web/src/lib/stockMovementSaleDate.ts`
+- `web/src/components/estoque/EstoqueMovimentacoesPanel.tsx`
+- `web/src/components/products/ProductStockMovementHistorySection.tsx`
+- `web/src/lib/stockMovementExpenseLink.ts`
 
 ## Comportamento esperado
 
-- `metadata_json.sale_date` (yyyy-MM-dd) tem prioridade sobre `created_at` na exibição e na ordem (mais recente primeiro).
-- Sem `sale_date` numa venda (`revenue_entry`), usa `revenue_entries.entry_date`.
-- Sem os dois, mantém `created_at` (com hora).
-- Paginação da aba do produto ordena o conjunto inteiro, não só a página.
+- PDV: `metadata_json.sale_date`, senão `revenue_entries.entry_date`.
+- Nota: `expenses.reference_date` (emissão / competência da NF), via `expense` / `expense_item` / `import_breakdown`.
+- Sem os dois: `created_at` (com hora).
+- Ordem da lista pela data efetiva.
 
 ## Critérios de aceite
 
-- [x] Aba Histórico do produto mostra `sale_date` / data da venda quando existir.
-- [x] Lista geral de movimentações usa a mesma regra na coluna Data.
-- [x] Sem `sale_date` nem `entry_date`, continua `created_at`.
-- [x] Listagem ordena pela data efetiva (sale_date / venda / created_at).
+- [x] Venda PDV mostra a data da venda.
+- [x] Entrada de nota mostra a data da compra (`reference_date`).
+- [x] Sem venda nem compra, mostra `created_at`.
 - [ ] Verificar no browser o fluxo principal (não só screenshot).

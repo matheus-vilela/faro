@@ -1,15 +1,17 @@
-import { Badge } from "@/components/ui/badge";
+import { StockMovementEditSheet } from "@/components/estoque/StockMovementEditSheet";
+import { StockMovementTypeBadge } from "@/components/estoque/StockMovementTypeBadge";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
+import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
 import {
-  attachRevenueSaleDates,
+  attachStockMovementSourceDates,
   formatStockMovementListDate,
   sortStockMovementsByEffectiveDate,
 } from "@/lib/stockMovementSaleDate";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type HistoryRow = {
@@ -39,6 +41,7 @@ export function RecipeMovementHistory({
   const [allRows, setAllRows] = useState<HistoryRow[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<StockMovementEditRow | null>(null);
 
   useEffect(() => {
     setPage(1);
@@ -65,8 +68,8 @@ export function RecipeMovementHistory({
           .or(orFilter)
           .order("created_at", { ascending: false }) as never,
       );
-      const withSaleDates = await attachRevenueSaleDates(data);
-      setAllRows(sortStockMovementsByEffectiveDate(withSaleDates));
+      const withSourceDates = await attachStockMovementSourceDates(data);
+      setAllRows(sortStockMovementsByEffectiveDate(withSourceDates));
     } catch (error) {
       console.error(error);
       setAllRows([]);
@@ -95,6 +98,24 @@ export function RecipeMovementHistory({
       style: "currency",
       currency: "BRL",
     }).format(v);
+
+  const openRow = (row: HistoryRow) => {
+    const products = Array.isArray(row.products)
+      ? row.products[0] ?? null
+      : row.products;
+    setSelected({
+      id: row.id,
+      product_id: row.product_id,
+      quantity: row.quantity,
+      type: row.type,
+      reference_type: row.reference_type,
+      reference_id: row.reference_id,
+      created_at: row.created_at,
+      unit_cost: row.unit_cost,
+      metadata_json: row.metadata_json ?? null,
+      products,
+    });
+  };
 
   if (loading) {
     return (
@@ -126,13 +147,22 @@ export function RecipeMovementHistory({
               <th className="px-3 py-2 font-medium">Quantidade</th>
               <th className="px-3 py-2 font-medium">Classificação</th>
               <th className="px-3 py-2 font-medium text-right">Custo un.</th>
+              <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr
                 key={row.id}
-                className="border-b border-border/60 last:border-b-0"
+                role="button"
+                tabIndex={0}
+                onClick={() => openRow(row)}
+                onKeyDown={(e) => e.key === "Enter" && openRow(row)}
+                className={cn(
+                  "group cursor-pointer border-b border-border/60 transition-colors last:border-b-0",
+                  "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                  selected?.id === row.id && "bg-muted/50",
+                )}
               >
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                   {formatStockMovementListDate(row)}
@@ -141,13 +171,12 @@ export function RecipeMovementHistory({
                   {row.products?.name ?? "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <Badge variant="secondary" className="font-normal">
-                    {row.type === "in"
-                      ? "Entrada"
-                      : row.type === "waste"
-                        ? "Perda"
-                        : "Saída"}
-                  </Badge>
+                  <StockMovementTypeBadge
+                    row={{
+                      type: row.type,
+                      reference_type: row.reference_type,
+                    }}
+                  />
                 </td>
                 <td className="px-3 py-2 tabular-nums">
                   {Number(row.quantity).toLocaleString("pt-BR")}{" "}
@@ -167,6 +196,9 @@ export function RecipeMovementHistory({
                     ? formatCurrency(Number(row.unit_cost))
                     : "—"}
                 </td>
+                <td className="px-2 py-2 text-right">
+                  <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100" />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -180,6 +212,16 @@ export function RecipeMovementHistory({
           onPageChange={setPage}
         />
       ) : null}
+      <StockMovementEditSheet
+        companyId={companyId}
+        movement={selected}
+        open={selected != null}
+        onOpenChange={(next) => {
+          if (!next) setSelected(null);
+        }}
+        onSaved={() => void load()}
+        formatCurrency={formatCurrency}
+      />
     </div>
   );
 }

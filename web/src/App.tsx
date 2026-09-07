@@ -218,7 +218,11 @@ function AuthenticatedLayout() {
             <Route path="estoque/compras" element={<EstoqueCompras />} />
             <Route path="contagem" element={<EstoqueContagem />} />
             <Route path="fichas" element={<FichasTecnicas />} />
-            <Route path="fichas/pendentes" element={<FichasTecnicas />} />
+            <Route path="fichas/producao" element={<FichasTecnicas />} />
+            <Route
+              path="fichas/pendentes"
+              element={<Navigate to="/app/produtos/fichas" replace />}
+            />
             <Route
               path="fichas/vinculos"
               element={<Navigate to="/app/produtos/fichas" replace />}

@@ -2,9 +2,9 @@ import {
   fetchProductsForStockExport,
 } from "@/lib/exportProductStockExcel";
 import {
-  attachRevenueSaleDates,
+  attachStockMovementSourceDates,
   sortStockMovementsByEffectiveDate,
-  stockMovementSaleDateYmd,
+  stockMovementSourceDateYmd,
 } from "@/lib/stockMovementSaleDate";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
@@ -129,11 +129,11 @@ export async function buildStockMovementsReport(
     unit_cost: number | null;
     reference_type: string | null;
     reference_id: string | null;
-    metadata_json: { sale_date?: unknown } | null;
+    metadata_json: { sale_date?: unknown; purchase_date?: unknown } | null;
     products: { name: string; unit: string } | { name: string; unit: string }[] | null;
   }[];
   const rows = sortStockMovementsByEffectiveDate(
-    await attachRevenueSaleDates(fetched),
+    await attachStockMovementSourceDates(fetched),
   );
 
   return {
@@ -160,7 +160,7 @@ export async function buildStockMovementsReport(
           const prod = Array.isArray(r.products) ? r.products[0] : r.products;
           return {
             date:
-              stockMovementSaleDateYmd(r.metadata_json) ??
+              stockMovementSourceDateYmd(r.metadata_json) ??
               r.created_at.slice(0, 10),
             product: prod?.name ?? "",
             type: TYPE_LABEL[r.type] ?? r.type,

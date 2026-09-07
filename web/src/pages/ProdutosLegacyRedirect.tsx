@@ -3,7 +3,6 @@ import {
   PRODUCT_CATALOG_PATH,
   PRODUCT_HOME_PATH,
   RECIPES_PATH,
-  RECIPES_PENDING_PATH,
   STOCK_COUNT_PATH,
   STOCK_LEDGER_PATH,
   STOCK_PURCHASES_PATH,
@@ -93,7 +92,7 @@ export function FichasInboxRedirect() {
   const [params] = useSearchParams();
   const inbox = params.get("inbox");
   if (inbox === "pendentes") {
-    return <Navigate to={RECIPES_PENDING_PATH} replace />;
+    return <Navigate to={RECIPES_PATH} replace />;
   }
   if (inbox === "vinculos") {
     return <Navigate to={RECIPES_PATH} replace />;

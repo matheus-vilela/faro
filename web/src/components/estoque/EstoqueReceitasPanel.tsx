@@ -41,6 +41,7 @@ import { convertQuantityForProduct } from "@/lib/companyUnits/convert";
 import { getAllowedUnitsForProductHub } from "@/lib/companyUnits/productAllowedUnits";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { createCatalogProduct } from "@/lib/createCatalogProduct";
+import { formatBrl } from "@/lib/dre/formatBrl";
 import { undoProductRecipeMatch } from "@/lib/onboardingProductRecipeMatch";
 import {
   isPlaceholderRecipeName,
@@ -67,6 +68,12 @@ import {
   recipeMatchingIngredientNames,
   type RecipeListKindFilter,
 } from "@/lib/recipeListFilter";
+import {
+  productUnitCostById,
+  recipeIngredientCmv,
+  recipeSaleCmv,
+  saleRecipesByOutputProductId,
+} from "@/lib/recipeSaleCmv";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types/product";
@@ -151,74 +158,76 @@ function RecipeEditorForm({
   return (
     <div className="space-y-4">
       {ingredientsOnly ? null : (
-      <section className={PRODUCT_SHEET_SECTION}>
-        <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-          Tipo
-        </p>
-        <p className="mb-4 text-sm text-muted-foreground">
-          Como a ficha se comporta na venda e no estoque.
-        </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {(
-            [
-              {
-                value: "sale" as const,
-                title: "Ficha normal",
-                description:
-                  "Na venda, baixa os insumos na proporção da receita. Não se produz.",
-                icon: ChefHat,
-              },
-              {
-                value: "intermediate" as const,
-                title: "Produção",
-                description:
-                  "Pode ser produzida: baixa insumos e entra o saldo. A venda baixa só o produto.",
-                icon: Factory,
-              },
-            ] as const
-          ).map((opt) => {
-            const Icon = opt.icon;
-            const active = sheetKind === opt.value;
-            const intermediate = opt.value === "intermediate";
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                disabled={disabled}
-                aria-pressed={active}
-                onClick={() => onSheetKindChange(opt.value)}
-                className={cn(
-                  "flex items-start gap-3 rounded-xl border p-3 text-left shadow-sm transition-colors disabled:opacity-60",
-                  active
-                    ? intermediate
-                      ? "border-teal-500 bg-teal-500/10 ring-1 ring-teal-500"
-                      : "border-primary bg-primary/5 ring-1 ring-primary"
-                    : "border-border bg-background hover:bg-accent/50",
-                )}
-              >
-                <span
+        <section className={PRODUCT_SHEET_SECTION}>
+          <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+            Tipo
+          </p>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Como a ficha se comporta na venda e no estoque.
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {(
+              [
+                {
+                  value: "sale" as const,
+                  title: "Ficha normal",
+                  description:
+                    "Na venda, baixa os insumos na proporção da receita. Não se produz.",
+                  icon: ChefHat,
+                },
+                {
+                  value: "intermediate" as const,
+                  title: "Produção",
+                  description:
+                    "Pode ser produzida: baixa insumos e entra o saldo. A venda baixa só o produto.",
+                  icon: Factory,
+                },
+              ] as const
+            ).map((opt) => {
+              const Icon = opt.icon;
+              const active = sheetKind === opt.value;
+              const intermediate = opt.value === "intermediate";
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={active}
+                  onClick={() => onSheetKindChange(opt.value)}
                   className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                    "flex items-start gap-3 rounded-xl border p-3 text-left shadow-sm transition-colors disabled:opacity-60",
                     active
                       ? intermediate
-                        ? "bg-teal-500/15 text-teal-800 dark:text-teal-100"
-                        : "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground",
+                        ? "border-teal-500 bg-teal-500/10 ring-1 ring-teal-500"
+                        : "border-primary bg-primary/5 ring-1 ring-primary"
+                      : "border-border bg-background hover:bg-accent/50",
                   )}
                 >
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{opt.title}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {opt.description}
+                  <span
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                      active
+                        ? intermediate
+                          ? "bg-teal-500/15 text-teal-800 dark:text-teal-100"
+                          : "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
                   </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">
+                      {opt.title}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {opt.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {ingredientsOnly ? null : (
@@ -606,6 +615,8 @@ type IngredientEditorProps = {
   onProductCreated?: (product: Product) => void;
   /** Produto de saída da ficha — não aparece na lista de insumos. */
   excludeProductId?: string;
+  showCmv?: boolean;
+  lineCmv?: (row: IngRow) => number | null;
 };
 
 function RecipeIngredientsAddPanel({
@@ -620,6 +631,8 @@ function RecipeIngredientsAddPanel({
   toBaseQty,
   onProductCreated,
   excludeProductId = "",
+  showCmv = false,
+  lineCmv,
 }: IngredientEditorProps) {
   const [draftProductId, setDraftProductId] = useState("");
   const [draftUnitCode, setDraftUnitCode] = useState("");
@@ -825,6 +838,7 @@ function RecipeIngredientsAddPanel({
           {ings.map((row, rowIndex) => {
             if (!row.product_id || !row.unit_code.trim()) return null;
             const product = productById.get(row.product_id);
+            const cmv = showCmv && lineCmv ? lineCmv(row) : null;
             return (
               <li
                 key={`${row.product_id}-${row.unit_code}-${rowIndex}`}
@@ -840,9 +854,16 @@ function RecipeIngredientsAddPanel({
                     {systemUnitLabel(row.unit_code)}
                   </p>
                 </div>
-                <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                  {product?.name ?? "—"}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {product?.name ?? "—"}
+                  </p>
+                  {showCmv ? (
+                    <p className="tabular-nums text-xs text-muted-foreground">
+                      CMV {cmv != null ? formatBrl(cmv) : "—"}
+                    </p>
+                  ) : null}
+                </div>
                 <Button
                   type="button"
                   variant="ghost"
@@ -868,6 +889,8 @@ export const EstoqueReceitasPanel = forwardRef<
   EstoqueReceitasPanelHandle,
   {
     companyId: string;
+    /** Lista só deste tipo (abas Fichas técnicas / Produção). Sem isto, chips Todas / Ficha / Produção. */
+    listKind?: RecipeListKindFilter;
     onStockChanged?: () => void;
     /** Produto-alvo para vincular à ficha (saída em ficha nova ou saída/ingrediente em ficha existente). */
     prefillNewRecipeOutputProductId?: string | null;
@@ -916,6 +939,7 @@ export const EstoqueReceitasPanel = forwardRef<
 >(function EstoqueReceitasPanel(
   {
     companyId,
+    listKind,
     onStockChanged,
     prefillNewRecipeOutputProductId,
     prefillNewRecipeAutoOpen = true,
@@ -952,7 +976,11 @@ export const EstoqueReceitasPanel = forwardRef<
   const [sheetKind, setSheetKind] =
     useState<TechnicalSheetKind>(technicalSheetKind);
   const [listQuery, setListQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState<RecipeListKindFilter>("all");
+  const [kindFilter, setKindFilter] = useState<RecipeListKindFilter>(
+    listKind ?? "all",
+  );
+  const lockedKind = listKind && listKind !== "all" ? listKind : null;
+  const activeKind = lockedKind ?? kindFilter;
   const [detailTab, setDetailTab] = useState<
     "ficha" | "historico" | "producao"
   >("ficha");
@@ -972,6 +1000,10 @@ export const EstoqueReceitasPanel = forwardRef<
   const prefillHandledRef = useRef(false);
 
   const technicalSheetPid = technicalSheetOutputProductId?.trim() ?? "";
+
+  useEffect(() => {
+    if (lockedKind) setKindFilter(lockedKind);
+  }, [lockedKind]);
 
   const isIngredientsDirty = useMemo(() => {
     if (!ingredientsOnly) return false;
@@ -1015,7 +1047,7 @@ export const EstoqueReceitasPanel = forwardRef<
     const match = products.find((p) => p.id === technicalSheetPid);
     if (!match) return;
     const base = match.name.trim();
-    setName(base ? `${base} — ficha técnica` : "Ficha técnica");
+    setName(base ? `${base}` : "Ficha técnica");
     setBatchYield("1");
     setOutputId(technicalSheetPid);
     setOutputDraftName("");
@@ -1072,7 +1104,7 @@ export const EstoqueReceitasPanel = forwardRef<
     setEditingRecipeId(null);
     setSheetMode("edit");
     const base = match.name.trim();
-    setName(base ? `${base} — ficha` : "Nova ficha técnica");
+    setName(base ? base : "Nova ficha técnica");
     setBatchYield("1");
     setOutputId(pid);
     setOutputDraftName("");
@@ -1164,6 +1196,15 @@ export const EstoqueReceitasPanel = forwardRef<
     () => new Map(products.map((p) => [p.id, p])),
     [products],
   );
+  const unitCostByProductId = useMemo(
+    () => productUnitCostById(products),
+    [products],
+  );
+  const saleRecipeByOutputId = useMemo(
+    () => saleRecipesByOutputProductId(recipes),
+    [recipes],
+  );
+  const isSaleList = lockedKind === "sale";
 
   const filteredRecipes = useMemo(
     () =>
@@ -1171,16 +1212,16 @@ export const EstoqueReceitasPanel = forwardRef<
         recipeMatchesListFilters(
           r,
           listQuery,
-          kindFilter,
+          activeKind,
           r.output_product_id
             ? productById.get(r.output_product_id)?.name
             : null,
         ),
       ),
-    [recipes, listQuery, kindFilter, productById],
+    [recipes, listQuery, activeKind, productById],
   );
 
-  type RecipeSortKey = "name" | "kind" | "output" | "yield" | "ings";
+  type RecipeSortKey = "name" | "kind" | "output" | "yield" | "ings" | "cmv";
   const {
     sorted: sortedRecipes,
     sortKey,
@@ -1206,6 +1247,11 @@ export const EstoqueReceitasPanel = forwardRef<
       }
       if (key === "yield") {
         return Number(a.batch_yield) - Number(b.batch_yield);
+      }
+      if (key === "cmv") {
+        const ca = recipeSaleCmv(a, unitCostByProductId, saleRecipeByOutputId);
+        const cb = recipeSaleCmv(b, unitCostByProductId, saleRecipeByOutputId);
+        return (ca ?? -1) - (cb ?? -1);
       }
       if (key === "ings") {
         return (
@@ -1465,6 +1511,23 @@ export const EstoqueReceitasPanel = forwardRef<
       return raw == null ? null : roundHubQuantityForStock(raw);
     },
     [conversionCodeRowsForProduct, productById],
+  );
+
+  const ingredientLineCmv = useCallback(
+    (row: IngRow): number | null => {
+      const pid = row.product_id.trim();
+      const qty = Number(String(row.quantity).replace(",", "."));
+      if (!pid || !Number.isFinite(qty) || qty <= 0) return null;
+      const stockQty = toBaseQty(pid, qty, row.unit_code);
+      if (stockQty == null) return null;
+      return recipeIngredientCmv(
+        stockQty,
+        pid,
+        unitCostByProductId,
+        saleRecipeByOutputId,
+      );
+    },
+    [saleRecipeByOutputId, toBaseQty, unitCostByProductId],
   );
 
   const fromBaseQty = useCallback(
@@ -1855,23 +1918,25 @@ export const EstoqueReceitasPanel = forwardRef<
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {(
-                  [
-                    ["all", "Todas"],
-                    ["sale", "Ficha"],
-                    ["production", "Produção"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    variant={kindFilter === value ? "default" : "outline"}
-                    onClick={() => setKindFilter(value)}
-                  >
-                    {label}
-                  </Button>
-                ))}
+                {lockedKind
+                  ? null
+                  : (
+                      [
+                        ["all", "Todas"],
+                        ["sale", "Ficha"],
+                        ["production", "Produção"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <Button
+                        key={value}
+                        type="button"
+                        size="sm"
+                        variant={kindFilter === value ? "default" : "outline"}
+                        onClick={() => setKindFilter(value)}
+                      >
+                        {label}
+                      </Button>
+                    ))}
                 <Button
                   type="button"
                   size="sm"
@@ -1880,11 +1945,19 @@ export const EstoqueReceitasPanel = forwardRef<
                     const match = pid
                       ? products.find((p) => p.id === pid)
                       : undefined;
+                    const nextKind =
+                      activeKind === "production" ? "intermediate" : "sale";
                     setEditingRecipeId(null);
                     setSheetMode("edit");
                     if (match) {
                       const base = match.name.trim();
-                      setName(base ? `${base} — ficha` : "Nova ficha técnica");
+                      setName(
+                        base
+                          ? base
+                          : nextKind === "intermediate"
+                            ? "Nova ficha de produção"
+                            : "Nova ficha técnica",
+                      );
                       setBatchYield("1");
                       setOutputId(pid!);
                       setOutputDraftName("");
@@ -1896,13 +1969,15 @@ export const EstoqueReceitasPanel = forwardRef<
                       setOutputDraftName("");
                       setIngs([]);
                     }
-                    setSheetKind("sale");
+                    setSheetKind(nextKind);
                     setDetailTab("ficha");
                     setSheetOpen(true);
                   }}
                 >
                   <Plus className="mr-1.5 h-4 w-4" />
-                  Nova ficha
+                  {activeKind === "production"
+                    ? "Nova ficha de produção"
+                    : "Nova ficha"}
                 </Button>
               </div>
             </div>
@@ -1919,11 +1994,24 @@ export const EstoqueReceitasPanel = forwardRef<
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Carregando…
               </div>
-            ) : recipes.length === 0 ? (
+            ) : recipes.length === 0 ||
+              (lockedKind &&
+                !listQuery.trim() &&
+                sortedRecipes.length === 0) ? (
               <div className="rounded-xl border border-dashed border-border bg-card px-4 py-10 text-center">
-                <p className="text-sm font-medium">Nenhuma ficha cadastrada</p>
+                <p className="text-sm font-medium">
+                  {activeKind === "production"
+                    ? "Nenhuma ficha de produção"
+                    : activeKind === "sale"
+                      ? "Nenhuma ficha técnica"
+                      : "Nenhuma ficha cadastrada"}
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Crie uma ficha normal ou um produto intermediário.
+                  {activeKind === "production"
+                    ? "Crie um intermediário para produzir e estocar o resultado."
+                    : activeKind === "sale"
+                      ? "Crie uma ficha normal — a venda baixa os insumos na proporção da receita."
+                      : "Crie uma ficha normal ou um produto intermediário."}
                 </p>
               </div>
             ) : sortedRecipes.length === 0 ? (
@@ -1941,6 +2029,13 @@ export const EstoqueReceitasPanel = forwardRef<
                     r,
                     listQuery,
                   );
+                  const saleCmv = isSaleList
+                    ? recipeSaleCmv(
+                        r,
+                        unitCostByProductId,
+                        saleRecipeByOutputId,
+                      )
+                    : null;
                   return (
                     <li
                       key={r.id}
@@ -1960,23 +2055,31 @@ export const EstoqueReceitasPanel = forwardRef<
                           <p className="font-medium">{r.name}</p>
                           <RecipeSearchMatchedIngredients names={matchedIngs} />
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {outName ? `${outName} · ` : ""}
-                            {Number(r.batch_yield).toLocaleString("pt-BR")}{" "}
-                            rendimento · {r.recipe_ingredients?.length ?? 0}{" "}
-                            insumos
-                            {!r.active ? " · inativa" : ""}
+                            {isSaleList
+                              ? [
+                                  saleCmv != null
+                                    ? `CMV ${formatBrl(saleCmv)}`
+                                    : "CMV —",
+                                  `${r.recipe_ingredients?.length ?? 0} insumos`,
+                                  !r.active ? "inativa" : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              : `${outName ? `${outName} · ` : ""}${Number(r.batch_yield).toLocaleString("pt-BR")} rendimento · ${r.recipe_ingredients?.length ?? 0} insumos${!r.active ? " · inativa" : ""}`}
                           </p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-2">
-                          <Badge
-                            variant="secondary"
-                            className={cn(
-                              "h-6 px-2 text-[0.7rem] font-normal",
-                              isProd ? INTERMEDIATE_BADGE_CLASS : "",
-                            )}
-                          >
-                            {isProd ? "Produção" : "Ficha"}
-                          </Badge>
+                          {lockedKind ? null : (
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                "h-6 px-2 text-[0.7rem] font-normal",
+                                isProd ? INTERMEDIATE_BADGE_CLASS : "",
+                              )}
+                            >
+                              {isProd ? "Produção" : "Ficha"}
+                            </Badge>
+                          )}
                           {recipeCanBeProduced(r.recipe_type) ? (
                             <Button
                               type="button"
@@ -2013,28 +2116,43 @@ export const EstoqueReceitasPanel = forwardRef<
                         sortAsc={sortAsc}
                         onSort={onSort}
                       />
-                      <SortableTableHead
-                        label="Tipo"
-                        column="kind"
-                        sortKey={sortKey}
-                        sortAsc={sortAsc}
-                        onSort={onSort}
-                      />
-                      <SortableTableHead
-                        label="Produto"
-                        column="output"
-                        sortKey={sortKey}
-                        sortAsc={sortAsc}
-                        onSort={onSort}
-                      />
-                      <SortableTableHead
-                        label="Rendimento"
-                        column="yield"
-                        sortKey={sortKey}
-                        sortAsc={sortAsc}
-                        onSort={onSort}
-                        align="right"
-                      />
+                      {lockedKind ? null : (
+                        <SortableTableHead
+                          label="Tipo"
+                          column="kind"
+                          sortKey={sortKey}
+                          sortAsc={sortAsc}
+                          onSort={onSort}
+                        />
+                      )}
+                      {isSaleList ? (
+                        <SortableTableHead
+                          label="CMV"
+                          column="cmv"
+                          sortKey={sortKey}
+                          sortAsc={sortAsc}
+                          onSort={onSort}
+                          align="right"
+                        />
+                      ) : (
+                        <>
+                          <SortableTableHead
+                            label="Produto"
+                            column="output"
+                            sortKey={sortKey}
+                            sortAsc={sortAsc}
+                            onSort={onSort}
+                          />
+                          <SortableTableHead
+                            label="Rendimento"
+                            column="yield"
+                            sortKey={sortKey}
+                            sortAsc={sortAsc}
+                            onSort={onSort}
+                            align="right"
+                          />
+                        </>
+                      )}
                       <SortableTableHead
                         label="Insumos"
                         column="ings"
@@ -2043,7 +2161,7 @@ export const EstoqueReceitasPanel = forwardRef<
                         onSort={onSort}
                         align="right"
                       />
-                      <th className="w-28 px-3 py-2.5" />
+                      {isSaleList ? null : <th className="w-28 px-3 py-2.5" />}
                     </tr>
                   </thead>
                   <tbody>
@@ -2056,6 +2174,13 @@ export const EstoqueReceitasPanel = forwardRef<
                         r,
                         listQuery,
                       );
+                      const saleCmv = isSaleList
+                        ? recipeSaleCmv(
+                            r,
+                            unitCostByProductId,
+                            saleRecipeByOutputId,
+                          )
+                        : null;
                       return (
                         <tr
                           key={r.id}
@@ -2070,48 +2195,60 @@ export const EstoqueReceitasPanel = forwardRef<
                               names={matchedIngs}
                             />
                           </td>
-                          <td className="px-3 py-2.5">
-                            <Badge
-                              variant="secondary"
-                              className={cn(
-                                "h-6 px-2 text-[0.7rem] font-normal",
-                                isProd ? INTERMEDIATE_BADGE_CLASS : "",
-                              )}
-                            >
-                              {isProd ? "Produção" : "Ficha"}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2.5 text-muted-foreground">
-                            {outName ?? "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums">
-                            {Number(r.batch_yield).toLocaleString("pt-BR")}
-                          </td>
+                          {lockedKind ? null : (
+                            <td className="px-3 py-2.5">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  "h-6 px-2 text-[0.7rem] font-normal",
+                                  isProd ? INTERMEDIATE_BADGE_CLASS : "",
+                                )}
+                              >
+                                {isProd ? "Produção" : "Ficha"}
+                              </Badge>
+                            </td>
+                          )}
+                          {isSaleList ? (
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {saleCmv != null ? formatBrl(saleCmv) : "—"}
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-2.5 text-muted-foreground">
+                                {outName ?? "—"}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums">
+                                {Number(r.batch_yield).toLocaleString("pt-BR")}
+                              </td>
+                            </>
+                          )}
                           <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
                             {r.recipe_ingredients?.length ?? 0}
                           </td>
-                          <td
-                            className="px-3 py-2.5 text-right"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {recipeCanBeProduced(r.recipe_type) ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs"
-                                onClick={() =>
-                                  requestOpenEditRecipe(
-                                    r,
-                                    linkContextProductId,
-                                    "producao",
-                                  )
-                                }
-                              >
-                                Produzir
-                              </Button>
-                            ) : null}
-                          </td>
+                          {isSaleList ? null : (
+                            <td
+                              className="px-3 py-2.5 text-right"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {recipeCanBeProduced(r.recipe_type) ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() =>
+                                    requestOpenEditRecipe(
+                                      r,
+                                      linkContextProductId,
+                                      "producao",
+                                    )
+                                  }
+                                >
+                                  Produzir
+                                </Button>
+                              ) : null}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -2227,6 +2364,8 @@ export const EstoqueReceitasPanel = forwardRef<
                         formatQtyHint={formatQtyHint}
                         onProductCreated={handleIngredientProductCreated}
                         excludeProductId={ingredientExcludeProductId}
+                        showCmv={sheetKind === "sale"}
+                        lineCmv={ingredientLineCmv}
                       />
                     }
                   />
@@ -2377,25 +2516,25 @@ export const EstoqueReceitasPanel = forwardRef<
                         id !== "producao" || sheetKind === "intermediate",
                     )
                     .map(([id, label, Icon]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="tab"
-                      aria-selected={detailTab === id}
-                      onClick={() => {
-                        setDetailTab(id);
-                      }}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-none border-b-2 px-2 py-2 text-sm font-medium",
-                        detailTab === id
-                          ? "border-primary text-foreground"
-                          : "border-transparent text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      {label}
-                    </button>
-                  ))}
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={detailTab === id}
+                        onClick={() => {
+                          setDetailTab(id);
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-none border-b-2 px-2 py-2 text-sm font-medium",
+                          detailTab === id
+                            ? "border-primary text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {label}
+                      </button>
+                    ))}
                 </div>
               ) : null}
             </SheetHeader>
@@ -2419,9 +2558,7 @@ export const EstoqueReceitasPanel = forwardRef<
                   companyId={companyId}
                   mode="produce"
                   outputProductId={outputId}
-                  outputName={
-                    productById.get(outputId)?.name || name
-                  }
+                  outputName={productById.get(outputId)?.name || name}
                   outputUnit={productById.get(outputId)?.unit || "un"}
                   batchYield={parseFloat(batchYield) || 1}
                   recipeId={editingRecipeId}
@@ -2478,21 +2615,37 @@ export const EstoqueReceitasPanel = forwardRef<
                           const p = products.find(
                             (x) => x.id === row.product_id,
                           );
+                          const cmv =
+                            sheetKind === "sale"
+                              ? ingredientLineCmv(row)
+                              : null;
                           return (
                             <li
                               key={`${row.product_id}-${idx}`}
-                              className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
+                              className="flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
                             >
-                              <p className="font-medium">{p?.name ?? "—"}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {Number(row.quantity || 0).toLocaleString(
-                                  "pt-BR",
-                                )}{" "}
-                                ·{" "}
-                                {systemUnitLabel(
-                                  row.unit_code || p?.unit || "",
-                                )}
-                              </p>
+                              <div className="min-w-0">
+                                <p className="font-medium">{p?.name ?? "—"}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {Number(row.quantity || 0).toLocaleString(
+                                    "pt-BR",
+                                  )}{" "}
+                                  ·{" "}
+                                  {systemUnitLabel(
+                                    row.unit_code || p?.unit || "",
+                                  )}
+                                </p>
+                              </div>
+                              {sheetKind === "sale" ? (
+                                <p className="shrink-0 text-right">
+                                  <span className="block text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                                    CMV
+                                  </span>
+                                  <span className="tabular-nums text-sm font-medium">
+                                    {cmv != null ? formatBrl(cmv) : "—"}
+                                  </span>
+                                </p>
+                              ) : null}
                             </li>
                           );
                         })}
@@ -2544,6 +2697,8 @@ export const EstoqueReceitasPanel = forwardRef<
                         formatQtyHint={formatQtyHint}
                         onProductCreated={handleIngredientProductCreated}
                         excludeProductId={ingredientExcludeProductId}
+                        showCmv={sheetKind === "sale"}
+                        lineCmv={ingredientLineCmv}
                       />
                     }
                   />
