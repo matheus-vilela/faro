@@ -52,6 +52,78 @@ function coerceAssignments(
   );
 }
 
+/** Itens da fila ainda sem leitura da IA e sem o usuário ter classificado. */
+export function itemsPendingAiCorrelation(
+  items: ProductSetupItem[],
+  seenProductIds: ReadonlySet<string>,
+  configuredProductIds: ReadonlySet<string> = new Set(),
+): ProductSetupItem[] {
+  return items.filter((item) => {
+    if (!item.productId) return false;
+    if (configuredProductIds.has(item.productId)) return false;
+    if (seenProductIds.has(item.productId)) return false;
+    return true;
+  });
+}
+
+export function mergeValidationResults(
+  prev: ProductValidationResult | null,
+  next: ProductValidationResult,
+): ProductValidationResult {
+  if (!prev) return next;
+  const nextSoldIds = new Set([
+    ...next.sameItem.map((row) => row.sold.productId),
+    ...next.recipes.map((row) => row.sold.productId),
+  ]);
+  const nextPurchaseIds = new Set<string>();
+  for (const row of next.sameItem) {
+    for (const candidate of row.candidates) {
+      nextPurchaseIds.add(candidate.purchase.productId);
+    }
+  }
+  for (const row of next.recipes) {
+    for (const ingredient of row.ingredients) {
+      nextPurchaseIds.add(ingredient.purchase.productId);
+    }
+  }
+
+  const sameItem = [
+    ...prev.sameItem
+      .filter((row) => !nextSoldIds.has(row.sold.productId))
+      .map((row) => ({
+        ...row,
+        candidates: row.candidates.filter(
+          (candidate) => !nextPurchaseIds.has(candidate.purchase.productId),
+        ),
+      }))
+      .filter((row) => row.candidates.length > 0),
+    ...next.sameItem,
+  ];
+  const recipes = [
+    ...prev.recipes
+      .filter((row) => !nextSoldIds.has(row.sold.productId))
+      .map((row) => ({
+        ...row,
+        ingredients: row.ingredients.filter(
+          (ingredient) => !nextPurchaseIds.has(ingredient.purchase.productId),
+        ),
+      })),
+    ...next.recipes,
+  ];
+  const unmatchedSold = [
+    ...(prev.unmatchedSold ?? []).filter(
+      (row) => !nextSoldIds.has(row.productId),
+    ),
+    ...(next.unmatchedSold ?? []),
+  ];
+  return {
+    ...next,
+    sameItem,
+    recipes,
+    unmatchedSold,
+  };
+}
+
 /** Depois de confirmar um vínculo, tira do resultado o que já saiu da fila — sem nova chamada à IA. */
 export function filterValidationToQueue(
   result: ProductValidationResult,

@@ -189,7 +189,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
             Não aparece como venda
           </span>{" "}
           para itens de uso interno (guardanapos, canudos): não entram em
-          campeões, calendário de vendas nem na correlação de venda. Se o
+          campeões, calendário de vendas nem em classificar. Se o
           produto estiver em qualquer categoria marcada, ele deixa de contar
           como venda.
         </CardDescription>
@@ -320,7 +320,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-xs">
                         Não aparece como venda — itens desta categoria não
-                        entram em vendas, campeões nem correlação.
+                        entram em vendas, campeões nem em classificar.
                       </TooltipContent>
                     </Tooltip>
                     {isOwner && !locked ? (

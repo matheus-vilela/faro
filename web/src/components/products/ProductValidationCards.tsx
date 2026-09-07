@@ -368,9 +368,7 @@ export function SameItemRow({
   const edited =
     selectedPurchaseIds.length !== aiPurchaseIds.length ||
     selectedPurchaseIds.some((id) => !aiPurchaseIds.includes(id));
-  const topScore = suggestion.candidates[0]?.score;
   const soldSub = formatTurnoverLine(sold) || "PDV / venda";
-  const canRemove = selectedPurchases.length > 1;
 
   return (
     <li>

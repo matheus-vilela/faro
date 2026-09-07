@@ -1,4 +1,9 @@
-import { invokeCorrelateSoldPurchased } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
+import {
+  filterValidationToQueue,
+  invokeCorrelateSoldPurchased,
+  itemsPendingAiCorrelation,
+  mergeValidationResults,
+} from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
   defaultSoldRoleForSameItem,
   type CorrelationSoldRole,
@@ -16,6 +21,8 @@ export type ProductValidationSessionState = {
   soldRole: Record<string, CorrelationSoldRole>;
   familyPick: Record<string, string>;
   generation: number;
+  /** Produtos que a IA já leu nesta sessão (não reenviar). */
+  aiSeenProductIds: string[];
 };
 
 export function samePickIds(
@@ -38,6 +45,7 @@ const emptyState = (): ProductValidationSessionState => ({
   soldRole: {},
   familyPick: {},
   generation: 0,
+  aiSeenProductIds: [],
 });
 
 const sessions = new Map<string, SessionRecord>();
@@ -57,6 +65,7 @@ export function getProductValidationSession(
     ...stored,
     soldRole: stored.soldRole ?? {},
     familyPick: stored.familyPick ?? {},
+    aiSeenProductIds: stored.aiSeenProductIds ?? [],
   };
 }
 
@@ -148,15 +157,27 @@ export async function startProductValidationSession(input: {
   companyId: string;
   loadQueue: () => Promise<ProductSetupQueue>;
   correlate?: typeof invokeCorrelateSoldPurchased;
+  excludeProductIds?: readonly string[];
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const current = getProductValidationSession(input.companyId);
   if (current.running) return { ok: true };
 
   const generation = beginProductValidationRun(input.companyId);
   const queue = await input.loadQueue();
+  const pending = itemsPendingAiCorrelation(
+    queue.items,
+    new Set(current.aiSeenProductIds),
+    new Set(input.excludeProductIds ?? []),
+  );
+
+  if (pending.length === 0) {
+    finishProductValidationRun(input.companyId, generation, { ok: false });
+    return { ok: true };
+  }
+
   const correlated = await (input.correlate ?? invokeCorrelateSoldPurchased)({
     companyId: input.companyId,
-    items: queue.items,
+    items: pending,
   });
 
   if (!correlated.ok) {
@@ -164,11 +185,19 @@ export async function startProductValidationSession(input: {
     return { ok: false, error: correlated.error };
   }
 
+  const merged = mergeValidationResults(current.result, correlated.result);
+  const result = filterValidationToQueue(merged, queue.items);
+  const seen = new Set(current.aiSeenProductIds);
+  for (const item of pending) seen.add(item.productId);
+
   const applied = finishProductValidationRun(input.companyId, generation, {
     ok: true,
-    result: correlated.result,
+    result,
   });
   if (!applied) return { ok: true };
+  patchProductValidationSession(input.companyId, {
+    aiSeenProductIds: [...seen],
+  });
   return { ok: true };
 }
 

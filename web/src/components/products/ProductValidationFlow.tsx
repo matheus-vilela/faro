@@ -12,7 +12,10 @@ import {
   fetchProductSetupQueue,
   type ProductSetupQueue,
 } from "@/lib/productSetupQueue";
-import { filterValidationToQueue } from "@/lib/productValidation/invokeCorrelateSoldPurchased";
+import {
+  filterValidationToQueue,
+  itemsPendingAiCorrelation,
+} from "@/lib/productValidation/invokeCorrelateSoldPurchased";
 import {
   patchProductValidationSession,
   startProductValidationSession,
@@ -93,6 +96,34 @@ function correlationGateHeaderIcon(
   return <Sparkles className="h-8 w-8 text-muted-foreground" />;
 }
 
+function CorrelationAiTableLoading() {
+  return (
+    <div
+      className="absolute inset-0 z-10 flex min-h-[22rem] items-center justify-center rounded-md bg-background/80 px-6 backdrop-blur-[2px]"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="flex max-w-sm flex-col items-center text-center">
+        <span className="relative flex h-14 w-14 items-center justify-center">
+          <span className="absolute inset-0 animate-ping rounded-full bg-sky-500/25" />
+          <span className="relative flex h-14 w-14 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10">
+            <Sparkles className="h-6 w-6 animate-pulse text-sky-600 dark:text-sky-400" />
+          </span>
+        </span>
+        <p className="mt-4 text-base font-semibold">Verificando com a IA</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Cruzando o PDV com as notas fiscais. Aguarde alguns instantes.
+        </p>
+        <p className="mt-3 flex items-center gap-2 text-xs text-sky-700 dark:text-sky-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Isso pode levar um instante
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CorrelationIdleCard({
   tone,
   icon,
@@ -130,9 +161,19 @@ function CorrelationIdleCard({
 
 export function ProductValidationFlow({ companyId }: { companyId: string }) {
   const { currentCompany, refetchCompanies } = useCompany();
-  const { running, result } = useProductValidationSession(companyId);
+  const { running, result, aiSeenProductIds } =
+    useProductValidationSession(companyId);
   const [queue, setQueue] = useState<ProductSetupQueue | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configuredIds, setConfiguredIds] = useState<string[]>([]);
+
+  const rememberConfiguredIds = useCallback((ids: string[]) => {
+    setConfiguredIds((prev) =>
+      prev.length === ids.length && prev.every((id, i) => id === ids[i])
+        ? prev
+        : ids,
+    );
+  }, []);
 
   const loadQueue = useCallback(async () => {
     const next = await fetchProductSetupQueue(supabase, companyId);
@@ -154,13 +195,14 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
       )
     ) {
       toast.error(
-        "Finalize o onboarding fiscal e o do PDV para iniciar a correlação.",
+        "Finalize o onboarding fiscal e o do PDV para começar a classificar.",
       );
       return;
     }
     const outcome = await startProductValidationSession({
       companyId,
       loadQueue,
+      excludeProductIds: configuredIds,
     });
     if (!outcome.ok) {
       toast.error(outcome.error);
@@ -177,6 +219,13 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
   };
 
   const inboxItemCount = queue?.items.length ?? 0;
+  const pendingAiCount = queue
+    ? itemsPendingAiCorrelation(
+        queue.items,
+        new Set(aiSeenProductIds),
+        new Set(configuredIds),
+      ).length
+    : 0;
 
   const fiscalStatus = correlationFiscalStepStatus(
     currentCompany?.onboarding_fiscal,
@@ -216,7 +265,7 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         }
         title="Carregando itens"
-        description="Buscando produtos da nota e do PDV para a correlação."
+        description="Buscando produtos da nota e do PDV para classificar."
       />
     );
   }
@@ -229,123 +278,114 @@ export function ProductValidationFlow({ companyId }: { companyId: string }) {
     );
   }
 
-  if (!result && !running) {
-    if (!canStart) {
-      return (
-        <CorrelationIdleCard
-          tone={
-            fiscalStatus === "error" || pdvStatus === "error"
-              ? "amber"
-              : "muted"
-          }
-          icon={correlationGateHeaderIcon(fiscalStatus, pdvStatus)}
-          title="Correlação ainda não disponível"
-          description="Essa etapa cruza produtos da nota fiscal com os vendidos no PDV. Libera quando o onboarding fiscal e o do PDV estiverem concluídos."
-        >
-          <ul className="mt-5 w-full space-y-2 text-left text-sm">
-            <PrerequisiteRow
-              status={fiscalStatus}
-              label="Onboarding fiscal concluído"
-            />
-            <PrerequisiteRow
-              status={pdvStatus}
-              label="Onboarding do PDV concluído"
-            />
-          </ul>
-          <Button variant="outline" className="mt-6" asChild>
-            <Link to="/app">Ir ao dashboard</Link>
-          </Button>
-        </CorrelationIdleCard>
-      );
-    }
-
-    if (pending === 0) {
-      return wrap(
-        <CorrelationIdleCard
-          tone="ok"
-          icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />}
-          title="Cadastro alinhado"
-          description="Novos itens da nota ou do PDV aparecem aqui para correlacionar comprados e vendidos."
-        />,
-      );
-    }
-
-    return wrap(
+  if (!canStart) {
+    return (
       <CorrelationIdleCard
-        tone="amber"
-        icon={
-          <Sparkles className="h-8 w-8 text-amber-800 dark:text-amber-400" />
+        tone={
+          fiscalStatus === "error" || pdvStatus === "error" ? "amber" : "muted"
         }
-        title={`${pending.toLocaleString("pt-BR")} ${
-          pending === 1 ? "item pendente" : "itens pendentes"
-        } de correlação`}
-        description="Nosso agente cruza os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos e atualizar corretamente o estoque e as movimentações. Nada é gravado até você confirmar."
+        icon={correlationGateHeaderIcon(fiscalStatus, pdvStatus)}
+        title="Classificar ainda não disponível"
+        description="Essa etapa cruza produtos da nota fiscal com os vendidos no PDV. Libera quando o onboarding fiscal e o do PDV estiverem concluídos."
       >
-        <Button
-          type="button"
-          className="mt-6"
-          onClick={() => void startValidation()}
-        >
-          Iniciar validação
+        <ul className="mt-5 w-full space-y-2 text-left text-sm">
+          <PrerequisiteRow
+            status={fiscalStatus}
+            label="Onboarding fiscal concluído"
+          />
+          <PrerequisiteRow
+            status={pdvStatus}
+            label="Onboarding do PDV concluído"
+          />
+        </ul>
+        <Button variant="outline" className="mt-6" asChild>
+          <Link to="/app">Ir ao dashboard</Link>
         </Button>
-      </CorrelationIdleCard>,
+      </CorrelationIdleCard>
     );
   }
 
-  if (running) {
+  if (pending === 0 && !running) {
     return wrap(
       <CorrelationIdleCard
-        tone="muted"
-        icon={
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        }
-        title="Interpretando vendidos e comprados"
-        description="Nosso agente está cruzando os dados do PDV com os produtos das notas fiscais para correlacionar itens comprados e vendidos. Isso pode levar um instante."
+        tone="ok"
+        icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />}
+        title="Cadastro alinhado"
+        description="Novos itens da nota ou do PDV aparecem aqui para correlacionar comprados e vendidos."
       />,
     );
   }
 
-  if (!result) return null;
+  if (!queue) return null;
 
-  const hasInbox = inboxItemCount > 0;
+  const canVerify = canStart && pendingAiCount > 0 && !running;
 
   return wrap(
     <div className="space-y-6">
-      <div className="rounded-xl border border-border/80 bg-card p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold">
-              {inboxItemCount.toLocaleString("pt-BR")}{" "}
-              {inboxItemCount === 1 ? "item na fila" : "itens na fila"}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Diga o que é cada item. Pares iguais já vêm como unificar. Nada é
-              gravado até você confirmar a ação.
-            </p>
+      {!result && (
+        <div className="rounded-xl border border-sky-500/80 bg-sky-500/[0.07] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Verificar com a IA</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                A tabela já sugere ficha, unificar ou insumo pelo cadastro. A IA
+                cruza PDV × nota só nos itens ainda sem leitura.
+                {pendingAiCount > 0
+                  ? ` ${pendingAiCount.toLocaleString("pt-BR")} ${
+                      pendingAiCount === 1
+                        ? "item ainda sem verificação"
+                        : "itens ainda sem verificação"
+                    }.`
+                  : result
+                    ? " A IA já leu os itens desta fila."
+                    : ""}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={result ? "outline" : "sky"}
+              size="sm"
+              disabled={!canVerify}
+              onClick={() => void startValidation()}
+            >
+              {running ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {running
+                ? "Verificando…"
+                : result
+                  ? "Verificar restantes"
+                  : "Verificar com a IA"}
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void startValidation()}
-          >
-            Rodar de novo
-          </Button>
         </div>
-      </div>
+      )}
 
-      {!hasInbox ? (
+      {inboxItemCount === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nada pendente depois desta leitura.
+          Nada pendente nesta fila.
         </p>
-      ) : queue ? (
-        <CorrelationCaseWorkbench
-          companyId={companyId}
-          queue={queue}
-          result={result}
-          onResolved={() => void reloadAfterConfirm()}
-        />
-      ) : null}
+      ) : (
+        <div className="relative min-h-[22rem]">
+          <div
+            className={cn(
+              running && "pointer-events-none select-none opacity-30",
+            )}
+            aria-hidden={running}
+          >
+            <CorrelationCaseWorkbench
+              companyId={companyId}
+              queue={queue}
+              result={result}
+              onResolved={() => void reloadAfterConfirm()}
+              onConfiguredProductIdsChange={rememberConfiguredIds}
+            />
+          </div>
+          {running ? <CorrelationAiTableLoading /> : null}
+        </div>
+      )}
     </div>,
   );
 }

@@ -37,6 +37,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-direita-por-papel.md` | Card de correlação: direita muda com o papel (ficha no card) |
 | `correlacao-2.md` | Aba Correlação 2 (removida; ver `correlacao-remover-v2`) |
 | `correlacao-remover-v2.md` | Remove aba Correlação 2; grupo Correlação sem tabs |
+| `correlacao-tabela-antes-da-ia.md` | Correlação: tabela na hora, IA opcional nos itens abertos |
 | `correlacao-2-variante-fila.md` | Variante já ligada não volta na fila da Correlação 2 |
 | `vendas-calendario-abas.md` | Vendas: Calendário com abas internas calendário / listagem |
 | `correlacao-match-so-unificar.md` | Correlação: match inicial só unifica produtos iguais |
@@ -55,6 +56,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `search-select-padrao.md` | SearchSelect único em formulário e filtro |
 | `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |
 | `correlacao-2-unificar-varios.md` | Correlação 2: unificar com vários produtos |
+| `classificar-renomear-aba.md` | Aba Correlação passa a Classificar |
 | `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 

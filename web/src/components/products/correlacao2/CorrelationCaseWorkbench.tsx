@@ -31,7 +31,7 @@ import {
 } from "@/lib/productValidation/correlationCase";
 import type { ProductValidationResult } from "@/lib/productValidation/types";
 import { cn } from "@/lib/utils";
-import { FilterX, Loader2 } from "lucide-react";
+import { FilterX, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 type SortKey = "name" | "turnover";
@@ -88,10 +88,14 @@ function CaseIdentity({
             {SETUP_STOCK_ONLY_LABEL}
           </Badge>
         ) : null}
-        {row.aiIntent === intent && row.score > 0 ? (
-          <span className="text-xs text-muted-foreground">
-            {row.score.toLocaleString("pt-BR")}%
-          </span>
+        {row.aiIntent === intent ? (
+          <Badge
+            variant="outline"
+            className="border-sky-500/35 bg-sky-500/15 font-normal text-sky-900 dark:text-sky-200"
+          >
+            <Sparkles className="h-3 w-3" />
+            {/* Pela IA */}
+          </Badge>
         ) : null}
       </div>
     </div>
@@ -238,11 +242,13 @@ export function CorrelationCaseWorkbench({
   queue,
   result,
   onResolved,
+  onConfiguredProductIdsChange,
 }: {
   companyId: string;
   queue: ProductSetupQueue;
   result: ProductValidationResult | null;
   onResolved: (productId: string) => void;
+  onConfiguredProductIdsChange?: (productIds: string[]) => void;
 }) {
   const isMobile = useIsMobile();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -280,6 +286,18 @@ export function CorrelationCaseWorkbench({
 
   const intentFor = (row: CorrelationCase): CorrelationIntent =>
     intents[row.id] ?? row.suggestedIntent;
+
+  useEffect(() => {
+    if (!onConfiguredProductIdsChange) return;
+    const ids = cases
+      .filter((row) => {
+        const picked = intents[row.id];
+        return picked != null && picked !== row.suggestedIntent;
+      })
+      .map((row) => row.subject.productId)
+      .filter(Boolean);
+    onConfiguredProductIdsChange(ids);
+  }, [cases, intents, onConfiguredProductIdsChange]);
 
   const markResolved = (productId: string) => {
     setHiddenProductIds((current) => {

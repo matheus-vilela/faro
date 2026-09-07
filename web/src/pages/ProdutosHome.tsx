@@ -16,8 +16,8 @@ export function ProdutosHome() {
     <div className="min-w-0 space-y-6">
       <PageHeader
         icon={Link2}
-        title="Correlação"
-        description="Cruza o que saiu no PDV com o que entrou nas notas fiscais para alinhar cadastro, estoque e movimentações."
+        title="Classificar"
+        description="Defina o que cada item é — unificar, ficha, agrupamento ou insumo — para o estoque bater com a nota e a venda."
       />
 
       <ProductValidationFlow companyId={currentCompany.id} />

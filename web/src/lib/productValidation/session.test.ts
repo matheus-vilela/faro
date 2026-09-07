@@ -59,10 +59,12 @@ function resultWithHighMatch(): ProductValidationResult {
   };
 }
 
-function emptyQueue(): ProductSetupQueue {
+function queueWithPair(): ProductSetupQueue {
+  const soldItem = sold("s1", "Heineken");
+  const purchaseItem = purchase("p1", "Heineken 600");
   return {
-    items: [],
-    counts: { total: 0, purchases: 0, sold: 0, recipes: 0 },
+    items: [soldItem, purchaseItem],
+    counts: { total: 2, purchases: 1, sold: 1, recipes: 0 },
     soldOnly: [],
     purchases: [],
     recipes: [],
@@ -157,7 +159,7 @@ describe("product validation session", () => {
     let release!: (value: { ok: true; result: ProductValidationResult; runId: null }) => void;
     const first = startProductValidationSession({
       companyId,
-      loadQueue: async () => emptyQueue(),
+      loadQueue: async () => queueWithPair(),
       correlate: () =>
         new Promise((resolve) => {
           correlateCalls += 1;
@@ -166,7 +168,7 @@ describe("product validation session", () => {
     });
     const second = await startProductValidationSession({
       companyId,
-      loadQueue: async () => emptyQueue(),
+      loadQueue: async () => queueWithPair(),
       correlate: async () => {
         correlateCalls += 1;
         return { ok: true, runId: null, result: resultWithHighMatch() };
@@ -177,6 +179,42 @@ describe("product validation session", () => {
     release({ ok: true, runId: null, result: resultWithHighMatch() });
     await first;
     expect(getProductValidationSession(companyId).result?.stats.sameItem).toBe(1);
+  });
+
+  it("não chama a IA de novo nos itens já lidos", async () => {
+    const companyId = "c1";
+    let correlateCalls = 0;
+    const correlate = async () => {
+      correlateCalls += 1;
+      return { ok: true as const, runId: null, result: resultWithHighMatch() };
+    };
+    await startProductValidationSession({
+      companyId,
+      loadQueue: async () => queueWithPair(),
+      correlate,
+    });
+    expect(correlateCalls).toBe(1);
+    await startProductValidationSession({
+      companyId,
+      loadQueue: async () => queueWithPair(),
+      correlate,
+    });
+    expect(correlateCalls).toBe(1);
+  });
+
+  it("não envia item que o usuário já classificou", async () => {
+    const companyId = "c1";
+    const seen: string[][] = [];
+    await startProductValidationSession({
+      companyId,
+      loadQueue: async () => queueWithPair(),
+      excludeProductIds: ["s1"],
+      correlate: async ({ items }) => {
+        seen.push(items.map((row) => row.productId));
+        return { ok: true, runId: null, result: resultWithHighMatch() };
+      },
+    });
+    expect(seen[0]).toEqual(["p1"]);
   });
 
   it("isola sessões por empresa", () => {

@@ -43,13 +43,13 @@ const STOCK_GROUPS: {
 }[] = [
   {
     id: "correlacao",
-    label: "Correlação",
+    label: "Classificar",
     description: "PDV × notas fiscais",
     icon: Link2,
     links: [
       {
         to: PRODUCT_HOME_PATH,
-        label: "Correlação",
+        label: "Classificar",
         icon: Link2,
         end: true,
       },
@@ -190,7 +190,7 @@ export function ProdutosEstoqueLayout() {
       <PageHeader
         icon={Package}
         title="Produtos e estoque"
-        description="Correlação PDV × notas, catálogo, movimentações, contagem, fichas, agrupamentos e serviços."
+        description="Classificar cadastros, catálogo, movimentações, contagem, fichas, agrupamentos e serviços."
       />
 
       <div className="flex h-full flex-col gap-6 md:flex-row md:items-start">

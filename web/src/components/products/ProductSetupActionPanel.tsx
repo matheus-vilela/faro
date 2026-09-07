@@ -851,7 +851,7 @@ export function ProductSetupActionPanel({
                       }
                       aria-label={`Remover ${row.label}`}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </li>
                 );
@@ -954,11 +954,7 @@ export function ProductSetupActionPanel({
                 : `Cadastrar ficha técnica «${query}»`
             }
           />
-          <p className="text-sm text-muted-foreground">
-            Este cadastro continua sendo o produto de estoque e entra como
-            insumo. Escolha uma ficha já cadastrada ou um produto para
-            converter. A aba define se é ficha técnica ou de produção.
-          </p>
+
           <EstoqueRecipeMatchIngredientConfig
             companyId={companyId}
             ingredient={matchRow}
@@ -1015,11 +1011,7 @@ export function ProductSetupActionPanel({
             onNewFamilyNameChange={setNewFamilyName}
             disabled={busy}
           />
-          <p className="text-sm text-muted-foreground">
-            Este cadastro continua sendo produto de estoque, ligado a um
-            agrupamento de cardápio. Se o nome ainda não existe, cadastre no
-            próprio seletor.
-          </p>
+
           {hidePrimaryAction ? null : (
             <Button
               type="button"

@@ -75,9 +75,7 @@ export function ProductMergeIncomingRow({
     if (conversionsLoading) return;
     if (draft.factorMode === "manual") return;
     if (candidates.length === 0) {
-      if (draft.factorMode !== "manual") {
-        onChange({ ...draft, factorMode: "manual", selectedFactorId: null });
-      }
+      onChange({ ...draft, factorMode: "manual", selectedFactorId: null });
       return;
     }
     if (

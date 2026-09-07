@@ -258,16 +258,21 @@ export function CorrelationRecipeComposer({
       run: () => void save(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save fecha sobre lines atuais
-  }, [actionLabel, busy, canSave, onPrimaryActionChange, lines, conversionsByProduct]);
+  }, [
+    actionLabel,
+    busy,
+    canSave,
+    onPrimaryActionChange,
+    lines,
+    conversionsByProduct,
+  ]);
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">Receita: {outputName}.</p>
-      {lines.length === 0 ? (
-        <p className="rounded-lg border bg-background px-2.5 py-2 text-sm text-muted-foreground">
-          Inclua pelo menos um insumo.
-        </p>
-      ) : (
+      <p className="text-xs text-muted-foreground">
+        Receita: <strong className="text-foreground">{outputName}</strong>
+      </p>
+      {lines.length > 0 && (
         <ul className="space-y-1.5">
           {lines.map((line) => (
             <CorrelationRecipeIngredientRow

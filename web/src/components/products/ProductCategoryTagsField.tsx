@@ -54,7 +54,7 @@ export function ProductCategoryTagsField({
     label === undefined ? "Categorias de produto" : label;
   const resolvedHint =
     hint === undefined
-      ? "Adicione quantas quiser. Busque, selecione ou crie uma nova categoria. Categorias marcadas como não-venda não entram em vendas nem na correlação."
+      ? "Adicione quantas quiser. Busque, selecione ou crie uma nova categoria. Categorias marcadas como não-venda não entram em vendas nem em classificar."
       : hint;
   const [creating, setCreating] = useState(false);
 

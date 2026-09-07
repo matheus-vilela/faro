@@ -15,6 +15,8 @@ function product(id: string, unit: string): Product {
     min_quantity: 0,
     current_quantity: 10,
     last_unit_value: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
   };
 }
 
