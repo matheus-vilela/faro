@@ -92,24 +92,35 @@ function errField(err: unknown, key: string): unknown {
   return (err as Record<string, unknown>)[key];
 }
 
+function firstNonEmptyText(...values: unknown[]): string {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 /** Mensagem amigável para violação de unicidade, FK, PostgREST ou erro genérico. */
 export function mapCompanyUnitMutationError(
   err: unknown,
   fallback: string,
 ): string {
-  const code = errField(err, "code");
+  const code = String(errField(err, "code") ?? "");
   if (code === "23505") {
-    const message = errField(err, "message");
-    const details = errField(err, "details");
-    const blob = `${String(message ?? "")} ${String(details ?? "")}`.toLowerCase();
+    const blob = `${String(errField(err, "message") ?? "")} ${String(
+      errField(err, "details") ?? "",
+    )}`.toLowerCase();
     if (blob.includes("document")) return DUPLICATE_UNIT_CNPJ_MSG;
     return DUPLICATE_UNIT_NAME_MSG;
   }
   if (code === "23503") {
     return FK_VIOLATION_MSG;
   }
-  if (err instanceof Error) return err.message;
-  const message = errField(err, "message");
-  if (typeof message === "string") return message;
-  return fallback;
+  const fromError = err instanceof Error ? err.message : "";
+  const text = firstNonEmptyText(
+    fromError,
+    errField(err, "message"),
+    errField(err, "details"),
+    errField(err, "hint"),
+  );
+  return text || fallback;
 }

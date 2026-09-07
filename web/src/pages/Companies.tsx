@@ -62,6 +62,7 @@ import {
 } from "@/services/focusAtualizarCertificadoService";
 import { fileToPureBase64 } from "@/services/focusCriaEmpresaService";
 import { focusDeleteEmpresa } from "@/services/focusDeleteEmpresaService";
+import { deleteCompanyUnit } from "@/services/deleteCompanyUnit";
 import { validateCertificateWithFocusNfe } from "@/services/focusNfeService";
 import { normalizeSetupMap } from "@/services/unitSetupService";
 import type { CompanyGroup } from "@/types/companyGroup";
@@ -558,16 +559,9 @@ export function Companies() {
           return;
         }
       }
-      const { data: deletedRows, error: dErr } = await supabase
-        .from("companies")
-        .delete()
-        .eq("id", deleteTarget.company.id)
-        .select("id");
-      if (dErr) throw dErr;
-      if (!deletedRows?.length) {
-        setError(
-          "Não foi possível remover a unidade. Só o dono do grupo (ou dono da unidade) pode excluir, ou a linha não existe mais.",
-        );
+      const removed = await deleteCompanyUnit(deleteTarget.company.id);
+      if (!removed.ok) {
+        setError(removed.error);
         return;
       }
       await refetchCompanies();
@@ -724,6 +718,7 @@ export function Companies() {
                               title="Remover unidade"
                               onClick={(ev) => {
                                 ev.stopPropagation();
+                                setError(null);
                                 setDeleteTarget({
                                   company,
                                   groupName: group.name,

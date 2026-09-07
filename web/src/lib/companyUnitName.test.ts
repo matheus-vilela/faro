@@ -81,5 +81,11 @@ describe("mapCompanyUnitMutationError", () => {
         "x",
       ),
     ).toBe("Já existe uma unidade com este CNPJ.");
+    expect(
+      mapCompanyUnitMutationError({ details: "permission denied for table products" }, "x"),
+    ).toBe("permission denied for table products");
+    expect(mapCompanyUnitMutationError({}, "Erro ao remover unidade")).toBe(
+      "Erro ao remover unidade",
+    );
   });
 });

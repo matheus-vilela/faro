@@ -35,8 +35,22 @@ CREATE TABLE IF NOT EXISTS public.company_ncm_category_rules (
 CREATE INDEX IF NOT EXISTS idx_company_ncm_category_rules_company
   ON public.company_ncm_category_rules (company_id);
 
-CREATE INDEX IF NOT EXISTS idx_company_ncm_category_rules_category
-  ON public.company_ncm_category_rules (company_category_id);
+-- Tabela pode já existir no schema v4 (product_category_id), sem esta coluna.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'company_ncm_category_rules'
+      AND column_name = 'company_category_id'
+  ) THEN
+    EXECUTE $idx$
+      CREATE INDEX IF NOT EXISTS idx_company_ncm_category_rules_category
+        ON public.company_ncm_category_rules (company_category_id)
+    $idx$;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_expense_items_company_ncm
   ON public.expense_items (company_id, ncm)
@@ -92,11 +106,24 @@ $$;
 
 DROP TRIGGER IF EXISTS tr_company_ncm_category_rules_validate
   ON public.company_ncm_category_rules;
-CREATE TRIGGER tr_company_ncm_category_rules_validate
-  BEFORE INSERT OR UPDATE OF ncm, company_id, company_category_id
-  ON public.company_ncm_category_rules
-  FOR EACH ROW
-  EXECUTE FUNCTION public.company_ncm_category_rules_validate();
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'company_ncm_category_rules'
+      AND column_name = 'company_category_id'
+  ) THEN
+    EXECUTE $trg$
+      CREATE TRIGGER tr_company_ncm_category_rules_validate
+        BEFORE INSERT OR UPDATE OF ncm, company_id, company_category_id
+        ON public.company_ncm_category_rules
+        FOR EACH ROW
+        EXECUTE FUNCTION public.company_ncm_category_rules_validate()
+    $trg$;
+  END IF;
+END $$;
 
 DROP TRIGGER IF EXISTS tr_company_ncm_category_rules_updated_at
   ON public.company_ncm_category_rules;
@@ -121,11 +148,15 @@ CREATE POLICY "Owners can write ncm category rules"
   ON public.company_ncm_category_rules FOR INSERT
   WITH CHECK (public.user_is_company_owner(auth.uid(), company_id));
 
+DROP POLICY IF EXISTS "Owners can update ncm category rules"
+  ON public.company_ncm_category_rules;
 CREATE POLICY "Owners can update ncm category rules"
   ON public.company_ncm_category_rules FOR UPDATE
   USING (public.user_is_company_owner(auth.uid(), company_id))
   WITH CHECK (public.user_is_company_owner(auth.uid(), company_id));
 
+DROP POLICY IF EXISTS "Owners can delete ncm category rules"
+  ON public.company_ncm_category_rules;
 CREATE POLICY "Owners can delete ncm category rules"
   ON public.company_ncm_category_rules FOR DELETE
   USING (public.user_is_company_owner(auth.uid(), company_id));
@@ -134,6 +165,7 @@ GRANT SELECT ON public.company_ncm_category_rules TO authenticated;
 GRANT INSERT, UPDATE, DELETE ON public.company_ncm_category_rules TO authenticated;
 GRANT ALL ON public.company_ncm_category_rules TO service_role;
 
+DROP FUNCTION IF EXISTS public.list_company_ncms(UUID);
 CREATE OR REPLACE FUNCTION public.list_company_ncms(p_company_id UUID)
 RETURNS TABLE (
   ncm TEXT,
