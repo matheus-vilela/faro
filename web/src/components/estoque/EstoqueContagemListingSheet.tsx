@@ -353,48 +353,6 @@ export function EstoqueContagemListingSheet({
           <div className="grid min-h-[22rem] gap-4 md:grid-cols-2">
             <section className="flex min-h-0 flex-col rounded-xl border">
               <div className="border-b px-3 py-2">
-                <p className="text-sm font-semibold">Nesta lista</p>
-                <p className="text-xs text-muted-foreground">
-                  {inListIds.size} produto(s)
-                </p>
-                <div className="relative mt-2">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="h-8 pl-8 text-sm"
-                    value={inListSearch}
-                    onChange={(e) => setInListSearch(e.target.value)}
-                    placeholder="Filtrar nesta lista…"
-                  />
-                </div>
-              </div>
-              <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-                {inListProducts.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm"
-                  >
-                    <span className="min-w-0 truncate font-medium">{p.name}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => removeProduct(p.id)}
-                    >
-                      Remover
-                    </Button>
-                  </li>
-                ))}
-                {inListProducts.length === 0 ? (
-                  <li className="px-2 py-6 text-center text-xs text-muted-foreground">
-                    Nenhum produto nesta lista.
-                  </li>
-                ) : null}
-              </ul>
-            </section>
-
-            <section className="flex min-h-0 flex-col rounded-xl border">
-              <div className="border-b px-3 py-2">
                 <p className="text-sm font-semibold">Adicionar produtos</p>
                 <p className="text-xs text-muted-foreground">
                   Catálogo ativo — a busca só filtra
@@ -438,6 +396,48 @@ export function EstoqueContagemListingSheet({
                     {products.length === 0
                       ? "Nenhum produto ativo."
                       : "Todos os produtos já estão na lista (ou não batem com o filtro)."}
+                  </li>
+                ) : null}
+              </ul>
+            </section>
+
+            <section className="flex min-h-0 flex-col rounded-xl border">
+              <div className="border-b px-3 py-2">
+                <p className="text-sm font-semibold">Nesta lista</p>
+                <p className="text-xs text-muted-foreground">
+                  {inListIds.size} produto(s)
+                </p>
+                <div className="relative mt-2">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="h-8 pl-8 text-sm"
+                    value={inListSearch}
+                    onChange={(e) => setInListSearch(e.target.value)}
+                    placeholder="Filtrar nesta lista…"
+                  />
+                </div>
+              </div>
+              <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+                {inListProducts.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm"
+                  >
+                    <span className="min-w-0 truncate font-medium">{p.name}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => removeProduct(p.id)}
+                    >
+                      Remover
+                    </Button>
+                  </li>
+                ))}
+                {inListProducts.length === 0 ? (
+                  <li className="px-2 py-6 text-center text-xs text-muted-foreground">
+                    Nenhum produto nesta lista.
                   </li>
                 ) : null}
               </ul>
