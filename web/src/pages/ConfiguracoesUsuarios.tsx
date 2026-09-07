@@ -341,7 +341,9 @@ export function ConfiguracoesUsuarios() {
               Ao adicionar um operador, informe o{" "}
               <strong>número do WhatsApp</strong> (com DDD).
               <br />
-              Esse número será validado nas mensagens recebidas
+              Esse número será validado nas mensagens recebidas. Se o mesmo
+              WhatsApp estiver em mais de uma unidade, o Faro pergunta qual
+              loja.
             </p>
           </div>
         </CardHeader>

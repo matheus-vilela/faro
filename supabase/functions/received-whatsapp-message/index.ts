@@ -21,12 +21,15 @@ import {
   matchTaskKeyword,
 } from "./whatsappTaskKeywordsFlow.ts";
 import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
+import type { CompanyWhatsappMatch } from "./whatsappCompanyContext.ts";
+import { resolveWhatsappCompanyContext } from "./whatsappCompanyContextFlow.ts";
 
 /**
  * Webhook Z-API "Ao receber" — fluxo completo neste arquivo.
  *
  * A linha `connectedPhone` é a mesma para todas as empresas; a empresa é resolvida
- * só pelo telefone do remetente (owner ou membro ativo). Ambiguidade → 409.
+ * só pelo telefone do remetente (owner ou membro ativo). Se o número estiver em
+ * mais de uma unidade, o Faro pergunta a loja (*loja* / *unidade* para trocar).
  *
  * Logs `VALIDAÇÃO: VÁLIDA` / `VALIDAÇÃO: INVÁLIDA` indicam se o remetente bate com
  * `companies.owner_whatsapp_normalized` ou `company_members` (ativo).
@@ -43,7 +46,8 @@ import { withFaroFlowFooter } from "./whatsappFlowFooter.ts";
  * Webhooks duplicados (mesmo messageId) são ignorados após o primeiro processamento.
  *
  * Comandos de texto: *lista* (pendentes + menu numérico), *checklist* (checklists atribuídos ao número do membro),
- * *estoque* / *inventario* (link de contagem de inventário), *comandos* (lista de ajuda).
+ * *estoque* / *inventario* (link de contagem de inventário), *comandos* (lista de ajuda),
+ * *loja* / *unidade* (troca de unidade quando o número está em mais de uma empresa).
  * Proprietário também vê *contas a pagar* na ajuda e pode usá-lo (7 dias).
  * Quem tem número de membro vê *checklist* se houver checklists atribuídos.
  * Número 1–20 após *lista* ou *checklist* escolhe opção do último menu correspondente.
@@ -98,16 +102,21 @@ type ZApiReceivedCallbackPayload = {
 
 // --- Resultado da autorização ----------------------------------------------
 
-type WebhookAuthSuccess = {
+type WebhookAuthLookupSuccess = {
   authorized: true;
-  companyId: string;
   senderNormalized: string;
   /** Linha da instância Z-API (igual para todas as empresas); só informativo. */
   connectedNormalized: string | null;
+  lookupVariants: string[];
+  matches: CompanyWhatsappMatch[];
+};
+
+type WebhookAuthSuccess = WebhookAuthLookupSuccess & {
+  companyId: string;
+  companyName: string;
   role: "owner" | "member";
   /** `company_members.id` quando o remetente é membro; `null` quando é só owner. */
   companyMemberId: string | null;
-  lookupVariants: string[];
 };
 
 type WebhookAuthFailure = {
@@ -117,12 +126,11 @@ type WebhookAuthFailure = {
     | "MISSING_SENDER"
     | "INVALID_SENDER"
     | "SENDER_NOT_AUTHORIZED"
-    | "AMBIGUOUS_COMPANY"
     | "FROM_ME_SKIPPED"
     | "SERVER_CONFIG";
 };
 
-type WebhookAuthResult = WebhookAuthSuccess | WebhookAuthFailure;
+type WebhookAuthResult = WebhookAuthLookupSuccess | WebhookAuthFailure;
 
 // --- Telefone normalizado (BR / DDI 55) ------------------------------------
 
@@ -284,8 +292,6 @@ function httpStatusForAuthFailure(auth: WebhookAuthResult): number {
       return 200;
     case "SERVER_CONFIG":
       return 500;
-    case "AMBIGUOUS_COMPANY":
-      return 409;
     case "MISSING_SENDER":
     case "INVALID_SENDER":
       return 400;
@@ -379,7 +385,7 @@ async function authorizeIncomingMessage(
 
   const { data: ownerCompanies, error: ownerErr } = await supabase
     .from("companies")
-    .select("id, owner_whatsapp_normalized")
+    .select("id, name, owner_whatsapp_normalized")
     .in("owner_whatsapp_normalized", lookupVariants);
 
   if (ownerErr) {
@@ -400,7 +406,7 @@ async function authorizeIncomingMessage(
 
   const { data: memberRows, error: memErr } = await supabase
     .from("company_members")
-    .select("company_id, id")
+    .select("company_id, id, companies ( id, name )")
     .in("phone_normalized", lookupVariants)
     .eq("is_active", true);
 
@@ -417,15 +423,32 @@ async function authorizeIncomingMessage(
     };
   }
 
-  const companyIds = new Set<string>();
+  const matchesById = new Map<string, CompanyWhatsappMatch>();
   for (const row of ownerCompanies ?? []) {
-    companyIds.add(row.id);
+    if (!row?.id) continue;
+    matchesById.set(row.id, {
+      companyId: row.id,
+      companyName: String(row.name ?? "").trim(),
+      role: "owner",
+      companyMemberId: null,
+    });
   }
   for (const row of memberRows ?? []) {
-    companyIds.add(row.company_id);
+    const companyId = row?.company_id;
+    if (!companyId || matchesById.has(companyId)) continue;
+    const rel = row.companies;
+    const co = Array.isArray(rel) ? rel[0] : rel;
+    matchesById.set(companyId, {
+      companyId,
+      companyName: String(co?.name ?? "").trim(),
+      role: "member",
+      companyMemberId: row.id ?? null,
+    });
   }
 
-  if (companyIds.size === 0) {
+  const matches = [...matchesById.values()];
+
+  if (matches.length === 0) {
     console.log(
       "[received-whatsapp-message] VALIDAÇÃO: INVÁLIDA — remetente não é owner (owner_whatsapp) nem membro ativo (company_members) em nenhuma empresa.",
       {
@@ -445,38 +468,14 @@ async function authorizeIncomingMessage(
     };
   }
 
-  if (companyIds.size > 1) {
-    console.log(
-      "[received-whatsapp-message] VALIDAÇÃO: INVÁLIDA — mesmo telefone resolve mais de uma empresa (ambiguidade).",
-      {
-        code: "AMBIGUOUS_COMPANY",
-        senderNormalized: senderN,
-        variantesConsideradas: lookupVariants,
-        companyIds: [...companyIds],
-      },
-    );
-    return {
-      authorized: false,
-      reason:
-        "Este telefone está associado a mais de uma empresa. Ajuste o cadastro para que seja único.",
-      code: "AMBIGUOUS_COMPANY",
-    };
-  }
-
-  const companyId = [...companyIds][0];
-  const isOwner = (ownerCompanies ?? []).some((c) => c.id === companyId);
-  const memberRow = (memberRows ?? []).find((r) => r.company_id === companyId);
-  const companyMemberId = isOwner ? null : (memberRow?.id ?? null);
-
   console.log(
     "[received-whatsapp-message] VALIDAÇÃO: VÁLIDA — remetente autorizado.",
     {
-      companyId,
-      companyMemberId,
-      papel: isOwner
-        ? "proprietário (companies.owner_whatsapp_normalized)"
-        : "membro ativo (company_members)",
-      role: isOwner ? "owner" : "member",
+      empresas: matches.map((m) => ({
+        companyId: m.companyId,
+        role: m.role,
+        companyMemberId: m.companyMemberId,
+      })),
       senderNormalized: senderN,
       variantesConsideradas: lookupVariants,
       connectedPhoneLog: connectedLog,
@@ -485,12 +484,10 @@ async function authorizeIncomingMessage(
 
   return {
     authorized: true,
-    companyId,
     senderNormalized: senderN,
     connectedNormalized: connectedLog,
-    role: isOwner ? "owner" : "member",
-    companyMemberId,
     lookupVariants,
+    matches,
   };
 }
 
@@ -506,6 +503,22 @@ function extractTextMessage(
   const m = payload.message;
   if (typeof m === "string" && m.trim()) return m.trim();
   return null;
+}
+
+function payloadHasIncomingMedia(
+  payload: ZApiReceivedCallbackPayload,
+): boolean {
+  const image = payload.image;
+  if (image && typeof image === "object") {
+    const url = image.imageUrl ?? image.url;
+    if (typeof url === "string" && url.trim()) return true;
+  }
+  const document = payload.document;
+  if (document && typeof document === "object") {
+    const url = document.documentUrl ?? document.url;
+    if (typeof url === "string" && url.trim()) return true;
+  }
+  return false;
 }
 
 /** Uma única palavra, minúscula e sem acento (para comandos *lista* / *comandos*). */
@@ -680,14 +693,26 @@ async function buildContasAPagarWhatsappMessage(
 function buildComandosWhatsappMessage(
   isOwner: boolean,
   includeChecklist: boolean,
+  opts?: { unitName?: string | null; includeLoja?: boolean },
 ): string {
   const lines = [
     "*Comandos disponíveis*",
     "",
+  ];
+  if (opts?.unitName?.trim()) {
+    lines.push(`Unidade: *${opts.unitName.trim()}*.`, "");
+  }
+  lines.push(
     "*lista* — mostra os recebimentos pendentes.",
     "",
     "*comandos* — mostra esta lista de comandos.",
-  ];
+  );
+  if (opts?.includeLoja) {
+    lines.push(
+      "",
+      "*loja* ou *unidade* — troca a loja quando seu número está em mais de uma unidade.",
+    );
+  }
   lines.push(
     "",
     "*estoque* ou *inventario* — link para contagem de estoque. Membros precisam de permissão em *Configurações* → *Usuários e membros*.",
@@ -1229,6 +1254,10 @@ async function handleRecebimentoTextFlow(
         buildComandosWhatsappMessage(
           isOwner,
           Boolean(companyMemberId),
+          {
+            unitName: auth.companyName,
+            includeLoja: auth.matches.length > 1,
+          },
         ),
       ),
       "recebimento_comandos_ajuda",
@@ -1506,26 +1535,26 @@ Deno.serve(async (req) => {
     webhookAuth: Boolean(secret),
   });
 
-  const auth = await authorizeIncomingMessage(payload);
+  const lookup = await authorizeIncomingMessage(payload);
 
-  if (!auth.authorized) {
-    const status = httpStatusForAuthFailure(auth);
+  if (!lookup.authorized) {
+    const status = httpStatusForAuthFailure(lookup);
     flowLog("webhook_autorizacao", {
       flowId,
       ok: false,
-      code: auth.code,
+      code: lookup.code,
       httpStatus: status,
     });
     console.log(
       "[received-whatsapp-message] Resposta HTTP: não processado (validação falhou).",
-      { status, code: auth.code },
+      { status, code: lookup.code },
     );
     return jsonResponse(
       {
         success: false,
         processed: false,
-        code: auth.code,
-        message: auth.reason,
+        code: lookup.code,
+        message: lookup.reason,
       },
       status,
     );
@@ -1534,8 +1563,8 @@ Deno.serve(async (req) => {
   flowLog("webhook_autorizacao", {
     flowId,
     ok: true,
-    companyId: auth.companyId,
-    role: auth.role,
+    empresas: lookup.matches.length,
+    companyIds: lookup.matches.map((m) => m.companyId),
   });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -1544,6 +1573,31 @@ Deno.serve(async (req) => {
   let expenseDraftHandled = false;
   if (supabaseUrl && serviceKey) {
     const supabase = createClient(supabaseUrl, serviceKey);
+    const companyPick = await resolveWhatsappCompanyContext({
+      supabase,
+      lookup,
+      text: textoBruto,
+      hasMedia: payloadHasIncomingMedia(payload),
+      sendWhatsappMessage,
+      flowId,
+    });
+    if (companyPick.kind === "handled") {
+      flowLog("webhook_processamento", {
+        flowId,
+        branch: "company_picker",
+        empresas: lookup.matches.length,
+      });
+      return jsonResponse({
+        success: true,
+        processed: true,
+      });
+    }
+    const auth = companyPick.auth;
+    flowLog("webhook_empresa_resolvida", {
+      flowId,
+      companyId: auth.companyId,
+      role: auth.role,
+    });
     const textoDraft = extractTextMessage(payload);
     if (textoDraft) {
       expenseDraftHandled = await tryHandleExpenseDraftReply(
@@ -1580,6 +1634,24 @@ Deno.serve(async (req) => {
         flowId,
       );
     }
+
+    flowLog("webhook_resposta_http", {
+      flowId,
+      companyId: auth.companyId,
+      recebimentoFlow,
+      expenseDraftHandled,
+      status: 200,
+    });
+
+    console.log(
+      "[received-whatsapp-message] Resposta HTTP: processado (validação já logada acima).",
+      {
+        companyId: auth.companyId,
+        role: auth.role,
+        recebimentoFlow,
+        expenseDraftHandled,
+      },
+    );
   } else {
     flowLog("webhook_processamento", {
       flowId,
@@ -1587,24 +1659,6 @@ Deno.serve(async (req) => {
       motivo: "supabase_env_ausente",
     });
   }
-
-  flowLog("webhook_resposta_http", {
-    flowId,
-    companyId: auth.companyId,
-    recebimentoFlow,
-    expenseDraftHandled,
-    status: 200,
-  });
-
-  console.log(
-    "[received-whatsapp-message] Resposta HTTP: processado (validação já logada acima).",
-    {
-      companyId: auth.companyId,
-      role: auth.role,
-      recebimentoFlow,
-      expenseDraftHandled,
-    },
-  );
 
   return jsonResponse({
     success: true,

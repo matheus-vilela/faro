@@ -61,6 +61,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
 | `unidade-cnpj-nome.md` | Unidade: CNPJ com dígitos verificadores; nome e CNPJ únicos por dono |
 | `unidade-remover.md` | Excluir unidade: RPC em vez do DELETE direto (RLS/CASCADE) |
+| `whatsapp-escolher-unidade.md` | WhatsApp: número em duas unidades pergunta a loja |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.
