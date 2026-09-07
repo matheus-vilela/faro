@@ -13,15 +13,23 @@ export type StockMovementDateRow = {
   created_at: string;
   reference_type?: string | null;
   reference_id?: string | null;
-  metadata_json?: { sale_date?: unknown } | null;
+  /** JSON livre; só `sale_date` entra na data efetiva. */
+  metadata_json?: unknown;
 };
 
 const IN_CHUNK = 200;
 
-export function stockMovementSaleDateYmd(
-  metadata: { sale_date?: unknown } | null | undefined,
-): string | null {
-  const raw = metadata?.sale_date;
+function metadataRecord(
+  metadata: unknown,
+): Record<string, unknown> {
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    return metadata as Record<string, unknown>;
+  }
+  return {};
+}
+
+export function stockMovementSaleDateYmd(metadata: unknown): string | null {
+  const raw = metadataRecord(metadata).sale_date;
   if (typeof raw !== "string") return null;
   const ymd = raw.trim().slice(0, 10);
   return YMD.test(ymd) ? ymd : null;
@@ -137,7 +145,7 @@ export async function attachRevenueSaleDates<T extends StockMovementDateRow>(
     return {
       ...r,
       metadata_json: {
-        ...(r.metadata_json ?? {}),
+        ...metadataRecord(r.metadata_json),
         sale_date: entryDate,
       },
     };

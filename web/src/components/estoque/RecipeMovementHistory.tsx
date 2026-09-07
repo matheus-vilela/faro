@@ -63,7 +63,7 @@ export function RecipeMovementHistory({
           )
           .eq("company_id", companyId)
           .or(orFilter)
-          .order("created_at", { ascending: false }),
+          .order("created_at", { ascending: false }) as never,
       );
       const withSaleDates = await attachRevenueSaleDates(data);
       setAllRows(sortStockMovementsByEffectiveDate(withSaleDates));
