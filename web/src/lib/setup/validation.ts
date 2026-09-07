@@ -40,7 +40,8 @@ export function validateStep1Empresa(
   opts?: ValidateStep1EmpresaOpts,
 ): string | null {
   const cnpj = unmask(e.cnpj_cpf ?? "");
-  if (!isValidCnpj(cnpj)) return "Informe um CNPJ válido.";
+  if (cnpj.length !== 14) return "Informe um CNPJ válido.";
+  if (!isValidCnpj(cnpj)) return "CNPJ inválido. Confira os dígitos.";
   if (opts?.requireFocusCnpjValidation) {
     const lock = opts.focusCnpjLock;
     if (!lock?.validated_cnpj_digits || lock.validated_cnpj_digits !== cnpj) {

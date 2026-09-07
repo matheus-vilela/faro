@@ -45,8 +45,10 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useUnitSetupModal } from "@/contexts/UnitSetupModalContext";
 import {
-  hasDuplicateUnitNameInGroup,
+  DUPLICATE_UNIT_NAME_MSG,
+  hasDuplicateUnitName,
   mapCompanyUnitMutationError,
+  unitRowsForOwner,
 } from "@/lib/companyUnitName";
 import { resolveFocusCnpjLockForResume } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
@@ -399,18 +401,14 @@ export function Companies() {
       setError("Informe o nome da unidade.");
       return;
     }
-    const gwcEdit = groupsWithCompanies.find(
+    const ownerId = groupsWithCompanies.find(
       (g) => g.group.id === editingCompany.group_id,
-    );
-    if (
-      hasDuplicateUnitNameInGroup(
-        trimmedName,
-        editingCompany.group_id,
-        gwcEdit?.companies ?? [],
-        editingCompany.id,
-      )
-    ) {
-      setError("Já existe uma unidade com este nome neste grupo.");
+    )?.group.owner_user_id;
+    const ownedUnits = ownerId
+      ? unitRowsForOwner(groupsWithCompanies, ownerId)
+      : [];
+    if (hasDuplicateUnitName(trimmedName, ownedUnits, editingCompany.id)) {
+      setError(DUPLICATE_UNIT_NAME_MSG);
       return;
     }
     setLoading(true);

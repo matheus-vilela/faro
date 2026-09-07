@@ -59,6 +59,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `correlacao-2-unificar-varios.md` | Correlação 2: unificar com vários produtos |
 | `classificar-renomear-aba.md` | Aba Correlação passa a Classificar |
 | `correlacao-unificar-primeiro.md` | Tabela: matches de unificar no topo, resto na ordem de sempre |
+| `unidade-cnpj-nome.md` | Unidade: CNPJ com dígitos verificadores; nome e CNPJ únicos por dono |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

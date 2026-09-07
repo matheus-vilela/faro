@@ -1,3 +1,5 @@
+import { isValidCnpj } from "@/lib/cnpj";
+import { INVALID_CNPJ_DIGITS_MSG } from "@/lib/companyUnitName";
 import { supabase, supabaseAnonKey, supabaseUrl } from "@/lib/supabase";
 import type { FocusCnpjConsultaData } from "@/types/focusCnpjConsulta";
 
@@ -39,6 +41,9 @@ export async function consultarCnpjNaFocus(
   const digits = onlyDigitsCnpj(cnpj);
   if (digits.length !== 14) {
     return { ok: false, error: "Informe um CNPJ com 14 dígitos para validar." };
+  }
+  if (!isValidCnpj(digits)) {
+    return { ok: false, error: INVALID_CNPJ_DIGITS_MSG };
   }
 
   const { data: sessData, error: sessErr } = await supabase.auth.getSession();

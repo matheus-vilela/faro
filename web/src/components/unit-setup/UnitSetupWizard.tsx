@@ -15,6 +15,14 @@ import {
 } from "@/lib/focusCnpjApply";
 import { stripFocusnfeSecrets } from "@/lib/focusNfeSanitize";
 import { isValidCnpj } from "@/lib/cnpj";
+import {
+  DUPLICATE_UNIT_CNPJ_MSG,
+  DUPLICATE_UNIT_NAME_MSG,
+  hasDuplicateUnitDocument,
+  hasDuplicateUnitName,
+  INVALID_CNPJ_DIGITS_MSG,
+  unitRowsForOwner,
+} from "@/lib/companyUnitName";
 import { mergeOnboardingPdv } from "@/lib/onboardingPdvDefaults";
 import { maskCpfCnpj, unmask } from "@/lib/masks";
 import {
@@ -97,7 +105,7 @@ import type {
   SetupStepNumber,
 } from "@/types/companySetup";
 import { Building2, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -154,7 +162,7 @@ export function UnitSetupWizard({
   onExit?: (payload?: { companyId?: string; completed?: boolean }) => void;
 }) {
   const { user } = useAuth();
-  const { refetchCompanies } = useCompany();
+  const { groupsWithCompanies, refetchCompanies } = useCompany();
   const { requestLeaveConfirm } = useUnitSetupModal();
   const { resolvedTheme } = useTheme();
   const navigate = useNavigate();
@@ -218,6 +226,21 @@ export function UnitSetupWizard({
     !!setup.focus_cnpj_lock?.validated_cnpj_digits &&
     setup.focus_cnpj_lock.validated_cnpj_digits ===
       unmask(empresa.cnpj_cpf ?? "");
+
+  const ownerUnitRows = useMemo(() => {
+    if (!user) return [];
+    let ownerId = user.id;
+    if (!createNewGroup && newUnitGroupId) {
+      const g = groupsWithCompanies.find((x) => x.group.id === newUnitGroupId);
+      if (g) ownerId = g.group.owner_user_id;
+    } else if (companyId) {
+      const g = groupsWithCompanies.find((x) =>
+        x.companies.some((uc) => uc.company.id === companyId),
+      );
+      if (g) ownerId = g.group.owner_user_id;
+    }
+    return unitRowsForOwner(groupsWithCompanies, ownerId);
+  }, [user, createNewGroup, newUnitGroupId, companyId, groupsWithCompanies]);
 
   /** Unidade na Faro e etapa pós-certificado: não reabrir empresa e certificado. */
   const lockStepsOneToTwo = !!companyId && (setup.current_step ?? 1) >= 3;
@@ -429,6 +452,14 @@ export function UnitSetupWizard({
       toast.error("Informe o CNPJ completo (14 dígitos) antes de validar.");
       return false;
     }
+    if (!isValidCnpj(digits)) {
+      toast.error(INVALID_CNPJ_DIGITS_MSG);
+      return false;
+    }
+    if (hasDuplicateUnitDocument(digits, ownerUnitRows, companyId ?? undefined)) {
+      toast.error(DUPLICATE_UNIT_CNPJ_MSG);
+      return false;
+    }
     setCnpjValidating(true);
     try {
       const res = await consultarCnpjNaFocus(digits);
@@ -467,7 +498,7 @@ export function UnitSetupWizard({
     } finally {
       setCnpjValidating(false);
     }
-  }, [empresa, endereco, setup, companyId]);
+  }, [empresa, endereco, setup, companyId, ownerUnitRows]);
 
   const handlePause = async () => {
     if (!user) return;
@@ -511,6 +542,25 @@ export function UnitSetupWizard({
     });
     if (err) {
       setStepError(err);
+      return false;
+    }
+    const displayName =
+      (empresa.nome_fantasia ?? "").trim() ||
+      (empresa.nome_razao_social ?? "").trim();
+    if (
+      hasDuplicateUnitName(displayName, ownerUnitRows, companyId ?? undefined)
+    ) {
+      setStepError(DUPLICATE_UNIT_NAME_MSG);
+      return false;
+    }
+    if (
+      hasDuplicateUnitDocument(
+        unmask(empresa.cnpj_cpf ?? ""),
+        ownerUnitRows,
+        companyId ?? undefined,
+      )
+    ) {
+      setStepError(DUPLICATE_UNIT_CNPJ_MSG);
       return false;
     }
     if (!createNewGroup && !newUnitGroupId) {
@@ -773,6 +823,25 @@ export function UnitSetupWizard({
       setStepError(err);
       return false;
     }
+    const displayName =
+      (empresa.nome_fantasia ?? "").trim() ||
+      (empresa.nome_razao_social ?? "").trim();
+    if (
+      hasDuplicateUnitName(displayName, ownerUnitRows, companyId ?? undefined)
+    ) {
+      setStepError(DUPLICATE_UNIT_NAME_MSG);
+      return false;
+    }
+    if (
+      hasDuplicateUnitDocument(
+        unmask(empresa.cnpj_cpf ?? ""),
+        ownerUnitRows,
+        companyId ?? undefined,
+      )
+    ) {
+      setStepError(DUPLICATE_UNIT_CNPJ_MSG);
+      return false;
+    }
     if (!isStep2EnderecoComplete(endereco)) {
       setStepError(
         "Valide o CNPJ: o endereço deve vir completo da consulta antes do certificado.",
@@ -783,9 +852,6 @@ export function UnitSetupWizard({
     setSaving(true);
     const docDigits = (empresa.cnpj_cpf ?? "").replace(/\D/g, "");
     const phoneDigits = (empresa.telefone ?? "").replace(/\D/g, "");
-    const displayName =
-      (empresa.nome_fantasia ?? "").trim() ||
-      (empresa.nome_razao_social ?? "").trim();
     const nextSetup = syncCompletionState(
       mergeSetupPatch(setup, { current_step: 2 }),
     );
@@ -828,7 +894,17 @@ export function UnitSetupWizard({
           return;
         }
         if (!isValidCnpj(digits)) {
-          setStepError("Informe um CNPJ válido.");
+          setStepError(INVALID_CNPJ_DIGITS_MSG);
+          return;
+        }
+        if (
+          hasDuplicateUnitDocument(
+            digits,
+            ownerUnitRows,
+            companyId ?? undefined,
+          )
+        ) {
+          setStepError(DUPLICATE_UNIT_CNPJ_MSG);
           return;
         }
         await handleValidarCnpj();
