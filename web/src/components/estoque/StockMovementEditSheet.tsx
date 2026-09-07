@@ -54,6 +54,7 @@ import {
   type StockMovementEditRow,
 } from "@/lib/stockMovementEdit";
 import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
+import { formatStockMovementListDate } from "@/lib/stockMovementSaleDate";
 import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -82,16 +83,6 @@ function defaultFormatCurrency(v: number) {
     style: "currency",
     currency: "BRL",
   }).format(v);
-}
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function unitPriceRawFromStock(
@@ -461,7 +452,7 @@ export function StockMovementEditSheet({
                   </Badge>
                 </div>
                 <SheetDescription>
-                  {formatDateTime(movement.created_at)}
+                  {formatStockMovementListDate(movement, { withYear: true })}
                 </SheetDescription>
               </SheetHeader>
 

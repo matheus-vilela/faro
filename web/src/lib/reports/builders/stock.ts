@@ -1,6 +1,11 @@
 import {
   fetchProductsForStockExport,
 } from "@/lib/exportProductStockExcel";
+import {
+  attachRevenueSaleDates,
+  sortStockMovementsByEffectiveDate,
+  stockMovementSaleDateYmd,
+} from "@/lib/stockMovementSaleDate";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { applyStockMovementDirectionFilter } from "@/lib/stockMovementFilters";
@@ -103,7 +108,7 @@ export async function buildStockMovementsReport(
   let q: any = supabase
     .from("stock_movements")
     .select(
-      "created_at, type, quantity, unit_cost, reference_type, products(name, unit)",
+      "created_at, type, quantity, unit_cost, reference_type, reference_id, metadata_json, products(name, unit)",
     )
     .eq("company_id", ctx.companyId)
     .order("created_at", { ascending: false });
@@ -117,14 +122,19 @@ export async function buildStockMovementsReport(
 
   q = applyStockMovementDirectionFilter(q, ctx.filters.movementDirection);
 
-  const rows = (await fetchAllInRange(q as never)) as {
+  const fetched = (await fetchAllInRange(q as never)) as {
     created_at: string;
     type: string;
     quantity: number;
     unit_cost: number | null;
     reference_type: string | null;
+    reference_id: string | null;
+    metadata_json: { sale_date?: unknown } | null;
     products: { name: string; unit: string } | { name: string; unit: string }[] | null;
   }[];
+  const rows = sortStockMovementsByEffectiveDate(
+    await attachRevenueSaleDates(fetched),
+  );
 
   return {
     title: "Movimentações de estoque",
@@ -149,7 +159,9 @@ export async function buildStockMovementsReport(
         rows: rows.map((r) => {
           const prod = Array.isArray(r.products) ? r.products[0] : r.products;
           return {
-            date: r.created_at.slice(0, 10),
+            date:
+              stockMovementSaleDateYmd(r.metadata_json) ??
+              r.created_at.slice(0, 10),
             product: prod?.name ?? "",
             type: TYPE_LABEL[r.type] ?? r.type,
             qty: Number(r.quantity) || 0,

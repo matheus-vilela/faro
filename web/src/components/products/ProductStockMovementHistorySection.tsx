@@ -8,13 +8,19 @@ import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
+import {
+  attachRevenueSaleDates,
+  formatStockMovementListDate,
+  sortStockMovementsByEffectiveDate,
+} from "@/lib/stockMovementSaleDate";
 import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
 import { stockMovementMergePairDisplay } from "@/lib/stockMovementMergeDisplay";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { stockMovementMergeUndoProps } from "@/types/productMergeAudit";
 import { ChevronRight, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type MovementRow = Omit<StockMovementEditRow, "product_id"> & {
   product_id?: string;
@@ -50,8 +56,7 @@ export function ProductStockMovementHistorySection({
   className,
   onStockChanged,
 }: Props) {
-  const [rows, setRows] = useState<MovementRow[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
+  const [allRows, setAllRows] = useState<MovementRow[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selectedMovement, setSelectedMovement] =
@@ -64,38 +69,40 @@ export function ProductStockMovementHistorySection({
 
   const load = useCallback(async () => {
     if (!productId) {
-      setRows([]);
-      setTotalCount(0);
+      setAllRows([]);
       return;
     }
     setLoading(true);
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-    const { data, error, count } = await supabase
-      .from("stock_movements")
-      .select(
-        "id, product_id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json",
-        { count: "exact" },
-      )
-      .eq("product_id", productId)
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (error) {
+    try {
+      const data = await fetchAllInRange<Omit<MovementRow, "expense_id">>(
+        supabase
+          .from("stock_movements")
+          .select(
+            "id, product_id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json",
+          )
+          .eq("product_id", productId)
+          .order("created_at", { ascending: false }),
+      );
+      const withExpenses = await resolveExpenseIdsForStockMovements(data);
+      const enriched = await attachRevenueSaleDates(withExpenses);
+      setAllRows(sortStockMovementsByEffectiveDate(enriched));
+    } catch (error) {
       console.error(error);
-      setRows([]);
-      setTotalCount(0);
-      setLoading(false);
-      return;
+      setAllRows([]);
     }
-
-    const enriched = await resolveExpenseIdsForStockMovements(
-      (data ?? []) as Omit<MovementRow, "expense_id">[],
-    );
-    setRows(enriched);
-    setTotalCount(count ?? 0);
     setLoading(false);
-  }, [productId, page, pageSize]);
+  }, [productId]);
+
+  const totalCount = allRows.length;
+  const rows = useMemo(() => {
+    const from = (page - 1) * pageSize;
+    return allRows.slice(from, from + pageSize);
+  }, [allRows, page, pageSize]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(totalCount / pageSize) || 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [page, pageSize, totalCount]);
 
   useEffect(() => {
     if (!active) return;
@@ -155,7 +162,7 @@ export function ProductStockMovementHistorySection({
           <Loader2 className="h-4 w-4 animate-spin" />
           Carregando movimentações...
         </div>
-      ) : rows.length === 0 ? (
+      ) : allRows.length === 0 ? (
         <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
           Nenhuma movimentação registrada para este produto.
         </p>
@@ -196,12 +203,7 @@ export function ProductStockMovementHistorySection({
                       )}
                     >
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {new Date(row.created_at).toLocaleString("pt-BR", {
-                          day: "2-digit",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {formatStockMovementListDate(row)}
                       </td>
                       <td className="px-3 py-2">
                         <StockMovementTypeBadge row={row} />

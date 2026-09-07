@@ -1,10 +1,16 @@
 import { Badge } from "@/components/ui/badge";
 import { PAGE_SIZE, Pagination } from "@/components/Pagination";
 import { movementClassificationDisplayLabel } from "@/lib/stockMovementClassification";
+import {
+  attachRevenueSaleDates,
+  formatStockMovementListDate,
+  sortStockMovementsByEffectiveDate,
+} from "@/lib/stockMovementSaleDate";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type HistoryRow = {
   id: string;
@@ -30,8 +36,7 @@ export function RecipeMovementHistory({
   outputProductId?: string | null;
   active: boolean;
 }) {
-  const [rows, setRows] = useState<HistoryRow[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
+  const [allRows, setAllRows] = useState<HistoryRow[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
@@ -41,39 +46,44 @@ export function RecipeMovementHistory({
 
   const load = useCallback(async () => {
     if (!recipeId) {
-      setRows([]);
-      setTotalCount(0);
+      setAllRows([]);
       return;
     }
     setLoading(true);
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
     const orFilter = outputProductId
       ? `reference_id.eq.${recipeId},and(product_id.eq.${outputProductId},reference_type.in.(intermediate_production,recipe,technical_sheet_backfill))`
       : `reference_id.eq.${recipeId}`;
 
-    const { data, error, count } = await supabase
-      .from("stock_movements")
-      .select(
-        "id, product_id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json, products(name, unit)",
-        { count: "exact" },
-      )
-      .eq("company_id", companyId)
-      .or(orFilter)
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (error) {
+    try {
+      const data = await fetchAllInRange<HistoryRow>(
+        supabase
+          .from("stock_movements")
+          .select(
+            "id, product_id, quantity, type, reference_type, reference_id, created_at, unit_cost, metadata_json, products(name, unit)",
+          )
+          .eq("company_id", companyId)
+          .or(orFilter)
+          .order("created_at", { ascending: false }),
+      );
+      const withSaleDates = await attachRevenueSaleDates(data);
+      setAllRows(sortStockMovementsByEffectiveDate(withSaleDates));
+    } catch (error) {
       console.error(error);
-      setRows([]);
-      setTotalCount(0);
-      setLoading(false);
-      return;
+      setAllRows([]);
     }
-    setRows((data ?? []) as unknown as HistoryRow[]);
-    setTotalCount(count ?? 0);
     setLoading(false);
-  }, [companyId, recipeId, outputProductId, page]);
+  }, [companyId, recipeId, outputProductId]);
+
+  const totalCount = allRows.length;
+  const rows = useMemo(() => {
+    const from = (page - 1) * PAGE_SIZE;
+    return allRows.slice(from, from + PAGE_SIZE);
+  }, [allRows, page]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(totalCount / PAGE_SIZE) || 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [page, totalCount]);
 
   useEffect(() => {
     if (!active) return;
@@ -95,7 +105,7 @@ export function RecipeMovementHistory({
     );
   }
 
-  if (rows.length === 0) {
+  if (allRows.length === 0) {
     return (
       <p className="rounded-xl border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
         Nenhuma movimentação desta ficha ainda. Produções e baixas de insumos
@@ -125,12 +135,7 @@ export function RecipeMovementHistory({
                 className="border-b border-border/60 last:border-b-0"
               >
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                  {new Date(row.created_at).toLocaleString("pt-BR", {
-                    day: "2-digit",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatStockMovementListDate(row)}
                 </td>
                 <td className="px-3 py-2 font-medium">
                   {row.products?.name ?? "—"}

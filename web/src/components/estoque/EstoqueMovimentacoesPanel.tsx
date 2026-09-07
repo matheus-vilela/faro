@@ -26,6 +26,11 @@ import {
 import { resolveExpenseIdsForStockMovements } from "@/lib/stockMovementExpenseLink";
 import type { StockMovementEditRow } from "@/lib/stockMovementEdit";
 import {
+  attachRevenueSaleDates,
+  formatStockMovementListDate,
+  sortStockMovementsByEffectiveDate,
+} from "@/lib/stockMovementSaleDate";
+import {
   applyStockMovementDirectionFilter,
   type FilterableQuery,
   type MovementDirectionFilter,
@@ -219,8 +224,9 @@ export function EstoqueMovimentacoesPanel({
       Row,
       "expense_id"
     >[];
-    const enriched = await resolveExpenseIdsForStockMovements(base);
-    setRows(enriched as Row[]);
+    const withExpenses = await resolveExpenseIdsForStockMovements(base);
+    const enriched = await attachRevenueSaleDates(withExpenses);
+    setRows(sortStockMovementsByEffectiveDate(enriched) as Row[]);
 
     const productIds = (productsRes.data ?? []).map((p) => p.id);
     if (productIds.length === 0) {
@@ -555,12 +561,7 @@ export function EstoqueMovimentacoesPanel({
                         )}
                       >
                         <td className="p-2 whitespace-nowrap text-muted-foreground">
-                          {new Date(r.created_at).toLocaleString("pt-BR", {
-                            day: "2-digit",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatStockMovementListDate(r)}
                         </td>
                         <td className="p-2">
                           {mergePair ? (
