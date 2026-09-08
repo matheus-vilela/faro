@@ -522,3 +522,8 @@ export function useIsOwnerAccess(): boolean {
   const { isAdmin } = useAuth();
   return isAdmin || isCompanyOwner;
 }
+
+/** Categorias e contas bancárias: permissão Configurações (ou owner/admin). */
+export function useCanManageFinancialCadastro(): boolean {
+  return useHasPermission("configuracoes");
+}

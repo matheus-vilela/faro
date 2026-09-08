@@ -155,8 +155,8 @@ export function PermissionProfilesSection() {
           <div className="space-y-1">
             <CardTitle className="text-base">Perfis de permissão</CardTitle>
             <CardDescription>
-              O perfil padrão libera todas as seções. Crie perfis customizados
-              para restringir áreas da plataforma.
+              O perfil padrão libera todas as seções. Quem tem Configurações
+              também edita categorias e contas bancárias.
             </CardDescription>
           </div>
           <Button

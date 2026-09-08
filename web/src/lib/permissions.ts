@@ -63,6 +63,16 @@ export function hasAnyPermission(
   return keys.some((k) => hasPermission(permissions, k));
 }
 
+/**
+ * Cadastro financeiro em Configurações (categorias DRE/produto/NCM e contas bancárias).
+ * Perfil com a seção Configurações — não exige ser proprietário.
+ */
+export function canManageFinancialCadastro(
+  permissions: readonly string[] | null | undefined,
+): boolean {
+  return hasPermission(permissions, "configuracoes");
+}
+
 /** Mapeia pathname `/app/...` para chave de permissão. */
 export function permissionKeyForPath(pathname: string): PermissionKey | null {
   const path = pathname.replace(/\/+$/, "") || "/app";

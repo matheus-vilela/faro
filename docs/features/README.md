@@ -6,6 +6,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 |---|---|
 | `_template.md` | Copiar para um spec novo |
 | `_exemplo.md` | Spec preenchido (já feito). Não implementar de novo |
+| `cadastro-financeiro-perfil.md` | Perfil com Configurações edita categorias e contas bancárias |
 | `epoc-estoque-dia.md` | Consulta de estoque EPOC do dia (aba Desenvolvimento) |
 | `epoc-estoque-vs-vendas.md` | Cruzar saídas de estoque com venda de produtos do dia |
 | `epoc-agrupamento-venda-estoque.md` | Agrupamento (Bolinhos) × variantes reais no estoque |

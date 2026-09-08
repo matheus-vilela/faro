@@ -25,10 +25,10 @@ import { toast } from "sonner";
 
 export function ConfiguracoesCategoriasProdutosPanel({
   companyId,
-  isOwner,
+  canManage,
 }: {
   companyId: string;
-  isOwner: boolean;
+  canManage: boolean;
 }) {
   const [rows, setRows] = useState<CompanyProductCategory[]>([]);
   const [dreCategories, setDreCategories] = useState<CompanyCategory[]>([]);
@@ -75,7 +75,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
 
   const add = async () => {
     const name = newName.trim();
-    if (!name || !isOwner) return;
+    if (!name || !canManage) return;
     setAdding(true);
     const { error } = await supabase.from("company_product_categories").insert({
       company_id: companyId,
@@ -93,7 +93,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
   };
 
   const remove = async (row: CompanyProductCategory) => {
-    if (!isOwner) return;
+    if (!canManage) return;
     if (row.padrao_sistema) {
       toast.error("Categoria padrão não pode ser excluída. Desative-a.");
       return;
@@ -112,7 +112,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
   };
 
   const toggleAtivo = async (row: CompanyProductCategory, next: boolean) => {
-    if (!isOwner) return;
+    if (!canManage) return;
     setTogglingId(row.id);
     const { error } = await supabase
       .from("company_product_categories")
@@ -130,7 +130,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
   };
 
   const saveDre = async (row: CompanyProductCategory, dreId: string) => {
-    if (!isOwner) return;
+    if (!canManage) return;
     setSavingDreId(row.id);
     const { error } = await supabase
       .from("company_product_categories")
@@ -155,7 +155,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
     row: CompanyProductCategory,
     next: boolean,
   ) => {
-    if (!isOwner) return;
+    if (!canManage) return;
     setTogglingId(row.id);
     const { error } = await supabase
       .from("company_product_categories")
@@ -195,7 +195,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {isOwner ? (
+        {canManage ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="min-w-0 flex-1 space-y-2">
               <Label htmlFor="nova-cat-produto">Nova categoria</Label>
@@ -225,7 +225,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Apenas o proprietário pode criar ou remover categorias.
+            Você não tem permissão para criar ou remover categorias.
           </p>
         )}
 
@@ -253,7 +253,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                       ? "border-amber-500/40 bg-amber-500/8"
                       : "border-border/80 bg-muted/20",
                     inactive && "opacity-70",
-                    !isOwner && "opacity-90",
+                    !canManage && "opacity-90",
                   )}
                 >
                   <span className="min-w-0 font-medium leading-snug sm:w-44 sm:shrink-0">
@@ -272,7 +272,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                       categories={dreCategories}
                       loading={loading}
                       onReload={load}
-                      disabled={!isOwner || savingDreId === row.id}
+                      disabled={!canManage || savingDreId === row.id}
                       compact
                       allowClear={Boolean(row.default_dre_category_id)}
                       placeholder="Conta do DRE"
@@ -285,7 +285,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                           <div className="flex items-center gap-1.5">
                             <Switch
                               checked={row.ativo !== false}
-                              disabled={!isOwner || togglingId === row.id}
+                              disabled={!canManage || togglingId === row.id}
                               onCheckedChange={(next) =>
                                 void toggleAtivo(row, next)
                               }
@@ -307,7 +307,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                         <div className="flex items-center gap-1.5">
                           <Switch
                             checked={excluded}
-                            disabled={!isOwner || togglingId === row.id}
+                            disabled={!canManage || togglingId === row.id}
                             onCheckedChange={(next) =>
                               void toggleExcludeFromSales(row, next)
                             }
@@ -323,7 +323,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                         entram em vendas, campeões nem em classificar.
                       </TooltipContent>
                     </Tooltip>
-                    {isOwner && !locked ? (
+                    {canManage && !locked ? (
                       <Button
                         type="button"
                         variant="ghost"

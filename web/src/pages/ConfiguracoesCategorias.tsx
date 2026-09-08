@@ -34,7 +34,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
+import { useCompany, useCanManageFinancialCadastro } from "@/contexts/CompanyContext";
 import {
   buildChildrenMap,
   categoryPathLabel,
@@ -79,7 +79,7 @@ const TIPOS_DESPESA: TipoCategoria[] = [
 
 export function ConfiguracoesCategorias() {
   const { currentCompany } = useCompany();
-  const isOwner = useIsOwnerAccess();
+  const canManage = useCanManageFinancialCadastro();
   const [rows, setRows] = useState<CompanyCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -298,7 +298,7 @@ export function ConfiguracoesCategorias() {
   }, [formKind, formParentId, formTipo, byId]);
 
   const persistCategory = async () => {
-    if (!currentCompany?.id || !isOwner) return;
+    if (!currentCompany?.id || !canManage) return;
     const name = formName.trim();
     const ordem = Number.parseInt(formOrdem, 10);
     const papelReceitaDrePayload =
@@ -350,7 +350,7 @@ export function ConfiguracoesCategorias() {
   };
 
   const save = () => {
-    if (!currentCompany?.id || !isOwner) return;
+    if (!currentCompany?.id || !canManage) return;
     const name = formName.trim();
     if (!name) {
       toast.error("Informe o nome.");
@@ -386,7 +386,7 @@ export function ConfiguracoesCategorias() {
   };
 
   const remove = async (row: CompanyCategory) => {
-    if (!currentCompany?.id || !isOwner) return;
+    if (!currentCompany?.id || !canManage) return;
     const { error } = await supabase
       .from("company_categories")
       .delete()
@@ -471,7 +471,7 @@ export function ConfiguracoesCategorias() {
                 Inativa
               </Badge>
             ) : null}
-            {isOwner ? (
+            {canManage ? (
               <div className="relative z-[1] flex shrink-0 items-center gap-1">
                 <Button
                   type="button"
@@ -538,7 +538,7 @@ export function ConfiguracoesCategorias() {
         description="Gerencie categorias do DRE (receitas, despesas), categorias de produtos (organização do catálogo) e o vínculo de NCMs às categorias de produto."
         action={
           configTab === "financeiras" ? (
-            <Button onClick={openCreateRoot} disabled={!isOwner || loading}>
+            <Button onClick={openCreateRoot} disabled={!canManage || loading}>
               <Plus className="mr-1 h-4 w-4" />
               Nova categoria principal
             </Button>
@@ -601,14 +601,14 @@ export function ConfiguracoesCategorias() {
       {configTab === "ncms" && currentCompany?.id ? (
         <ConfiguracoesCategoriasNcmsPanel
           companyId={currentCompany.id}
-          isOwner={isOwner}
+          canManage={canManage}
         />
       ) : null}
 
       {configTab === "produtos" && currentCompany?.id ? (
         <ConfiguracoesCategoriasProdutosPanel
           companyId={currentCompany.id}
-          isOwner={isOwner}
+          canManage={canManage}
         />
       ) : null}
 
@@ -946,7 +946,7 @@ export function ConfiguracoesCategorias() {
           <SheetFooter className="shrink-0 gap-2">
             <Button
               onClick={save}
-              disabled={saving || !isOwner}
+              disabled={saving || !canManage}
               className="w-full"
             >
               {saving ? (

@@ -77,10 +77,10 @@ function compareNcmRows(
 
 export function ConfiguracoesCategoriasNcmsPanel({
   companyId,
-  isOwner,
+  canManage,
 }: {
   companyId: string;
-  isOwner: boolean;
+  canManage: boolean;
 }) {
   const listView = useSheetListView();
   const [rows, setRows] = useState<CompanyNcmRow[]>([]);
@@ -233,7 +233,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
     categoryId: string | null,
     opts?: { similarFrom?: string },
   ) => {
-    if (!isOwner || ncms.length === 0) return;
+    if (!canManage || ncms.length === 0) return;
     const key = ncms.length === 1 ? ncms[0]! : "bulk";
     setSavingNcm(key);
     try {
@@ -280,7 +280,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
 
   const addManual = async () => {
     const ncm = normalizeNcm8(addNcm);
-    if (!ncm || !addCategoryId || !isOwner) return;
+    if (!ncm || !addCategoryId || !canManage) return;
     setAdding(true);
     try {
       await upsertNcmCategoryRules({
@@ -353,7 +353,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
           void assign([row.ncm], id || null, id ? { similarFrom: row.ncm } : {});
         }}
         categories={productCategories}
-        disabled={!isOwner || savingNcm === row.ncm}
+        disabled={!canManage || savingNcm === row.ncm}
         compact
         allowClear={Boolean(row.categoryId)}
         placeholder="Sem categoria"
@@ -418,7 +418,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
               <Button
                 type="button"
                 size="sm"
-                disabled={!isOwner || similarSaving}
+                disabled={!canManage || similarSaving}
                 onClick={() => void applySimilar()}
               >
                 {similarSaving ? (
@@ -442,7 +442,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
                   value={bulkCategoryId}
                   onValueChange={setBulkCategoryId}
                   categories={productCategories}
-                  disabled={!isOwner}
+                  disabled={!canManage}
                   placeholder="Categoria para os selecionados"
                 />
               </div>
@@ -459,7 +459,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!isOwner || !bulkCategoryId || bulkSaving}
+                  disabled={!canManage || !bulkCategoryId || bulkSaving}
                   onClick={() => void applyBulk()}
                 >
                   {bulkSaving ? (
@@ -495,7 +495,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
                 className="rounded-xl border border-border/80 bg-muted/20 p-3"
               >
                 <div className="flex items-start gap-2">
-                  {isOwner ? (
+                  {canManage ? (
                     <Checkbox
                       checked={selected.has(row.ncm)}
                       onCheckedChange={(on) => {
@@ -543,7 +543,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
               <thead>
                 <tr className="border-b border-border bg-muted/40 text-left text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                   <th className="w-10 px-3 py-2.5">
-                    {isOwner ? (
+                    {canManage ? (
                       <Checkbox
                         checked={allPageSelected}
                         onCheckedChange={(on) => {
@@ -613,7 +613,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
                     className="border-b border-border/70 last:border-0"
                   >
                     <td className="px-3 py-2">
-                      {isOwner ? (
+                      {canManage ? (
                         <Checkbox
                           checked={selected.has(row.ncm)}
                           onCheckedChange={(on) => {
@@ -665,7 +665,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
           </div>
         )}
 
-        {isOwner ? (
+        {canManage ? (
           <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_auto] sm:items-end">
             <div className="space-y-2">
               <Label htmlFor="add-ncm">Adicionar NCM</Label>
@@ -701,7 +701,7 @@ export function ConfiguracoesCategoriasNcmsPanel({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Apenas o proprietário pode vincular NCMs a categorias.
+            Você não tem permissão para vincular NCMs a categorias.
           </p>
         )}
       </CardContent>

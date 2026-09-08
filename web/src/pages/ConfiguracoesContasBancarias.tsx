@@ -19,7 +19,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
+import { useCompany, useCanManageFinancialCadastro } from "@/contexts/CompanyContext";
 import { parseOpeningBalance } from "@/lib/cashFlowSimulation/computeCashFlowProjection";
 import { formatBrl } from "@/lib/dre/formatBrl";
 import { supabase } from "@/lib/supabase";
@@ -74,7 +74,7 @@ function mapSupabaseError(message: string): string {
 export function ConfiguracoesContasBancarias() {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
-  const isOwner = useIsOwnerAccess();
+  const canManage = useCanManageFinancialCadastro();
 
   const [rows, setRows] = useState<CompanyBankAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,7 +173,7 @@ export function ConfiguracoesContasBancarias() {
   };
 
   const save = async () => {
-    if (!companyId || !isOwner) return;
+    if (!companyId || !canManage) return;
     const trimmedName = name.trim();
     if (!trimmedName) {
       toast.error("Informe o nome da conta.");
@@ -220,7 +220,7 @@ export function ConfiguracoesContasBancarias() {
   };
 
   const remove = async (row: CompanyBankAccount) => {
-    if (!companyId || !isOwner) return;
+    if (!companyId || !canManage) return;
     setDeletingId(row.id);
     const { error } = await supabase
       .from("company_bank_accounts")
@@ -264,7 +264,7 @@ export function ConfiguracoesContasBancarias() {
               size="sm"
               className="shrink-0 w-full sm:w-auto"
               onClick={openCreate}
-              disabled={!isOwner || busy}
+              disabled={!canManage || busy}
             >
               <Plus className="h-4 w-4 mr-1" />
               Nova conta
@@ -322,7 +322,7 @@ export function ConfiguracoesContasBancarias() {
                         variant="ghost"
                         size="icon"
                         onClick={() => openEdit(row)}
-                        disabled={!isOwner || busy}
+                        disabled={!canManage || busy}
                         aria-label="Editar conta"
                       >
                         <Pencil className="h-4 w-4" />
@@ -332,7 +332,7 @@ export function ConfiguracoesContasBancarias() {
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => void remove(row)}
-                        disabled={!isOwner || busy}
+                        disabled={!canManage || busy}
                         aria-label={`Excluir ${row.name}`}
                       >
                         {deletingId === row.id ? (
