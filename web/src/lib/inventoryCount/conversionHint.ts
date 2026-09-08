@@ -10,6 +10,7 @@ export type PublicCountUnitOption = {
   code: string;
   label: string;
   hint: string | null;
+  qty_in_hub: number | null;
 };
 
 export function conversionHintForUnit(
@@ -39,11 +40,21 @@ export function allowedUnitsForPublicCount(
 ): PublicCountUnitOption[] {
   const hub = hubCode.trim().toLowerCase();
   if (!hub) return [];
-  return getAllowedUnitsForProductHub(hub, conversions).map((code) => ({
-    code,
-    label: `${systemUnitLabel(code)} (${code})`,
-    hint: conversionHintForUnit(code, hub, conversions),
-  }));
+  return getAllowedUnitsForProductHub(hub, conversions).map((code) => {
+    const qtyInHub =
+      code === hub
+        ? 1
+        : convertQuantityWithHubCodes(1, code, hub, hub, conversions);
+    return {
+      code,
+      label: `${systemUnitLabel(code)} (${code})`,
+      hint: conversionHintForUnit(code, hub, conversions),
+      qty_in_hub:
+        qtyInHub != null && Number.isFinite(qtyInHub) && qtyInHub > 0
+          ? qtyInHub
+          : null,
+    };
+  });
 }
 
 export function convertTypedQtyToHub(

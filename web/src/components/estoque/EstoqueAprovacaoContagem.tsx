@@ -1,5 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
@@ -21,9 +29,10 @@ import {
   countClickableRowClass,
   inventoryCountLineCount,
 } from "@/lib/inventoryCount/ui";
+import { inventoryCountPublicUrl } from "@/lib/inventoryCount/createSession";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { CheckCheck, ChevronRight, Loader2, RotateCcw } from "lucide-react";
+import { CheckCheck, ChevronRight, Copy, Loader2, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -64,6 +73,14 @@ function formatQty(n: number | null | undefined): string {
   return Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
 }
 
+function lineProductName(
+  raw: { name: string; unit: string } | { name: string; unit: string }[] | null,
+): { name: string; unit: string } | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  return raw;
+}
+
 export function EstoqueAprovacaoContagem({
   companyId,
   refreshTrigger = 0,
@@ -92,6 +109,12 @@ export function EstoqueAprovacaoContagem({
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
   const [onlyDivergent, setOnlyDivergent] = useState(false);
+  const [recountHandoff, setRecountHandoff] = useState<{
+    itemCount: number;
+    link: string;
+    operatorName: string | null;
+    copied: boolean;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -228,7 +251,8 @@ export function EstoqueAprovacaoContagem({
         counted_unit_code,
         counted_qty_input,
         in_band,
-        tolerance_pct
+        tolerance_pct,
+        products ( name, unit )
       `,
       )
       .eq("session_id", id)
@@ -242,26 +266,7 @@ export function EstoqueAprovacaoContagem({
       toast.error("Não foi possível carregar as linhas.");
       return;
     }
-    const raw = (data ?? []) as Omit<LineRow, "products">[];
-    const ids = [...new Set(raw.map((r) => r.product_id))];
-    const nameById = new Map<string, { name: string; unit: string }>();
-    const chunk = 200;
-    for (let i = 0; i < ids.length; i += chunk) {
-      const slice = ids.slice(i, i + chunk);
-      const { data: prods, error: prodError } = await supabase
-        .from("products")
-        .select("id, name, unit")
-        .in("id", slice);
-      if (openRequestIdRef.current !== id) return;
-      if (prodError) {
-        console.error(prodError);
-        continue;
-      }
-      for (const p of prods ?? []) {
-        nameById.set(p.id, { name: p.name, unit: p.unit });
-      }
-    }
-    if (openRequestIdRef.current !== id) return;
+    const raw = data ?? [];
     if (raw.length === 0) {
       setSessions((prev) => prev.filter((s) => s.id !== id));
       closeSession();
@@ -270,8 +275,16 @@ export function EstoqueAprovacaoContagem({
     }
     setLines(
       raw.map((row) => ({
-        ...row,
-        products: nameById.get(row.product_id) ?? null,
+        id: row.id,
+        product_id: row.product_id,
+        expected_qty: Number(row.expected_qty),
+        counted_qty: row.counted_qty == null ? null : Number(row.counted_qty),
+        counted_unit_code: row.counted_unit_code,
+        counted_qty_input:
+          row.counted_qty_input == null ? null : Number(row.counted_qty_input),
+        in_band: row.in_band,
+        tolerance_pct: Number(row.tolerance_pct),
+        products: lineProductName(row.products),
       })),
     );
     setLinesLoading(false);
@@ -342,6 +355,9 @@ export function EstoqueAprovacaoContagem({
       toast.message("Selecione itens para devolver.");
       return;
     }
+    const itemCount = selected.size;
+    const operatorName =
+      sessions.find((s) => s.id === activeId)?.assigned_member?.name ?? null;
     setBusy(true);
     const { data, error } = await supabase.rpc("return_inventory_count_lines", {
       p_session_id: activeId,
@@ -353,20 +369,21 @@ export function EstoqueAprovacaoContagem({
       toast.error("Falha ao devolver itens.");
       return;
     }
-    const base = window.location.origin.replace(/\/$/, "");
-    const link = row.slug
-      ? `${base}/i/${row.slug}`
-      : `${base}/contagem-estoque/${row.token}`;
-    toast.success("Itens devolvidos para recontagem.");
+    const link = inventoryCountPublicUrl({
+      slug: row.slug,
+      token: row.token,
+    });
+    let copied = false;
     try {
       await navigator.clipboard.writeText(link);
-      toast.message("Link de recontagem copiado.");
+      copied = true;
     } catch {
       /* ignore */
     }
     closeSession();
     await load();
     onChanged?.();
+    setRecountHandoff({ itemCount, link, operatorName, copied });
   };
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
@@ -692,6 +709,77 @@ export function EstoqueAprovacaoContagem({
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={recountHandoff != null}
+        onOpenChange={(open) => {
+          if (!open) setRecountHandoff(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Envie o link ao operador</DialogTitle>
+            <DialogDescription>
+              {recountHandoff && recountHandoff.itemCount === 1
+                ? "1 item voltou para recontagem."
+                : `${recountHandoff?.itemCount ?? 0} itens voltaram para recontagem.`}
+            </DialogDescription>
+          </DialogHeader>
+          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-foreground">
+            <li>
+              Envie este link para{" "}
+              {recountHandoff?.operatorName
+                ? recountHandoff.operatorName
+                : "o operador"}
+              .
+            </li>
+            <li>
+              Quando ele contar e enviar de novo, a sessão volta em Aprovar.
+            </li>
+          </ol>
+          {recountHandoff ? (
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                value={recountHandoff.link}
+                className="font-mono text-xs"
+                aria-label="Link de recontagem"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                aria-label="Copiar link"
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(recountHandoff.link)
+                    .then(() => {
+                      setRecountHandoff((prev) =>
+                        prev ? { ...prev, copied: true } : prev,
+                      );
+                      toast.success("Link copiado.");
+                    });
+                }}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
+          {recountHandoff?.copied ? (
+            <p className="text-xs text-muted-foreground">Link copiado.</p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => setRecountHandoff(null)}
+            >
+              Entendi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

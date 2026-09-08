@@ -31,6 +31,8 @@ describe("allowedUnitsForPublicCount", () => {
     expect(codes).toContain("un");
     expect(codes).toContain("cx");
     expect(units.find((u) => u.code === "cx")?.hint).toBe("1 cx = 12 un");
+    expect(units.find((u) => u.code === "cx")?.qty_in_hub).toBe(12);
+    expect(units.find((u) => u.code === "un")?.qty_in_hub).toBe(1);
   });
 });
 

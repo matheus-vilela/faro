@@ -1,5 +1,15 @@
 import logoDark from "@/assets/logos/faro_logo_darkmode_transp.png";
 import logoLight from "@/assets/logos/faro_logo_light_transparent.png";
+import { InventoryCountPackCalculator } from "@/components/estoque/InventoryCountPackCalculator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +23,7 @@ import { SearchSelect } from "@/components/ui/search-select";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
+import { formatPackCountQty } from "@/lib/inventoryCount/packCountCalculator";
 import { ClipboardList, Loader2, ScanBarcode } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -47,6 +58,7 @@ function PublicPageShell({ children }: { children: ReactNode }) {
 type AllowedUnit = {
   code: string;
   hint?: string | null;
+  qty_in_hub?: number | null;
 };
 
 type ProductLine = {
@@ -112,6 +124,8 @@ export function ContagemEstoquePublic() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [barcodeQuery, setBarcodeQuery] = useState("");
+  const [packCalcOpen, setPackCalcOpen] = useState(false);
+  const [recountIntroOpen, setRecountIntroOpen] = useState(false);
 
   const queue = useMemo(() => {
     if (sessionStatus === "returned") {
@@ -147,14 +161,24 @@ export function ContagemEstoquePublic() {
       return;
     }
     const list = row.products ?? [];
+    const status = row.status ?? "open";
     setCompanyName(row.company_name ?? "");
     setGroupName((row.group_name ?? "").trim());
     setListingName((row.listing_name ?? "").trim());
     setAssignedToName((row.assigned_to_name ?? "").trim());
-    setSessionStatus(row.status ?? "open");
-    setProducts(list);
+    setSessionStatus(status);
+    setProducts(
+      status === "returned"
+        ? list.map((p) =>
+            p.recount_required ? { ...p, counted_qty: null } : p,
+          )
+        : list,
+    );
     setQtyDraft("");
     setIndex(0);
+    setRecountIntroOpen(
+      status === "returned" && list.some((p) => p.recount_required),
+    );
   }, [token]);
 
   useEffect(() => {
@@ -174,6 +198,7 @@ export function ContagemEstoquePublic() {
     setUnitDraft(
       units.some((u) => u.code === saved) ? saved : fallback,
     );
+    setPackCalcOpen(false);
   }, [current?.id]);
 
   const confirmCurrent = async (): Promise<boolean> => {
@@ -218,7 +243,6 @@ export function ContagemEstoquePublic() {
               ...p,
               counted_qty: n,
               counted_unit_code: unitDraft || current.unit,
-              recount_required: false,
             }
           : p,
       ),
@@ -341,7 +365,7 @@ export function ContagemEstoquePublic() {
             <CardTitle>Contagem de estoque</CardTitle>
             <CardDescription>
               {sessionStatus === "returned"
-                ? "Nenhum item pendente de recontagem."
+                ? "Nada pendente nesta recontagem. Pode fechar esta tela."
                 : "Nenhum produto para contar."}
             </CardDescription>
           </CardHeader>
@@ -370,10 +394,10 @@ export function ContagemEstoquePublic() {
             {assignedToName ? <p>Operador: {assignedToName}</p> : null}
             {sessionStatus === "returned" ? (
               <p className="text-amber-700 dark:text-amber-400">
-                Recontagem: confira só os itens devolvidos (sem ver o esperado).
+                Conte de novo e, no último item, envie.
               </p>
             ) : (
-              <p>Um item por vez. O número esperado fica oculto.</p>
+              <p>Um item por vez.</p>
             )}
           </CardDescription>
         </CardHeader>
@@ -428,6 +452,7 @@ export function ContagemEstoquePublic() {
               <SearchSelect
                 value={unitDraft || current.unit}
                 onValueChange={setUnitDraft}
+                disabled={packCalcOpen}
                 searchPlaceholder="Buscar unidade…"
                 triggerClassName="h-16 w-[7.5rem] shrink-0 text-base"
                 options={currentUnits.map((u) => ({
@@ -439,6 +464,22 @@ export function ContagemEstoquePublic() {
             {currentHint ? (
               <p className="mt-2 text-xs text-muted-foreground">{currentHint}</p>
             ) : null}
+            <InventoryCountPackCalculator
+              key={current.id}
+              hubUnit={current.unit}
+              allowedUnits={currentUnits}
+              onOpenChange={(open) => {
+                setPackCalcOpen(open);
+                if (open) {
+                  setUnitDraft(current.unit);
+                  if (qtyDraft.trim() === "") setQtyDraft("0");
+                }
+              }}
+              onApply={(qty, unit) => {
+                setQtyDraft(formatPackCountQty(qty));
+                setUnitDraft(unit);
+              }}
+            />
           </div>
 
           {error ? (
@@ -476,6 +517,8 @@ export function ContagemEstoquePublic() {
               >
                 {submitting || saving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
+                ) : sessionStatus === "returned" ? (
+                  "Enviar de novo"
                 ) : (
                   "Enviar p/ aprovação"
                 )}
@@ -484,6 +527,27 @@ export function ContagemEstoquePublic() {
           </div>
         </CardContent>
       </Card>
+      <AlertDialog open={recountIntroOpen} onOpenChange={setRecountIntroOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conte estes itens de novo</AlertDialogTitle>
+            <AlertDialogDescription>
+              {queue.length === 1
+                ? "O responsável pediu para conferir 1 item outra vez."
+                : `O responsável pediu para conferir ${queue.length} itens outra vez.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-foreground">
+            <li>Conte a quantidade de cada um.</li>
+            <li>No último item, envie de novo.</li>
+          </ol>
+          <AlertDialogFooter>
+            <AlertDialogAction className="w-full">
+              Começar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PublicPageShell>
   );
 }
