@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { activeCountStatusLabel } from "@/lib/inventoryCount/createSession";
 import { formatRecurrenceLabel, formatScheduleWhen } from "@/lib/inventoryCount/scheduleNextRun";
 import { COUNT_ROW_ACTION_CLASS, countClickableRowClass } from "@/lib/inventoryCount/ui";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ export function EstoqueContagemListasTab({
   members,
   schedules,
   productCountByListing,
+  listingActiveStatus,
   loading,
   countingId,
   onNewGroup,
@@ -39,6 +41,7 @@ export function EstoqueContagemListasTab({
   members: CompanyMember[];
   schedules: InventoryCountSchedule[];
   productCountByListing: Map<string, number>;
+  listingActiveStatus: Map<string, "open" | "returned">;
   loading: boolean;
   countingId: string;
   onNewGroup: () => void;
@@ -171,6 +174,7 @@ export function EstoqueContagemListasTab({
                 <ul className="space-y-2">
                   {groupListings.map((l) => {
                     const sched = listingNext(l);
+                    const activeStatus = listingActiveStatus.get(l.id);
                     return (
                       <li key={l.id} className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
                         <button
@@ -179,8 +183,22 @@ export function EstoqueContagemListasTab({
                           onClick={() => onOpenListing(l.id)}
                         >
                           <span className="min-w-0">
-                            <span className="block font-semibold text-foreground">
-                              {l.name}
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-foreground">
+                                {l.name}
+                              </span>
+                              {activeStatus ? (
+                                <span
+                                  className={cn(
+                                    "rounded-md px-2 py-0.5 text-[11px] font-medium",
+                                    activeStatus === "returned"
+                                      ? "bg-orange-500/15 text-orange-800 dark:text-orange-200"
+                                      : "bg-amber-500/15 text-amber-800 dark:text-amber-200",
+                                  )}
+                                >
+                                  {activeCountStatusLabel(activeStatus)}
+                                </span>
+                              ) : null}
                             </span>
                             <span className="mt-0.5 block text-xs text-muted-foreground">
                               Operador:{" "}

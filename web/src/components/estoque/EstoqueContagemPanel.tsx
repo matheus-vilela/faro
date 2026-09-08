@@ -2,6 +2,10 @@ import { EstoqueAprovacaoContagem } from "@/components/estoque/EstoqueAprovacaoC
 import { EstoqueContagemListasTab } from "@/components/estoque/EstoqueContagemListasTab";
 import { EstoqueContagemListingSheet } from "@/components/estoque/EstoqueContagemListingSheet";
 import {
+  EstoqueContagemReuseDialog,
+  type CountReusePrompt,
+} from "@/components/estoque/EstoqueContagemReuseDialog";
+import {
   EstoqueContagemScheduleDialog,
   type ScheduleDialogTarget,
 } from "@/components/estoque/EstoqueContagemScheduleDialog";
@@ -21,9 +25,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  activeSessionsForListing,
+  listingActiveStatusById,
+  listingHasPendingApproval,
   notifyInventoryCountSessions,
   openInventoryCountSessionFallback,
   processDueInventoryCountSchedules,
+  publicUrlForSession,
+  shouldAskToReuseCount,
+  splitListingsForCountMode,
+  type InventoryCountSessionSummary,
 } from "@/lib/inventoryCount/createSession";
 import { inventoryCountLineCount } from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
@@ -41,12 +52,7 @@ import { toast } from "sonner";
 
 type GeneratedLink = { label: string; url: string };
 
-type SessionSummaryRow = {
-  id: string;
-  status: string;
-  kind: string | null;
-  inventory_count_lines?: { count: number }[];
-};
+type CountExecuteMode = "create-all" | "reuse-and-fill";
 
 export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   const [tab, setTab] = useState<ContagemTab>("aprovar");
@@ -60,7 +66,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     { listing_id: string; product_id: string }[]
   >([]);
   const [schedules, setSchedules] = useState<InventoryCountSchedule[]>([]);
-  const [sessionSummary, setSessionSummary] = useState<SessionSummaryRow[]>([]);
+  const [sessionSummary, setSessionSummary] = useState<
+    InventoryCountSessionSummary[]
+  >([]);
+  const [reusePrompt, setReusePrompt] = useState<CountReusePrompt | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -123,7 +132,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         .order("next_run_at", { ascending: true }),
       supabase
         .from("inventory_count_sessions")
-        .select("id, status, kind, inventory_count_lines(count)")
+        .select(
+          "id, status, kind, inventory_count_listing_id, created_at, token, inventory_count_short_links(slug), inventory_count_lines(count)",
+        )
         .eq("company_id", companyId)
         .in("status", ["open", "returned", "pending_approval"]),
     ]);
@@ -138,7 +149,8 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       (lprod.data ?? []) as { listing_id: string; product_id: string }[],
     );
     setSchedules((sch.data ?? []) as InventoryCountSchedule[]);
-    setSessionSummary((sess.data ?? []) as SessionSummaryRow[]);
+    if (sess.error) console.error(sess.error);
+    setSessionSummary((sess.data ?? []) as InventoryCountSessionSummary[]);
     setLoadingMeta(false);
   }, [companyId]);
 
@@ -170,6 +182,11 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     }
     return out;
   }, [listingProductRows]);
+
+  const listingActiveStatus = useMemo(
+    () => listingActiveStatusById(sessionSummary),
+    [sessionSummary],
+  );
 
   const pendingApproval = sessionSummary.filter(
     (s) =>
@@ -278,9 +295,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         ) ?? null
       : null);
 
-  const countListings = async (
+  const executeCount = async (
     rows: InventoryCountListing[],
     busyKey: string,
+    mode: CountExecuteMode,
   ) => {
     const withProducts = rows.filter(
       (l) => (productCountByListing.get(l.id) ?? 0) > 0,
@@ -293,24 +311,61 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     try {
       const generated: GeneratedLink[] = [];
       const sessionIds: string[] = [];
+      const { reuseIds } = splitListingsForCountMode(
+        withProducts.map((l) => l.id),
+        sessionSummary,
+        mode,
+      );
+      const reuseSet = new Set(reuseIds);
+      let reused = 0;
       for (const listing of withProducts) {
+        const latest = reuseSet.has(listing.id)
+          ? activeSessionsForListing(sessionSummary, listing.id)[0]
+          : undefined;
+        if (latest) {
+          generated.push({
+            label: listing.name,
+            url: publicUrlForSession(latest),
+          });
+          reused += 1;
+          continue;
+        }
         const created = await openInventoryCountSessionFallback({
           companyId,
           groupId: listing.inventory_count_group_id,
           listingId: listing.id,
           assignedCompanyMemberId: listing.assigned_company_member_id,
         });
-        generated.push(created);
+        generated.push({
+          label: created.label || listing.name,
+          url: created.url,
+        });
         if (created.sessionId) sessionIds.push(created.sessionId);
       }
       setLinks(generated);
       setLinksOpen(true);
-      bump();
-      toast.success(
-        generated.length === 1
-          ? "Link da listagem gerado."
-          : "Links do grupo gerados (um por listagem).",
+      if (sessionIds.length > 0) bump();
+      const pendingNote = withProducts.some((l) =>
+        listingHasPendingApproval(sessionSummary, l.id),
       );
+      if (reused > 0 && sessionIds.length === 0) {
+        toast.success(
+          generated.length === 1
+            ? "Link da contagem em andamento."
+            : "Links das contagens em andamento.",
+        );
+      } else if (reused > 0) {
+        toast.success("Links prontos. As listas abertas foram reutilizadas.");
+      } else {
+        toast.success(
+          generated.length === 1
+            ? "Link da listagem gerado."
+            : "Links do grupo gerados (um por listagem).",
+        );
+      }
+      if (pendingNote && sessionIds.length > 0) {
+        toast.message("Já há uma desta lista aguardando conferência.");
+      }
       await notifyInventoryCountSessions(sessionIds);
     } catch (err) {
       console.error(err);
@@ -318,6 +373,28 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     } finally {
       setCountingId("");
     }
+  };
+
+  const requestCount = (
+    rows: InventoryCountListing[],
+    busyKey: string,
+  ) => {
+    const withProducts = rows.filter(
+      (l) => (productCountByListing.get(l.id) ?? 0) > 0,
+    );
+    if (withProducts.length === 0) {
+      toast.error("Não há listagens com produtos para contar.");
+      return;
+    }
+    const anyActive = shouldAskToReuseCount(
+      withProducts.map((l) => l.id),
+      sessionSummary,
+    );
+    if (!anyActive) {
+      void executeCount(withProducts, busyKey, "create-all");
+      return;
+    }
+    setReusePrompt({ listings: withProducts, busyKey });
   };
 
   const openSchedule = (target: ScheduleDialogTarget) => {
@@ -430,6 +507,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           members={members}
           schedules={schedules}
           productCountByListing={productCountByListing}
+          listingActiveStatus={listingActiveStatus}
           loading={loadingMeta}
           countingId={countingId}
           onNewGroup={() => setGroupDialogOpen(true)}
@@ -437,14 +515,14 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           onNewListing={openCreateListing}
           onOpenListing={openEditListing}
           onCountGroup={(gid) =>
-            void countListings(
+            requestCount(
               listings.filter((l) => l.inventory_count_group_id === gid),
               gid,
             )
           }
           onCountListing={(lid) => {
             const listing = listings.find((l) => l.id === lid);
-            if (listing) void countListings([listing], lid);
+            if (listing) requestCount([listing], lid);
           }}
           onProgramGroup={(gid) => {
             const g = groups.find((x) => x.id === gid);
@@ -556,6 +634,27 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         target={scheduleTarget}
         existing={scheduleExisting}
         onSaved={bump}
+      />
+
+      <EstoqueContagemReuseDialog
+        prompt={reusePrompt}
+        sessions={sessionSummary}
+        busy={countingId.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setReusePrompt(null);
+        }}
+        onReuse={() => {
+          if (!reusePrompt) return;
+          const { listings: rows, busyKey } = reusePrompt;
+          setReusePrompt(null);
+          void executeCount(rows, busyKey, "reuse-and-fill");
+        }}
+        onCreateNew={() => {
+          if (!reusePrompt) return;
+          const { listings: rows, busyKey } = reusePrompt;
+          setReusePrompt(null);
+          void executeCount(rows, busyKey, "create-all");
+        }}
       />
 
       <Dialog open={linksOpen} onOpenChange={setLinksOpen}>

@@ -2,6 +2,22 @@ import { randomShortSlug } from "@/lib/randomSlug";
 import { supabase } from "@/lib/supabase";
 import type { OpenInventoryCountSessionResult } from "@/types/inventoryCount";
 
+export type InventoryCountShortLinkEmbed =
+  | { slug?: string | null }
+  | { slug?: string | null }[]
+  | null;
+
+export type InventoryCountSessionSummary = {
+  id: string;
+  status: string;
+  kind: string | null;
+  inventory_count_listing_id: string | null;
+  created_at: string;
+  token: string | null;
+  inventory_count_short_links?: InventoryCountShortLinkEmbed;
+  inventory_count_lines?: { count: number }[] | { count: number } | null;
+};
+
 export function inventoryCountPublicUrl(params: {
   slug?: string | null;
   token?: string | null;
@@ -10,6 +26,116 @@ export function inventoryCountPublicUrl(params: {
   if (params.slug) return `${base}/i/${params.slug}`;
   if (params.token) return `${base}/contagem-estoque/${params.token}`;
   return base;
+}
+
+export function isReusableCountStatus(status: string): boolean {
+  return status === "open" || status === "returned";
+}
+
+export function slugFromCountShortLinks(
+  raw: InventoryCountShortLinkEmbed | undefined,
+): string | null {
+  if (!raw) return null;
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  const s = row?.slug;
+  return typeof s === "string" && s ? s : null;
+}
+
+export function publicUrlForSession(params: {
+  slug?: string | null;
+  token?: string | null;
+  inventory_count_short_links?: InventoryCountShortLinkEmbed;
+}): string {
+  return inventoryCountPublicUrl({
+    slug: params.slug ?? slugFromCountShortLinks(params.inventory_count_short_links),
+    token: params.token,
+  });
+}
+
+export function activeSessionsForListing(
+  sessions: InventoryCountSessionSummary[],
+  listingId: string,
+): InventoryCountSessionSummary[] {
+  return sessions
+    .filter(
+      (s) =>
+        s.inventory_count_listing_id === listingId &&
+        isReusableCountStatus(s.status),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+}
+
+export function listingHasPendingApproval(
+  sessions: InventoryCountSessionSummary[],
+  listingId: string,
+): boolean {
+  return sessions.some(
+    (s) =>
+      s.inventory_count_listing_id === listingId &&
+      s.status === "pending_approval",
+  );
+}
+
+/** Status da sessão ativa mais recente por listagem (badge na aba Listas). */
+export function listingActiveStatusById(
+  sessions: InventoryCountSessionSummary[],
+): Map<string, "open" | "returned"> {
+  const out = new Map<string, "open" | "returned">();
+  const newestFirst = [...sessions].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+  for (const s of newestFirst) {
+    const listingId = s.inventory_count_listing_id;
+    if (!listingId || out.has(listingId)) continue;
+    if (s.status === "open" || s.status === "returned") {
+      out.set(listingId, s.status);
+    }
+  }
+  return out;
+}
+
+export function activeCountStatusLabel(status: string): string {
+  return status === "returned" ? "Recontagem" : "Em andamento";
+}
+
+export function formatCountSessionWhen(iso: string): string {
+  return new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function shouldAskToReuseCount(
+  listingIds: string[],
+  sessions: InventoryCountSessionSummary[],
+): boolean {
+  return listingIds.some(
+    (id) => activeSessionsForListing(sessions, id).length > 0,
+  );
+}
+
+export function splitListingsForCountMode(
+  listingIds: string[],
+  sessions: InventoryCountSessionSummary[],
+  mode: "create-all" | "reuse-and-fill",
+): { reuseIds: string[]; createIds: string[] } {
+  if (mode === "create-all") {
+    return { reuseIds: [], createIds: [...listingIds] };
+  }
+  const reuseIds: string[] = [];
+  const createIds: string[] = [];
+  for (const id of listingIds) {
+    if (activeSessionsForListing(sessions, id)[0]) reuseIds.push(id);
+    else createIds.push(id);
+  }
+  return { reuseIds, createIds };
 }
 
 export async function openInventoryCountSession(params: {
