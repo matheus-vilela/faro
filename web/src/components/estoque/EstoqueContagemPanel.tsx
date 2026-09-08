@@ -1,4 +1,5 @@
 import { EstoqueAprovacaoContagem } from "@/components/estoque/EstoqueAprovacaoContagem";
+import { EstoqueContagemAgendaTab } from "@/components/estoque/EstoqueContagemAgendaTab";
 import { EstoqueContagemListasTab } from "@/components/estoque/EstoqueContagemListasTab";
 import { EstoqueContagemListingSheet } from "@/components/estoque/EstoqueContagemListingSheet";
 import {
@@ -46,7 +47,7 @@ import type {
   InventoryCountSchedule,
 } from "@/types/inventoryCount";
 import type { Product } from "@/types/product";
-import { CheckCheck, ClipboardList, Copy, History, Loader2, Users } from "lucide-react";
+import { CalendarClock, CheckCheck, ClipboardList, Copy, History, Loader2, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -82,6 +83,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   );
   const [activeListingId, setActiveListingId] = useState("");
   const [listingSheetGroupId, setListingSheetGroupId] = useState("");
+  const [listingSheetOneOff, setListingSheetOneOff] = useState(false);
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleDialogTarget | null>(
@@ -109,6 +111,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         .from("inventory_count_listings")
         .select("*")
         .eq("company_id", companyId)
+        .is("archived_at", null)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
       supabase
@@ -233,6 +236,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     await loadMeta();
     if (gid) {
       setListingSheetMode("create");
+      setListingSheetOneOff(false);
       setListingSheetGroupId(gid);
       setActiveListingId("");
       setListingSheetOpen(true);
@@ -263,7 +267,16 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
 
   const openCreateListing = (groupId: string) => {
     setListingSheetMode("create");
+    setListingSheetOneOff(false);
     setListingSheetGroupId(groupId);
+    setActiveListingId("");
+    setListingSheetOpen(true);
+  };
+
+  const openCreateOneOff = () => {
+    setListingSheetMode("create");
+    setListingSheetOneOff(true);
+    setListingSheetGroupId("");
     setActiveListingId("");
     setListingSheetOpen(true);
   };
@@ -272,8 +285,9 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     const listing = listings.find((l) => l.id === listingId);
     if (!listing) return;
     setListingSheetMode("edit");
+    setListingSheetOneOff(!listing.inventory_count_group_id);
     setActiveListingId(listingId);
-    setListingSheetGroupId(listing.inventory_count_group_id);
+    setListingSheetGroupId(listing.inventory_count_group_id ?? "");
     setListingSheetOpen(true);
   };
 
@@ -282,18 +296,6 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   const activeListingProductIds = listingProductRows
     .filter((r) => r.listing_id === activeListingId)
     .map((r) => r.product_id);
-  const activeListingSchedule =
-    schedules.find(
-      (s) => s.active && s.inventory_count_listing_id === activeListingId,
-    ) ??
-    (activeListing
-      ? schedules.find(
-          (s) =>
-            s.active &&
-            s.inventory_count_group_id === activeListing.inventory_count_group_id &&
-            !s.inventory_count_listing_id,
-        ) ?? null
-      : null);
 
   const executeCount = async (
     rows: InventoryCountListing[],
@@ -412,6 +414,34 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     setScheduleOpen(true);
   };
 
+  const openScheduleFromRow = (s: InventoryCountSchedule) => {
+    const listing = s.inventory_count_listing_id
+      ? listings.find((l) => l.id === s.inventory_count_listing_id)
+      : null;
+    if (listing) {
+      openSchedule({
+        groupId: listing.inventory_count_group_id,
+        listingId: listing.id,
+        defaultMemberId:
+          s.assigned_company_member_id ?? listing.assigned_company_member_id,
+        title: listing.inventory_count_group_id
+          ? `Listagem: ${listing.name}`
+          : `Lista única: ${listing.name}`,
+        onceOnly: !listing.inventory_count_group_id,
+      });
+      return;
+    }
+    const group = s.inventory_count_group_id
+      ? groups.find((g) => g.id === s.inventory_count_group_id)
+      : null;
+    openSchedule({
+      groupId: s.inventory_count_group_id,
+      listingId: null,
+      defaultMemberId: s.assigned_company_member_id,
+      title: group ? `Grupo: ${group.name}` : "Grupo",
+    });
+  };
+
   const copy = (text: string) => {
     void navigator.clipboard.writeText(text);
     toast.success("Link copiado.");
@@ -435,6 +465,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
   const tabs: { id: ContagemTab; label: string; icon: typeof CheckCheck }[] = [
     { id: "aprovar", label: "Aprovar", icon: CheckCheck },
     { id: "listas", label: "Listas", icon: ClipboardList },
+    { id: "agenda", label: "Agenda", icon: CalendarClock },
     { id: "historico", label: "Histórico", icon: History },
   ];
 
@@ -453,12 +484,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         inProgress={inProgress}
         scheduled={schedules.length}
         onboardingPending={onboardingPending}
-        onSelect={(next, card) => {
-          setTab(next);
-          if (card === "onboarding" || card === "aprovar") {
-            setTab("aprovar");
-          }
-        }}
+        onSelect={(next) => setTab(next)}
       />
 
       <nav
@@ -486,6 +512,11 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
                   {pendingApproval}
                 </span>
               ) : null}
+              {t.id === "agenda" && schedules.length > 0 ? (
+                <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums">
+                  {schedules.length}
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -505,12 +536,12 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           groups={groups}
           listings={listings}
           members={members}
-          schedules={schedules}
           productCountByListing={productCountByListing}
           listingActiveStatus={listingActiveStatus}
           loading={loadingMeta}
           countingId={countingId}
           onNewGroup={() => setGroupDialogOpen(true)}
+          onNewOneOff={openCreateOneOff}
           onDeleteGroup={(id) => void deleteGroup(id)}
           onNewListing={openCreateListing}
           onOpenListing={openEditListing}
@@ -540,9 +571,25 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
               groupId: listing.inventory_count_group_id,
               listingId: listing.id,
               defaultMemberId: listing.assigned_company_member_id,
-              title: `Listagem: ${listing.name}`,
+              title: listing.inventory_count_group_id
+                ? `Listagem: ${listing.name}`
+                : `Lista única: ${listing.name}`,
+              onceOnly: !listing.inventory_count_group_id,
             });
           }}
+        />
+      ) : null}
+
+      {tab === "agenda" ? (
+        <EstoqueContagemAgendaTab
+          companyId={companyId}
+          groups={groups}
+          listings={listings}
+          members={members}
+          schedules={schedules}
+          loading={loadingMeta}
+          onEdit={openScheduleFromRow}
+          onChanged={bump}
         />
       ) : null}
 
@@ -550,6 +597,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         <EstoqueHistoricoContagem
           companyId={companyId}
           refreshTrigger={historyTick}
+          onChanged={bump}
         />
       ) : null}
 
@@ -607,12 +655,12 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           listingSheetMode === "edit" ? activeListingProductIds : []
         }
         defaultGroupId={listingSheetGroupId}
-        nextSchedule={
-          listingSheetMode === "edit" ? activeListingSchedule : null
-        }
+        oneOff={listingSheetOneOff}
         nextSortOrder={
-          listings.filter((l) => l.inventory_count_group_id === listingSheetGroupId)
-            .length
+          listingSheetOneOff
+            ? listings.filter((l) => !l.inventory_count_group_id).length
+            : listings.filter((l) => l.inventory_count_group_id === listingSheetGroupId)
+                .length
         }
         onChanged={() => void loadMeta()}
         onProgramar={() => {
@@ -621,7 +669,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
             groupId: activeListing.inventory_count_group_id,
             listingId: activeListing.id,
             defaultMemberId: activeListing.assigned_company_member_id,
-            title: `Listagem: ${activeListing.name}`,
+            title: activeListing.inventory_count_group_id
+              ? `Listagem: ${activeListing.name}`
+              : `Lista única: ${activeListing.name}`,
+            onceOnly: !activeListing.inventory_count_group_id,
           });
         }}
       />

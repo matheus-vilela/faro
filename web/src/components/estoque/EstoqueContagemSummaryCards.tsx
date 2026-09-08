@@ -6,7 +6,7 @@ import {
   Loader2,
 } from "lucide-react";
 
-export type ContagemTab = "aprovar" | "listas" | "historico";
+export type ContagemTab = "aprovar" | "listas" | "agenda" | "historico";
 
 export function EstoqueContagemSummaryCards({
   pendingApproval,
@@ -48,10 +48,10 @@ export function EstoqueContagemSummaryCards({
     },
     {
       id: "agenda" as const,
-      tab: "listas" as const,
+      tab: "agenda" as const,
       label: "Agendadas",
       value: scheduled,
-      hint: "Próximas datas maleáveis",
+      hint: "Fila na aba Agenda",
       icon: CalendarClock,
       className: "border-border bg-card hover:bg-muted/40",
       valueClass: "",

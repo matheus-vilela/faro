@@ -28,6 +28,7 @@ import {
   COUNT_SELECT_TRIGGER_CLASS,
   countClickableRowClass,
   inventoryCountLineCount,
+  inventoryCountSessionGroupLabel,
 } from "@/lib/inventoryCount/ui";
 import { inventoryCountPublicUrl } from "@/lib/inventoryCount/createSession";
 import { supabase } from "@/lib/supabase";
@@ -164,7 +165,7 @@ export function EstoqueAprovacaoContagem({
       if (s.inventory_count_group_id) {
         map.set(
           s.inventory_count_group_id,
-          s.inventory_count_groups?.name ?? "Grupo",
+          s.inventory_count_groups?.name?.trim() || "Única",
         );
       }
     }
@@ -391,7 +392,9 @@ export function EstoqueAprovacaoContagem({
     ? activeSession.kind === "onboarding"
       ? "Contagem geral (onboarding)"
       : [
-          activeSession.inventory_count_groups?.name ?? "Contagem",
+          inventoryCountSessionGroupLabel({
+            groupName: activeSession.inventory_count_groups?.name,
+          }),
           activeSession.inventory_count_listings?.name,
         ]
           .filter(Boolean)
@@ -497,7 +500,9 @@ export function EstoqueAprovacaoContagem({
                     <span className="block font-semibold text-foreground">
                       {onboarding
                         ? "Contagem geral (onboarding)"
-                        : (s.inventory_count_groups?.name ?? "Contagem")}
+                        : inventoryCountSessionGroupLabel({
+                            groupName: s.inventory_count_groups?.name,
+                          })}
                       {s.inventory_count_listings?.name
                         ? ` · ${s.inventory_count_listings.name}`
                         : ""}

@@ -54,6 +54,8 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `contagem-cores-layout.md` | Cores da aba Contagem e Listas alinhadas ao layout |
 | `contagem-listagem-colunas.md` | Sheet da listagem: catálogo à esquerda, itens à direita |
 | `contagem-reusar-sessao-aberta.md` | Listas: continuar sessão aberta em vez de criar outra |
+| `contagem-lista-unica.md` | Lista avulsa (agora ou once) + cancelar sessão no Histórico |
+| `contagem-aba-agenda.md` | Aba Agenda; lista única some após aprovar |
 | `agrupamento-destino-sem-variante.md` | Destino de agrupamento não lista variantes |
 | `search-select-padrao.md` | SearchSelect único em formulário e filtro |
 | `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |

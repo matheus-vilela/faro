@@ -29,6 +29,7 @@ export type ScheduleDialogTarget = {
   listingId: string | null;
   defaultMemberId: string | null;
   title: string;
+  onceOnly?: boolean;
 };
 
 export function EstoqueContagemScheduleDialog({
@@ -59,7 +60,7 @@ export function EstoqueContagemScheduleDialog({
     if (!open) return;
     if (existing) {
       setNextRunLocal(toDatetimeLocalValue(existing.next_run_at));
-      setKind(existing.recurrence_kind);
+      setKind(target?.onceOnly ? "once" : existing.recurrence_kind);
       setIntervalDays(String(existing.interval_days ?? 7));
       setWeekday(existing.weekday ?? 1);
       setMemberId(existing.assigned_company_member_id ?? "");
@@ -82,21 +83,24 @@ export function EstoqueContagemScheduleDialog({
       toast.error("Informe a próxima data.");
       return;
     }
+    const recurrence: InventoryCountRecurrenceKind = target.onceOnly
+      ? "once"
+      : kind;
     let next = parsed;
-    if (kind === "alt_weeks") {
+    if (recurrence === "alt_weeks") {
       next = snapToWeekday(parsed, weekday);
     }
     const nDays = Math.max(1, Number.parseInt(intervalDays, 10) || 1);
     setSaving(true);
     const payload = {
       company_id: companyId,
-      inventory_count_group_id: target.listingId ? target.groupId : target.groupId,
+      inventory_count_group_id: target.groupId,
       inventory_count_listing_id: target.listingId,
       assigned_company_member_id: memberId || null,
       next_run_at: next.toISOString(),
-      recurrence_kind: kind,
-      interval_days: kind === "every_n_days" ? nDays : null,
-      weekday: kind === "alt_weeks" ? weekday : null,
+      recurrence_kind: recurrence,
+      interval_days: recurrence === "every_n_days" ? nDays : null,
+      weekday: recurrence === "alt_weeks" ? weekday : null,
       active: true,
       updated_at: new Date().toISOString(),
     };
@@ -141,61 +145,67 @@ export function EstoqueContagemScheduleDialog({
               onChange={(e) => setNextRunLocal(e.target.value)}
             />
             <p className="text-[11px] text-muted-foreground">
-              Alterar esta data não cria o link antes da hora.
+              {target?.onceOnly
+                ? "A sessão só é criada nesta data. Lista única não se repete."
+                : "Alterar esta data não cria o link antes da hora."}
             </p>
           </div>
-          <div className="space-y-2">
-            <Label>Recorrência</Label>
-            <SearchSelect
-              value={kind}
-              onValueChange={(v) => setKind(v as InventoryCountRecurrenceKind)}
-              searchPlaceholder="Buscar recorrência…"
-              triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
-              options={[
-                { value: "once", label: "Única" },
-                { value: "every_n_days", label: "A cada N dias" },
-                {
-                  value: "alt_weeks",
-                  label: "Semana sim / semana não",
-                },
-              ]}
-            />
-          </div>
-          {kind === "every_n_days" ? (
-            <div className="space-y-2">
-              <Label htmlFor="count-interval">Intervalo (dias)</Label>
-              <Input
-                id="count-interval"
-                type="number"
-                min={1}
-                className={COUNT_SELECT_TRIGGER_CLASS}
-                value={intervalDays}
-                onChange={(e) => setIntervalDays(e.target.value)}
-              />
-            </div>
-          ) : null}
-          {kind === "alt_weeks" ? (
-            <div className="space-y-2">
-              <Label>Dia da semana</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {INVENTORY_COUNT_WEEKDAY_LABELS.map((lb, i) => (
-                  <button
-                    key={lb}
-                    type="button"
-                    onClick={() => setWeekday(i)}
-                    className={cn(
-                      "h-11 min-w-[2.75rem] rounded-md border px-3 text-sm font-medium transition-colors",
-                      weekday === i
-                        ? "border-primary bg-primary/15 text-foreground"
-                        : "border-border bg-muted/30 text-muted-foreground",
-                    )}
-                  >
-                    {lb}
-                  </button>
-                ))}
+          {target?.onceOnly ? null : (
+            <>
+              <div className="space-y-2">
+                <Label>Recorrência</Label>
+                <SearchSelect
+                  value={kind}
+                  onValueChange={(v) => setKind(v as InventoryCountRecurrenceKind)}
+                  searchPlaceholder="Buscar recorrência…"
+                  triggerClassName={COUNT_SELECT_TRIGGER_CLASS}
+                  options={[
+                    { value: "once", label: "Única" },
+                    { value: "every_n_days", label: "A cada N dias" },
+                    {
+                      value: "alt_weeks",
+                      label: "Semana sim / semana não",
+                    },
+                  ]}
+                />
               </div>
-            </div>
-          ) : null}
+              {kind === "every_n_days" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="count-interval">Intervalo (dias)</Label>
+                  <Input
+                    id="count-interval"
+                    type="number"
+                    min={1}
+                    className={COUNT_SELECT_TRIGGER_CLASS}
+                    value={intervalDays}
+                    onChange={(e) => setIntervalDays(e.target.value)}
+                  />
+                </div>
+              ) : null}
+              {kind === "alt_weeks" ? (
+                <div className="space-y-2">
+                  <Label>Dia da semana</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {INVENTORY_COUNT_WEEKDAY_LABELS.map((lb, i) => (
+                      <button
+                        key={lb}
+                        type="button"
+                        onClick={() => setWeekday(i)}
+                        className={cn(
+                          "h-11 min-w-[2.75rem] rounded-md border px-3 text-sm font-medium transition-colors",
+                          weekday === i
+                            ? "border-primary bg-primary/15 text-foreground"
+                            : "border-border bg-muted/30 text-muted-foreground",
+                        )}
+                      >
+                        {lb}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
           <div className="space-y-2">
             <Label>Operador</Label>
             <SearchSelect

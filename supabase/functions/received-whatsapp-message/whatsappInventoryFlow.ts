@@ -221,6 +221,7 @@ async function fetchListingsWithProducts(
     `,
     )
     .eq("company_id", companyId)
+    .is("archived_at", null)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
@@ -264,6 +265,7 @@ async function memberHasAssignedListings(
     .select("id")
     .eq("company_id", companyId)
     .eq("assigned_company_member_id", memberId)
+    .is("archived_at", null)
     .limit(1)
     .maybeSingle();
 

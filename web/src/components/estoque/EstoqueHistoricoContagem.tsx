@@ -1,13 +1,29 @@
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
 import { useSheetListView } from "@/hooks/useSheetListView";
-import { COUNT_FILTER_INPUT_CLASS, COUNT_SELECT_TRIGGER_CLASS } from "@/lib/inventoryCount/ui";
+import { cancelInventoryCountSession } from "@/lib/inventoryCount/createSession";
+import {
+  COUNT_FILTER_INPUT_CLASS,
+  COUNT_SELECT_TRIGGER_CLASS,
+  canCancelCountSession,
+  inventoryCountSessionGroupLabel,
+} from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
 import { History, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 type ShortLinkEmbed = { slug?: string | null } | { slug?: string | null }[] | null;
 
@@ -85,6 +101,7 @@ const STATUS_OPTIONS = [
   { value: "returned", label: "Recontagem" },
   { value: "pending_approval", label: "Aguardando aprovação" },
   { value: "committed", label: "Estoques ajustados" },
+  { value: "cancelled", label: "Cancelada" },
 ] as const;
 
 function statusLabel(status: string): string {
@@ -95,6 +112,7 @@ function statusLabel(status: string): string {
     approved: "Aprovada",
     committed: "Estoques ajustados",
     submitted: "Concluída",
+    cancelled: "Cancelada",
   };
   return labels[status] ?? status;
 }
@@ -102,9 +120,11 @@ function statusLabel(status: string): string {
 export function EstoqueHistoricoContagem({
   companyId,
   refreshTrigger = 0,
+  onChanged,
 }: {
   companyId: string;
   refreshTrigger?: number;
+  onChanged?: () => void;
 }) {
   const listView = useSheetListView();
   const [rows, setRows] = useState<SessionRow[]>([]);
@@ -112,6 +132,8 @@ export function EstoqueHistoricoContagem({
   const [statusFilter, setStatusFilter] = useState("all");
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
+  const [cancelTarget, setCancelTarget] = useState<SessionRow | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,6 +168,7 @@ export function EstoqueHistoricoContagem({
         "approved",
         "committed",
         "submitted",
+        "cancelled",
       ])
       .limit(120);
 
@@ -184,8 +207,14 @@ export function EstoqueHistoricoContagem({
     }
     if (key === "status") return a.status.localeCompare(b.status, "pt-BR");
     if (key === "group") {
-      return (a.inventory_count_groups?.name ?? "").localeCompare(
-        b.inventory_count_groups?.name ?? "",
+      return inventoryCountSessionGroupLabel({
+        kind: a.kind,
+        groupName: a.inventory_count_groups?.name,
+      }).localeCompare(
+        inventoryCountSessionGroupLabel({
+          kind: b.kind,
+          groupName: b.inventory_count_groups?.name,
+        }),
         "pt-BR",
       );
     }
@@ -242,6 +271,33 @@ export function EstoqueHistoricoContagem({
       : r.created_by_user_id
         ? "Painel"
         : "WhatsApp (proprietário)";
+
+  const groupLabel = (r: SessionRow) =>
+    inventoryCountSessionGroupLabel({
+      kind: r.kind,
+      groupName: r.inventory_count_groups?.name,
+      onboardingLabel:
+        listView === "cards" ? "Contagem geral (onboarding)" : "Onboarding",
+    });
+
+  const confirmCancel = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    const result = await cancelInventoryCountSession(cancelTarget.id);
+    setCancelling(false);
+    if (!result.ok) {
+      toast.error(
+        result.error === "not_cancellable"
+          ? "Esta contagem já foi ajustada e não pode ser cancelada."
+          : "Não foi possível cancelar a contagem.",
+      );
+      return;
+    }
+    toast.success("Contagem cancelada. O link do operador deixou de valer.");
+    setCancelTarget(null);
+    await load();
+    onChanged?.();
+  };
 
   return (
     <div className="space-y-4">
@@ -300,24 +356,39 @@ export function EstoqueHistoricoContagem({
                 </span>
               </div>
               <p className="mt-2 font-medium">
+                {groupLabel(r)}
                 {r.kind === "onboarding"
-                  ? "Contagem geral (onboarding)"
-                  : (r.inventory_count_groups?.name ?? "—")}
-                {r.inventory_count_listings?.name
-                  ? ` · ${r.inventory_count_listings.name}`
-                  : ""}
+                  ? ""
+                  : r.inventory_count_listings?.name
+                    ? ` · ${r.inventory_count_listings.name}`
+                    : ""}
               </p>
               <p className="text-xs text-muted-foreground">
                 Operador: {r.assigned_member?.name ?? "—"} · {originOf(r)}
               </p>
-              <a
-                href={buildSessionLink(r)}
-                className="mt-1 inline-block text-xs text-primary underline-offset-2 hover:underline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Abrir link
-              </a>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {r.status === "cancelled" ? null : (
+                  <a
+                    href={buildSessionLink(r)}
+                    className="inline-block text-xs text-primary underline-offset-2 hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Abrir link
+                  </a>
+                )}
+                {canCancelCountSession(r.status) ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setCancelTarget(r)}
+                  >
+                    Cancelar
+                  </Button>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
@@ -376,6 +447,7 @@ export function EstoqueHistoricoContagem({
                   onSort={onSort}
                 />
                 <th className="p-2 font-medium">Link</th>
+                <th className="p-2 font-medium">Ação</th>
               </tr>
             </thead>
             <tbody>
@@ -386,9 +458,7 @@ export function EstoqueHistoricoContagem({
                   </td>
                   <td className="p-2">{statusBadge(r.status)}</td>
                   <td className="p-2 text-muted-foreground">
-                    {r.kind === "onboarding"
-                      ? "Onboarding"
-                      : (r.inventory_count_groups?.name?.trim() || "—")}
+                    {groupLabel(r)}
                   </td>
                   <td className="p-2 text-muted-foreground">
                     {r.inventory_count_listings?.name?.trim() || "—"}
@@ -399,14 +469,33 @@ export function EstoqueHistoricoContagem({
                   <td className="p-2 font-medium">{initiatorLabel(r)}</td>
                   <td className="p-2 text-muted-foreground">{originOf(r)}</td>
                   <td className="p-2 max-w-[min(200px,28vw)]">
-                    <a
-                      href={buildSessionLink(r)}
-                      className="break-all text-xs text-primary underline-offset-2 hover:underline"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Abrir
-                    </a>
+                    {r.status === "cancelled" ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      <a
+                        href={buildSessionLink(r)}
+                        className="break-all text-xs text-primary underline-offset-2 hover:underline"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Abrir
+                      </a>
+                    )}
+                  </td>
+                  <td className="p-2">
+                    {canCancelCountSession(r.status) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setCancelTarget(r)}
+                      >
+                        Cancelar
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -414,6 +503,47 @@ export function EstoqueHistoricoContagem({
           </table>
         </div>
       )}
+
+      <Dialog
+        open={cancelTarget != null}
+        onOpenChange={(open) => {
+          if (!open && !cancelling) setCancelTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancelar esta contagem?</DialogTitle>
+            <DialogDescription>
+              {cancelTarget?.inventory_count_listings?.name?.trim() ||
+                (cancelTarget?.kind === "onboarding"
+                  ? "Contagem geral (onboarding)"
+                  : "Esta sessão")}
+              . O link do operador deixa de valer. Não dá para desfazer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={cancelling}
+              onClick={() => setCancelTarget(null)}
+            >
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={cancelling}
+              onClick={() => void confirmCancel()}
+            >
+              {cancelling ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Cancelar contagem
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

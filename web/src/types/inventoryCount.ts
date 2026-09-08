@@ -9,11 +9,12 @@ export interface InventoryCountGroup {
 export interface InventoryCountListing {
   id: string
   company_id: string
-  inventory_count_group_id: string
+  inventory_count_group_id: string | null
   name: string
   sort_order: number
   assigned_company_member_id: string | null
   created_at: string
+  archived_at: string | null
 }
 
 export type InventoryCountSessionKind = "regular" | "onboarding"
@@ -24,6 +25,7 @@ export type InventoryCountSessionStatus =
   | "returned"
   | "approved"
   | "committed"
+  | "cancelled"
 
 export type InventoryCountRecurrenceKind =
   | "once"

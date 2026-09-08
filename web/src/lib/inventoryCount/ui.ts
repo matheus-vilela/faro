@@ -31,3 +31,36 @@ export function countClickableRowClass(active?: boolean): string {
     active && "border-foreground/20 bg-muted",
   );
 }
+
+export function inventoryCountSessionGroupLabel(params: {
+  kind?: string | null;
+  groupName?: string | null;
+  onboardingLabel?: string;
+}): string {
+  if (params.kind === "onboarding") {
+    return params.onboardingLabel ?? "Onboarding";
+  }
+  const name = params.groupName?.trim();
+  return name || "Única";
+}
+
+export function canCancelCountSession(status: string): boolean {
+  return status === "open" || status === "returned" || status === "pending_approval";
+}
+
+/** Rótulo da fila de agenda: lista única, listagem de setor ou grupo inteiro. */
+export function inventoryCountScheduleTargetLabel(params: {
+  listingId: string | null;
+  listingName?: string | null;
+  listingGroupId?: string | null;
+  groupName?: string | null;
+}): string {
+  if (params.listingId) {
+    const name = params.listingName?.trim() || "Listagem";
+    if (!params.listingGroupId) return `Única · ${name}`;
+    const group = params.groupName?.trim();
+    return group ? `${group} · ${name}` : name;
+  }
+  const group = params.groupName?.trim();
+  return group ? `${group} · todas as listagens` : "Grupo";
+}

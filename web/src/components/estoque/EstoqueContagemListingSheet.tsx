@@ -9,7 +9,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { formatScheduleWhen } from "@/lib/inventoryCount/scheduleNextRun";
 import { COUNT_SELECT_TRIGGER_CLASS } from "@/lib/inventoryCount/ui";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -17,7 +16,6 @@ import type { CompanyMember } from "@/types/companyMember";
 import type {
   InventoryCountGroup,
   InventoryCountListing,
-  InventoryCountSchedule,
 } from "@/types/inventoryCount";
 import type { Product } from "@/types/product";
 import { Loader2, Plus, Search, Trash2 } from "lucide-react";
@@ -43,8 +41,8 @@ export function EstoqueContagemListingSheet({
   listing,
   listingProductIds,
   defaultGroupId,
-  nextSchedule,
   nextSortOrder = 0,
+  oneOff = false,
   onChanged,
   onProgramar,
 }: {
@@ -58,8 +56,8 @@ export function EstoqueContagemListingSheet({
   listing: InventoryCountListing | null;
   listingProductIds: string[];
   defaultGroupId: string;
-  nextSchedule: InventoryCountSchedule | null;
   nextSortOrder?: number;
+  oneOff?: boolean;
   onChanged: () => void;
   onProgramar: () => void;
 }) {
@@ -77,7 +75,7 @@ export function EstoqueContagemListingSheet({
     if (!open) return;
     if (mode === "edit" && listing) {
       setName(listing.name);
-      setGroupId(listing.inventory_count_group_id);
+      setGroupId(listing.inventory_count_group_id ?? "");
       setMemberId(listing.assigned_company_member_id ?? "");
       setInListIds(new Set(listingProductIds));
     } else {
@@ -88,7 +86,7 @@ export function EstoqueContagemListingSheet({
     }
     setAddSearch("");
     setInListSearch("");
-  }, [open, mode, listing, listingProductIds, defaultGroupId]);
+  }, [open, mode, listing, listingProductIds, defaultGroupId, oneOff]);
 
   const inListProducts = useMemo(() => {
     const q = inListSearch.trim().toLowerCase();
@@ -166,12 +164,12 @@ export function EstoqueContagemListingSheet({
   const saveHeader = async (overrides?: { name?: string; groupId?: string }) => {
     if (mode !== "edit" || !listing) return;
     const trimmed = (overrides?.name ?? name).trim();
-    const nextGroup = overrides?.groupId ?? groupId;
+    const nextGroup = oneOff ? null : (overrides?.groupId ?? groupId);
     if (!trimmed) {
       toast.error("Informe o nome da listagem.");
       return;
     }
-    if (!nextGroup) {
+    if (!oneOff && !nextGroup) {
       toast.error("Selecione o grupo.");
       return;
     }
@@ -191,7 +189,7 @@ export function EstoqueContagemListingSheet({
 
   const createListing = async () => {
     const trimmed = name.trim();
-    if (!groupId) {
+    if (!oneOff && !groupId) {
       toast.error("Selecione o grupo.");
       return;
     }
@@ -209,7 +207,7 @@ export function EstoqueContagemListingSheet({
       .from("inventory_count_listings")
       .insert({
         company_id: companyId,
-        inventory_count_group_id: groupId,
+        inventory_count_group_id: oneOff ? null : groupId,
         name: trimmed,
         sort_order: nextSortOrder,
         assigned_company_member_id: memberId || null,
@@ -236,7 +234,7 @@ export function EstoqueContagemListingSheet({
       toast.error("Não foi possível vincular produtos à listagem.");
       return;
     }
-    toast.success("Listagem criada.");
+    toast.success(oneOff ? "Lista única criada." : "Listagem criada.");
     onOpenChange(false);
     onChanged();
   };
@@ -266,13 +264,32 @@ export function EstoqueContagemListingSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex h-full flex-col gap-0 p-0">
         <SheetHeader className="border-b px-6 py-4 pr-16">
-          <SheetTitle>
-            {mode === "create" ? "Nova listagem" : "Editar listagem"}
-          </SheetTitle>
+          <div className="flex items-center justify-between gap-3">
+            <SheetTitle>
+              {oneOff
+                ? mode === "create"
+                  ? "Nova lista única"
+                  : "Editar lista única"
+                : mode === "create"
+                  ? "Nova listagem"
+                  : "Editar listagem"}
+            </SheetTitle>
+            {mode === "edit" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mr-2"
+                onClick={onProgramar}
+              >
+                Programar
+              </Button>
+            ) : null}
+          </div>
         </SheetHeader>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
+            <div className={cn("space-y-2", oneOff && "sm:col-span-2")}>
               <Label>Nome</Label>
               <Input
                 className={COUNT_SELECT_TRIGGER_CLASS}
@@ -282,9 +299,10 @@ export function EstoqueContagemListingSheet({
                   if (mode === "edit") void saveHeader();
                 }}
                 maxLength={120}
-                placeholder="Ex.: Cozinha fria"
+                placeholder={oneOff ? "Ex.: Inventário extra" : "Ex.: Cozinha fria"}
               />
             </div>
+            {oneOff ? null : (
             <div className="space-y-2">
               <Label>Grupo</Label>
               <SearchSelect
@@ -306,6 +324,7 @@ export function EstoqueContagemListingSheet({
                 }))}
               />
             </div>
+            )}
             <div className="space-y-2 sm:col-span-2">
               <Label>Operador</Label>
               <SearchSelect
@@ -335,19 +354,6 @@ export function EstoqueContagemListingSheet({
                 A troca de operador vale na hora, sem salvar o resto da ficha.
               </p>
             </div>
-            {mode === "edit" ? (
-              <div className="flex flex-wrap items-end justify-between gap-2 sm:col-span-2">
-                <p className="text-sm text-muted-foreground">
-                  Próxima agenda:{" "}
-                  <span className="font-medium text-foreground">
-                    {formatScheduleWhen(nextSchedule?.next_run_at)}
-                  </span>
-                </p>
-                <Button type="button" variant="outline" size="sm" onClick={onProgramar}>
-                  Programar
-                </Button>
-              </div>
-            ) : null}
           </div>
 
           <div className="grid min-h-[22rem] gap-4 md:grid-cols-2">
@@ -481,7 +487,7 @@ export function EstoqueContagemListingSheet({
               onClick={() => void createListing()}
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Criar listagem
+              {oneOff ? "Criar lista única" : "Criar listagem"}
             </Button>
           ) : (
             <Button

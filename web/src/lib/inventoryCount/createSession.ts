@@ -246,3 +246,19 @@ export async function processDueInventoryCountSchedules(): Promise<string[]> {
   const row = data as { ok?: boolean; session_ids?: string[] } | null;
   return Array.isArray(row?.session_ids) ? row.session_ids : [];
 }
+
+export async function cancelInventoryCountSession(
+  sessionId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.rpc("cancel_inventory_count_session", {
+    p_session_id: sessionId,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const row = data as { ok?: boolean; error?: string } | null;
+  if (!row?.ok) {
+    return { ok: false, error: row?.error ?? "not_cancellable" };
+  }
+  return { ok: true };
+}
