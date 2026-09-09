@@ -113,6 +113,7 @@ export type SearchSelectProps = {
   searchPlaceholder?: string;
   emptyMessage?: string;
   disabled?: boolean;
+  className?: string;
   triggerClassName?: string;
   contentClassName?: string;
   id?: string;
@@ -170,6 +171,7 @@ export function SearchSelect({
   loading = false,
   loadingMessage = "Buscando…",
   disabled,
+  className,
   triggerClassName,
   contentClassName,
   id,
@@ -354,7 +356,7 @@ export function SearchSelect({
       }}
     >
       <PopoverAnchor asChild>
-        <div ref={anchorRef} className="relative w-full min-w-0">
+        <div ref={anchorRef} className={cn("relative w-full min-w-0", className)}>
           <Input
             ref={inputRef}
             id={id}

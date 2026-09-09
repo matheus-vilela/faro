@@ -434,12 +434,12 @@ export function ContagemEstoquePublic() {
             </label>
             <div className="mt-2 flex gap-2">
               <Input
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="any"
-                min="0"
+                autoComplete="off"
                 autoFocus
-                className="h-16 flex-1 text-center text-3xl font-bold tabular-nums"
+                aria-label="Quantidade contada"
+                className="h-16 min-w-[6.5rem] flex-1 text-center text-3xl font-bold tabular-nums"
                 value={qtyDraft}
                 onChange={(e) => setQtyDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -454,7 +454,8 @@ export function ContagemEstoquePublic() {
                 onValueChange={setUnitDraft}
                 disabled={packCalcOpen}
                 searchPlaceholder="Buscar unidade…"
-                triggerClassName="h-16 w-[7.5rem] shrink-0 text-base"
+                className="w-[7.5rem] shrink-0"
+                triggerClassName="h-16 text-base"
                 options={currentUnits.map((u) => ({
                   value: u.code,
                   label: `${systemUnitLabel(u.code)} (${u.code})`,
