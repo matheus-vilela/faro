@@ -1,13 +1,12 @@
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
-  PopoverTrigger,
 } from "@/components/ui/popover";
 import { usePopoverListScrollFix } from "@/hooks/usePopoverListScrollFix";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Plus, X } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -200,11 +199,24 @@ export function SearchSelect({
   );
   const activeTab = tab ?? internalTab;
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
   usePopoverListScrollFix(open, listRef);
 
   const setSearchAndNotify = (next: string) => {
     setSearch(next);
     onSearchChange?.(next);
+  };
+
+  const setOpenSafe = (next: boolean) => {
+    if (disabled) return;
+    setOpen(next);
+    if (next) {
+      setSearchAndNotify("");
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } else {
+      setSearchAndNotify("");
+    }
   };
 
   const allFixed = useMemo(() => {
@@ -216,8 +228,7 @@ export function SearchSelect({
   }, [leadingOptions, trailingOptions, options]);
 
   const selected = value ? allFixed.get(value) : undefined;
-  const triggerLabel =
-    triggerLabelOverride ?? selected?.label ?? placeholder;
+  const closedDisplay = triggerLabelOverride ?? selected?.label ?? "";
 
   const visibleOptions = useMemo(() => {
     if (!tabs?.length || !activeTab) return options;
@@ -248,6 +259,8 @@ export function SearchSelect({
       }
     : null;
 
+  const showClear = clearable && Boolean(value) && !disabled;
+
   const pick = (next: string) => {
     if (next === SEARCH_SELECT_CREATE_VALUE) {
       if (createQuery) onCreate?.(createQuery);
@@ -262,8 +275,32 @@ export function SearchSelect({
     setSearchAndNotify("");
   };
 
-  const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+  const handleTriggerKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpenSafe(false);
+      return;
+    }
+    if (e.key === "ArrowDown" && !open) {
+      e.preventDefault();
+      setOpenSafe(true);
+      return;
+    }
+    if (e.key === "Enter" && open) {
+      e.preventDefault();
+      if (filtered.length > 0) {
+        pick(filtered[0].value);
+        return;
+      }
+      if (createOption) {
+        pick(SEARCH_SELECT_CREATE_VALUE);
+        return;
+      }
+      if (leadingOptions.length > 0) {
+        pick(leadingOptions[0].value);
+      }
+    }
   };
 
   const renderRow = (option: SearchSelectOption) => {
@@ -278,6 +315,7 @@ export function SearchSelect({
           isSelected && "bg-accent/80",
           option.accent && "font-medium text-primary",
         )}
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => pick(option.value)}
       >
         <span className="min-w-0 flex-1">
@@ -305,52 +343,87 @@ export function SearchSelect({
       open={open}
       onOpenChange={(next) => {
         if (disabled) return;
-        setOpen(next);
-        if (!next) setSearchAndNotify("");
+        // Clique/foco no campo não deve fechar a lista (Anchor ≠ Trigger no Radix).
+        if (
+          !next &&
+          anchorRef.current?.contains(document.activeElement)
+        ) {
+          return;
+        }
+        setOpenSafe(next);
       }}
     >
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          id={id}
-          disabled={disabled}
-          className={cn(
-            "w-full justify-between font-normal",
-            size === "sm" ? "h-8" : "h-10",
-            !selected && !triggerLabelOverride && "text-muted-foreground",
-            triggerClassName,
-          )}
-        >
-          <span className="truncate text-left">{triggerLabel}</span>
-          {clearable && value && !disabled ? (
-            <span
-              role="button"
-              tabIndex={0}
-              className="ml-1 rounded p-0.5 hover:bg-muted"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onValueChange("");
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+      <PopoverAnchor asChild>
+        <div ref={anchorRef} className="relative w-full min-w-0">
+          <Input
+            ref={inputRef}
+            id={id}
+            role="combobox"
+            aria-expanded={open}
+            aria-autocomplete="list"
+            disabled={disabled}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={open ? search : closedDisplay}
+            placeholder={
+              open
+                ? closedDisplay || searchPlaceholder || placeholder
+                : placeholder
+            }
+            onChange={(e) => {
+              if (!open) setOpen(true);
+              setSearchAndNotify(e.target.value);
+            }}
+            onFocus={() => {
+              if (!disabled && !open) setOpenSafe(true);
+            }}
+            onKeyDown={handleTriggerKeyDown}
+            className={cn(
+              "w-full font-normal",
+              size === "sm" ? "h-8" : "h-10",
+              showClear ? "pr-14" : "pr-9",
+              !closedDisplay && !open && "text-muted-foreground",
+              triggerClassName,
+            )}
+          />
+          <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5">
+            {showClear ? (
+              <button
+                type="button"
+                tabIndex={-1}
+                className="pointer-events-auto rounded p-0.5 hover:bg-muted"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   onValueChange("");
-                }
-              }}
-              aria-label="Limpar seleção"
+                  setSearchAndNotify("");
+                  inputRef.current?.focus();
+                }}
+                aria-label="Limpar seleção"
+              >
+                <X className="h-3.5 w-3.5 opacity-60" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              tabIndex={-1}
+              className="pointer-events-auto rounded p-0.5 hover:bg-muted"
+              disabled={disabled}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOpenSafe(!open)}
+              aria-label={open ? "Fechar lista" : "Abrir lista"}
             >
-              <X className="h-3.5 w-3.5 opacity-60" />
-            </span>
-          ) : (
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          )}
-        </Button>
-      </PopoverTrigger>
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin opacity-50" />
+              ) : (
+                <ChevronsUpDown className="h-4 w-4 opacity-50" />
+              )}
+            </button>
+          </div>
+        </div>
+      </PopoverAnchor>
       <PopoverContent
         align="start"
         collisionPadding={16}
@@ -360,6 +433,22 @@ export function SearchSelect({
         )}
         onWheel={(e) => e.stopPropagation()}
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => {
+          if (anchorRef.current?.contains(e.target as Node)) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          if (anchorRef.current?.contains(e.target as Node)) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          if (anchorRef.current?.contains(e.target as Node)) {
+            e.preventDefault();
+          }
+        }}
       >
         {tabs && tabs.length > 0 ? (
           <div className="flex gap-1 border-b border-border p-1">
@@ -378,6 +467,7 @@ export function SearchSelect({
                   onClick={() => {
                     if (tab == null) setInternalTab(row.value);
                     onTabChange?.(row.value);
+                    inputRef.current?.focus();
                   }}
                 >
                   {row.label}
@@ -386,38 +476,11 @@ export function SearchSelect({
             })}
           </div>
         ) : null}
-        <div className="border-b border-border p-2">
-          <div className="relative">
-            {loading ? (
-              <Loader2
-                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
-                aria-hidden
-              />
-            ) : (
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-            )}
-            <Input
-              value={search}
-              onChange={(e) => setSearchAndNotify(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder={searchPlaceholder}
-              className="h-9 pl-8"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              autoFocus
-              aria-busy={loading}
-            />
-          </div>
-          {searchHint ? (
-            <p className="mt-1.5 px-0.5 text-[11px] leading-snug text-muted-foreground sm:text-xs">
-              {searchHint}
-            </p>
-          ) : null}
-        </div>
+        {searchHint ? (
+          <p className="border-b border-border px-2 py-1.5 text-[11px] leading-snug text-muted-foreground sm:text-xs">
+            {searchHint}
+          </p>
+        ) : null}
         <div
           ref={listRef}
           className={cn(

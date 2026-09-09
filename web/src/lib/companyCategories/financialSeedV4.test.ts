@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FINANCIAL_SEED_V4,
   pickExistingDreLeafName,
+  ADMIN_DRE_LEAF_CANDIDATES,
   VARIABLE_DRE_LEAF_CANDIDATES,
 } from "./financialSeedV4";
 
@@ -55,6 +56,15 @@ describe("pickExistingDreLeafName", () => {
         VARIABLE_DRE_LEAF_CANDIDATES,
       ),
     ).toBe("Despesas Variáveis");
+  });
+
+  it("prioriza Despesas Administrativas no v4 antes da folha v3 de limpeza", () => {
+    expect(
+      pickExistingDreLeafName(
+        ["Material e serviços de limpeza", "Despesas Administrativas"],
+        ADMIN_DRE_LEAF_CANDIDATES,
+      ),
+    ).toBe("Despesas Administrativas");
   });
 
   it("aceita null quando não há folha", () => {

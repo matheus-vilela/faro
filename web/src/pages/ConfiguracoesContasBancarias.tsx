@@ -20,8 +20,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useCompany, useCanManageFinancialCadastro } from "@/contexts/CompanyContext";
-import { parseOpeningBalance } from "@/lib/cashFlowSimulation/computeCashFlowProjection";
 import { formatBrl } from "@/lib/dre/formatBrl";
+import { parseMoneyPtBr } from "@/lib/formatMoneyPtBr";
 import { supabase } from "@/lib/supabase";
 import {
   nestedRelation,
@@ -41,10 +41,7 @@ import { toast } from "sonner";
 const NO_ACQUIRER = "__none__";
 
 function parseBalanceInput(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const n = parseOpeningBalance(trimmed.replace(/\./g, "").replace(",", "."));
-  return n;
+  return parseMoneyPtBr(raw);
 }
 
 function formatBalanceInput(value: number | null | undefined): string {
@@ -180,7 +177,15 @@ export function ConfiguracoesContasBancarias() {
       return;
     }
 
-    const parsedBalance = parseBalanceInput(currentBalance);
+    const trimmedBalance = currentBalance.trim();
+    let parsedBalance: number | null = null;
+    if (trimmedBalance) {
+      parsedBalance = parseBalanceInput(trimmedBalance);
+      if (parsedBalance === null) {
+        toast.error("Saldo inválido. Use o formato 20.213,88");
+        return;
+      }
+    }
     const asOf = balanceAsOf.trim() || null;
     const payload = {
       name: trimmedName,
@@ -397,9 +402,16 @@ export function ConfiguracoesContasBancarias() {
                 <Input
                   id="bank-account-balance"
                   inputMode="decimal"
-                  placeholder="0,00"
+                  autoComplete="off"
+                  placeholder="20.213,88"
                   value={currentBalance}
                   onChange={(e) => setCurrentBalance(e.target.value)}
+                  onBlur={() => {
+                    const parsed = parseBalanceInput(currentBalance);
+                    if (parsed !== null) {
+                      setCurrentBalance(formatBalanceInput(parsed));
+                    }
+                  }}
                   disabled={saving}
                   className="pl-10 tabular-nums"
                 />

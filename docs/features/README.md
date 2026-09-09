@@ -7,6 +7,8 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `_template.md` | Copiar para um spec novo |
 | `_exemplo.md` | Spec preenchido (já feito). Não implementar de novo |
 | `cadastro-financeiro-perfil.md` | Perfil com Configurações edita categorias e contas bancárias |
+| `contas-bancarias-saldo-ptbr.md` | Saldo da conta bancária: parse pt-BR sem inflar o valor |
+| `dre-categorias-plano-principais.md` | DRE: seed só principais; subcategorias por unidade |
 | `epoc-estoque-dia.md` | Consulta de estoque EPOC do dia (aba Desenvolvimento) |
 | `epoc-estoque-vs-vendas.md` | Cruzar saídas de estoque com venda de produtos do dia |
 | `epoc-agrupamento-venda-estoque.md` | Agrupamento (Bolinhos) × variantes reais no estoque |
@@ -59,6 +61,8 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `contagem-aba-agenda.md` | Aba Agenda; lista única some após aprovar |
 | `agrupamento-destino-sem-variante.md` | Destino de agrupamento não lista variantes |
 | `search-select-padrao.md` | SearchSelect único em formulário e filtro |
+| `search-select-trigger-digitavel.md` | SearchSelect: digitar no próprio campo (sem busca extra) |
+| `itens-nf-persistir-rascunhos.md` | Itens da NF: manter rascunhos + salvar todas |
 | `correlacao-2-insumo.md` | Correlação 2: é um insumo (ligar ou criar ficha) |
 | `correlacao-2-unificar-varios.md` | Correlação 2: unificar com vários produtos |
 | `classificar-renomear-aba.md` | Aba Correlação passa a Classificar |

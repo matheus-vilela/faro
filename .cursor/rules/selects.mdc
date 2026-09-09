@@ -11,6 +11,7 @@ Não use `Select` / `SelectTrigger` / `SelectContent` / `SelectItem` (`ui/select
 
 - Filtro compacto: `size="sm"` (barra `h-8`).
 - Demais: `size="default"`.
+- Digite no próprio campo do seletor para filtrar (sem segundo clique numa busca interna).
 - Criar na lista: `onCreate` (texto digitado). Campos extras: `footer` no popover ou dialog do pai — não um picker novo.
 - Duas listas no mesmo seletor (ex.: ficha técnica / produção): `tabs` + `option.tab`.
 - Ação fixa «Criar…» sem texto: `trailingOptions` com `accent`.

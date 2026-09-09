@@ -578,11 +578,17 @@ BEGIN
     END IF;
 
     BEGIN
-      PERFORM public.seed_financial_categories_v3(r_company.id);
+      PERFORM public.seed_financial_categories_v4(r_company.id);
       RAISE NOTICE '  [seed] categorias financeiras';
     EXCEPTION
       WHEN undefined_function THEN
-        RAISE NOTICE '  [seed] seed_financial_categories_v3 ausente';
+        BEGIN
+          PERFORM public.seed_financial_categories_v3(r_company.id);
+          RAISE NOTICE '  [seed] categorias financeiras (v3)';
+        EXCEPTION
+          WHEN undefined_function THEN
+            RAISE NOTICE '  [seed] seed_financial_categories_v4/v3 ausente';
+        END;
     END;
 
     BEGIN

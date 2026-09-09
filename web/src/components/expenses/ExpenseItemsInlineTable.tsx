@@ -42,7 +42,7 @@ import type { CompanyCategory } from "@/types/category";
 import type { ExpenseItem } from "@/types/expense";
 import type { Product } from "@/types/product";
 import type { ProductUnitConversionDraft } from "@/types/productUnitConversion";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const CREATE_VALUE = "__new__";
@@ -118,6 +118,17 @@ function receiptKindForItem(
   if (itemId in partialQtyByItemId) return "partial";
   if (receivedItemIds.has(itemId)) return "received";
   return "none";
+}
+
+function canSubmitExpenseItemDraft(
+  draft: ExpenseItemLinkEditDraft,
+): boolean {
+  return (
+    draft.quantity > 0 &&
+    draft.unitValue >= 0 &&
+    (draft.mode !== "create" || !!draft.newProductName.trim()) &&
+    (draft.mode !== "link" || !!draft.productId)
+  );
 }
 
 function invoiceLineLabel(item: ExpenseItem): string {
@@ -331,11 +342,7 @@ function ExpenseItemInlineRow({
       : draft.mode === "link" && draft.productId
         ? draft.productId
         : NONE_VALUE;
-  const canSubmit =
-    draft.quantity > 0 &&
-    draft.unitValue >= 0 &&
-    (draft.mode !== "create" || !!draft.newProductName.trim()) &&
-    (draft.mode !== "link" || !!draft.productId);
+  const canSubmit = canSubmitExpenseItemDraft(draft);
 
   useEffect(() => {
     if (draft.mode !== "link" || !draft.productId) return;
@@ -615,14 +622,15 @@ export function ExpenseItemsInlineTable({
 }) {
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmSaveAll, setConfirmSaveAll] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
   const [companyCategories, setCompanyCategories] = useState<CompanyCategory[]>(
     [],
   );
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [classifReady, setClassifReady] = useState(false);
   const itemIdsKey = items.map((it) => it.id).join(",");
-  const hydratedIdsRef = useRef<Set<string>>(new Set());
 
   const productById = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
@@ -646,6 +654,19 @@ export function ExpenseItemsInlineTable({
     () => new Map(companyCategories.map((c) => [c.id, c])),
     [companyCategories],
   );
+
+  const dirtySaveableIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const it of items) {
+      if (!it.id || notDeliveredIds.has(it.id)) continue;
+      const row = rows[it.id];
+      if (!row) continue;
+      if (!isExpenseItemDraftDirty(row.draft, row.pristine)) continue;
+      if (!canSubmitExpenseItemDraft(row.draft)) continue;
+      ids.push(it.id);
+    }
+    return ids;
+  }, [items, rows, notDeliveredIds]);
 
   const loadCompanyCategories = useCallback(async () => {
     const { data } = await supabase
@@ -674,38 +695,54 @@ export function ExpenseItemsInlineTable({
   }, [companyId, loadCompanyCategories]);
 
   useEffect(() => {
-    hydratedIdsRef.current = new Set();
     setRows({});
     setConfirmId(null);
-  }, [itemIdsKey, companyId]);
+    setConfirmSaveAll(false);
+  }, [companyId]);
 
   useEffect(() => {
     if (!canEdit || !classifReady) return;
-    const toHydrate = items.filter(
-      (it): it is ExpenseItem & { id: string } =>
-        !!it.id && !hydratedIdsRef.current.has(it.id),
-    );
-    if (toHydrate.length === 0) return;
+    // Evita apagar rascunhos no flash de lista vazia durante reload do pai.
+    if (items.length === 0) return;
 
-    for (const it of toHydrate) {
-      hydratedIdsRef.current.add(it.id);
-      const product = it.product_id ? productById.get(it.product_id) : undefined;
-      const initial = initialDraftFromItem(it, companyId, {
-        productDefaultCategoryId: product?.default_expense_category_id,
-        productCmvCategoryId: product?.cmv_category_id,
-      });
-      setRows((prev) => ({
-        ...prev,
-        [it.id]: { draft: initial, pristine: initial },
-      }));
-    }
-  }, [
-    canEdit,
-    classifReady,
-    companyId,
-    items,
-    productById,
-  ]);
+    setRows((prev) => {
+      const next: Record<string, RowState> = {};
+      const idSet = new Set(
+        items.filter((it) => !!it.id).map((it) => it.id as string),
+      );
+
+      for (const it of items) {
+        if (!it.id) continue;
+        const product = it.product_id
+          ? productById.get(it.product_id)
+          : undefined;
+        const initial = initialDraftFromItem(it, companyId, {
+          productDefaultCategoryId: product?.default_expense_category_id,
+          productCmvCategoryId: product?.cmv_category_id,
+        });
+        const existing = prev[it.id];
+        if (
+          existing &&
+          isExpenseItemDraftDirty(existing.draft, existing.pristine)
+        ) {
+          next[it.id] = existing;
+          continue;
+        }
+        next[it.id] = { draft: initial, pristine: initial };
+      }
+
+      // Mantém drafts sujos se o id ainda existir (já coberto acima).
+      for (const [id, state] of Object.entries(prev)) {
+        if (!idSet.has(id)) continue;
+        if (next[id]) continue;
+        if (isExpenseItemDraftDirty(state.draft, state.pristine)) {
+          next[id] = state;
+        }
+      }
+
+      return next;
+    });
+  }, [canEdit, classifReady, companyId, itemIdsKey, items, productById]);
 
   const handleDraftChange = useCallback(
     (itemId: string, next: ExpenseItemLinkEditDraft) => {
@@ -746,6 +783,17 @@ export function ExpenseItemsInlineTable({
     [],
   );
 
+  const markRowSaved = useCallback((itemId: string) => {
+    setRows((prev) => {
+      const cur = prev[itemId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [itemId]: { draft: cur.draft, pristine: cur.draft },
+      };
+    });
+  }, []);
+
   const confirmItem = confirmId
     ? items.find((it) => it.id === confirmId)
     : undefined;
@@ -774,23 +822,95 @@ export function ExpenseItemsInlineTable({
       return;
     }
     toast.success("Item atualizado.");
-    hydratedIdsRef.current.delete(confirmItem.id);
-    setRows((prev) => {
-      const next = { ...prev };
-      delete next[confirmItem.id!];
-      return next;
-    });
+    markRowSaved(confirmItem.id);
     setConfirmId(null);
     onSaved(result.createdProduct);
+  };
+
+  const handleSaveAll = async () => {
+    const queue = dirtySaveableIds
+      .map((id) => {
+        const item = items.find((it) => it.id === id);
+        const row = rows[id];
+        if (!item || !row) return null;
+        return { id, item, draft: row.draft };
+      })
+      .filter(Boolean) as Array<{
+      id: string;
+      item: ExpenseItem;
+      draft: ExpenseItemLinkEditDraft;
+    }>;
+
+    if (queue.length === 0) {
+      setConfirmSaveAll(false);
+      return;
+    }
+
+    setSavingAll(true);
+    let ok = 0;
+    let created: Product | undefined;
+    const errors: string[] = [];
+
+    for (const entry of queue) {
+      setSavingId(entry.id);
+      const result = await saveExpenseItemLinkEdit({
+        companyId,
+        item: entry.item,
+        draft: entry.draft,
+        deferProductCreation,
+      });
+      if (result.error) {
+        errors.push(
+          `${invoiceLineLabel(entry.item)}: ${result.error}`,
+        );
+        continue;
+      }
+      ok += 1;
+      markRowSaved(entry.id);
+      if (result.createdProduct) created = result.createdProduct;
+    }
+
+    setSavingId(null);
+    setSavingAll(false);
+    setConfirmSaveAll(false);
+
+    if (ok > 0) {
+      toast.success(
+        ok === 1 ? "1 item atualizado." : `${ok} itens atualizados.`,
+      );
+      onSaved(created);
+    }
+    if (errors.length > 0) {
+      toast.error(
+        errors.length === 1
+          ? errors[0]
+          : `${errors.length} itens falharam ao salvar.`,
+      );
+    }
   };
 
   if (items.length === 0) return null;
 
   return (
     <div>
-      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-        Itens da nota fiscal
-      </p>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          Itens da nota fiscal
+        </p>
+        {canEdit && dirtySaveableIds.length > 0 ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={savingAll || !!savingId}
+            onClick={() => setConfirmSaveAll(true)}
+          >
+            {savingAll
+              ? "Salvando…"
+              : `Salvar todas (${dirtySaveableIds.length})`}
+          </Button>
+        ) : null}
+      </div>
       {canEdit ? (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[80rem] text-sm">
@@ -833,7 +953,7 @@ export function ExpenseItemsInlineTable({
                     itemId={it.id}
                     draft={row.draft}
                     dirty={isExpenseItemDraftDirty(row.draft, row.pristine)}
-                    saving={savingId === it.id}
+                    saving={savingAll || savingId === it.id}
                     companyId={companyId}
                     productById={productById}
                     productSelectOptions={productSelectOptions}
@@ -951,6 +1071,38 @@ export function ExpenseItemsInlineTable({
               }}
             >
               {savingId ? "Salvando…" : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmSaveAll}
+        onOpenChange={(next) => {
+          if (savingAll) return;
+          setConfirmSaveAll(next);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Salvar todas as alterações?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {dirtySaveableIds.length === 1
+                ? "1 item com alteração será gravado."
+                : `${dirtySaveableIds.length} itens com alteração serão gravados.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={savingAll}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={savingAll}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleSaveAll();
+              }}
+            >
+              {savingAll ? "Salvando…" : "Salvar todas"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

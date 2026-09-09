@@ -27,7 +27,7 @@ Um único seletor de formulário: `SearchSelect`. Busca sempre. Criar na lista q
 
 ## Comportamento esperado
 
-- Trigger com busca no popover; `size` `sm` (filtros `h-8`) ou `default`.
+- Trigger digitável: clique/foco e digite para filtrar (sem busca extra no popover). `size` `sm` (filtros `h-8`) ou `default`.
 - `onCreate(texto)` mostra «Cadastrar «texto»» se a busca não for um item exato. Extra de campos vai em `footer` ou dialog do pai.
 - Grupo (`group`), limpar (`clearable`), busca remota (`filterLocally={false}` + `onSearchChange` + `onListScroll`).
 - Contagem e demais formulários/filtros usam só `SearchSelect`.

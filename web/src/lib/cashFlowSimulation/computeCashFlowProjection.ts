@@ -1,3 +1,4 @@
+import { parseMoneyPtBr } from "@/lib/formatMoneyPtBr";
 import { addDaysYmd } from "@/lib/payableTotals";
 import {
   normalizeWeekStartsOn,
@@ -165,11 +166,7 @@ export function toCashFlowItem(input: {
 
 export function parseOpeningBalance(raw: unknown): number {
   if (raw === null || raw === undefined || raw === "") return 0;
-  const n =
-    typeof raw === "number"
-      ? raw
-      : parseFloat(String(raw).replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
+  return parseMoneyPtBr(raw) ?? 0;
 }
 
 export function computeCashFlowProjection(input: {

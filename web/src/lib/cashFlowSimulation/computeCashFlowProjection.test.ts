@@ -225,6 +225,11 @@ describe("computeCashFlowProjection", () => {
     expect(parseOpeningBalance(1500)).toBe(1500);
   });
 
+  it("parseOpeningBalance lê pt-BR sem inflar o decimal", () => {
+    expect(parseOpeningBalance("20.213,88")).toBe(20213.88);
+    expect(parseOpeningBalance("20213.88")).toBe(20213.88);
+  });
+
   it("range vazio produz buckets zerados sem erro", () => {
     const result = computeCashFlowProjection({
       rawItems: [],

@@ -131,6 +131,10 @@ export function ConfiguracoesCategorias() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setExpanded({});
+  }, [currentCompany?.id]);
+
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const childrenMap = useMemo(() => buildChildrenMap(rows), [rows]);
   const roots = useMemo(
@@ -337,12 +341,19 @@ export function ConfiguracoesCategorias() {
       if (error) return toast.error(error.message);
       toast.success("Categoria atualizada.");
     } else {
+      const parentToExpand =
+        formKind === "subcategoria" && formParentId !== "ROOT"
+          ? formParentId
+          : null;
       const { error } = await supabase
         .from("company_categories")
         .insert(payload);
       setSaving(false);
       if (error) return toast.error(error.message);
       toast.success("Categoria criada.");
+      if (parentToExpand) {
+        setExpanded((s) => ({ ...s, [parentToExpand]: true }));
+      }
     }
     resetForm();
     setSheetOpen(false);
@@ -387,12 +398,27 @@ export function ConfiguracoesCategorias() {
 
   const remove = async (row: CompanyCategory) => {
     if (!currentCompany?.id || !canManage) return;
+    if (row.parent_id == null) {
+      toast.error("Categorias principais não podem ser removidas. Desative-as.");
+      return;
+    }
     const { error } = await supabase
       .from("company_categories")
       .delete()
       .eq("id", row.id)
       .eq("company_id", currentCompany.id);
-    if (error) return toast.error(error.message);
+    if (error) {
+      const msg = error.message;
+      if (
+        /em uso|padrão não pode|padrao|arquive/i.test(msg) ||
+        msg.includes("ativo = false")
+      ) {
+        return toast.error(
+          "Categoria em uso ou protegida. Arquive (desative) em vez de remover.",
+        );
+      }
+      return toast.error(msg);
+    }
     toast.success("Categoria removida.");
     if (selectedId === row.id) {
       resetForm();
@@ -493,17 +519,19 @@ export function ConfiguracoesCategorias() {
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="text-destructive"
-                  onClick={() => remove(node)}
-                  aria-label="Remover categoria"
-                  title="Remover"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {node.parent_id != null ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive"
+                    onClick={() => void remove(node)}
+                    aria-label="Remover categoria"
+                    title="Remover"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

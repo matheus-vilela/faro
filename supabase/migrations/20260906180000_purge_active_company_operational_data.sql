@@ -419,7 +419,7 @@ BEGIN
   END IF;
 
   BEGIN
-    PERFORM public.seed_financial_categories_v3(p_company_id);
+    PERFORM public.seed_financial_categories_v4(p_company_id);
   EXCEPTION
     WHEN undefined_function THEN
       NULL;

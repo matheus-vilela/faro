@@ -19,8 +19,7 @@ function formatInputValue(value: number): string {
 function parseCurrencyInput(raw: string): number {
   const trimmed = raw.trim();
   if (!trimmed) return 0;
-  const normalized = trimmed.replace(/\./g, "").replace(",", ".");
-  return parseOpeningBalance(normalized);
+  return parseOpeningBalance(trimmed);
 }
 
 function formatYmdBr(ymd: string): string {
