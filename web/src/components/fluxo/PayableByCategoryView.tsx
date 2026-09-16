@@ -16,6 +16,7 @@ import { formatContasCount } from "@/lib/payableTotals";
 import {
   categoryTipoIcon,
   formatDueDateShort,
+  formatEmissionDateShort,
   groupPayablesByCategory,
   resolvePayableOrigin,
   resolvePayableSituation,
@@ -162,6 +163,10 @@ export function PayableByCategoryView({
                                   {b.split_from_boleto_id ? (
                                     <PayableRemainderBadge />
                                   ) : null}
+                                  <span className="text-sm text-muted-foreground">
+                                    Emis.{" "}
+                                    {formatEmissionDateShort(b.emission_date)}
+                                  </span>
                                   <span className="text-sm text-muted-foreground">
                                     Vence {formatDueDateShort(b.due_date)}
                                   </span>

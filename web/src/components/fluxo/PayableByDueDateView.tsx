@@ -10,9 +10,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  boletoEmissionYmd,
   boletoSupplierLabel,
   formatCategoryPathBullet,
   formatDueDateCell,
+  formatEmissionDateShort,
   resolvePayableOrigin,
   resolvePayableSituation,
   sortPayablesByDueDate,
@@ -47,6 +49,7 @@ export function PayableByDueDateView({
 }) {
   const rows = useMemo(() => sortPayablesByDueDate(boletos), [boletos]);
   type DueSortKey =
+    | "emission"
     | "due"
     | "supplier"
     | "category"
@@ -58,6 +61,8 @@ export function PayableByDueDateView({
     DueSortKey
   >(rows, "due", (a, b, key) => {
     switch (key) {
+      case "emission":
+        return boletoEmissionYmd(a).localeCompare(boletoEmissionYmd(b));
       case "due":
         return a.due_date.localeCompare(b.due_date);
       case "supplier":
@@ -100,9 +105,17 @@ export function PayableByDueDateView({
       </CardHeader>
       <CardContent className="pt-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-sm">
+          <table className="w-full min-w-[800px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <SortableTableHead
+                  label="Emissão"
+                  column="emission"
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={onSort}
+                  className="pb-2 pr-3 font-semibold"
+                />
                 <SortableTableHead
                   label="Vencimento"
                   column="due"
@@ -168,6 +181,9 @@ export function PayableByDueDateView({
                     className="cursor-pointer border-b border-border/50 last:border-0 hover:bg-muted/30"
                     onClick={() => onSelect(b)}
                   >
+                    <td className="py-3 pr-3 tabular-nums text-muted-foreground">
+                      {formatEmissionDateShort(b.emission_date)}
+                    </td>
                     <td
                       className={cn(
                         "py-3 pr-3 font-medium tabular-nums",

@@ -136,7 +136,7 @@ function CalendarDayValueBucket({
   return (
     <div
       className={cn(
-        "w-full min-w-0 overflow-hidden rounded-md border px-2 py-1.5 sm:py-2",
+        "w-full min-w-0 overflow-hidden rounded-md border px-0.5 py-1 @[96px]:px-1.5 @[96px]:py-1.5 @[128px]:px-2 @[128px]:py-2",
         styles.wrap,
         muted && "opacity-85",
       )}
@@ -144,7 +144,7 @@ function CalendarDayValueBucket({
     >
       <p
         className={cn(
-          "text-[9px] font-bold uppercase leading-tight tracking-wide sm:text-[10px]",
+          "text-[8px] font-bold uppercase leading-tight tracking-wide @[96px]:text-[9px] @[128px]:text-[10px]",
           styles.label,
         )}
       >
@@ -152,7 +152,7 @@ function CalendarDayValueBucket({
       </p>
       <p
         className={cn(
-          "mt-0.5 text-right text-sm font-extrabold tabular-nums leading-none sm:text-base",
+          "mt-0.5 text-right font-extrabold tabular-nums leading-none tracking-tight whitespace-nowrap text-[clamp(8px,11cqi,0.875rem)]",
           styles.amount,
         )}
       >
@@ -250,7 +250,7 @@ export function BoletosCalendar({
                     role="presentation"
                     onClick={() => onDayListOpen(dayListPayload)}
                     className={cn(
-                      "relative flex cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5",
+                      "@container relative flex cursor-pointer flex-col overflow-hidden border-t border-l transition-colors hover:bg-muted/5",
                       splitPayableTotals
                         ? "min-h-[132px] sm:min-h-[156px]"
                         : "min-h-[112px] sm:min-h-[128px]",

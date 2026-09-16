@@ -1197,13 +1197,23 @@ export function FluxoBoletosPage({
           )}
         </div>
         <div className="flex shrink-0 flex-row items-end justify-between border-t border-border pt-3 sm:flex-col sm:items-end sm:justify-start sm:border-t-0 sm:pt-0 sm:text-right">
-          <div className="flex  items-center justify-end gap-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Vencimento:
-            </p>
-            <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
-              {formatDate(b.due_date)}
-            </p>
+          <div className="space-y-1">
+            <div className="flex items-center justify-end gap-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Emissão:
+              </p>
+              <p className="text-sm font-medium tabular-nums text-foreground">
+                {formatDate(b.emission_date ?? "")}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Vencimento:
+              </p>
+              <p className="text-sm font-medium tabular-nums text-foreground">
+                {formatDate(b.due_date)}
+              </p>
+            </div>
           </div>
           <p
             className={cn(
@@ -1286,11 +1296,19 @@ export function FluxoBoletosPage({
           )}
         </div>
         <div className="flex items-end justify-between border-t border-border/70 pt-1.5">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <span className="uppercase tracking-wide">Venc.:</span>
-            <span className="font-medium text-foreground">
-              {formatDate(b.due_date)}
-            </span>
+          <div className="space-y-0.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1">
+              <span className="uppercase tracking-wide">Emis.:</span>
+              <span className="font-medium text-foreground">
+                {formatDate(b.emission_date ?? "")}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="uppercase tracking-wide">Venc.:</span>
+              <span className="font-medium text-foreground">
+                {formatDate(b.due_date)}
+              </span>
+            </div>
           </div>
           <p
             className={cn(

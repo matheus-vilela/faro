@@ -99,6 +99,20 @@ export function formatDueDateShort(dueYmd: string): string {
   return `${d}/${m}`;
 }
 
+export function boletoEmissionYmd(
+  b: Pick<FluxoBoletoRow, "emission_date">,
+): string {
+  return String(b.emission_date ?? "").slice(0, 10);
+}
+
+export function formatEmissionDateShort(
+  emissionYmd: string | null | undefined,
+): string {
+  const part = String(emissionYmd ?? "").slice(0, 10);
+  if (!part) return "—";
+  return formatDueDateShort(part);
+}
+
 export function formatDueDateCell(
   dueYmd: string,
   todayYmd: string,

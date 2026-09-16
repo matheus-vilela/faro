@@ -263,6 +263,14 @@ export function BoletoResumoSheet({
 
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <ResumoFact
+                  label="Emissão"
+                  value={
+                    <span className="tabular-nums">
+                      {formatDate(boleto.emission_date ?? "")}
+                    </span>
+                  }
+                />
+                <ResumoFact
                   label="Vencimento"
                   value={
                     <span className="tabular-nums">
