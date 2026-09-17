@@ -41,6 +41,10 @@ type SessionRow = {
   assigned_company_member_id: string | null;
   inventory_count_groups: { name: string } | null;
   inventory_count_listings: { name: string } | null;
+  inventory_count_session_groups?:
+    | { group_id: string; inventory_count_groups: { name: string } | null }[]
+    | { group_id: string; inventory_count_groups: { name: string } | null }
+    | null;
   initiator_member: { name: string } | null;
   assigned_member: { name: string } | null;
   profiles: { full_name: string | null } | null;
@@ -152,8 +156,9 @@ export function EstoqueHistoricoContagem({
         inventory_count_group_id,
         inventory_count_listing_id,
         assigned_company_member_id,
-        inventory_count_groups ( name ),
+        inventory_count_groups!inventory_count_sessions_inventory_count_group_id_fkey ( name ),
         inventory_count_listings ( name ),
+        inventory_count_session_groups ( group_id, inventory_count_groups ( name ) ),
         initiator_member:company_members!inventory_count_sessions_company_member_id_fkey ( name ),
         assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name ),
         profiles!inventory_count_sessions_created_by_user_id_fkey ( full_name ),
@@ -272,13 +277,24 @@ export function EstoqueHistoricoContagem({
         ? "Painel"
         : "WhatsApp (proprietário)";
 
-  const groupLabel = (r: SessionRow) =>
-    inventoryCountSessionGroupLabel({
+  const groupLabel = (r: SessionRow) => {
+    const origin = inventoryCountSessionGroupLabel({
       kind: r.kind,
       groupName: r.inventory_count_groups?.name,
       onboardingLabel:
         listView === "cards" ? "Contagem geral (onboarding)" : "Onboarding",
     });
+    const raw = r.inventory_count_session_groups;
+    const rows = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+    const extra = [
+      ...new Set(
+        rows
+          .map((row) => row.inventory_count_groups?.name?.trim() || "")
+          .filter((n) => n && n !== r.inventory_count_groups?.name?.trim()),
+      ),
+    ];
+    return extra.length ? `${origin} · ${extra.join(", ")}` : origin;
+  };
 
   const confirmCancel = async () => {
     if (!cancelTarget) return;

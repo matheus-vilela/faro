@@ -16,10 +16,19 @@ import {
 } from "@/lib/inventoryCount/createSession";
 import type { InventoryCountListing } from "@/types/inventoryCount";
 
-export type CountReusePrompt = {
-  listings: InventoryCountListing[];
-  busyKey: string;
-};
+export type CountReusePrompt =
+  | {
+      kind: "listings";
+      listings: InventoryCountListing[];
+      busyKey: string;
+    }
+  | {
+      kind: "round";
+      groupName: string;
+      session: InventoryCountSessionSummary;
+      pendingApproval: boolean;
+      busyKey: string;
+    };
 
 export function EstoqueContagemReuseDialog({
   prompt,
@@ -36,8 +45,8 @@ export function EstoqueContagemReuseDialog({
   onReuse: () => void;
   onCreateNew: () => void;
 }) {
-  const listings = prompt?.listings ?? [];
-  const isGroup = listings.length > 1;
+  const isRound = prompt?.kind === "round";
+  const listings = prompt?.kind === "listings" ? prompt.listings : [];
   const first = listings[0] ?? null;
   const firstActive = first
     ? activeSessionsForListing(sessions, first.id)
@@ -50,45 +59,27 @@ export function EstoqueContagemReuseDialog({
   return (
     <Dialog open={prompt != null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        {isGroup ? (
+        {isRound && prompt.kind === "round" ? (
           <>
             <DialogHeader>
-              <DialogTitle>Já existem contagens neste grupo</DialogTitle>
+              <DialogTitle>Já existe uma rodada neste setor</DialogTitle>
               <DialogDescription>
-                Continuar reusa o link de cada lista aberta e só cria as que
-                ainda não têm. Abrir tudo de novo deixa as anteriores no
-                Histórico.
+                Continuar reusa o mesmo link (pode incluir outros setores).
+                Começar outra deixa a anterior no Histórico.
               </DialogDescription>
             </DialogHeader>
-            <ul className="max-h-56 space-y-2 overflow-y-auto py-1 text-sm">
-              {listings.map((l) => {
-                const active = activeSessionsForListing(sessions, l.id);
-                const row = active[0];
-                return (
-                  <li
-                    key={l.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2"
-                  >
-                    <span className="font-medium text-foreground">{l.name}</span>
-                    {row ? (
-                      <span className="shrink-0 text-right text-xs text-muted-foreground">
-                        {activeCountStatusLabel(row.status)}
-                        <span className="mt-0.5 block">
-                          {formatCountSessionWhen(row.created_at)}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        Sem contagem aberta
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            {pendingAny ? (
+            <p className="text-sm">
+              <span className="font-medium text-foreground">
+                {prompt.groupName}
+              </span>
+              {" · "}
+              {activeCountStatusLabel(prompt.session.status)}
+              {" · "}
+              {formatCountSessionWhen(prompt.session.created_at)}
+            </p>
+            {prompt.pendingApproval ? (
               <p className="text-xs text-muted-foreground">
-                Há listagem neste grupo aguardando conferência.
+                Há também uma rodada deste setor aguardando conferência.
               </p>
             ) : null}
             <DialogFooter className="sm:flex-wrap">
@@ -106,10 +97,10 @@ export function EstoqueContagemReuseDialog({
                 disabled={busy}
                 onClick={onCreateNew}
               >
-                Abrir tudo de novo
+                Começar uma nova
               </Button>
               <Button type="button" disabled={busy} onClick={onReuse}>
-                Continuar as existentes e abrir só as que faltam
+                Continuar esta
               </Button>
             </DialogFooter>
           </>

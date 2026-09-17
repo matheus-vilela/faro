@@ -61,6 +61,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `contagem-reusar-sessao-aberta.md` | Listas: continuar sessão aberta em vez de criar outra |
 | `contagem-lista-unica.md` | Lista avulsa (agora ou once) + cancelar sessão no Histórico |
 | `contagem-aba-agenda.md` | Aba Agenda; lista única some após aprovar |
+| `contagem-ambientes-unico-link.md` | Rodada: um link, N setores; soma no commit; conferência em R$ |
 | `agrupamento-destino-sem-variante.md` | Destino de agrupamento não lista variantes |
 | `search-select-padrao.md` | SearchSelect único em formulário e filtro |
 | `search-select-trigger-digitavel.md` | SearchSelect: digitar no próprio campo (sem busca extra) |

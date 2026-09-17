@@ -258,7 +258,7 @@ export function DashboardDayOperations({
           status,
           created_at,
           submitted_at,
-          inventory_count_groups ( name ),
+          inventory_count_groups!inventory_count_sessions_inventory_count_group_id_fkey ( name ),
           inventory_count_listings ( name ),
           assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name ),
           initiator_member:company_members!inventory_count_sessions_company_member_id_fkey ( name )

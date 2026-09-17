@@ -20,11 +20,24 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { SearchSelect } from "@/components/ui/search-select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useTheme } from "@/contexts/ThemeContext";
-import { supabase } from "@/lib/supabase";
 import { systemUnitLabel } from "@/lib/companyUnits/systemUnits";
 import { formatPackCountQty } from "@/lib/inventoryCount/packCountCalculator";
-import { ClipboardList, Loader2, ScanBarcode } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabase";
+import {
+  Check,
+  ClipboardList,
+  Loader2,
+  Menu,
+  ScanBarcode,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -63,7 +76,7 @@ type AllowedUnit = {
 
 type ProductLine = {
   id: string;
-  line_id?: string;
+  line_id: string;
   name: string;
   sku: string | null;
   unit: string;
@@ -73,6 +86,19 @@ type ProductLine = {
   allowed_units?: AllowedUnit[];
   recount_required?: boolean;
   sort_order?: number;
+  listing_id?: string | null;
+  listing_name?: string | null;
+  group_id?: string | null;
+  group_name?: string | null;
+};
+
+type CountPoint = {
+  listing_id: string | null;
+  listing_name: string;
+  group_id: string | null;
+  group_name: string;
+  total: number;
+  counted: number;
 };
 
 type LoadJson = {
@@ -84,6 +110,7 @@ type LoadJson = {
   listing_name?: string;
   assigned_to_name?: string;
   products?: ProductLine[];
+  points?: CountPoint[];
 };
 
 function publicCountErrorMessage(code: string | undefined): string {
@@ -107,16 +134,52 @@ function unitsForProduct(p: ProductLine): AllowedUnit[] {
   return [{ code: p.unit, hint: null }];
 }
 
+function lineKey(p: ProductLine): string {
+  return p.line_id || p.id;
+}
+
+function lineIsPending(p: ProductLine, sessionStatus: string): boolean {
+  if (sessionStatus === "returned") {
+    return Boolean(p.recount_required) && p.counted_qty == null;
+  }
+  return p.counted_qty == null;
+}
+
+function pointsFromProducts(
+  products: ProductLine[],
+  sessionStatus: string,
+): CountPoint[] {
+  const map = new Map<string, CountPoint>();
+  for (const p of products) {
+    const listingId = p.listing_id ?? "";
+    const key = listingId || "_none";
+    const row = map.get(key) ?? {
+      listing_id: p.listing_id ?? null,
+      listing_name: (p.listing_name ?? "").trim() || "Listagem",
+      group_id: p.group_id ?? null,
+      group_name: (p.group_name ?? "").trim(),
+      total: 0,
+      counted: 0,
+    };
+    row.total += 1;
+    if (!lineIsPending(p, sessionStatus)) row.counted += 1;
+    map.set(key, row);
+  }
+  return [...map.values()];
+}
+
 export function ContagemEstoquePublic() {
   const { token } = useParams<{ token: string }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("");
   const [groupName, setGroupName] = useState("");
   const [listingName, setListingName] = useState("");
   const [assignedToName, setAssignedToName] = useState("");
   const [products, setProducts] = useState<ProductLine[]>([]);
   const [sessionStatus, setSessionStatus] = useState("open");
+  const [activeListingId, setActiveListingId] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [qtyDraft, setQtyDraft] = useState("");
   const [unitDraft, setUnitDraft] = useState("");
@@ -126,18 +189,45 @@ export function ContagemEstoquePublic() {
   const [barcodeQuery, setBarcodeQuery] = useState("");
   const [packCalcOpen, setPackCalcOpen] = useState(false);
   const [recountIntroOpen, setRecountIntroOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
-  const queue = useMemo(() => {
+  const points = useMemo(
+    () => pointsFromProducts(products, sessionStatus),
+    [products, sessionStatus],
+  );
+
+  const queueAll = useMemo(() => {
     if (sessionStatus === "returned") {
       return products.filter((p) => p.recount_required);
     }
     return products;
   }, [products, sessionStatus]);
 
+  const listingIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const p of queueAll) {
+      const id = p.listing_id ?? "";
+      if (!ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  }, [queueAll]);
+
+  const queue = useMemo(() => {
+    if (listingIds.length <= 1) return queueAll;
+    const wanted = activeListingId ?? listingIds[0] ?? "";
+    return queueAll.filter((p) => (p.listing_id ?? "") === wanted);
+  }, [queueAll, listingIds, activeListingId]);
+
   const current = queue[index] ?? null;
   const currentUnits = current ? unitsForProduct(current) : [];
   const currentHint =
     currentUnits.find((u) => u.code === unitDraft)?.hint ?? null;
+
+  const pendingAll = useMemo(
+    () => queueAll.filter((p) => lineIsPending(p, sessionStatus)),
+    [queueAll, sessionStatus],
+  );
+  const roundComplete = pendingAll.length === 0 && queueAll.length > 0;
 
   const load = useCallback(async () => {
     if (!token) {
@@ -160,20 +250,25 @@ export function ContagemEstoquePublic() {
       setError(publicCountErrorMessage(row?.error));
       return;
     }
-    const list = row.products ?? [];
+    const list = (row.products ?? []).map((p) => ({
+      ...p,
+      line_id: p.line_id || p.id,
+    }));
     const status = row.status ?? "open";
     setCompanyName(row.company_name ?? "");
     setGroupName((row.group_name ?? "").trim());
     setListingName((row.listing_name ?? "").trim());
     setAssignedToName((row.assigned_to_name ?? "").trim());
     setSessionStatus(status);
-    setProducts(
+    const normalized =
       status === "returned"
         ? list.map((p) =>
             p.recount_required ? { ...p, counted_qty: null } : p,
           )
-        : list,
-    );
+        : list;
+    setProducts(normalized);
+    const firstPending = normalized.find((p) => lineIsPending(p, status));
+    setActiveListingId(firstPending?.listing_id ?? normalized[0]?.listing_id ?? null);
     setQtyDraft("");
     setIndex(0);
     setRecountIntroOpen(
@@ -195,11 +290,9 @@ export function ContagemEstoquePublic() {
     const units = unitsForProduct(current);
     const saved = (current.counted_unit_code ?? "").trim().toLowerCase();
     const fallback = current.unit;
-    setUnitDraft(
-      units.some((u) => u.code === saved) ? saved : fallback,
-    );
+    setUnitDraft(units.some((u) => u.code === saved) ? saved : fallback);
     setPackCalcOpen(false);
-  }, [current?.id]);
+  }, [current?.line_id, current?.id]);
 
   const confirmCurrent = async (): Promise<boolean> => {
     if (!token || !current) return false;
@@ -210,15 +303,25 @@ export function ContagemEstoquePublic() {
     }
     setSaving(true);
     setError(null);
-    const { data: res, error: err } = await supabase.rpc(
+    setSavedNote(null);
+    const baseArgs = {
+      p_token: token,
+      p_product_id: current.id,
+      p_counted_qty: n,
+      p_counted_unit_code: unitDraft || current.unit,
+    };
+    let { data: res, error: err } = await supabase.rpc(
       "set_inventory_count_line_public",
       {
-        p_token: token,
-        p_product_id: current.id,
-        p_counted_qty: n,
-        p_counted_unit_code: unitDraft || current.unit,
+        ...baseArgs,
+        p_line_id: current.line_id || current.id,
       },
     );
+    if (err) {
+      const retry = await supabase.rpc("set_inventory_count_line_public", baseArgs);
+      res = retry.data;
+      err = retry.error;
+    }
     setSaving(false);
     if (err) {
       setError("Não foi possível salvar este item.");
@@ -238,11 +341,12 @@ export function ContagemEstoquePublic() {
 
     setProducts((prev) =>
       prev.map((p) =>
-        p.id === current.id
+        lineKey(p) === lineKey(current)
           ? {
               ...p,
               counted_qty: n,
               counted_unit_code: unitDraft || current.unit,
+              recount_required: false,
             }
           : p,
       ),
@@ -250,18 +354,54 @@ export function ContagemEstoquePublic() {
     return true;
   };
 
+  const goToLine = (line: ProductLine) => {
+    setActiveListingId(line.listing_id ?? null);
+    const listingQueue =
+      sessionStatus === "returned"
+        ? products.filter(
+            (p) =>
+              p.recount_required &&
+              (p.listing_id ?? "") === (line.listing_id ?? ""),
+          )
+        : products.filter((p) => (p.listing_id ?? "") === (line.listing_id ?? ""));
+    const idx = listingQueue.findIndex((p) => lineKey(p) === lineKey(line));
+    setIndex(idx >= 0 ? idx : 0);
+    setError(null);
+    setNavOpen(false);
+  };
+
   const goNext = async () => {
     const ok = await confirmCurrent();
     if (!ok) return;
     if (index < queue.length - 1) {
       setIndex((i) => i + 1);
+      return;
     }
+    const nextPending = pendingAll.find(
+      (p) => lineKey(p) !== (current ? lineKey(current) : ""),
+    );
+    if (nextPending) {
+      goToLine(nextPending);
+    }
+  };
+
+  const savePause = async () => {
+    const ok = await confirmCurrent();
+    if (!ok) return;
+    setSavedNote("Salvo. Pode fechar e voltar pelo mesmo link.");
   };
 
   const submit = async () => {
     if (!token) return;
-    const ok = await confirmCurrent();
-    if (!ok) return;
+    if (!roundComplete) {
+      setNavOpen(true);
+      setError("Ainda há pontos sem quantidade.");
+      return;
+    }
+    if (current) {
+      const ok = await confirmCurrent();
+      if (!ok) return;
+    }
 
     setSubmitting(true);
     const { data: res, error: err } = await supabase.rpc(
@@ -280,6 +420,7 @@ export function ContagemEstoquePublic() {
     if (!row?.ok) {
       if (row?.error === "incomplete") {
         setError("Ainda há itens sem quantidade.");
+        setNavOpen(true);
         return;
       }
       if (row?.error === "group_required" || row?.error === "listing_required") {
@@ -299,19 +440,19 @@ export function ContagemEstoquePublic() {
   const jumpBarcode = () => {
     const q = barcodeQuery.trim();
     if (!q) return;
-    const found = queue.findIndex(
+    const found = queueAll.find(
       (p) =>
         (p.barcode && p.barcode === q) ||
         (p.sku && p.sku.toLowerCase() === q.toLowerCase()) ||
         p.name.toLowerCase().includes(q.toLowerCase()),
     );
-    if (found < 0) {
+    if (!found) {
       setError("Item não encontrado nesta contagem.");
       return;
     }
     setError(null);
-    setIndex(found);
     setBarcodeQuery("");
+    goToLine(found);
   };
 
   if (loading) {
@@ -374,8 +515,16 @@ export function ContagemEstoquePublic() {
     );
   }
 
-  const isLast = index >= queue.length - 1;
   const progressLabel = `${index + 1} de ${queue.length}`;
+  const currentGroupName = (current.group_name ?? "").trim() || groupName;
+  const currentListingName = (current.listing_name ?? "").trim() || listingName;
+  const groupedPoints = new Map<string, CountPoint[]>();
+  for (const point of points) {
+    const key = point.group_name || "Pontos";
+    const list = groupedPoints.get(key) ?? [];
+    list.push(point);
+    groupedPoints.set(key, list);
+  }
 
   return (
     <PublicPageShell>
@@ -383,21 +532,35 @@ export function ContagemEstoquePublic() {
         <CardHeader className="space-y-2">
           <CardTitle className="flex items-center gap-2 text-xl">
             <ClipboardList className="h-5 w-5" />
-            Contagem
+            <span className="flex-1">Contagem</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="shrink-0"
+              aria-label="Pontos da contagem"
+              onClick={() => setNavOpen(true)}
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
           </CardTitle>
           <CardDescription className="space-y-1">
             {companyName ? (
               <p className="font-medium text-foreground">{companyName}</p>
             ) : null}
-            {groupName ? <p>Grupo: {groupName}</p> : null}
-            {listingName ? <p>Listagem: {listingName}</p> : null}
+            {currentGroupName ? <p>Setor: {currentGroupName}</p> : null}
+            {currentListingName ? <p>Ponto: {currentListingName}</p> : null}
             {assignedToName ? <p>Operador: {assignedToName}</p> : null}
             {sessionStatus === "returned" ? (
               <p className="text-amber-700 dark:text-amber-400">
                 Conte de novo e, no último item, envie.
               </p>
             ) : (
-              <p>Um item por vez.</p>
+              <p>
+                {pendingAll.length === 0
+                  ? "Todos os pontos desta rodada foram contados."
+                  : `${pendingAll.length} item(ns) pendente(s) na rodada.`}
+              </p>
             )}
           </CardDescription>
         </CardHeader>
@@ -445,7 +608,7 @@ export function ContagemEstoquePublic() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    void (isLast ? submit() : goNext());
+                    void goNext();
                   }
                 }}
               />
@@ -466,7 +629,7 @@ export function ContagemEstoquePublic() {
               <p className="mt-2 text-xs text-muted-foreground">{currentHint}</p>
             ) : null}
             <InventoryCountPackCalculator
-              key={current.id}
+              key={lineKey(current)}
               hubUnit={current.unit}
               allowedUnits={currentUnits}
               onOpenChange={(open) => {
@@ -486,6 +649,9 @@ export function ContagemEstoquePublic() {
           {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : null}
+          {savedNote ? (
+            <p className="text-sm text-muted-foreground">{savedNote}</p>
+          ) : null}
 
           <div className="flex gap-2">
             <Button
@@ -496,56 +662,149 @@ export function ContagemEstoquePublic() {
               onClick={() => {
                 setIndex((i) => Math.max(0, i - 1));
                 setError(null);
+                setSavedNote(null);
               }}
             >
               Anterior
             </Button>
-            {!isLast ? (
-              <Button
-                type="button"
-                className="flex-1"
-                disabled={saving || submitting}
-                onClick={() => void goNext()}
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Próximo"}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                className="flex-1"
-                disabled={saving || submitting}
-                onClick={() => void submit()}
-              >
-                {submitting || saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : sessionStatus === "returned" ? (
-                  "Enviar de novo"
-                ) : (
-                  "Enviar p/ aprovação"
-                )}
-              </Button>
-            )}
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={saving || submitting}
+              onClick={() => void goNext()}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Próximo"}
+            </Button>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={saving || submitting}
+            onClick={() => void savePause()}
+          >
+            Salvar
+          </Button>
+          <Button
+            type="button"
+            className="w-full"
+            disabled={saving || submitting}
+            onClick={() => void submit()}
+          >
+            {submitting || saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : sessionStatus === "returned" ? (
+              "Enviar de novo"
+            ) : (
+              "Enviar p/ aprovação"
+            )}
+          </Button>
         </CardContent>
       </Card>
+
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent className="flex h-full max-h-[100dvh] w-full flex-col gap-0 overflow-hidden p-0">
+          <SheetHeader className="shrink-0 space-y-1 border-b border-border px-6 pb-4 pt-6 pr-14 text-left">
+            <SheetTitle>Pontos da rodada</SheetTitle>
+            <p className="text-sm text-muted-foreground">
+              {pendingAll.length === 0
+                ? "Nada pendente. Pode enviar."
+                : `${pendingAll.length} item(ns) ainda sem quantidade.`}
+            </p>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+            {[...groupedPoints.entries()].map(([gName, gPoints]) => (
+              <div key={gName} className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {gName}
+                </p>
+                {gPoints.map((point) => {
+                  const listingProducts = queueAll.filter(
+                    (p) => (p.listing_id ?? "") === (point.listing_id ?? ""),
+                  );
+                  const pending = listingProducts.filter((p) =>
+                    lineIsPending(p, sessionStatus),
+                  );
+                  const active =
+                    (activeListingId ?? "") === (point.listing_id ?? "");
+                  return (
+                    <div key={point.listing_id ?? gName} className="space-y-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm",
+                          active
+                            ? "border-foreground/20 bg-muted"
+                            : "border-border bg-card",
+                          pending.length > 0 && "border-amber-500/40",
+                        )}
+                        onClick={() => {
+                          const target =
+                            pending[0] ?? listingProducts[0] ?? null;
+                          if (target) goToLine(target);
+                          else {
+                            setActiveListingId(point.listing_id);
+                            setIndex(0);
+                            setNavOpen(false);
+                          }
+                        }}
+                      >
+                        <span className="font-medium">{point.listing_name}</span>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                          {point.counted}/{point.total}
+                        </span>
+                      </button>
+                      {listingProducts.length > 0 ? (
+                        <ul className="space-y-1 pl-2">
+                          {listingProducts.map((p) => {
+                            const pendingItem = lineIsPending(p, sessionStatus);
+                            return (
+                              <li key={lineKey(p)}>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/60"
+                                  onClick={() => goToLine(p)}
+                                >
+                                  {pendingItem ? (
+                                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                                  ) : (
+                                    <Check className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {p.name}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <AlertDialog open={recountIntroOpen} onOpenChange={setRecountIntroOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Conte estes itens de novo</AlertDialogTitle>
             <AlertDialogDescription>
-              {queue.length === 1
+              {queueAll.length === 1
                 ? "O responsável pediu para conferir 1 item outra vez."
-                : `O responsável pediu para conferir ${queue.length} itens outra vez.`}
+                : `O responsável pediu para conferir ${queueAll.length} itens outra vez.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <ol className="list-decimal space-y-1.5 pl-5 text-sm text-foreground">
             <li>Conte a quantidade de cada um.</li>
-            <li>No último item, envie de novo.</li>
+            <li>Pode salvar para pausar e voltar pelo mesmo link.</li>
+            <li>Quando todos os pontos estiverem prontos, envie de novo.</li>
           </ol>
           <AlertDialogFooter>
-            <AlertDialogAction className="w-full">
-              Começar
-            </AlertDialogAction>
+            <AlertDialogAction className="w-full">Começar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -135,7 +135,7 @@ const OPEN_SESSION_SELECT = `
   token,
   created_at,
   inventory_count_listing_id,
-  inventory_count_groups ( name ),
+  inventory_count_groups!inventory_count_sessions_inventory_count_group_id_fkey ( name ),
   inventory_count_listings ( name ),
   inventory_count_short_links ( slug )
 `;

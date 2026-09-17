@@ -68,8 +68,9 @@ Deno.serve(async (req) => {
     .select(
       `
       id, company_id, token, operator_notified_at,
-      inventory_count_groups ( name ),
+      inventory_count_groups!inventory_count_sessions_inventory_count_group_id_fkey ( name ),
       inventory_count_listings ( name ),
+      inventory_count_session_groups ( inventory_count_groups ( name ) ),
       assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey (
         name, phone_normalized
       ),
@@ -127,7 +128,21 @@ Deno.serve(async (req) => {
 
     const group = relationName(row.inventory_count_groups);
     const listing = relationName(row.inventory_count_listings);
-    const title = [group, listing].filter(Boolean).join(" · ") || "Contagem de estoque";
+    const extraRaw = row.inventory_count_session_groups as
+      | { inventory_count_groups?: NameRel }[]
+      | { inventory_count_groups?: NameRel }
+      | null;
+    const extraRows = !extraRaw
+      ? []
+      : Array.isArray(extraRaw)
+        ? extraRaw
+        : [extraRaw];
+    const extraNames = extraRows
+      .map((r) => relationName(r.inventory_count_groups ?? null))
+      .filter((n) => n && n !== group);
+    const title =
+      [group, extraNames.join(", "), listing].filter(Boolean).join(" · ") ||
+      "Contagem de estoque";
     const lines = [
       "*Contagem de estoque*",
       title,

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   activeCountStatusLabel,
+  activeRoundForGroup,
   activeSessionsForListing,
+  groupIdsForSession,
   listingActiveStatusById,
   listingHasPendingApproval,
+  roundActiveStatusByGroupId,
   shouldAskToReuseCount,
   slugFromCountShortLinks,
   splitListingsForCountMode,
@@ -123,5 +126,33 @@ describe("shouldAskToReuseCount / splitListingsForCountMode", () => {
       reuseIds: [],
       createIds: ["a", "b"],
     });
+  });
+});
+
+describe("round session helpers", () => {
+  const round = sess({
+    id: "round-1",
+    status: "open",
+    inventory_count_listing_id: null,
+    inventory_count_group_id: "bar-1",
+    inventory_count_session_groups: [
+      { group_id: "bar-1" },
+      { group_id: "camara" },
+    ],
+  });
+
+  it("lê os setores da junção", () => {
+    expect(groupIdsForSession(round).sort()).toEqual(["bar-1", "camara"]);
+  });
+
+  it("reusa a rodada pelo setor incluído, não só pela origem", () => {
+    expect(activeRoundForGroup([round], "camara")?.id).toBe("round-1");
+    expect(activeRoundForGroup([round], "deposito")).toBeUndefined();
+  });
+
+  it("marca em andamento nos dois setores da rodada", () => {
+    const map = roundActiveStatusByGroupId([round]);
+    expect(map.get("bar-1")).toBe("open");
+    expect(map.get("camara")).toBe("open");
   });
 });

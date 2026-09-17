@@ -94,6 +94,7 @@ export function EstoqueContagemListasTab({
   members,
   productCountByListing,
   listingActiveStatus,
+  groupRoundStatus,
   loading,
   countingId,
   onNewGroup,
@@ -111,6 +112,7 @@ export function EstoqueContagemListasTab({
   members: CompanyMember[];
   productCountByListing: Map<string, number>;
   listingActiveStatus: Map<string, "open" | "returned">;
+  groupRoundStatus: Map<string, "open" | "returned">;
   loading: boolean;
   countingId: string;
   onNewGroup: () => void;
@@ -261,7 +263,9 @@ export function EstoqueContagemListasTab({
                       listing={l}
                       members={members}
                       productCount={productCountByListing.get(l.id) ?? 0}
-                      activeStatus={listingActiveStatus.get(l.id)}
+                      activeStatus={
+                        listingActiveStatus.get(l.id) ?? groupRoundStatus.get(g.id)
+                      }
                       countingId={countingId}
                       onOpen={() => onOpenListing(l.id)}
                       onCount={() => onCountListing(l.id)}

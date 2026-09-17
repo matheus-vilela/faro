@@ -7,15 +7,29 @@ export type InventoryCountShortLinkEmbed =
   | { slug?: string | null }[]
   | null;
 
+export type InventoryCountSessionGroupEmbed =
+  | { group_id: string }
+  | { group_id: string }[]
+  | null;
+
 export type InventoryCountSessionSummary = {
   id: string;
   status: string;
   kind: string | null;
   inventory_count_listing_id: string | null;
+  inventory_count_group_id?: string | null;
   created_at: string;
   token: string | null;
   inventory_count_short_links?: InventoryCountShortLinkEmbed;
   inventory_count_lines?: { count: number }[] | { count: number } | null;
+  inventory_count_session_groups?: InventoryCountSessionGroupEmbed;
+};
+
+export type SharingCountGroup = {
+  id: string;
+  name: string;
+  shared_count: number;
+  sample_name?: string | null;
 };
 
 export function inventoryCountPublicUrl(params: {
@@ -98,6 +112,72 @@ export function listingActiveStatusById(
   return out;
 }
 
+function embedGroupRows(
+  raw: InventoryCountSessionGroupEmbed | undefined,
+): { group_id: string }[] {
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+export function groupIdsForSession(session: InventoryCountSessionSummary): string[] {
+  const fromJunction = embedGroupRows(session.inventory_count_session_groups)
+    .map((row) => row.group_id)
+    .filter(Boolean);
+  if (fromJunction.length > 0) return [...new Set(fromJunction)];
+  if (session.inventory_count_group_id && !session.inventory_count_listing_id) {
+    return [session.inventory_count_group_id];
+  }
+  return [];
+}
+
+export function activeRoundForGroup(
+  sessions: InventoryCountSessionSummary[],
+  groupId: string,
+): InventoryCountSessionSummary | undefined {
+  return sessions
+    .filter(
+      (s) =>
+        isReusableCountStatus(s.status) &&
+        !s.inventory_count_listing_id &&
+        groupIdsForSession(s).includes(groupId),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )[0];
+}
+
+export function roundActiveStatusByGroupId(
+  sessions: InventoryCountSessionSummary[],
+): Map<string, "open" | "returned"> {
+  const out = new Map<string, "open" | "returned">();
+  const newestFirst = [...sessions].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+  for (const s of newestFirst) {
+    if (s.status !== "open" && s.status !== "returned") continue;
+    if (s.inventory_count_listing_id) continue;
+    for (const gid of groupIdsForSession(s)) {
+      if (!out.has(gid)) out.set(gid, s.status);
+    }
+  }
+  return out;
+}
+
+export function groupHasPendingApproval(
+  sessions: InventoryCountSessionSummary[],
+  groupId: string,
+): boolean {
+  return sessions.some(
+    (s) =>
+      s.status === "pending_approval" &&
+      !s.inventory_count_listing_id &&
+      (s.inventory_count_group_id === groupId ||
+        groupIdsForSession(s).includes(groupId)),
+  );
+}
+
 export function activeCountStatusLabel(status: string): string {
   return status === "returned" ? "Recontagem" : "Em andamento";
 }
@@ -136,6 +216,43 @@ export function splitListingsForCountMode(
     else createIds.push(id);
   }
   return { reuseIds, createIds };
+}
+
+export async function fetchGroupsSharingSku(params: {
+  companyId: string;
+  groupId: string;
+}): Promise<SharingCountGroup[]> {
+  const { data, error } = await supabase.rpc(
+    "inventory_count_groups_sharing_sku",
+    {
+      p_company_id: params.companyId,
+      p_group_id: params.groupId,
+    },
+  );
+  if (error) {
+    console.error(error);
+    return [];
+  }
+  const row = data as { ok?: boolean; groups?: SharingCountGroup[] } | null;
+  return Array.isArray(row?.groups) ? row.groups : [];
+}
+
+export async function openInventoryCountRound(params: {
+  companyId: string;
+  originGroupId: string;
+  groupIds: string[];
+  assignedCompanyMemberId?: string | null;
+}): Promise<OpenInventoryCountSessionResult> {
+  const { data, error } = await supabase.rpc("open_inventory_count_round", {
+    p_company_id: params.companyId,
+    p_origin_group_id: params.originGroupId,
+    p_group_ids: params.groupIds,
+    p_assigned_company_member_id: params.assignedCompanyMemberId ?? null,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return (data ?? { ok: false, error: "empty" }) as OpenInventoryCountSessionResult;
 }
 
 export async function openInventoryCountSession(params: {

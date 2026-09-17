@@ -1,5 +1,9 @@
 import { EstoqueAprovacaoContagem } from "@/components/estoque/EstoqueAprovacaoContagem";
 import { EstoqueContagemAgendaTab } from "@/components/estoque/EstoqueContagemAgendaTab";
+import {
+  EstoqueContagemIncludeGroupsDialog,
+  type CountIncludeGroupsPrompt,
+} from "@/components/estoque/EstoqueContagemIncludeGroupsDialog";
 import { EstoqueContagemListasTab } from "@/components/estoque/EstoqueContagemListasTab";
 import { EstoqueContagemListingSheet } from "@/components/estoque/EstoqueContagemListingSheet";
 import {
@@ -26,13 +30,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  activeRoundForGroup,
   activeSessionsForListing,
+  fetchGroupsSharingSku,
+  groupHasPendingApproval,
+  inventoryCountPublicUrl,
   listingActiveStatusById,
   listingHasPendingApproval,
   notifyInventoryCountSessions,
+  openInventoryCountRound,
   openInventoryCountSessionFallback,
   processDueInventoryCountSchedules,
   publicUrlForSession,
+  roundActiveStatusByGroupId,
   shouldAskToReuseCount,
   splitListingsForCountMode,
   type InventoryCountSessionSummary,
@@ -71,6 +81,8 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
     InventoryCountSessionSummary[]
   >([]);
   const [reusePrompt, setReusePrompt] = useState<CountReusePrompt | null>(null);
+  const [includePrompt, setIncludePrompt] =
+    useState<CountIncludeGroupsPrompt | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -136,7 +148,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       supabase
         .from("inventory_count_sessions")
         .select(
-          "id, status, kind, inventory_count_listing_id, created_at, token, inventory_count_short_links(slug), inventory_count_lines(count)",
+          "id, status, kind, inventory_count_listing_id, inventory_count_group_id, created_at, token, inventory_count_short_links(slug), inventory_count_lines(count), inventory_count_session_groups(group_id)",
         )
         .eq("company_id", companyId)
         .in("status", ["open", "returned", "pending_approval"]),
@@ -188,6 +200,10 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
 
   const listingActiveStatus = useMemo(
     () => listingActiveStatusById(sessionSummary),
+    [sessionSummary],
+  );
+  const groupRoundStatus = useMemo(
+    () => roundActiveStatusByGroupId(sessionSummary),
     [sessionSummary],
   );
 
@@ -362,7 +378,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         toast.success(
           generated.length === 1
             ? "Link da listagem gerado."
-            : "Links do grupo gerados (um por listagem).",
+            : "Links gerados.",
         );
       }
       if (pendingNote && sessionIds.length > 0) {
@@ -396,7 +412,122 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
       void executeCount(withProducts, busyKey, "create-all");
       return;
     }
-    setReusePrompt({ listings: withProducts, busyKey });
+    setReusePrompt({ kind: "listings", listings: withProducts, busyKey });
+  };
+
+  const showRoundLink = (label: string, url: string, sessionId?: string) => {
+    setLinks([{ label, url }]);
+    setLinksOpen(true);
+    if (sessionId) {
+      bump();
+      void notifyInventoryCountSessions([sessionId]);
+    }
+  };
+
+  const executeRound = async (originGroupId: string, groupIds: string[]) => {
+    const uniqueIds = [...new Set(groupIds.filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      toast.error("Selecione ao menos um setor.");
+      return;
+    }
+    const originListings = listings.filter(
+      (l) => l.inventory_count_group_id === originGroupId,
+    );
+    const assigned =
+      originListings.find((l) => l.assigned_company_member_id)
+        ?.assigned_company_member_id ?? null;
+    setCountingId(originGroupId);
+    try {
+      const created = await openInventoryCountRound({
+        companyId,
+        originGroupId,
+        groupIds: uniqueIds,
+        assignedCompanyMemberId: assigned,
+      });
+      if (!created.ok || (!created.slug && !created.token)) {
+        const missingFn = /PGRST202|does not exist|schema cache/i.test(
+          created.error ?? "",
+        );
+        if (missingFn) {
+          const rows = listings.filter(
+            (l) => l.inventory_count_group_id === originGroupId,
+          );
+          toast.message("A rodada ainda não está no banco. Abrindo um link por lista.");
+          await executeCount(rows, originGroupId, "create-all");
+          return;
+        }
+        toast.error(
+          created.error === "no_products"
+            ? "Não há produtos nesses setores para contar."
+            : created.error
+              ? `Não foi possível gerar o link da rodada (${created.error}).`
+              : "Não foi possível gerar o link da rodada.",
+        );
+        return;
+      }
+      const url = inventoryCountPublicUrl({
+        slug: created.slug,
+        token: created.token,
+      });
+      const group = groups.find((g) => g.id === originGroupId);
+      showRoundLink(
+        created.group_name || group?.name || "Rodada",
+        url,
+        created.session_id,
+      );
+      toast.success("Link da rodada gerado.");
+      if (groupHasPendingApproval(sessionSummary, originGroupId)) {
+        toast.message("Já há uma rodada deste setor aguardando conferência.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Não foi possível gerar o link da rodada.");
+    } finally {
+      setCountingId("");
+    }
+  };
+
+  const startGroupRound = async (groupId: string) => {
+    const extras = await fetchGroupsSharingSku({
+      companyId,
+      groupId,
+    });
+    if (extras.length > 0) {
+      const group = groups.find((g) => g.id === groupId);
+      setIncludePrompt({
+        originGroupId: groupId,
+        originGroupName: group?.name ?? "Setor",
+        extras,
+        busyKey: groupId,
+      });
+      return;
+    }
+    await executeRound(groupId, [groupId]);
+  };
+
+  const requestCountGroup = (groupId: string) => {
+    const withProducts = listings.filter(
+      (l) =>
+        l.inventory_count_group_id === groupId &&
+        (productCountByListing.get(l.id) ?? 0) > 0,
+    );
+    if (withProducts.length === 0) {
+      toast.error("Não há listagens com produtos para contar.");
+      return;
+    }
+    const existing = activeRoundForGroup(sessionSummary, groupId);
+    if (existing) {
+      const group = groups.find((g) => g.id === groupId);
+      setReusePrompt({
+        kind: "round",
+        groupName: group?.name ?? "Setor",
+        session: existing,
+        pendingApproval: groupHasPendingApproval(sessionSummary, groupId),
+        busyKey: groupId,
+      });
+      return;
+    }
+    void startGroupRound(groupId);
   };
 
   const openSchedule = (target: ScheduleDialogTarget) => {
@@ -538,6 +669,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           members={members}
           productCountByListing={productCountByListing}
           listingActiveStatus={listingActiveStatus}
+          groupRoundStatus={groupRoundStatus}
           loading={loadingMeta}
           countingId={countingId}
           onNewGroup={() => setGroupDialogOpen(true)}
@@ -545,12 +677,7 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
           onDeleteGroup={(id) => void deleteGroup(id)}
           onNewListing={openCreateListing}
           onOpenListing={openEditListing}
-          onCountGroup={(gid) =>
-            requestCount(
-              listings.filter((l) => l.inventory_count_group_id === gid),
-              gid,
-            )
-          }
+          onCountGroup={(gid) => requestCountGroup(gid)}
           onCountListing={(lid) => {
             const listing = listings.find((l) => l.id === lid);
             if (listing) requestCount([listing], lid);
@@ -696,15 +823,43 @@ export function EstoqueContagemPanel({ companyId }: { companyId: string }) {
         }}
         onReuse={() => {
           if (!reusePrompt) return;
+          if (reusePrompt.kind === "round") {
+            const { session, groupName } = reusePrompt;
+            setReusePrompt(null);
+            showRoundLink(groupName, publicUrlForSession(session));
+            toast.success("Link da rodada em andamento.");
+            return;
+          }
           const { listings: rows, busyKey } = reusePrompt;
           setReusePrompt(null);
           void executeCount(rows, busyKey, "reuse-and-fill");
         }}
         onCreateNew={() => {
           if (!reusePrompt) return;
+          if (reusePrompt.kind === "round") {
+            const { busyKey } = reusePrompt;
+            setReusePrompt(null);
+            void startGroupRound(busyKey);
+            return;
+          }
           const { listings: rows, busyKey } = reusePrompt;
           setReusePrompt(null);
           void executeCount(rows, busyKey, "create-all");
+        }}
+      />
+
+      <EstoqueContagemIncludeGroupsDialog
+        prompt={includePrompt}
+        busy={countingId.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setIncludePrompt(null);
+        }}
+        onConfirm={(groupIds) => {
+          if (!includePrompt) return;
+          const { originGroupId } = includePrompt;
+          void executeRound(originGroupId, groupIds).finally(() =>
+            setIncludePrompt(null),
+          );
         }}
       />
 

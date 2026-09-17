@@ -31,6 +31,12 @@ import {
   inventoryCountSessionGroupLabel,
 } from "@/lib/inventoryCount/ui";
 import { inventoryCountPublicUrl } from "@/lib/inventoryCount/createSession";
+import {
+  aggregateCountReview,
+  formatCountImpact,
+  type CountReviewProduct,
+  type RequiredCountPoint,
+} from "@/lib/inventoryCount/review";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { CheckCheck, ChevronRight, Copy, Loader2, RotateCcw } from "lucide-react";
@@ -47,39 +53,35 @@ type PendingSession = {
   inventory_count_groups: { name: string } | null;
   inventory_count_listings: { name: string } | null;
   assigned_member: { name: string } | null;
+  inventory_count_session_groups?:
+    | { group_id: string; inventory_count_groups: { name: string } | null }[]
+    | { group_id: string; inventory_count_groups: { name: string } | null }
+    | null;
 };
 
-type LineRow = {
-  id: string;
-  product_id: string;
-  expected_qty: number;
-  counted_qty: number | null;
-  counted_unit_code: string | null;
-  counted_qty_input: number | null;
-  in_band: boolean | null;
-  tolerance_pct: number;
-  products: { name: string; unit: string } | null;
-};
-
-type LineSortKey = "name" | "expected" | "counted" | "variation";
-
-function variationPct(expected: number, counted: number | null): number | null {
-  if (counted == null) return null;
-  if (expected === 0) return counted === 0 ? 0 : 100;
-  return ((counted - expected) / Math.abs(expected)) * 100;
-}
+type LineSortKey = "name" | "expected" | "counted" | "variation" | "impact";
 
 function formatQty(n: number | null | undefined): string {
   if (n == null) return "—";
   return Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
 }
 
-function lineProductName(
-  raw: { name: string; unit: string } | { name: string; unit: string }[] | null,
-): { name: string; unit: string } | null {
-  if (raw == null) return null;
-  if (Array.isArray(raw)) return raw[0] ?? null;
-  return raw;
+function sessionExtraGroupNames(s: PendingSession): string[] {
+  const raw = s.inventory_count_session_groups;
+  const rows = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+  const origin = s.inventory_count_groups?.name?.trim() || "";
+  const names = rows
+    .map((r) => r.inventory_count_groups?.name?.trim() || "")
+    .filter(Boolean)
+    .filter((n) => n !== origin);
+  return [...new Set(names)];
+}
+
+function sessionCoversGroup(s: PendingSession, groupId: string): boolean {
+  if (s.inventory_count_group_id === groupId) return true;
+  const raw = s.inventory_count_session_groups;
+  const rows = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+  return rows.some((r) => r.group_id === groupId);
 }
 
 export function EstoqueAprovacaoContagem({
@@ -97,7 +99,7 @@ export function EstoqueAprovacaoContagem({
   const [sessions, setSessions] = useState<PendingSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [lines, setLines] = useState<LineRow[]>([]);
+  const [reviewRows, setReviewRows] = useState<CountReviewProduct[]>([]);
   const [linesLoading, setLinesLoading] = useState(false);
   const [linesError, setLinesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -129,9 +131,10 @@ export function EstoqueAprovacaoContagem({
         inventory_count_group_id,
         inventory_count_listing_id,
         assigned_company_member_id,
-        inventory_count_groups ( name ),
+        inventory_count_groups!inventory_count_sessions_inventory_count_group_id_fkey ( name ),
         inventory_count_listings ( name ),
         assigned_member:company_members!inventory_count_sessions_assigned_company_member_id_fkey ( name ),
+        inventory_count_session_groups ( group_id, inventory_count_groups ( name ) ),
         inventory_count_lines ( count )
       `,
       )
@@ -168,6 +171,12 @@ export function EstoqueAprovacaoContagem({
           s.inventory_count_groups?.name?.trim() || "Única",
         );
       }
+      const raw = s.inventory_count_session_groups;
+      const rows = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+      for (const row of rows) {
+        const name = row.inventory_count_groups?.name?.trim();
+        if (row.group_id && name) map.set(row.group_id, name);
+      }
     }
     return [...map.entries()];
   }, [sessions]);
@@ -198,7 +207,7 @@ export function EstoqueAprovacaoContagem({
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((s) => {
-      if (filterGroup && s.inventory_count_group_id !== filterGroup)
+      if (filterGroup && !sessionCoversGroup(s, filterGroup))
         return false;
       if (filterListing && s.inventory_count_listing_id !== filterListing) {
         return false;
@@ -228,7 +237,7 @@ export function EstoqueAprovacaoContagem({
   const closeSession = () => {
     openRequestIdRef.current = null;
     setActiveId(null);
-    setLines([]);
+    setReviewRows([]);
     setLinesError(null);
     setLinesLoading(false);
     setSelected(new Set());
@@ -238,7 +247,7 @@ export function EstoqueAprovacaoContagem({
     openRequestIdRef.current = id;
     setActiveId(id);
     setSelected(new Set());
-    setLines([]);
+    setReviewRows([]);
     setLinesError(null);
     setLinesLoading(true);
     const { data, error } = await supabase
@@ -249,11 +258,10 @@ export function EstoqueAprovacaoContagem({
         product_id,
         expected_qty,
         counted_qty,
-        counted_unit_code,
-        counted_qty_input,
-        in_band,
+        listing_id,
         tolerance_pct,
-        products ( name, unit )
+        inventory_count_listings ( name, inventory_count_group_id, inventory_count_groups ( name ) ),
+        products ( name, unit, average_cost, last_unit_value )
       `,
       )
       .eq("session_id", id)
@@ -261,7 +269,7 @@ export function EstoqueAprovacaoContagem({
       .limit(5000);
     if (openRequestIdRef.current !== id) return;
     if (error) {
-      setLines([]);
+      setReviewRows([]);
       setLinesError(error.message);
       setLinesLoading(false);
       toast.error("Não foi possível carregar as linhas.");
@@ -274,55 +282,128 @@ export function EstoqueAprovacaoContagem({
       toast.message("Esta sessão não tem itens contados.");
       return;
     }
-    setLines(
-      raw.map((row) => ({
-        id: row.id,
-        product_id: row.product_id,
+
+    const productIds = [...new Set(raw.map((row) => row.product_id as string))];
+    const { data: pointRows } = await supabase
+      .from("inventory_count_listing_products")
+      .select(
+        "product_id, listing_id, inventory_count_listings!inner ( id, name, archived_at, inventory_count_group_id, inventory_count_groups ( name ) )",
+      )
+      .in("product_id", productIds);
+    if (openRequestIdRef.current !== id) return;
+
+    const requiredPoints: RequiredCountPoint[] = [];
+    for (const row of pointRows ?? []) {
+      const listingRaw = row.inventory_count_listings as
+        | {
+            id: string;
+            name: string;
+            archived_at: string | null;
+            inventory_count_group_id: string | null;
+            inventory_count_groups: { name: string } | { name: string }[] | null;
+          }
+        | {
+            id: string;
+            name: string;
+            archived_at: string | null;
+            inventory_count_group_id: string | null;
+            inventory_count_groups: { name: string } | { name: string }[] | null;
+          }[]
+        | null;
+      const listing = Array.isArray(listingRaw) ? listingRaw[0] : listingRaw;
+      if (!listing || listing.archived_at || !listing.inventory_count_group_id) {
+        continue;
+      }
+      const g = listing.inventory_count_groups;
+      const groupName = Array.isArray(g) ? g[0]?.name ?? "" : g?.name ?? "";
+      requiredPoints.push({
+        productId: row.product_id as string,
+        listingId: listing.id,
+        listingName: listing.name,
+        groupName,
+      });
+    }
+
+    const mapped = raw.map((row) => {
+      const productRaw = row.products as
+        | {
+            name: string;
+            unit: string;
+            average_cost?: number | null;
+            last_unit_value?: number | null;
+          }
+        | {
+            name: string;
+            unit: string;
+            average_cost?: number | null;
+            last_unit_value?: number | null;
+          }[]
+        | null;
+      const product = Array.isArray(productRaw) ? productRaw[0] : productRaw;
+      const listingRaw = row.inventory_count_listings as
+        | {
+            name: string;
+            inventory_count_groups: { name: string } | { name: string }[] | null;
+          }
+        | {
+            name: string;
+            inventory_count_groups: { name: string } | { name: string }[] | null;
+          }[]
+        | null;
+      const listing = Array.isArray(listingRaw) ? listingRaw[0] : listingRaw;
+      const g = listing?.inventory_count_groups;
+      const groupName = Array.isArray(g) ? g[0]?.name ?? "" : g?.name ?? "";
+      return {
+        id: row.id as string,
+        product_id: row.product_id as string,
         expected_qty: Number(row.expected_qty),
         counted_qty: row.counted_qty == null ? null : Number(row.counted_qty),
-        counted_unit_code: row.counted_unit_code,
-        counted_qty_input:
-          row.counted_qty_input == null ? null : Number(row.counted_qty_input),
-        in_band: row.in_band,
         tolerance_pct: Number(row.tolerance_pct),
-        products: lineProductName(row.products),
-      })),
+        listing_id: (row.listing_id as string | null) ?? null,
+        listing_name: listing?.name ?? null,
+        group_name: groupName,
+        product_name: product?.name ?? (row.product_id as string),
+        product_unit: product?.unit ?? "",
+        average_cost: product?.average_cost ?? null,
+        last_unit_value: product?.last_unit_value ?? null,
+      };
+    });
+
+    setReviewRows(
+      aggregateCountReview({ lines: mapped, requiredPoints }),
     );
     setLinesLoading(false);
   };
 
-  const visibleLines = useMemo(() => {
-    if (!onlyDivergent) return lines;
-    return lines.filter((l) => l.in_band === false);
-  }, [lines, onlyDivergent]);
+  const visibleRows = useMemo(() => {
+    if (!onlyDivergent) return reviewRows;
+    return reviewRows.filter(
+      (r) => r.countedQty != null && r.countedQty !== r.expectedQty,
+    );
+  }, [reviewRows, onlyDivergent]);
 
-  const compareLines = useCallback(
-    (a: LineRow, b: LineRow, key: LineSortKey) => {
+  const compareRows = useCallback(
+    (a: CountReviewProduct, b: CountReviewProduct, key: LineSortKey) => {
       if (key === "name") {
-        return (a.products?.name ?? "").localeCompare(
-          b.products?.name ?? "",
-          "pt-BR",
-        );
+        return a.name.localeCompare(b.name, "pt-BR");
       }
-      if (key === "expected") return a.expected_qty - b.expected_qty;
+      if (key === "expected") return a.expectedQty - b.expectedQty;
       if (key === "counted") {
-        return (a.counted_qty ?? -1) - (b.counted_qty ?? -1);
+        return (a.countedQty ?? -1) - (b.countedQty ?? -1);
       }
       if (key === "variation") {
-        return (
-          (variationPct(a.expected_qty, a.counted_qty) ?? 0) -
-          (variationPct(b.expected_qty, b.counted_qty) ?? 0)
-        );
+        return (a.variationPct ?? 0) - (b.variationPct ?? 0);
       }
+      if (key === "impact") return a.impact - b.impact;
       return 0;
     },
     [],
   );
 
   const { sorted, sortKey, sortAsc, onSort } = useClientTableSort<
-    LineRow,
+    CountReviewProduct,
     LineSortKey
-  >(visibleLines, "name", compareLines, true);
+  >(visibleRows, "impact", compareRows, false);
 
   const toggle = (productId: string) => {
     setSelected((prev) => {
@@ -341,11 +422,16 @@ export function EstoqueAprovacaoContagem({
       { p_session_id: activeId },
     );
     setBusy(false);
-    if (error || !(data as { ok?: boolean })?.ok) {
+    const result = data as { ok?: boolean; skipped?: number };
+    if (error || !result?.ok) {
       toast.error("Falha ao aprovar/ajustar estoque.");
       return;
     }
-    toast.success("Contagem aprovada e estoque atualizado.");
+    toast.success(
+      result.skipped
+        ? `Contagem aprovada. ${result.skipped} produto(s) não atualizaram estoque (faltam pontos).`
+        : "Contagem aprovada e estoque atualizado.",
+    );
     closeSession();
     await load();
     onChanged?.();
@@ -388,6 +474,9 @@ export function EstoqueAprovacaoContagem({
   };
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
+  const extraGroups = activeSession
+    ? sessionExtraGroupNames(activeSession)
+    : [];
   const sessionTitle = activeSession
     ? activeSession.kind === "onboarding"
       ? "Contagem geral (onboarding)"
@@ -395,6 +484,7 @@ export function EstoqueAprovacaoContagem({
           inventoryCountSessionGroupLabel({
             groupName: activeSession.inventory_count_groups?.name,
           }),
+          extraGroups.length > 0 ? extraGroups.join(", ") : null,
           activeSession.inventory_count_listings?.name,
         ]
           .filter(Boolean)
@@ -503,6 +593,9 @@ export function EstoqueAprovacaoContagem({
                         : inventoryCountSessionGroupLabel({
                             groupName: s.inventory_count_groups?.name,
                           })}
+                      {sessionExtraGroupNames(s).length > 0
+                        ? ` · ${sessionExtraGroupNames(s).join(", ")}`
+                        : ""}
                       {s.inventory_count_listings?.name
                         ? ` · ${s.inventory_count_listings.name}`
                         : ""}
@@ -538,7 +631,7 @@ export function EstoqueAprovacaoContagem({
           <SheetHeader className="shrink-0 space-y-1 border-b border-border px-6 pb-4 pt-6 pr-14 text-left">
             <SheetTitle>{sessionTitle}</SheetTitle>
             <p className="text-sm text-muted-foreground">
-              Esperado × contado
+              Esperado × soma dos pontos · impacto em R$
               {activeSession?.kind === "onboarding"
                 ? " · onboarding (obrigatória para o estoque atualizar)"
                 : ""}
@@ -564,40 +657,61 @@ export function EstoqueAprovacaoContagem({
               </p>
             ) : sorted.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                {lines.length === 0
+                {reviewRows.length === 0
                   ? "Nenhuma linha nesta contagem."
                   : "Nenhuma linha divergente."}
               </p>
             ) : listView === "cards" ? (
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 {sorted.map((l) => {
-                  const out = l.in_band === false;
-                  const pct = variationPct(l.expected_qty, l.counted_qty);
-                  const hub = l.products?.unit ?? "";
+                  const out = l.inBand === false;
+                  const highImpact = l.impact > 0 && l.unitCost > 0;
+                  const hub = l.unit;
+                  const pointsLabel = l.points
+                    .map((p) =>
+                      [p.groupName, formatQty(p.countedQty)]
+                        .filter(Boolean)
+                        .join(" "),
+                    )
+                    .join(" · ");
                   return (
                     <label
-                      key={l.id}
+                      key={l.productId}
                       className={cn(
                         "flex items-start gap-3 rounded-lg border p-2 text-sm",
-                        out && "border-amber-500/40 bg-amber-500/5",
+                        (out || highImpact) && "border-amber-500/40 bg-amber-500/5",
                       )}
                     >
                       <Checkbox
-                        checked={selected.has(l.product_id)}
-                        onCheckedChange={() => toggle(l.product_id)}
+                        checked={selected.has(l.productId)}
+                        onCheckedChange={() => toggle(l.productId)}
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium">
-                          {l.products?.name ?? l.product_id}
-                        </p>
+                        <p className="font-medium">{l.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          Esperado: {formatQty(l.expected_qty)} {hub} · Contado:{" "}
-                          {formatQty(l.counted_qty)} {hub}
-                          {pct != null
-                            ? ` · ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
+                          Esperado: {formatQty(l.expectedQty)} {hub} · Contado:{" "}
+                          {formatQty(l.countedQty)} {hub}
+                          {l.variationPct != null
+                            ? ` · ${l.variationPct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
                             : ""}
+                          {` · ${formatCountImpact(l.impact)}`}
                           {out ? " · fora da faixa" : ""}
                         </p>
+                        {pointsLabel ? (
+                          <p className="text-xs text-muted-foreground">
+                            {pointsLabel}
+                          </p>
+                        ) : null}
+                        {!l.updatesStock ? (
+                          <p className="text-xs text-amber-800 dark:text-amber-200">
+                            Não atualiza estoque
+                            {l.missingPoints.length > 0
+                              ? ` · falta ${l.missingPoints
+                                  .map((p) => p.groupName || p.listingName)
+                                  .join(", ")}`
+                              : ""}
+                          </p>
+                        ) : null}
                       </div>
                     </label>
                   );
@@ -641,44 +755,77 @@ export function EstoqueAprovacaoContagem({
                         onSort={onSort}
                         align="right"
                       />
+                      <SortableTableHead
+                        label="Impacto"
+                        column="impact"
+                        sortKey={sortKey}
+                        sortAsc={sortAsc}
+                        onSort={onSort}
+                        align="right"
+                      />
                     </tr>
                   </thead>
                   <tbody>
                     {sorted.map((l) => {
-                      const out = l.in_band === false;
-                      const pct = variationPct(l.expected_qty, l.counted_qty);
-                      const hub = l.products?.unit ?? "";
+                      const out = l.inBand === false;
+                      const highImpact = l.impact > 0 && l.unitCost > 0;
+                      const hub = l.unit;
+                      const pointsLabel = l.points
+                        .map((p) =>
+                          [p.groupName, formatQty(p.countedQty)]
+                            .filter(Boolean)
+                            .join(" "),
+                        )
+                        .join(" · ");
                       return (
                         <tr
-                          key={l.id}
+                          key={l.productId}
                           className={cn(
                             "border-b border-border/60",
-                            out && "bg-amber-500/5",
+                            (out || highImpact) && "bg-amber-500/5",
                           )}
                         >
                           <td className="p-2">
                             <Checkbox
-                              checked={selected.has(l.product_id)}
-                              onCheckedChange={() => toggle(l.product_id)}
+                              checked={selected.has(l.productId)}
+                              onCheckedChange={() => toggle(l.productId)}
                             />
                           </td>
                           <td className="p-2 font-medium">
-                            {l.products?.name ?? l.product_id}
+                            <span className="block">{l.name}</span>
+                            {pointsLabel ? (
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {pointsLabel}
+                              </span>
+                            ) : null}
+                            {!l.updatesStock ? (
+                              <span className="mt-0.5 block text-xs font-normal text-amber-800 dark:text-amber-200">
+                                Não atualiza estoque
+                                {l.missingPoints.length > 0
+                                  ? ` · falta ${l.missingPoints
+                                      .map((p) => p.groupName || p.listingName)
+                                      .join(", ")}`
+                                  : ""}
+                              </span>
+                            ) : null}
                           </td>
                           <td className="p-2 text-right tabular-nums">
-                            {formatQty(l.expected_qty)}
+                            {formatQty(l.expectedQty)}
                           </td>
                           <td className="p-2 text-right tabular-nums">
-                            {formatQty(l.counted_qty)}
+                            {formatQty(l.countedQty)}
                           </td>
                           <td className="p-2 text-muted-foreground">
                             {hub ? systemUnitLabel(hub) : "—"}
                             {hub ? ` (${hub})` : ""}
                           </td>
                           <td className="p-2 text-right tabular-nums">
-                            {pct == null
+                            {l.variationPct == null
                               ? "—"
-                              : `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+                              : `${l.variationPct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">
+                            {formatCountImpact(l.impact)}
                           </td>
                         </tr>
                       );
@@ -701,7 +848,7 @@ export function EstoqueAprovacaoContagem({
             </Button>
             <Button
               type="button"
-              disabled={busy || linesLoading || lines.length === 0}
+              disabled={busy || linesLoading || reviewRows.length === 0}
               onClick={() => void commit()}
             >
               {busy ? (
