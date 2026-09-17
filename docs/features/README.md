@@ -74,6 +74,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `unidade-cnpj-nome.md` | Unidade: CNPJ com dígitos verificadores; nome e CNPJ únicos por dono |
 | `unidade-remover.md` | Excluir unidade: RPC em vez do DELETE direto (RLS/CASCADE) |
 | `whatsapp-escolher-unidade.md` | WhatsApp: número em duas unidades pergunta a loja |
+| `vendas-realizadas-menu-operacao.md` | Vendas realizadas sai de Financeiro e vai para Operação |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

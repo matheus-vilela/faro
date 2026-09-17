@@ -100,6 +100,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           permission: "checklists",
         },
         {
+          title: "Vendas realizadas",
+          url: "/app/vendas-realizadas",
+          icon: TrendingUp,
+          permission: "vendas_realizadas",
+        },
+        {
           title: "Fornecedores",
           url: "/app/fornecedores",
           icon: Truck,
@@ -121,12 +127,6 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           url: "/app/contas-a-pagar",
           icon: TrendingDown,
           permission: "contas_a_pagar",
-        },
-        {
-          title: "Vendas realizadas",
-          url: "/app/vendas-realizadas",
-          icon: TrendingUp,
-          permission: "vendas_realizadas",
         },
         {
           title: "Conciliação bancária",
