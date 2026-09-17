@@ -753,6 +753,8 @@ type RecebimentoWhatsappRow = {
     display_name: string | null;
     invoice_number: string | null;
     company_id: string;
+    expense_source?: string | null;
+    status?: string | null;
   } | null;
 };
 
@@ -769,7 +771,7 @@ async function fetchPendingRecebimentosForWhatsapp(
       id,
       token,
       assigned_company_member_id,
-      expenses ( supplier_name, display_name, invoice_number, company_id )
+      expenses ( supplier_name, display_name, invoice_number, company_id, expense_source, status )
     `,
     )
     .eq("status", "pending")
@@ -788,6 +790,9 @@ async function fetchPendingRecebimentosForWhatsapp(
   const filtered = rows.filter((r) => {
     const exp = r.expenses;
     if (!exp || exp.company_id !== companyId) return false;
+    if (exp.expense_source === "whatsapp" && exp.status === "pending") {
+      return false;
+    }
     if (isOwner) return true;
     if (companyMemberId && r.assigned_company_member_id === companyMemberId) {
       return true;

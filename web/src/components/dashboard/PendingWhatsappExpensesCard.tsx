@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useCompany, useIsOwnerAccess } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { supabase } from "@/lib/supabase";
 import type { Expense } from "@/types/expense";
 import { ArrowRight, Loader2, MessageCircle } from "lucide-react";
@@ -25,7 +25,7 @@ function formatBrl(amount: number): string {
 
 export function PendingWhatsappExpensesCard() {
   const { currentCompany } = useCompany();
-  const isOwner = useIsOwnerAccess();
+  const canApprove = useHasPermission("despesas");
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<
     Pick<Expense, "id" | "supplier_name" | "created_at" | "expense_items">[]
@@ -34,7 +34,7 @@ export function PendingWhatsappExpensesCard() {
   const [sheetExpenseId, setSheetExpenseId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!currentCompany?.id || !isOwner) {
+    if (!currentCompany?.id || !canApprove) {
       setLoading(false);
       setItems([]);
       return;
@@ -61,7 +61,7 @@ export function PendingWhatsappExpensesCard() {
         "id" | "supplier_name" | "created_at" | "expense_items"
       >[],
     );
-  }, [currentCompany?.id, isOwner]);
+  }, [currentCompany?.id, canApprove]);
 
   useEffect(() => {
     void load();
@@ -83,11 +83,11 @@ export function PendingWhatsappExpensesCard() {
       toast.error(res?.error ?? "Não foi possível aprovar");
       return;
     }
-    toast.success("Despesa aprovada.");
+    toast.success("Nota aprovada. Título criado; conferência e estoque liberados.");
     void load();
   };
 
-  if (!isOwner || items.length === 0) {
+  if (!canApprove || items.length === 0) {
     return null;
   }
 
@@ -108,7 +108,7 @@ export function PendingWhatsappExpensesCard() {
               <div>
                 <CardTitle className="text-lg">Notas fiscais WhatsApp</CardTitle>
                 <CardDescription>
-                  Importações aguardando sua aprovação para liberar recebimento
+                  Importações aguardando aprovação para liberar estoque e título
                 </CardDescription>
               </div>
             </div>

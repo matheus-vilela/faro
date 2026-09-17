@@ -7,10 +7,33 @@ import {
   filterIdsByRecebimento,
   filterIdsByRecebimentoSection,
   filterIdsParticipatingInNotasRecebimento,
+  isWhatsappAwaitingApproval,
   parseRecebimentoListSection,
   parseRecebimentoListTab,
+  partitionWhatsappApprovalIds,
   recebimentoKindFromRow,
 } from "./notasRecebimentoListFilters";
+
+describe("whatsapp approval gate", () => {
+  it("flags WhatsApp pending as awaiting approval", () => {
+    expect(isWhatsappAwaitingApproval("whatsapp", "pending")).toBe(true);
+    expect(isWhatsappAwaitingApproval("whatsapp", "approved")).toBe(false);
+    expect(isWhatsappAwaitingApproval("manual", "pending")).toBe(false);
+  });
+
+  it("pulls pending WhatsApp ids out of other sections", () => {
+    expect(
+      partitionWhatsappApprovalIds(
+        ["a", "b", "c"],
+        [
+          { id: "a", expense_source: "whatsapp", status: "pending" },
+          { id: "b", expense_source: "whatsapp", status: "approved" },
+          { id: "c", expense_source: "manual", status: "pending" },
+        ],
+      ),
+    ).toEqual({ approvalIds: ["a"], restIds: ["b", "c"] });
+  });
+});
 
 describe("recebimentoKindFromRow", () => {
   it("classifies pending, confirmed and pending receipt", () => {
@@ -94,6 +117,7 @@ describe("filterIdsByRecebimento / boleto", () => {
     expect(parseRecebimentoListTab(null)).toBe("awaiting");
     expect(parseRecebimentoListSection(null)).toBeNull();
     expect(parseRecebimentoListSection("divergence")).toBe("divergence");
+    expect(parseRecebimentoListSection("approval")).toBe("approval");
   });
 
   it("splits boleto linked vs unlinked", () => {

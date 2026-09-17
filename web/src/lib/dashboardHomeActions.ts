@@ -83,7 +83,6 @@ export type WhatsappPendingExpense = {
 
 export type BuildHomeActionsInput = {
   canSeeAlerts: boolean;
-  isOwner: boolean;
   whatsappPending: WhatsappPendingExpense[];
   payablesTodayCount: number;
   payablesTodayAmount: number;
@@ -103,7 +102,7 @@ export function buildHomeActionItems(
 ): HomeActionItem[] {
   const items: HomeActionItem[] = [];
 
-  if (input.isOwner) {
+  if (input.whatsappPending.length > 0) {
     for (const exp of input.whatsappPending.slice(0, 3)) {
       const name = exp.supplier_name?.trim() || "Fornecedor";
       items.push({
@@ -131,7 +130,7 @@ export function buildHomeActionItems(
         priority: "high",
         tone: "amber",
         title: `Mais ${rest} nota${rest === 1 ? "" : "s"} WhatsApp pendente${rest === 1 ? "" : "s"}`,
-        subtitle: "Aguardando sua aprovação para liberar o recebimento",
+        subtitle: "Aguardando aprovação para liberar estoque e título",
         primary: {
           label: "Ver notas",
           href: "/app/notas-recebimento",

@@ -254,9 +254,9 @@ export function ConfiguracoesWhatsapp() {
               despesa — conforme regras da empresa e do servidor.
             </p>
             <p>
-              Despesas originadas no WhatsApp podem ficar{" "}
-              <strong>aguardando aprovação do proprietário</strong> antes de
-              integrar recebimento e estoque; acompanhe em{" "}
+              Despesas originadas no WhatsApp ficam{" "}
+              <strong>aguardando aprovação da gerência/operação</strong> antes
+              de integrar estoque e título no financeiro; acompanhe em{" "}
               <Link to="/app/notas-recebimento" className={linkWa}>
                 Notas Fiscais
               </Link>{" "}

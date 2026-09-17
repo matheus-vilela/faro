@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getMonthRange, type MonthYear } from "@/components/MonthSelector";
-import { useCompany, useHasPermission, useIsOwnerAccess } from "@/contexts/CompanyContext";
+import { useCompany, useHasPermission } from "@/contexts/CompanyContext";
 import { localDateYmd } from "@/lib/boletoPayment";
 import { syncCompanyAlerts } from "@/lib/companyAlerts/syncCompanyAlerts";
 import {
@@ -118,7 +118,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
   const canSeeAlerts = useHasPermission("alertas");
-  const isOwner = useIsOwnerAccess();
+  const canSeeNotas = useHasPermission("despesas");
 
   const [loading, setLoading] = useState(true);
   const [actionsLoading, setActionsLoading] = useState(true);
@@ -545,7 +545,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
         canSeeAlerts
           ? fetchDashboardImportReviewPendingRevenueLink(supabase, companyId)
           : Promise.resolve({ rows: [], error: null }),
-        isOwner
+        canSeeNotas
           ? supabase
               .from("expenses")
               .select(
@@ -622,7 +622,6 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setActions(
         buildHomeActionItems({
           canSeeAlerts,
-          isOwner,
           whatsappPending,
           payablesTodayCount,
           payablesTodayAmount,
@@ -642,7 +641,7 @@ export function useDashboardHomeData(period: DashboardHomePeriod) {
       setActions([]);
     }
     setActionsLoading(false);
-  }, [canSeeAlerts, companyId, isOwner, todayYmd]);
+  }, [canSeeAlerts, canSeeNotas, companyId, todayYmd]);
 
   useEffect(() => {
     queueMicrotask(() => void loadSalesAndKpis());

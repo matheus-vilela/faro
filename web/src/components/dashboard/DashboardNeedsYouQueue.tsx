@@ -42,7 +42,7 @@ export function DashboardNeedsYouQueue({
       toast.error(res?.error ?? "Não foi possível aprovar");
       return;
     }
-    toast.success("Despesa aprovada.");
+    toast.success("Nota aprovada. Título criado; conferência e estoque liberados.");
     onChanged();
   };
 

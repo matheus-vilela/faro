@@ -57,7 +57,9 @@ import {
   filterIdsByBoleto,
   filterIdsByRecebimentoSection,
   filterIdsParticipatingInNotasRecebimento,
+  isWhatsappAwaitingApproval,
   parseRecebimentoListSection,
+  partitionWhatsappApprovalIds,
   recebimentoKindFromRow,
   type NotasAtencaoFilter,
   type NotasBoletoFilter,
@@ -98,6 +100,7 @@ import {
   Loader2,
   PackageCheck,
   Plus,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Upload,
@@ -114,6 +117,7 @@ type RecebimentoListInfo = {
 };
 
 type RecebimentoListSectionIds = {
+  approval: string[];
   divergence: string[];
   awaiting: string[];
   received: string[];
@@ -292,6 +296,7 @@ export function Despesas() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [listSectionIds, setListSectionIds] =
     useState<RecebimentoListSectionIds>({
+      approval: [],
       divergence: [],
       awaiting: [],
       received: [],
@@ -402,6 +407,10 @@ export function Despesas() {
         .map((id) => expensesById.get(id))
         .filter((row): row is Expense => Boolean(row)),
     [expensesById],
+  );
+  const approvalExpenses = useMemo(
+    () => expensesFromIds(listSectionIds.approval),
+    [expensesFromIds, listSectionIds.approval],
   );
   const divergenceExpenses = useMemo(
     () => expensesFromIds(listSectionIds.divergence),
@@ -599,6 +608,8 @@ export function Despesas() {
     type LightExpenseRow = {
         id: string;
         type: string;
+        expense_source?: string | null;
+        status?: string | null;
         document_total?: number | null;
         financial_reconciliation_json?: Record<string, unknown> | null;
         expense_items?: Array<{
@@ -610,8 +621,8 @@ export function Despesas() {
       };
       const lightSelect =
         atencaoFilter === "all"
-          ? "id, type"
-          : "id, type, document_total, financial_reconciliation_json, expense_items(product_id, company_category_id, quantity, unit_value)";
+          ? "id, type, expense_source, status"
+          : "id, type, expense_source, status, document_total, financial_reconciliation_json, expense_items(product_id, company_category_id, quantity, unit_value)";
       const lightRows = await fetchAllInRange<LightExpenseRow>(
         applyListFilters(
           supabase
@@ -676,27 +687,37 @@ export function Despesas() {
         });
       }
 
-      const divergenceIds = filterIdsByRecebimentoSection(
+      const { approvalIds, restIds } = partitionWhatsappApprovalIds(
         ids,
+        lightRows,
+      );
+      const divergenceIds = filterIdsByRecebimentoSection(
+        restIds,
         kindByExpenseId,
         "divergence",
       );
       const awaitingIds = filterIdsByRecebimentoSection(
-        ids,
+        restIds,
         kindByExpenseId,
         "awaiting",
       );
       const receivedIds = filterIdsByRecebimentoSection(
-        ids,
+        restIds,
         kindByExpenseId,
         "received",
       );
       setListSectionIds({
+        approval: approvalIds,
         divergence: divergenceIds,
         awaiting: awaitingIds,
         received: receivedIds,
       });
-      const pageIds = [...divergenceIds, ...awaitingIds, ...receivedIds];
+      const pageIds = [
+        ...approvalIds,
+        ...divergenceIds,
+        ...awaitingIds,
+        ...receivedIds,
+      ];
       if (pageIds.length > 0) {
         const byId = new Map<string, Expense>();
         for (let i = 0; i < pageIds.length; i += EXPENSE_IN_CHUNK) {
@@ -783,6 +804,13 @@ export function Despesas() {
       const existing = recebimentosByExpenseId.get(expenseId);
       if (existing) return existing.id;
       if (!companyId) return null;
+      const exp = expenses.find((e) => e.id === expenseId);
+      if (isWhatsappAwaitingApproval(exp?.expense_source, exp?.status)) {
+        toast.error(
+          "Aprove a nota antes de gerar o recebimento e o estoque.",
+        );
+        return null;
+      }
       setEnsuringRecebimentoExpenseId(expenseId);
       const { data, error } = await supabase
         .from("recebimentos")
@@ -826,13 +854,17 @@ export function Despesas() {
       });
       return data.id as string;
     },
-    [recebimentosByExpenseId, companyId],
+    [recebimentosByExpenseId, companyId, expenses],
   );
 
   const openReviewForExpense = async (expenseId: string) => {
+    const exp = expenses.find((e) => e.id === expenseId);
+    if (isWhatsappAwaitingApproval(exp?.expense_source, exp?.status)) {
+      setDetailExpenseId(expenseId);
+      return;
+    }
     const existing = recebimentosByExpenseId.get(expenseId);
     if (!existing) {
-      const exp = expenses.find((e) => e.id === expenseId);
       if (exp && !isMerchandiseExpenseType(exp.type)) return;
     }
     const id = await ensureRecebimentoForExpense(expenseId);
@@ -840,9 +872,16 @@ export function Despesas() {
   };
 
   const openShareForExpense = async (expenseId: string) => {
+    const exp = expenses.find((e) => e.id === expenseId);
+    if (isWhatsappAwaitingApproval(exp?.expense_source, exp?.status)) {
+      toast.error(
+        "Aprove a nota antes de gerar o link de recebimento para o operador.",
+      );
+      setDetailExpenseId(expenseId);
+      return;
+    }
     const rec = recebimentosByExpenseId.get(expenseId);
     if (!rec) {
-      const exp = expenses.find((e) => e.id === expenseId);
       if (exp && !isMerchandiseExpenseType(exp.type)) return;
     }
     const id = await ensureRecebimentoForExpense(expenseId);
@@ -1293,8 +1332,10 @@ export function Despesas() {
     const boleto = getBoletoForExpense(exp.id);
     const linked = !!boleto;
     const recInfo = recebimentosByExpenseId.get(exp.id);
-    const pendingOwnerApproval =
-      exp.expense_source === "whatsapp" && exp.status === "pending";
+    const pendingOwnerApproval = isWhatsappAwaitingApproval(
+      exp.expense_source,
+      exp.status,
+    );
     const sumItemsRow =
       exp.expense_items?.reduce(
         (s, it) => s + Number(it.quantity) * Number(it.unit_value),
@@ -1320,7 +1361,13 @@ export function Despesas() {
       exp.supplier_name?.trim() ||
       typeLabel ||
       "Sem fornecedor";
-    const recebimentoBadge = !recInfo
+    const recebimentoBadge = pendingOwnerApproval
+      ? {
+          label: "Aguardando aprovação",
+          className:
+            "border-amber-600/30 bg-amber-500/10 text-amber-950 dark:text-amber-100",
+        }
+      : !recInfo
       ? {
           label: "Sem recebimento",
           className: "border-muted-foreground/30",
@@ -1380,12 +1427,23 @@ export function Despesas() {
         unlinkedProducts={unlinkedProducts}
         recebimento={recebimentoBadge}
         ensuringRecebimento={ensuringRecebimentoExpenseId === exp.id}
-        showShareAction={isCompanyOwner}
-        reviewLabel={reviewLabel}
+        showShareAction={isCompanyOwner && !pendingOwnerApproval}
+        reviewLabel={pendingOwnerApproval ? "Aprovar" : reviewLabel}
         onOpenDetail={() => setDetailExpenseId(exp.id)}
-        onOpenReview={() => void openReviewForExpense(exp.id)}
+        onOpenReview={() =>
+          pendingOwnerApproval
+            ? setDetailExpenseId(exp.id)
+            : void openReviewForExpense(exp.id)
+        }
         onOpenShare={() => void openShareForExpense(exp.id)}
         onBoletoClick={() => {
+          if (pendingOwnerApproval) {
+            toast.error(
+              "Aprove a nota antes de vincular o título no financeiro.",
+            );
+            setDetailExpenseId(exp.id);
+            return;
+          }
           if (linked) setBoletoResumo(boleto!);
           else openLinkDialog(exp.id);
         }}
@@ -2146,8 +2204,25 @@ export function Despesas() {
               </p>
             ) : (
               <>
+                {approvalExpenses.length > 0 ? (
+                  <>
+                    <NotasListSectionHeader
+                      id="recebimento-section-approval"
+                      title="Aguardando aprovação"
+                      count={approvalExpenses.length}
+                      tone="amber"
+                      icon={ShieldCheck}
+                    />
+                    {approvalExpenses.map((exp) =>
+                      renderExpenseRow(exp, "Aprovar", "awaiting"),
+                    )}
+                  </>
+                ) : null}
                 {divergenceExpenses.length > 0 ? (
                   <>
+                    {approvalExpenses.length > 0 ? (
+                      <NotasListSectionGap />
+                    ) : null}
                     <NotasListSectionHeader
                       id="recebimento-section-divergence"
                       title="Com divergência"
@@ -2162,7 +2237,8 @@ export function Despesas() {
                 ) : null}
                 {awaitingExpenses.length > 0 ? (
                   <>
-                    {divergenceExpenses.length > 0 ? (
+                    {approvalExpenses.length > 0 ||
+                    divergenceExpenses.length > 0 ? (
                       <NotasListSectionGap />
                     ) : null}
                     <NotasListSectionHeader
@@ -2179,7 +2255,8 @@ export function Despesas() {
                 ) : null}
                 {receivedExpenses.length > 0 ? (
                   <>
-                    {divergenceExpenses.length > 0 ||
+                    {approvalExpenses.length > 0 ||
+                    divergenceExpenses.length > 0 ||
                     awaitingExpenses.length > 0 ? (
                       <NotasListSectionGap />
                     ) : null}

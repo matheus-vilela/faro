@@ -9,8 +9,9 @@ export type NotasRecebimentoFilter =
   | "confirmed"
   | "pending_receipt";
 
-/** Listagens da tela: divergência, conferência pendente e já recebidas. */
+/** Listagens da tela: aprovação WhatsApp, divergência, conferência pendente e já recebidas. */
 export type NotasRecebimentoListSection =
+  | "approval"
   | "divergence"
   | "awaiting"
   | "received";
@@ -28,7 +29,12 @@ export function parseRecebimentoListTab(
 export function parseRecebimentoListSection(
   value: string | null | undefined,
 ): NotasRecebimentoListSection | null {
-  if (value === "received" || value === "awaiting" || value === "divergence") {
+  if (
+    value === "received" ||
+    value === "awaiting" ||
+    value === "divergence" ||
+    value === "approval"
+  ) {
     return value;
   }
   return null;
@@ -45,6 +51,32 @@ export type RecebimentoListKind =
   | "pending"
   | "confirmed"
   | "pending_receipt";
+
+export function isWhatsappAwaitingApproval(
+  expenseSource: string | null | undefined,
+  status: string | null | undefined,
+): boolean {
+  return expenseSource === "whatsapp" && status === "pending";
+}
+
+export function partitionWhatsappApprovalIds(
+  expenseIds: string[],
+  expenses: Array<{
+    id: string;
+    expense_source?: string | null;
+    status?: string | null;
+  }>,
+): { approvalIds: string[]; restIds: string[] } {
+  const pending = new Set(
+    expenses
+      .filter((e) => isWhatsappAwaitingApproval(e.expense_source, e.status))
+      .map((e) => e.id),
+  );
+  return {
+    approvalIds: expenseIds.filter((id) => pending.has(id)),
+    restIds: expenseIds.filter((id) => !pending.has(id)),
+  };
+}
 
 export function recebimentoKindFromRow(input: {
   status: string;

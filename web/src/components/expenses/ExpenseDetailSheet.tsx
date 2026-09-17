@@ -382,6 +382,11 @@ export function ExpenseDetailSheet({
     detailExpense.status !== "rejected" &&
     (canEditDespesas || isOwner);
 
+  const awaitingWhatsappApproval =
+    detailExpense?.expense_source === "whatsapp" &&
+    detailExpense.status === "pending";
+  const canApproveWhatsapp = canEditDespesas;
+
   const supplierSelectOptions = useMemo(
     () => suppliers.map(supplierSearchOption),
     [suppliers],
@@ -564,7 +569,7 @@ export function ExpenseDetailSheet({
   };
 
   const handleRejectWhatsappExpense = async () => {
-    if (!detailExpense?.id || !isOwner) return;
+    if (!detailExpense?.id || !canApproveWhatsapp) return;
     setApprovingWhatsapp(true);
     const { error } = await supabase
       .from("expenses")
@@ -591,7 +596,7 @@ export function ExpenseDetailSheet({
   };
 
   const handleApproveWhatsappExpense = async () => {
-    if (!detailExpense?.id || !isOwner) return;
+    if (!detailExpense?.id || !canApproveWhatsapp) return;
     const missingVinculo = (detailExpense.expense_items ?? []).some(
       (it) => !expenseItemHasVinculo(it),
     );
@@ -616,7 +621,9 @@ export function ExpenseDetailSheet({
       toast.error(res?.error ?? "Não foi possível aprovar");
       return;
     }
-    toast.success("Nota fiscal aprovada. O recebimento foi liberado.");
+    toast.success(
+      "Nota aprovada. Título criado no financeiro; conferência e estoque ficam liberados.",
+    );
     const { data: updated } = await supabase
       .from("expenses")
       .select(EXPENSE_SELECT)
@@ -675,6 +682,12 @@ export function ExpenseDetailSheet({
 
   const handleGenerateRecebimento = async () => {
     if (!detailExpense?.id || !companyId) return;
+    if (awaitingWhatsappApproval) {
+      toast.error(
+        "Aprove a nota antes de gerar o recebimento e o estoque.",
+      );
+      return;
+    }
     if (recebimentoInfo) {
       onOpenRecebimento?.();
       return;
@@ -1065,7 +1078,17 @@ export function ExpenseDetailSheet({
                   )}
                 </div>
               </SheetHeader>
-              {!detailEditMode &&
+              {!detailEditMode && awaitingWhatsappApproval ? (
+                <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3">
+                  <p className="text-sm font-semibold text-foreground">
+                    Aguardando aprovação
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Estoque e título no financeiro só depois do OK da
+                    gerência/operação.
+                  </p>
+                </div>
+              ) : !detailEditMode &&
               !isMerchandiseExpenseType(detailExpense.type) &&
               !recebimentoInfo ? (
                 <div className="mt-3 flex w-full flex-col gap-3 rounded-lg border border-muted-foreground/25 bg-muted/40 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1096,7 +1119,9 @@ export function ExpenseDetailSheet({
                     </Button>
                   )}
                 </div>
-              ) : !detailEditMode && onOpenRecebimento ? (
+              ) : !detailEditMode &&
+                !awaitingWhatsappApproval &&
+                onOpenRecebimento ? (
                 <div
                   className={cn(
                     "mt-3 flex w-full flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between",
@@ -1260,9 +1285,7 @@ export function ExpenseDetailSheet({
                     </div>
                   )}
                   {canEditDespesas &&
-                    detailExpense.expense_source === "whatsapp" &&
-                    detailExpense.status === "pending" &&
-                    !isOwner && (
+                    awaitingWhatsappApproval && (
                       <div>
                         <Label>Status</Label>
                         <SearchSelect
@@ -1279,16 +1302,14 @@ export function ExpenseDetailSheet({
                           triggerClassName="w-full"
                         />
                         <p className="text-xs text-muted-foreground mt-1.5">
-                          Só o proprietário pode aprovar. Você pode recusar se o
-                          lançamento estiver incorreto.
+                          Use Aprovar abaixo para liberar estoque e título. Aqui
+                          você só pode recusar se o lançamento estiver
+                          incorreto.
                         </p>
                       </div>
                     )}
                   {canEditDespesas &&
-                    !(
-                      detailExpense.expense_source === "whatsapp" &&
-                      detailExpense.status === "pending"
-                    ) && (
+                    !awaitingWhatsappApproval && (
                       <div>
                         <Label>Status</Label>
                         <SearchSelect
@@ -1575,13 +1596,11 @@ export function ExpenseDetailSheet({
                     <BoletoUnlinkedBlock />
                   )}
 
-                  {detailExpense.expense_source === "whatsapp" &&
-                    detailExpense.status === "pending" &&
-                    isOwner && (
+                  {awaitingWhatsappApproval && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
                         <p className="text-sm">
-                          Esta nota fiscal só entra no recebimento e nos alertas
-                          depois da sua aprovação.
+                          Esta nota aguarda aprovação da gerência/operação.
+                          Estoque e título no financeiro só depois do OK.
                         </p>
                         {detailUnlinkedProductRows > 0 ? (
                           <p className="text-sm text-amber-950 dark:text-amber-100">
@@ -1589,6 +1608,7 @@ export function ExpenseDetailSheet({
                             Vínculo) antes de aprovar.
                           </p>
                         ) : null}
+                        {canApproveWhatsapp ? (
                         <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -1612,6 +1632,12 @@ export function ExpenseDetailSheet({
                             Recusar
                           </Button>
                         </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Quem tem acesso a Notas e recebimento precisa
+                            aprovar para continuar.
+                          </p>
+                        )}
                       </div>
                     )}
 

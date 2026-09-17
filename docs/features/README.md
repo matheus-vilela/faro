@@ -74,6 +74,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `unidade-cnpj-nome.md` | Unidade: CNPJ com dígitos verificadores; nome e CNPJ únicos por dono |
 | `unidade-remover.md` | Excluir unidade: RPC em vez do DELETE direto (RLS/CASCADE) |
 | `whatsapp-escolher-unidade.md` | WhatsApp: número em duas unidades pergunta a loja |
+| `whatsapp-nota-aguarda-aprovacao.md` | NF WhatsApp aguarda OK da gerência antes de estoque/título |
 | `vendas-realizadas-menu-operacao.md` | Vendas realizadas sai de Financeiro e vai para Operação |
 | `contas-a-receber.md` | Contas a receber no Financeiro, gêmea de Contas a pagar |
 | `vendas-categoria-produto.md` | Categoria da venda: mix (bebida/produto), nunca forma de pagamento |

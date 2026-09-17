@@ -365,6 +365,15 @@ async function insertExpense(
   const documentTotal =
     Number.isFinite(docTotalRaw) && docTotalRaw > 0 ? docTotalRaw : null;
 
+  const dueDateIso = normalizeExtractedDueDate(extracted.dueDate ?? undefined);
+  const boletoTitle = (extracted.boletoTitle ?? "").trim() || null;
+  const financialReconciliation: Record<string, unknown> = {
+    schema_version: 1,
+    source: "whatsapp",
+  };
+  if (dueDateIso) financialReconciliation.due_date = dueDateIso;
+  if (boletoTitle) financialReconciliation.boleto_title = boletoTitle;
+
   const { data: exp, error: e1 } = await supabase
     .from("expenses")
     .insert({
@@ -381,6 +390,7 @@ async function insertExpense(
       expense_source: "whatsapp",
       reference_date: referenceDate,
       document_total: documentTotal,
+      financial_reconciliation_json: financialReconciliation,
       notes:
         [extracted.notes, "Importado via WhatsApp"]
           .filter(Boolean)
@@ -468,7 +478,7 @@ async function insertExpense(
       );
     }
   }
-  // Recebimento: criado no app após approve_whatsapp_expense_as_owner.
+  // Recebimento, estoque e título: só após OK da gerência/operação.
   return { status: "ok", expenseId };
 }
 
@@ -567,7 +577,7 @@ async function processMatchedExpenseFlow(
         await sendWhatsapp(
           senderNormalized,
           withFaroFlowFooter(
-            `Despesa registrada (${formatMoneyBrl(totalDoc)}). Os itens batem com o total. Abra o Faro para revisar.`,
+            `Nota registrada (${formatMoneyBrl(totalDoc)}). Ficou *aguardando aprovação* no Faro. Estoque e título no financeiro só depois do OK da gerência/operação.`,
             "registro",
           ),
           "despesa_whatsapp_ok",
@@ -839,7 +849,7 @@ export async function tryHandleExpenseDraftReply(
       await sendWhatsapp(
         senderNormalized,
         withFaroFlowFooter(
-          `Despesa registrada usando o *total da nota* (${formatMoneyBrl(totalDoc)}). Abra o Faro para revisar e aprovar.`,
+          `Nota registrada usando o *total da nota* (${formatMoneyBrl(totalDoc)}). Ficou *aguardando aprovação* no Faro.`,
           "registro",
         ),
         "despesa_whatsapp_ok_total",
@@ -879,7 +889,7 @@ export async function tryHandleExpenseDraftReply(
       await sendWhatsapp(
         senderNormalized,
         withFaroFlowFooter(
-          `Despesa registrada usando a *soma dos itens* (${formatMoneyBrl(sum)}). Abra o Faro para revisar e aprovar.`,
+          `Nota registrada usando a *soma dos itens* (${formatMoneyBrl(sum)}). Ficou *aguardando aprovação* no Faro.`,
           "registro",
         ),
         "despesa_whatsapp_ok_soma",
@@ -1157,8 +1167,15 @@ export async function tryHandleIncomingExpenseDocument(
     }
 
     const intent = data.businessIntent ?? "compra_insumos";
+    const isMerchandiseDoc =
+      data.documentKind === "nota_fiscal" ||
+      data.documentKind === "cupom_fiscal" ||
+      data.documentKind === "romaneio";
 
-    if (intent === "conta_pagar" || intent === "conta_receber") {
+    if (
+      (intent === "conta_pagar" || intent === "conta_receber") &&
+      !isMerchandiseDoc
+    ) {
       const totalDoc = Number(data.totalAmount ?? 0);
       if (!Number.isFinite(totalDoc) || totalDoc <= 0) {
         await sendWhatsapp(
@@ -1203,8 +1220,19 @@ export async function tryHandleIncomingExpenseDocument(
       return true;
     }
 
-    const items = data.items ?? [];
+    let items = data.items ?? [];
     const totalDoc = Number(data.totalAmount ?? 0);
+    if (items.length === 0 && isMerchandiseDoc && totalDoc > 0) {
+      items = [
+        {
+          productName: "Item da nota",
+          quantity: 1,
+          unitValue: totalDoc,
+          lineTotal: totalDoc,
+        },
+      ];
+    }
+    const workingData = { ...data, items };
     if (items.length === 0 || totalDoc <= 0) {
       await sendWhatsapp(
         auth.senderNormalized,
@@ -1220,7 +1248,7 @@ export async function tryHandleIncomingExpenseDocument(
     const { supplierId: waSupplierId } = await ensureSupplierFromExtracted(
       supabase,
       auth.companyId,
-      data,
+      workingData,
     );
     const matchOpts = await getDefaultCatalogMatchingOpts(
       supabase,
@@ -1238,7 +1266,7 @@ export async function tryHandleIncomingExpenseDocument(
       supabase,
       auth.companyId,
       auth.senderNormalized,
-      data,
+      workingData,
       matchResult,
       sendWhatsapp,
       flowId,
