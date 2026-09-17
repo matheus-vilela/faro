@@ -182,9 +182,10 @@ export function ConfiguracoesCategoriasProdutosPanel({
           Categorias de produtos
         </CardTitle>
         <CardDescription>
-          Classifique itens do catálogo (organização interna). A Conta do DRE
-          desta categoria preenche a linha da nota quando o NCM apontar para
-          ela. Marque{" "}
+          Classifique itens do catálogo (organização interna). A conta DRE
+          desta categoria é de <span className="font-medium text-foreground">compra/despesa</span>{" "}
+          (preenche a linha da nota quando o NCM apontar para ela) — não é
+          conta de venda. Marque{" "}
           <span className="font-medium text-foreground">
             Não aparece como venda
           </span>{" "}
@@ -275,7 +276,7 @@ export function ConfiguracoesCategoriasProdutosPanel({
                       disabled={!canManage || savingDreId === row.id}
                       compact
                       allowClear={Boolean(row.default_dre_category_id)}
-                      placeholder="Conta do DRE"
+                      placeholder="Conta de compra (DRE)"
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

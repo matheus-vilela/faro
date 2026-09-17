@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { useClientTableSort } from "@/hooks/useClientTableSort";
-import { tipoBadge } from "@/lib/companyCategoryLabels";
+import { catalogMixLabelForSale } from "@/lib/companyProductCategories/catalogMixLabel";
+import type { CatalogMixMaps } from "@/lib/companyProductCategories/fetchCatalogMix";
+import { emptyCatalogMixMaps } from "@/lib/companyProductCategories/fetchCatalogMix";
 import { cn } from "@/lib/utils";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry, RevenueEntryMode } from "@/types/revenue";
@@ -52,6 +54,7 @@ export type RevenueSalesListProps = {
   ) => string;
   productNameById: Map<string, string>;
   recipeNameById: Map<string, string>;
+  catalogMix?: CatalogMixMaps;
   formatCurrency: (v: number) => string;
   formatDate: (isoDate: string) => string;
   revenueTypeLabels: Record<string, string>;
@@ -204,6 +207,7 @@ type RowContext = {
   dateParts: ReturnType<typeof formatEntryDateParts>;
   cat: CompanyCategory | undefined;
   catLabel: string;
+  catalogLabel: string;
   subtitle: string | null;
 };
 
@@ -216,6 +220,7 @@ function buildRowContext(
   ) => string,
   productNameById: Map<string, string>,
   recipeNameById: Map<string, string>,
+  catalogMix: CatalogMixMaps,
 ): RowContext {
   const mode = (
     r.entry_mode in ENTRY_MODE_META ? r.entry_mode : "manual"
@@ -234,6 +239,11 @@ function buildRowContext(
     dateParts: formatEntryDateParts(r.entry_date),
     cat: categoriesById.get(r.subcategory_id),
     catLabel: categoryPathLabel(r.subcategory_id, categoriesById),
+    catalogLabel: catalogMixLabelForSale(
+      r,
+      catalogMix.categoriesByProductId,
+      catalogMix.recipeOutputById,
+    ),
     subtitle,
   };
 }
@@ -270,6 +280,7 @@ function RevenueSalesListView({
   categoryPathLabel,
   productNameById,
   recipeNameById,
+  catalogMix = emptyCatalogMixMaps(),
   formatCurrency,
   formatDate,
   revenueTypeLabels,
@@ -285,6 +296,7 @@ function RevenueSalesListView({
   ) => string;
   productNameById: Map<string, string>;
   recipeNameById: Map<string, string>;
+  catalogMix?: CatalogMixMaps;
   formatCurrency: (v: number) => string;
   formatDate: (isoDate: string) => string;
   revenueTypeLabels: Record<string, string>;
@@ -311,6 +323,7 @@ function RevenueSalesListView({
       categoryPathLabel,
       productNameById,
       recipeNameById,
+      catalogMix,
     );
     const ctxB = buildRowContext(
       b,
@@ -318,6 +331,7 @@ function RevenueSalesListView({
       categoryPathLabel,
       productNameById,
       recipeNameById,
+      catalogMix,
     );
     switch (key) {
       case "date":
@@ -329,7 +343,7 @@ function RevenueSalesListView({
       case "type":
         return a.revenue_type.localeCompare(b.revenue_type);
       case "category":
-        return ctxA.catLabel.localeCompare(ctxB.catLabel, "pt-BR");
+        return ctxA.catalogLabel.localeCompare(ctxB.catalogLabel, "pt-BR");
       case "gross":
         return Number(a.gross_amount) - Number(b.gross_amount);
       case "tax":
@@ -390,7 +404,7 @@ function RevenueSalesListView({
                 className="px-4 py-3 font-semibold"
               />
               <SortableTableHead
-                label="Categoria"
+                label="Grupo"
                 column="category"
                 sortKey={sortKey}
                 sortAsc={sortAsc}
@@ -434,6 +448,7 @@ function RevenueSalesListView({
                 categoryPathLabel,
                 productNameById,
                 recipeNameById,
+                catalogMix,
               );
               return (
                 <tr
@@ -480,15 +495,10 @@ function RevenueSalesListView({
                   <td className="px-4 py-3 align-middle">
                     <span
                       className="block truncate text-foreground"
-                      title={ctx.catLabel}
+                      title={ctx.catalogLabel}
                     >
-                      {ctx.catLabel || "—"}
+                      {ctx.catalogLabel || "—"}
                     </span>
-                    {ctx.cat ? (
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                        {tipoBadge(ctx.cat)}
-                      </span>
-                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right align-middle tabular-nums text-muted-foreground">
                     {formatCurrency(Number(r.gross_amount))}
@@ -519,6 +529,7 @@ function RevenueSalesListView({
           categoryPathLabel,
           productNameById,
           recipeNameById,
+          catalogMix,
         );
         return (
           <li key={r.id}>
@@ -584,7 +595,7 @@ function RevenueSalesListView({
                       variant="outline"
                       className="text-[11px] font-normal"
                     >
-                      {tipoBadge(ctx.cat)}
+                      {revenueTypeLabels[r.revenue_type] ?? r.revenue_type}
                     </Badge>
                   ) : null}
                 </div>
@@ -597,9 +608,9 @@ function RevenueSalesListView({
                     </dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-muted-foreground">Categoria</dt>
+                    <dt className="text-muted-foreground">Grupo</dt>
                     <dd className="mt-0.5 truncate font-medium text-foreground">
-                      {ctx.catLabel || "—"}
+                      {ctx.catalogLabel || "—"}
                     </dd>
                   </div>
                 </dl>
@@ -666,6 +677,7 @@ export function RevenueSalesList(props: RevenueSalesListProps) {
     categoryPathLabel,
     productNameById,
     recipeNameById,
+    catalogMix = emptyCatalogMixMaps(),
     formatCurrency,
     formatDate,
     revenueTypeLabels,
@@ -780,6 +792,7 @@ export function RevenueSalesList(props: RevenueSalesListProps) {
               categoryPathLabel={categoryPathLabel}
               productNameById={productNameById}
               recipeNameById={recipeNameById}
+              catalogMix={catalogMix}
               formatCurrency={formatCurrency}
               formatDate={formatDate}
               revenueTypeLabels={revenueTypeLabels}

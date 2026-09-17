@@ -26,6 +26,11 @@ import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 import { excludedProductIdsFromRows } from "@/lib/productExcludeFromSales";
 import {
+  emptyCatalogMixMaps,
+  fetchCatalogMixMaps,
+  type CatalogMixMaps,
+} from "@/lib/companyProductCategories/fetchCatalogMix";
+import {
   Banknote,
   Hash,
   Loader2,
@@ -577,6 +582,9 @@ export function VendasRealizadasResumo() {
   const [recipeNameById, setRecipeNameById] = useState<Map<string, string>>(
     () => new Map(),
   );
+  const [catalogMix, setCatalogMix] = useState<CatalogMixMaps>(() =>
+    emptyCatalogMixMaps(),
+  );
   const [excludedProductIds, setExcludedProductIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -693,7 +701,7 @@ export function VendasRealizadasResumo() {
         ),
       ];
 
-      const [productsRes, recipesRes] = await Promise.all([
+      const [productsRes, recipesRes, mixMaps] = await Promise.all([
         productIds.length
           ? supabase
               .from("products")
@@ -703,6 +711,11 @@ export function VendasRealizadasResumo() {
         recipeIds.length
           ? supabase.from("recipes").select("id, name").in("id", recipeIds)
           : Promise.resolve({ data: [], error: null }),
+        fetchCatalogMixMaps({
+          companyId,
+          productIds,
+          recipeIds,
+        }),
       ]);
 
       if (productsRes.error) throw productsRes.error;
@@ -738,11 +751,13 @@ export function VendasRealizadasResumo() {
           ),
         ),
       );
+      setCatalogMix(mixMaps);
     } catch (err) {
       console.error(err);
       setEntries([]);
       setEpocPayments([]);
       setEpocFaturamentoDays([]);
+      setCatalogMix(emptyCatalogMixMaps());
     } finally {
       setLoading(false);
     }
@@ -772,6 +787,8 @@ export function VendasRealizadasResumo() {
         epocFaturamentoDays,
         customRange,
         weekStartsOn,
+        catalogByProductId: catalogMix.categoriesByProductId,
+        recipeOutputById: catalogMix.recipeOutputById,
       }),
     [
       entries,
@@ -786,6 +803,7 @@ export function VendasRealizadasResumo() {
       epocFaturamentoDays,
       customRange,
       weekStartsOn,
+      catalogMix,
     ],
   );
 
@@ -969,7 +987,7 @@ export function VendasRealizadasResumo() {
                     <thead>
                       <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         <th className="pb-2 pr-3 font-semibold">Produto</th>
-                        <th className="pb-2 pr-3 font-semibold">Categoria</th>
+                        <th className="pb-2 pr-3 font-semibold">Grupo</th>
                         <th className="pb-2 pr-3 text-right font-semibold">
                           Qtde
                         </th>
@@ -997,7 +1015,7 @@ export function VendasRealizadasResumo() {
                               {row.label}
                             </td>
                             <td className="py-3 pr-3 text-muted-foreground">
-                              {row.categoryLabel}
+                              {row.catalogLabel}
                             </td>
                             <td className="py-3 pr-3 text-right tabular-nums">
                               {row.quantity.toLocaleString("pt-BR", {
@@ -1095,13 +1113,13 @@ export function VendasRealizadasResumo() {
                 <Card className="shadow-sm">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base font-semibold">
-                      Receita por categoria
+                      Receita por grupo
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 pt-0">
                     {dashboard.categories.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        Sem categorias no período.
+                        Sem grupos no período.
                       </p>
                     ) : (
                       dashboard.categories.map((row, i) => (

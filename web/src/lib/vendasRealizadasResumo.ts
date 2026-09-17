@@ -3,6 +3,11 @@ import {
   companyCategoryDisplayName,
 } from "@/lib/companyCategoryLabels";
 import { filterRevenueEntriesAppearingAsSale } from "@/lib/productExcludeFromSales";
+import {
+  catalogMixLabelForSale,
+  SEM_GRUPO_LABEL,
+  type CatalogMixCategory,
+} from "@/lib/companyProductCategories/catalogMixLabel";
 import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 
@@ -104,7 +109,7 @@ export type ResumoKpiDelta = {
 export type ResumoChampionRow = {
   key: string;
   label: string;
-  categoryLabel: string;
+  catalogLabel: string;
   quantity: number;
   revenue: number;
   revenueShare: number;
@@ -684,15 +689,16 @@ function productLabel(
 
 function buildChampions(
   entries: RevenueEntry[],
-  categoriesById: Map<string, CompanyCategory>,
   productNameById: Map<string, string>,
   recipeNameById: Map<string, string>,
+  catalogByProductId: ReadonlyMap<string, readonly CatalogMixCategory[]>,
+  recipeOutputById: ReadonlyMap<string, string | null | undefined>,
 ): ResumoChampionRow[] {
   const totalNet = entries.reduce((s, e) => s + (Number(e.net_amount) || 0), 0);
   type Acc = {
     key: string;
     label: string;
-    categoryLabel: string;
+    catalogLabel: string;
     quantity: number;
     revenue: number;
   };
@@ -701,7 +707,11 @@ function buildChampions(
   for (const e of entries) {
     const key = productKey(e);
     const label = productLabel(e, productNameById, recipeNameById);
-    const categoryLabel = categoryGroupLabel(e.subcategory_id, categoriesById);
+    const catalogLabel = catalogMixLabelForSale(
+      e,
+      catalogByProductId,
+      recipeOutputById,
+    );
     const prev = map.get(key);
     if (prev) {
       prev.quantity += entryQuantity(e);
@@ -710,7 +720,7 @@ function buildChampions(
       map.set(key, {
         key,
         label,
-        categoryLabel,
+        catalogLabel,
         quantity: entryQuantity(e),
         revenue: Number(e.net_amount) || 0,
       });
@@ -931,20 +941,25 @@ function buildDailySeriesFromFaturamento(
 
 function buildCategories(
   entries: RevenueEntry[],
-  categoriesById: Map<string, CompanyCategory>,
+  catalogByProductId: ReadonlyMap<string, readonly CatalogMixCategory[]>,
+  recipeOutputById: ReadonlyMap<string, string | null | undefined>,
 ): ResumoCategoryRow[] {
   const totalNet = entries.reduce((s, e) => s + (Number(e.net_amount) || 0), 0);
   const map = new Map<string, { label: string; revenue: number }>();
 
   for (const e of entries) {
-    const label = categoryGroupLabel(e.subcategory_id, categoriesById);
-    const key = label;
+    const label = catalogMixLabelForSale(
+      e,
+      catalogByProductId,
+      recipeOutputById,
+    );
+    const key = label || SEM_GRUPO_LABEL;
     const prev = map.get(key);
     const amount = Number(e.net_amount) || 0;
     if (prev) {
       prev.revenue += amount;
     } else {
-      map.set(key, { label, revenue: amount });
+      map.set(key, { label: key, revenue: amount });
     }
   }
 
@@ -976,6 +991,8 @@ export function buildVendasRealizadasResumo(input: {
   customRange?: ResumoCustomRange | null;
   /** Dia de início da semana contábil (0=dom … 6=sáb). */
   weekStartsOn?: number;
+  catalogByProductId?: ReadonlyMap<string, readonly CatalogMixCategory[]>;
+  recipeOutputById?: ReadonlyMap<string, string | null | undefined>;
 }): ResumoDashboard {
   const ranges = getResumoRanges(
     input.period,
@@ -1077,13 +1094,18 @@ export function buildVendasRealizadasResumo(input: {
     },
     champions: buildChampions(
       current,
-      input.categoriesById,
       input.productNameById,
       input.recipeNameById,
+      input.catalogByProductId ?? new Map(),
+      input.recipeOutputById ?? new Map(),
     ),
     payments,
     daily,
-    categories: buildCategories(current, input.categoriesById),
+    categories: buildCategories(
+      current,
+      input.catalogByProductId ?? new Map(),
+      input.recipeOutputById ?? new Map(),
+    ),
   };
 }
 

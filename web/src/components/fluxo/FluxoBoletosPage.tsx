@@ -98,6 +98,11 @@ import {
   fetchExcludedFromSalesProductIds,
   filterRevenueEntriesAppearingAsSale,
 } from "@/lib/productExcludeFromSales";
+import {
+  emptyCatalogMixMaps,
+  fetchCatalogMixMaps,
+  type CatalogMixMaps,
+} from "@/lib/companyProductCategories/fetchCatalogMix";
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
@@ -278,6 +283,9 @@ export function FluxoBoletosPage({
   const [boletosList, setBoletosList] = useState<FluxoBoletoRow[]>([]);
   const [listRevenueEntries, setListRevenueEntries] = useState<RevenueEntry[]>(
     [],
+  );
+  const [salesCatalogMix, setSalesCatalogMix] = useState<CatalogMixMaps>(() =>
+    emptyCatalogMixMaps(),
   );
   const [boletosMonthFiltered, setBoletosMonthFiltered] = useState<
     FluxoBoletoRow[]
@@ -597,6 +605,25 @@ export function FluxoBoletosPage({
     boletosPage,
     listDateRange,
   ]);
+
+  useEffect(() => {
+    if (!companyId || !isSalesSource) {
+      queueMicrotask(() => setSalesCatalogMix(emptyCatalogMixMaps()));
+      return;
+    }
+    const productIds = listRevenueEntries
+      .map((e) => e.product_id)
+      .filter((id): id is string => Boolean(id));
+    const recipeIds = listRevenueEntries
+      .map((e) => e.recipe_id)
+      .filter((id): id is string => Boolean(id));
+    void fetchCatalogMixMaps({ companyId, productIds, recipeIds })
+      .then(setSalesCatalogMix)
+      .catch((err) => {
+        console.error(err);
+        setSalesCatalogMix(emptyCatalogMixMaps());
+      });
+  }, [companyId, isSalesSource, listRevenueEntries]);
 
   const fetchPayableTotals = useCallback(async () => {
     if (!companyId || !isBoletosSource) {
@@ -1597,8 +1624,7 @@ export function FluxoBoletosPage({
             <VendasRealizadasListTable
               revenueEntries={listRevenueEntries}
               serviceSales={monthServiceSales}
-              categories={companyCategories}
-              categoriesById={categoriesById}
+              catalogMix={salesCatalogMix}
               loading={loadingList}
               emptyMessage={emptyListMessage}
               formatCurrency={formatCurrency}

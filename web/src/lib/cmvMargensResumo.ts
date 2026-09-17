@@ -6,6 +6,11 @@ import {
 import { parseRevenueCmvLines } from "@/types/revenueCmv";
 import type { RevenueEntry } from "@/types/revenue";
 import { filterRevenueEntriesAppearingAsSale } from "@/lib/productExcludeFromSales";
+import {
+  catalogMixLabelForSale,
+  SEM_GRUPO_LABEL,
+  type CatalogMixCategory,
+} from "@/lib/companyProductCategories/catalogMixLabel";
 
 export type CmvPeriodFilter = ResumoPeriodFilter;
 
@@ -42,6 +47,7 @@ export type CmvProductRow = {
   /** Delta de margem em pp vs período anterior (null se sem base). */
   marginDeltaPp: number | null;
   quadrant: BcgQuadrant;
+  catalogLabel: string;
 };
 
 export type CmvGapKind = "backfill" | "no_cost" | "recipe";
@@ -460,6 +466,8 @@ export function buildCmvMargensDashboard(input: {
   recipeNameById: Map<string, string>;
   productMetaById?: Map<string, ProductCmvMeta>;
   weekStartsOn?: number;
+  catalogByProductId?: ReadonlyMap<string, readonly CatalogMixCategory[]>;
+  recipeOutputById?: ReadonlyMap<string, string | null | undefined>;
 }): CmvMargensDashboard {
   const productMetaById = input.productMetaById ?? new Map();
   const excludedProductIds = new Set<string>();
@@ -552,6 +560,19 @@ export function buildCmvMargensDashboard(input: {
         volumeThreshold,
         CMV_MARGIN_TARGET_PCT,
       ),
+      catalogLabel: catalogMixLabelForSale(
+        {
+          entry_mode: acc.recipeId
+            ? "recipe_sale"
+            : acc.productId
+              ? "product_sale"
+              : "manual",
+          product_id: acc.productId,
+          recipe_id: acc.recipeId,
+        },
+        input.catalogByProductId ?? new Map(),
+        input.recipeOutputById ?? new Map(),
+      ),
     };
   });
 
@@ -589,6 +610,45 @@ export function buildCmvMargensDashboard(input: {
     volumeThreshold,
     marginThreshold: CMV_MARGIN_TARGET_PCT,
   };
+}
+
+export function rollupCmvRowsByCatalog(rows: CmvProductRow[]): CmvProductRow[] {
+  const map = new Map<string, CmvProductRow>();
+  for (const r of rows) {
+    const label = r.catalogLabel || SEM_GRUPO_LABEL;
+    const key = `catalog:${label}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        ...r,
+        key,
+        label,
+        shortLabel: shortLabelFrom(label),
+        productId: null,
+        recipeId: null,
+      });
+    } else {
+      prev.quantity += r.quantity;
+      prev.revenue += r.revenue;
+      prev.cmv += r.cmv;
+    }
+  }
+  const rolled: CmvProductRow[] = [];
+  for (const row of map.values()) {
+    const sellPrice = row.quantity > 0 ? row.revenue / row.quantity : 0;
+    const costPrice = row.quantity > 0 ? row.cmv / row.quantity : 0;
+    const mPct = marginPctOf(row.revenue, row.cmv);
+    rolled.push({
+      ...row,
+      sellPrice,
+      costPrice,
+      markup: markupOf(sellPrice, costPrice),
+      marginPct: mPct,
+      marginDeltaPp: null,
+      quadrant: classifyBcg(row.quantity, mPct, 1),
+    });
+  }
+  return rolled;
 }
 
 /** Expõe linhas de CMV de um lançamento (útil para detalhe / testes). */

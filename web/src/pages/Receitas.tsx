@@ -39,6 +39,12 @@ import {
   categoryPathLabel,
   isLeafCategory,
 } from "@/lib/companyCategoryLabels";
+import { isExcludedSaleMixLeafName } from "@/lib/companyCategories/saleMixRevenueLeaves";
+import {
+  emptyCatalogMixMaps,
+  fetchCatalogMixMaps,
+  type CatalogMixMaps,
+} from "@/lib/companyProductCategories/fetchCatalogMix";
 import {
   convertQuantityForProduct,
   getLockedSystemSecondaryQty,
@@ -350,6 +356,9 @@ export function Receitas() {
     year: now.getFullYear(),
   });
   const [rows, setRows] = useState<RevenueEntry[]>([]);
+  const [catalogMix, setCatalogMix] = useState<CatalogMixMaps>(() =>
+    emptyCatalogMixMaps(),
+  );
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -514,13 +523,25 @@ export function Receitas() {
     return receitaCategories
       .filter((c) => isLeafCategory(c.id, childrenMap))
       .filter((c) => c.papel_receita_dre !== "DEDUCAO")
+      .filter(
+        (c) =>
+          tipoFilter !== "OPERACIONAL" ||
+          !isExcludedSaleMixLeafName(c.name) ||
+          c.id === categoryLeafId,
+      )
       .sort((a, b) =>
         categoryPathLabel(a.id, categoriesById).localeCompare(
           categoryPathLabel(b.id, categoriesById),
           "pt-BR",
         ),
       );
-  }, [receitaCategories, childrenMap, categoriesById]);
+  }, [
+    receitaCategories,
+    childrenMap,
+    categoriesById,
+    tipoFilter,
+    categoryLeafId,
+  ]);
 
   const categorySelectOptions = useMemo(
     () =>
@@ -616,6 +637,26 @@ export function Receitas() {
     () => new Map(recipes.map((r) => [r.id, r.name])),
     [recipes],
   );
+
+  useEffect(() => {
+    const companyId = currentCompany?.id;
+    if (!companyId) {
+      queueMicrotask(() => setCatalogMix(emptyCatalogMixMaps()));
+      return;
+    }
+    const productIds = rows
+      .map((e) => e.product_id)
+      .filter((id): id is string => Boolean(id));
+    const recipeIds = rows
+      .map((e) => e.recipe_id)
+      .filter((id): id is string => Boolean(id));
+    void fetchCatalogMixMaps({ companyId, productIds, recipeIds })
+      .then(setCatalogMix)
+      .catch((err) => {
+        console.error(err);
+        setCatalogMix(emptyCatalogMixMaps());
+      });
+  }, [currentCompany?.id, rows]);
 
   const effectiveGross = isPontual ? pontualGrossTotal : grossNum;
 
@@ -1601,6 +1642,7 @@ export function Receitas() {
         categoryPathLabel={categoryPathLabel}
         productNameById={productNameById}
         recipeNameById={recipeNameById}
+        catalogMix={catalogMix}
         formatCurrency={formatCurrency}
         formatDate={formatDate}
         revenueTypeLabels={REVENUE_TYPE_LABEL}

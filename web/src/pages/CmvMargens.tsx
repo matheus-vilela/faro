@@ -17,6 +17,7 @@ import {
   buildCmvMargensDashboard,
   CMV_MARGIN_TARGET_PCT,
   countByQuadrant,
+  rollupCmvRowsByCatalog,
   type BcgQuadrant,
   type CmvGapKind,
   type CmvPeriodFilter,
@@ -34,6 +35,11 @@ import {
 import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import { cn } from "@/lib/utils";
+import {
+  emptyCatalogMixMaps,
+  fetchCatalogMixMaps,
+  type CatalogMixMaps,
+} from "@/lib/companyProductCategories/fetchCatalogMix";
 import { getResumoRanges, normalizeWeekStartsOn } from "@/lib/vendasRealizadasResumo";
 import type { RevenueEntry } from "@/types/revenue";
 import {
@@ -236,6 +242,9 @@ export function CmvMargens({
   const [productMetaById, setProductMetaById] = useState<
     Map<string, ProductCmvMeta>
   >(() => new Map());
+  const [catalogMix, setCatalogMix] = useState<CatalogMixMaps>(() =>
+    emptyCatalogMixMaps(),
+  );
   const [loading, setLoading] = useState(true);
 
   const todayYmd = localDateYmd();
@@ -298,7 +307,7 @@ export function CmvMargens({
 
       const allProductIds = [...cmvProductIds];
 
-      const [productsRes, recipesRes] = await Promise.all([
+      const [productsRes, recipesRes, mixMaps] = await Promise.all([
         allProductIds.length
           ? supabase
               .from("products")
@@ -308,6 +317,11 @@ export function CmvMargens({
         recipeIds.length
           ? supabase.from("recipes").select("id, name").in("id", recipeIds)
           : Promise.resolve({ data: [], error: null }),
+        fetchCatalogMixMaps({
+          companyId,
+          productIds: allProductIds,
+          recipeIds,
+        }),
       ]);
 
       if (productsRes.error) throw productsRes.error;
@@ -343,9 +357,11 @@ export function CmvMargens({
           ),
         ),
       );
+      setCatalogMix(mixMaps);
     } catch (err) {
       console.error(err);
       setEntries([]);
+      setCatalogMix(emptyCatalogMixMaps());
     } finally {
       setLoading(false);
     }
@@ -366,6 +382,8 @@ export function CmvMargens({
         recipeNameById,
         productMetaById,
         weekStartsOn,
+        catalogByProductId: catalogMix.categoriesByProductId,
+        recipeOutputById: catalogMix.recipeOutputById,
       }),
     [
       entries,
@@ -376,6 +394,7 @@ export function CmvMargens({
       recipeNameById,
       productMetaById,
       weekStartsOn,
+      catalogMix,
     ],
   );
 
@@ -528,15 +547,32 @@ function MargemPanel({
     "all",
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [groupByCatalog, setGroupByCatalog] = useState(false);
+
+  const tableProducts = useMemo(() => {
+    if (!groupByCatalog) return products;
+    const rolled = rollupCmvRowsByCatalog(products);
+    const copy = [...rolled];
+    if (sort === "pior") {
+      copy.sort((a, b) => (a.marginPct ?? 999) - (b.marginPct ?? 999));
+    } else if (sort === "volume") {
+      copy.sort((a, b) => b.quantity - a.quantity);
+    } else {
+      copy.sort((a, b) => (b.marginPct ?? -999) - (a.marginPct ?? -999));
+    }
+    return copy;
+  }, [groupByCatalog, products, sort]);
 
   const quadrantCounts = useMemo(() => countByQuadrant(products), [products]);
 
   const filteredProducts = useMemo(
     () =>
-      quadrantFilter === "all"
-        ? products
-        : products.filter((p) => p.quadrant === quadrantFilter),
-    [products, quadrantFilter],
+      groupByCatalog
+        ? tableProducts
+        : quadrantFilter === "all"
+          ? products
+          : products.filter((p) => p.quadrant === quadrantFilter),
+    [groupByCatalog, tableProducts, products, quadrantFilter],
   );
 
   const filteredBcgData = useMemo(
@@ -615,19 +651,52 @@ function MargemPanel({
               <Button
                 key={opt.value}
                 type="button"
-                role="tab"
-                aria-selected={active}
                 variant="ghost"
                 size="sm"
                 onClick={() => setView(opt.value)}
+                disabled={groupByCatalog && opt.value === "bcg"}
                 className={cn(
-                  "h-8 rounded-full px-3 text-sm font-medium shadow-none",
+                  "h-8 rounded-full px-3 text-xs font-medium shadow-none",
                   active
-                    ? "bg-background text-foreground shadow-sm hover:bg-background"
-                    : "text-muted-foreground hover:bg-transparent hover:text-foreground",
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground",
                 )}
               >
-                <Icon className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                <Icon className="mr-1.5 size-3.5" />
+                {opt.label}
+              </Button>
+            );
+          })}
+        </div>
+        <div
+          className="inline-flex max-w-full flex-wrap rounded-full bg-muted p-1"
+          role="tablist"
+          aria-label="Agrupar margem"
+        >
+          {(
+            [
+              { value: false, label: "Por produto" },
+              { value: true, label: "Por grupo" },
+            ] as const
+          ).map((opt) => {
+            const active = groupByCatalog === opt.value;
+            return (
+              <Button
+                key={String(opt.value)}
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setGroupByCatalog(opt.value);
+                  if (opt.value) setView("tabela");
+                }}
+                className={cn(
+                  "h-8 rounded-full px-3 text-xs font-medium shadow-none",
+                  active
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground",
+                )}
+              >
                 {opt.label}
               </Button>
             );
@@ -668,7 +737,7 @@ function MargemPanel({
         </label>
       </div>
 
-      {hasProducts ? (
+      {!groupByCatalog && hasProducts ? (
         <div
           className="flex flex-wrap gap-2"
           role="group"
@@ -861,7 +930,7 @@ function MargemPanel({
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">
-              Margem por produto — {ranges.championsTitle}
+              Margem por {groupByCatalog ? "grupo" : "produto"} — {ranges.championsTitle}
             </CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto pt-0">
@@ -873,7 +942,9 @@ function MargemPanel({
               <table className="w-full min-w-[40rem] border-collapse text-sm">
                 <thead>
                   <tr className="border-b text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    <th className="pb-2 pr-3 font-semibold">Produto</th>
+                    <th className="pb-2 pr-3 font-semibold">
+                      {groupByCatalog ? "Grupo" : "Produto"}
+                    </th>
                     <th className="pb-2 pr-3 text-right font-semibold">
                       Preço compra
                     </th>
@@ -891,16 +962,28 @@ function MargemPanel({
                   {filteredProducts.map((row) => (
                     <tr
                       key={row.key}
-                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40"
-                      onClick={() => setSelectedKey(row.key)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelectedKey(row.key);
-                        }
-                      }}
-                      tabIndex={0}
-                      role="button"
+                      className={cn(
+                        "border-b border-border/60 last:border-0",
+                        !groupByCatalog &&
+                          "cursor-pointer hover:bg-muted/40",
+                      )}
+                      onClick={
+                        groupByCatalog
+                          ? undefined
+                          : () => setSelectedKey(row.key)
+                      }
+                      onKeyDown={
+                        groupByCatalog
+                          ? undefined
+                          : (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedKey(row.key);
+                              }
+                            }
+                      }
+                      tabIndex={groupByCatalog ? undefined : 0}
+                      role={groupByCatalog ? undefined : "button"}
                     >
                       <td className="py-3 pr-3">
                         <div className="flex items-start gap-2">
@@ -919,7 +1002,10 @@ function MargemPanel({
                               {row.quantity.toLocaleString("pt-BR", {
                                 maximumFractionDigits: 2,
                               })}{" "}
-                              un · {BCG_QUADRANT_LABELS[row.quadrant]}
+                              un
+                              {groupByCatalog
+                                ? null
+                                : ` · ${BCG_QUADRANT_LABELS[row.quadrant]}`}
                             </div>
                           </div>
                         </div>

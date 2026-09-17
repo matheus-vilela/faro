@@ -29,6 +29,7 @@ import {
   isLeafCategory,
   tipoBadge,
 } from "@/lib/companyCategoryLabels";
+import { isExcludedSaleMixLeafName } from "@/lib/companyCategories/saleMixRevenueLeaves";
 import {
   convertQuantityForProduct,
   getLockedSystemSecondaryQty,
@@ -156,13 +157,25 @@ export function RevenueDetailSheet({
     return receitaCategories
       .filter((c) => isLeafCategory(c.id, childrenMap))
       .filter((c) => c.papel_receita_dre !== "DEDUCAO")
+      .filter(
+        (c) =>
+          tipoFilter !== "OPERACIONAL" ||
+          !isExcludedSaleMixLeafName(c.name) ||
+          c.id === categoryLeafId,
+      )
       .sort((a, b) =>
         categoryPathLabel(a.id, categoriesById).localeCompare(
           categoryPathLabel(b.id, categoriesById),
           "pt-BR",
         ),
       );
-  }, [receitaCategories, childrenMap, categoriesById]);
+  }, [
+    receitaCategories,
+    childrenMap,
+    categoriesById,
+    tipoFilter,
+    categoryLeafId,
+  ]);
 
   const categorySelectOptions = useMemo(
     () =>

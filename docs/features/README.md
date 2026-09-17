@@ -77,6 +77,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `vendas-realizadas-menu-operacao.md` | Vendas realizadas sai de Financeiro e vai para Operação |
 | `contas-a-receber.md` | Contas a receber no Financeiro, gêmea de Contas a pagar |
 | `vendas-categoria-produto.md` | Categoria da venda: mix (bebida/produto), nunca forma de pagamento |
+| `vendas-mix-catalogo.md` | Mix fino do catálogo (Cervejas/Soft/prato) em vendas e margens |
 | `<slug>.md` | Task real (rascunho → pronta → em-andamento → feita) |
 
 Convenções permanentes (tabelas, sheets, etc.) ficam em `.cursor/rules/`, não aqui.

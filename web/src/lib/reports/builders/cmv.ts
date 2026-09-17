@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import type { RevenueEntry } from "@/types/revenue";
 import { getResumoRanges } from "@/lib/vendasRealizadasResumo";
+import { fetchCatalogMixMaps } from "@/lib/companyProductCategories/fetchCatalogMix";
 import type { ReportResult, ReportRunContext } from "../types";
 
 export async function buildCmvMarginsReport(
@@ -54,7 +55,7 @@ export async function buildCmvMarginsReport(
     }
   }
 
-  const [productsRes, recipesRes] = await Promise.all([
+  const [productsRes, recipesRes, mixMaps] = await Promise.all([
     cmvProductIds.size
       ? supabase
           .from("products")
@@ -64,6 +65,11 @@ export async function buildCmvMarginsReport(
     recipeIds.length
       ? supabase.from("recipes").select("id, name").in("id", recipeIds)
       : Promise.resolve({ data: [], error: null }),
+    fetchCatalogMixMaps({
+      companyId: ctx.companyId,
+      productIds: [...cmvProductIds],
+      recipeIds,
+    }),
   ]);
   if (productsRes.error) throw productsRes.error;
   if (recipesRes.error) throw recipesRes.error;
@@ -98,6 +104,8 @@ export async function buildCmvMarginsReport(
     recipeNameById,
     productMetaById,
     weekStartsOn: ctx.weekStartsOn,
+    catalogByProductId: mixMaps.categoriesByProductId,
+    recipeOutputById: mixMaps.recipeOutputById,
   });
 
   const periodLabelMap = {
@@ -142,6 +150,7 @@ export async function buildCmvMarginsReport(
         title: "Produtos",
         columns: [
           { key: "label", header: "Produto" },
+          { key: "grupo", header: "Grupo" },
           { key: "quantity", header: "Qtde", format: "number", align: "right" },
           { key: "revenue", header: "Receita", format: "money", align: "right" },
           { key: "cmv", header: "CMV", format: "money", align: "right" },
@@ -151,6 +160,7 @@ export async function buildCmvMarginsReport(
         ],
         rows: dash.products.map((p) => ({
           label: p.label,
+          grupo: p.catalogLabel,
           quantity: p.quantity,
           revenue: p.revenue,
           cmv: p.cmv,

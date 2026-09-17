@@ -6,6 +6,7 @@ import {
   CMV_MARGIN_TARGET_PCT,
   countByQuadrant,
   priceToReachMargin,
+  rollupCmvRowsByCatalog,
 } from "@/lib/cmvMargensResumo";
 import type { RevenueEntry } from "@/types/revenue";
 
@@ -298,5 +299,55 @@ describe("buildCmvMargensDashboard", () => {
     expect(dash.products).toHaveLength(1);
     expect(dash.products[0]!.key).toBe("product:p1");
     expect(dash.kpis.eligibleRevenue).toBe(140);
+  });
+
+  it("agrega CMV por grupo de catálogo sem mudar KPIs", () => {
+    const entries = [
+      entry({
+        id: "1",
+        title: "Heineken",
+        product_id: "p1",
+        net_amount: 100,
+        cmv_amount: 40,
+        quantity: 10,
+        entry_date: "2026-07-15",
+      }),
+      entry({
+        id: "2",
+        title: "Amstel",
+        product_id: "p3",
+        net_amount: 80,
+        cmv_amount: 32,
+        quantity: 8,
+        entry_date: "2026-07-15",
+      }),
+    ];
+    const cervejas = {
+      id: "cerv",
+      name: "Cervejas",
+      sort_order: 13,
+    };
+    const dash = buildCmvMargensDashboard({
+      entries,
+      period: "today",
+      todayYmd: "2026-07-15",
+      sort: "volume",
+      productNameById: new Map([
+        ["p1", "Heineken"],
+        ["p3", "Amstel"],
+      ]),
+      recipeNameById,
+      catalogByProductId: new Map([
+        ["p1", [cervejas]],
+        ["p3", [cervejas]],
+      ]),
+    });
+    const kpisBefore = { ...dash.kpis };
+    const rolled = rollupCmvRowsByCatalog(dash.products);
+    expect(dash.kpis).toEqual(kpisBefore);
+    expect(rolled).toHaveLength(1);
+    expect(rolled[0]!.label).toBe("Cervejas");
+    expect(rolled[0]!.revenue).toBe(180);
+    expect(rolled[0]!.cmv).toBe(72);
   });
 });

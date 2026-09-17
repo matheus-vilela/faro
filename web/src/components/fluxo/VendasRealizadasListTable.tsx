@@ -5,9 +5,10 @@ import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { orderedYmdRange } from "@/lib/monthYmdRange";
-import { categoryGroupLabel } from "@/lib/vendasRealizadasResumo";
+import { catalogMixLabelForSale } from "@/lib/companyProductCategories/catalogMixLabel";
+import type { CatalogMixMaps } from "@/lib/companyProductCategories/fetchCatalogMix";
+import { emptyCatalogMixMaps } from "@/lib/companyProductCategories/fetchCatalogMix";
 import { cn } from "@/lib/utils";
-import type { CompanyCategory } from "@/types/category";
 import type { RevenueEntry } from "@/types/revenue";
 import {
   serviceDailySaleDisplayAmount,
@@ -39,8 +40,7 @@ type UnifiedRow = {
   dateYmd: string;
   dateYmdEnd: string;
   description: string;
-  categoryLabel: string;
-  categoryId: string | null;
+  catalogLabel: string;
   amount: number;
   quantity: number | null;
   revenueEntryId?: string;
@@ -139,7 +139,7 @@ function compareRows(a: UnifiedRow, b: UnifiedRow, sortKey: SortKey): number {
     case "kind":
       return a.kind.localeCompare(b.kind);
     case "category":
-      return a.categoryLabel.localeCompare(b.categoryLabel, "pt-BR");
+      return a.catalogLabel.localeCompare(b.catalogLabel, "pt-BR");
     case "quantity":
       return (a.quantity ?? -1) - (b.quantity ?? -1);
     case "amount":
@@ -152,8 +152,7 @@ function compareRows(a: UnifiedRow, b: UnifiedRow, sortKey: SortKey): number {
 type Props = {
   revenueEntries: RevenueEntry[];
   serviceSales: ServiceDailySaleCalendarRow[];
-  categories: CompanyCategory[];
-  categoriesById: Map<string, CompanyCategory>;
+  catalogMix?: CatalogMixMaps;
   loading: boolean;
   emptyMessage: string;
   formatCurrency: (v: number) => string;
@@ -168,7 +167,7 @@ type Props = {
 export function VendasRealizadasListTable({
   revenueEntries,
   serviceSales,
-  categoriesById,
+  catalogMix = emptyCatalogMixMaps(),
   loading,
   emptyMessage,
   formatCurrency,
@@ -181,6 +180,7 @@ export function VendasRealizadasListTable({
 }: Props) {
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<VendasListKindFilter>("all");
+  const [catalogFilter, setCatalogFilter] = useState("all");
   const [groupMode, setGroupMode] = useState<VendasListGroupMode>("product_day");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortAsc, setSortAsc] = useState(false);
@@ -201,8 +201,11 @@ export function VendasRealizadasListTable({
         dateYmd,
         dateYmdEnd: dateYmd,
         description: e.title?.trim() || "Produto",
-        categoryLabel: categoryGroupLabel(e.subcategory_id, categoriesById),
-        categoryId: e.subcategory_id ?? e.category_id ?? null,
+        catalogLabel: catalogMixLabelForSale(
+          e,
+          catalogMix.categoriesByProductId,
+          catalogMix.recipeOutputById,
+        ),
         amount: Number(e.net_amount) || 0,
         quantity: parseQuantity(e.quantity),
         revenueEntryId: e.id,
@@ -218,8 +221,7 @@ export function VendasRealizadasListTable({
         dateYmd,
         dateYmdEnd: dateYmd,
         description: serviceDailySaleTitle(s),
-        categoryLabel: "Serviços",
-        categoryId: null,
+        catalogLabel: "Serviços",
         amount: serviceDailySaleDisplayAmount(s),
         quantity: parseQuantity(s.quantity),
         service: s,
@@ -227,7 +229,7 @@ export function VendasRealizadasListTable({
     });
 
     return [...productRows, ...serviceRows];
-  }, [revenueEntries, serviceSales, categoriesById]);
+  }, [revenueEntries, serviceSales, catalogMix]);
 
   const filteredSorted = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -236,10 +238,13 @@ export function VendasRealizadasListTable({
     const { gte, lte } = orderedYmdRange(fromDate, toDate);
     const filtered = allRows.filter((r) => {
       if (kind !== "all" && r.kind !== kind) return false;
+      if (catalogFilter !== "all" && r.catalogLabel !== catalogFilter) {
+        return false;
+      }
       if (gte && r.dateYmd < gte) return false;
       if (lte && r.dateYmd > lte) return false;
       if (term) {
-        const hay = `${r.description} ${r.categoryLabel}`.toLowerCase();
+        const hay = `${r.description} ${r.catalogLabel}`.toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
@@ -251,7 +256,18 @@ export function VendasRealizadasListTable({
       if (cmp !== 0) return sortAsc ? cmp : -cmp;
       return a.description.localeCompare(b.description, "pt-BR");
     });
-  }, [allRows, search, kind, dateFrom, dateTo, monthBounds, groupMode, sortKey, sortAsc]);
+  }, [
+    allRows,
+    search,
+    kind,
+    catalogFilter,
+    dateFrom,
+    dateTo,
+    monthBounds,
+    groupMode,
+    sortKey,
+    sortAsc,
+  ]);
 
   const totalAmount = useMemo(
     () => filteredSorted.reduce((s, r) => s + r.amount, 0),
@@ -265,12 +281,20 @@ export function VendasRealizadasListTable({
     safePage * pageSize,
   );
 
+  const catalogOptions = useMemo(() => {
+    const names = new Set(allRows.map((r) => r.catalogLabel));
+    return [...names]
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+      .map((name) => ({ value: name, label: name }));
+  }, [allRows]);
+
   const dateRangeIsCustom =
     dateFrom !== monthBounds.min || dateTo !== monthBounds.max;
   const hasActiveFilters =
     search.trim() !== "" ||
     dateRangeIsCustom ||
     kind !== "all" ||
+    catalogFilter !== "all" ||
     groupMode !== "product_day";
 
   const clearFilters = () => {
@@ -278,6 +302,7 @@ export function VendasRealizadasListTable({
     onDateFromChange(monthBounds.min);
     onDateToChange(monthBounds.max);
     setKind("all");
+    setCatalogFilter("all");
     setGroupMode("product_day");
     setSortKey("date");
     setSortAsc(false);
@@ -306,7 +331,7 @@ export function VendasRealizadasListTable({
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Descrição, categoria…"
+            placeholder="Descrição, grupo…"
           />
         </div>
         <div className="space-y-1.5">
@@ -324,6 +349,23 @@ export function VendasRealizadasListTable({
             ]}
             placeholder="Tipo"
             triggerClassName="w-[9.5rem]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Grupo</Label>
+          <SearchSelect
+            value={catalogFilter}
+            onValueChange={(v) => {
+              setCatalogFilter(v);
+              setPage(1);
+            }}
+            options={[
+              { value: "all", label: "Todos" },
+              ...catalogOptions,
+            ]}
+            placeholder="Grupo"
+            size="sm"
+            triggerClassName="w-[11rem]"
           />
         </div>
         <div className="space-y-1.5">
@@ -406,7 +448,7 @@ export function VendasRealizadasListTable({
                     onSort={handleSort}
                   />
                   <SortableTableHead
-                    label="Categoria"
+                    label="Grupo"
                     column="category"
                     sortKey={sortKey}
                     sortAsc={sortAsc}
@@ -477,7 +519,7 @@ export function VendasRealizadasListTable({
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5 text-muted-foreground">
-                        {r.categoryLabel}
+                        {r.catalogLabel}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
                         {formatQty(r.quantity)}
