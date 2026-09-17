@@ -20,6 +20,7 @@ Cada arquivo aqui é o briefing de uma task **antes** de implementar. A IA lê o
 | `ficha-produto-saida-nome.md` | Produto de saída: nome novo ou busca no catálogo |
 | `producao-lotes.md` | Produzir: receitas × rendimento, resumo e confirmação |
 | `catalogo-filtros-tipo.md` | Catálogo: tipo, categoria, alerta e barra compacta |
+| `catalogo-salvar-edicao-produto.md` | Catálogo: salvar edição (toast de erro, preço NF, CMV) |
 | `correlacao-validacao-persistente.md` | Validação da correlação sobrevive à troca de aba |
 | `correlacao-colunas-multi-nota.md` | PDV à esquerda, várias notas à direita na correlação |
 | `correlacao-corrigir-filtros-tipos.md` | Filtros e tipos atuais em «Para corrigir» |

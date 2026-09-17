@@ -94,6 +94,11 @@ import {
 } from "@/lib/productCatalogKind";
 import { fetchCatalogProductIds } from "@/lib/fetchCatalogProductIds";
 import { getUndoableProductBulkEdit } from "@/lib/productBulkEdit";
+import {
+  catalogLastUnitValueChanged,
+  catalogUnitCodesDiffer,
+  parseCatalogStockQuantity,
+} from "@/lib/catalogProductEdit";
 import { sanitizeCatalogProductName } from "@/lib/productImport/canonicalName";
 import {
   matchesPurchasesMetric,
@@ -1711,11 +1716,22 @@ export function Produtos() {
   const handleStockSave = async () => {
     if (!stockProduct) return;
     const newName = sanitizeCatalogProductName(stockName);
-    if (!newName) return;
-    const newQty = parseFloat(stockQuantity);
-    if (Number.isNaN(newQty) || newQty < 0) return;
-    const newMinQty = parseFloat(stockMinQuantity);
-    if (Number.isNaN(newMinQty) || newMinQty < 0) return;
+    if (!newName) {
+      toast.error("Informe um nome válido.");
+      return;
+    }
+    const newQty = parseCatalogStockQuantity(stockQuantity);
+    if (newQty == null) {
+      toast.error("Informe uma quantidade válida.");
+      return;
+    }
+    const newMinQty = parseFloat(
+      stockMinQuantity.replace(/\s/g, "").replace(",", "."),
+    );
+    if (Number.isNaN(newMinQty) || newMinQty < 0) {
+      toast.error("Informe um mínimo válido.");
+      return;
+    }
     const currentQty = Number(stockProduct.current_quantity);
     const currentMinQty = Number(stockProduct.min_quantity ?? 0);
     const currentActive = stockProduct.is_active !== false;
@@ -1753,18 +1769,18 @@ export function Produtos() {
       !Number.isNaN(Number(stockProduct.last_unit_value))
         ? Number(stockProduct.last_unit_value)
         : null;
-    const lastUnitValueChanged =
-      resolvedLastUnit === null && currentLastUnit === null
-        ? false
-        : resolvedLastUnit === null || currentLastUnit === null
-          ? true
-          : Math.abs(resolvedLastUnit - currentLastUnit) > 1e-6;
+    const lastUnitValueChanged = catalogLastUnitValueChanged(
+      resolvedLastUnit,
+      currentLastUnit,
+    );
     const currentLastUnitCode =
       stockProduct.last_unit_value_unit_code?.trim() ||
       stockProduct.unit ||
       "un";
-    const lastUnitValueUnitChanged =
-      (stockLastUnitValueUnitCode || stockUnit) !== currentLastUnitCode;
+    const lastUnitValueUnitChanged = catalogUnitCodesDiffer(
+      stockLastUnitValueUnitCode || stockUnit,
+      currentLastUnitCode,
+    );
 
     const categoryIdsSnapshot = stockProductCategoryIdsRef.current;
     const categoriesChanged = !sameCategorySelection(
@@ -1799,6 +1815,7 @@ export function Produtos() {
       return;
     }
     setStockSaving(true);
+    try {
     if (!unitChanged && qtyChanged) {
       const unitCostForMovement =
         delta > 0
@@ -1820,7 +1837,6 @@ export function Produtos() {
       if (error) {
         console.error(error);
         toast.error(technicalSheetErrorMessage(error.message));
-        setStockSaving(false);
         return;
       }
     }
@@ -1940,7 +1956,7 @@ export function Produtos() {
         .eq("id", stockProduct.id);
       if (error) {
         console.error(error);
-        setStockSaving(false);
+        toast.error(error.message ?? "Não foi possível salvar o produto.");
         return;
       }
     }
@@ -1968,13 +1984,12 @@ export function Produtos() {
       );
       if (error) {
         console.error(error);
-        setStockSaving(false);
+        toast.error(error.message ?? "Falha ao salvar tipo operacional.");
         return;
       }
       const out = data as { ok?: boolean; error?: string };
       if (!out?.ok) {
         toast.error(out?.error ?? "Falha ao salvar tipo operacional.");
-        setStockSaving(false);
         return;
       }
       setOperationalTypeByProduct((prev) => ({
@@ -2002,7 +2017,7 @@ export function Produtos() {
 
     if (categoriesChanged) {
       if (!currentCompany?.id) {
-        setStockSaving(false);
+        toast.error("Selecione uma empresa para salvar as categorias.");
         return;
       }
       const companyId = currentCompany.id;
@@ -2013,7 +2028,7 @@ export function Produtos() {
         .eq("product_id", stockProduct.id);
       if (delErr) {
         console.error(delErr);
-        setStockSaving(false);
+        toast.error(delErr.message ?? "Não foi possível salvar as categorias.");
         return;
       }
       if (idsToPersist.length > 0) {
@@ -2028,7 +2043,7 @@ export function Produtos() {
           );
         if (insErr) {
           console.error(insErr);
-          setStockSaving(false);
+          toast.error(insErr.message ?? "Não foi possível salvar as categorias.");
           return;
         }
       }
@@ -2049,7 +2064,7 @@ export function Produtos() {
       );
       if (!convResult.ok) {
         console.error(convResult.error);
-        setStockSaving(false);
+        toast.error(convResult.error ?? "Falha ao salvar conversões.");
         return;
       }
       const { rows: reloaded } = await loadProductUnitConversions(
@@ -2063,13 +2078,21 @@ export function Produtos() {
     if (lotsChanged) {
       setInitialStockLots([...stockLots]);
     }
-    setStockSaving(false);
+    toast.success("Produto atualizado.");
     setLotsRefreshKey((k) => k + 1);
     closeStockSheet();
     void loadCompanyProductCategories();
     fetchProducts();
     void fetchCatalogKpis();
     if (currentCompany?.id) void syncCompanyAlerts(currentCompany.id);
+    } catch (e) {
+      console.error(e);
+      toast.error(
+        e instanceof Error ? e.message : "Não foi possível salvar o produto.",
+      );
+    } finally {
+      setStockSaving(false);
+    }
   };
 
   const handleStockProductDelete = async () => {
@@ -3037,7 +3060,6 @@ export function Produtos() {
                               id="stock-qty"
                               type="number"
                               step="0.01"
-                              min="0"
                               value={stockQuantity}
                               onChange={(e) => setStockQuantity(e.target.value)}
                               className={SHEET_INPUT}
