@@ -38,7 +38,7 @@ const VENDAS_NAV: {
     label: "Calendário",
     icon: CalendarDays,
     description:
-      "Entradas previstas: calendário de recebimentos ou lista do mês.",
+      "Vendas do período no calendário ou na lista do mês.",
   },
   {
     to: "/app/vendas-realizadas/faturamento",

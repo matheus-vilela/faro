@@ -8,15 +8,24 @@ import {
   parseExpenseSeriesMaster,
 } from "@/lib/expenseSeriesProjection";
 import { supabase } from "@/lib/supabase";
+import { fetchAllInRange } from "@/lib/supabaseFetchAll";
 import type {
   ExpenseSeriesMaster,
   FluxoBoletoRow,
   ScheduledAdjustment,
 } from "@/types/expenseSeries";
-import type { Boleto, PaymentType } from "@/types/expense";
+import type { Boleto, BoletoFlowType, PaymentType } from "@/types/expense";
+import { isManualReceivableBoleto } from "@/lib/manualReceivableBoleto";
+
+export type FetchMergedBoletosOptions = {
+  flowType?: BoletoFlowType;
+  /** Contas a receber: só títulos manuais (sem venda e sem transferência). */
+  manualReceivablesOnly?: boolean;
+};
 
 export async function fetchSeriesMastersWithAnchorBoletos(
   companyId: string,
+  flowType: BoletoFlowType = "payable",
 ): Promise<ExpenseSeriesMaster[]> {
   const { data: masters, error } = await supabase
     .from("expenses")
@@ -36,7 +45,7 @@ export async function fetchSeriesMastersWithAnchorBoletos(
     .from("boletos")
     .select("*, supplier:suppliers(id, name, document)")
     .eq("company_id", companyId)
-    .eq("flow_type", "payable")
+    .eq("flow_type", flowType)
     .in("expense_id", ids)
     .order("due_date", { ascending: true });
 
@@ -143,26 +152,46 @@ async function syncAnchorBoletoIfAdjustmentMonth(
   });
 }
 
+export async function fetchMergedBoletosInRange(
+  companyId: string,
+  rangeStartYmd: string,
+  rangeEndYmd: string,
+  options: FetchMergedBoletosOptions = {},
+): Promise<FluxoBoletoRow[]> {
+  const flowType = options.flowType ?? "payable";
+  let realQuery = supabase
+    .from("boletos")
+    .select("*, supplier:suppliers(id, name, document)")
+    .eq("company_id", companyId)
+    .eq("flow_type", flowType)
+    .gte("due_date", rangeStartYmd)
+    .lte("due_date", rangeEndYmd)
+    .order("due_date", { ascending: true });
+  if (options.manualReceivablesOnly) {
+    realQuery = realQuery.is("revenue_entry_id", null);
+  }
+  const [mastersRaw, real] = await Promise.all([
+    fetchSeriesMastersWithAnchorBoletos(companyId, flowType),
+    fetchAllInRange<Boleto>(realQuery),
+  ]);
+
+  const visible = options.manualReceivablesOnly
+    ? real.filter((b) => isManualReceivableBoleto(b))
+    : real;
+  const masters = options.manualReceivablesOnly
+    ? mastersRaw.filter((m) => isManualReceivableBoleto(m.anchor_boleto))
+    : mastersRaw;
+  return mergeFluxoBoletos(visible, masters, rangeStartYmd, rangeEndYmd);
+}
+
 export async function fetchMergedPayableBoletosInRange(
   companyId: string,
   rangeStartYmd: string,
   rangeEndYmd: string,
 ): Promise<FluxoBoletoRow[]> {
-  const [masters, realRes] = await Promise.all([
-    fetchSeriesMastersWithAnchorBoletos(companyId),
-    supabase
-      .from("boletos")
-      .select("*, supplier:suppliers(id, name, document)")
-      .eq("company_id", companyId)
-      .eq("flow_type", "payable")
-      .gte("due_date", rangeStartYmd)
-      .lte("due_date", rangeEndYmd)
-      .order("due_date", { ascending: true }),
-  ]);
-
-  if (realRes.error) throw realRes.error;
-  const real = (realRes.data ?? []) as Boleto[];
-  return mergeFluxoBoletos(real, masters, rangeStartYmd, rangeEndYmd);
+  return fetchMergedBoletosInRange(companyId, rangeStartYmd, rangeEndYmd, {
+    flowType: "payable",
+  });
 }
 
 export async function suppressProjectedMonth(
@@ -334,7 +363,7 @@ export async function materializeSeriesMonth(input: {
     .insert({
       company_id: input.companyId,
       expense_id: childExp.id,
-      flow_type: "payable",
+      flow_type: anchorBoleto.flow_type ?? "payable",
       description: input.description,
       emission_date: b.emission_date ?? input.dueDate,
       due_date: input.dueDate,

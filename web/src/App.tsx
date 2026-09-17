@@ -31,6 +31,7 @@ import { ExecutarChecklist } from "@/pages/ExecutarChecklist";
 import { MeuDesempenho } from "@/pages/MeuDesempenho";
 import { RedirectStaffPerformanceSlug } from "@/pages/RedirectStaffPerformanceSlug";
 import { ContasAPagar } from "@/pages/ContasAPagar";
+import { ContasAReceber } from "@/pages/ContasAReceber";
 import { ConciliacaoBancaria } from "@/pages/ConciliacaoBancaria";
 import { FluxoDeCaixa } from "@/pages/FluxoDeCaixa";
 import { VendasRealizadasCalendario, VendasRealizadasFaturamento, VendasRealizadasFluxo, VendasRealizadasIndex, VendasRealizadasMargens } from "@/pages/VendasRealizadasFluxo";
@@ -152,6 +153,14 @@ function AuthenticatedLayout() {
             element={
               <PermissionRouteGuard permission="contas_a_pagar">
                 <ContasAPagar />
+              </PermissionRouteGuard>
+            }
+          />
+          <Route
+            path="contas-a-receber/*"
+            element={
+              <PermissionRouteGuard permission="contas_a_pagar">
+                <ContasAReceber />
               </PermissionRouteGuard>
             }
           />

@@ -1031,7 +1031,6 @@ export function CreateBoletoSheet({
           <div className="min-h-0 flex-1 overflow-y-auto bg-muted">
             <div className="space-y-4 p-6">
             {!expenseId &&
-              effectiveFlow === "payable" &&
               defaultLaunchType == null && (
               <div className={PRODUCT_SHEET_SECTION}>
                 <p className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1041,14 +1040,23 @@ export function CreateBoletoSheet({
                   Como esta conta entra no fluxo.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {LAUNCH_TYPE_OPTIONS.map((opt) => (
+                  {(effectiveFlow === "receivable"
+                    ? LAUNCH_TYPE_OPTIONS.filter((opt) => opt.value !== "transfer")
+                    : LAUNCH_TYPE_OPTIONS
+                  ).map((opt) => (
                     <ChoiceCard
                       key={opt.value}
                       selected={launchType === opt.value}
                       onSelect={() => setLaunchType(opt.value)}
                       icon={opt.icon}
                       label={opt.label}
-                      hint={opt.hint}
+                      hint={
+                        opt.value === "single"
+                          ? effectiveFlow === "receivable"
+                            ? "Um recebimento"
+                            : "Um pagamento"
+                          : opt.hint
+                      }
                     />
                   ))}
                 </div>
@@ -1072,7 +1080,7 @@ export function CreateBoletoSheet({
                       triggerClassName={PRODUCT_SHEET_SELECT}
                     />
                     <p className="text-xs text-muted-foreground">
-                      De quanto em quanto tempo esta despesa se repete.
+                      De quanto em quanto tempo esta conta se repete.
                     </p>
                   </div>
                 )}

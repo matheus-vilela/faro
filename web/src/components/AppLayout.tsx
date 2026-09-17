@@ -55,6 +55,7 @@ import {
   TrendingDown,
   TrendingUp,
   Truck,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
@@ -126,6 +127,12 @@ const NAV_SECTIONS: { label: string; adminOnly?: boolean; items: NavItem[] }[] =
           title: "Contas a pagar",
           url: "/app/contas-a-pagar",
           icon: TrendingDown,
+          permission: "contas_a_pagar",
+        },
+        {
+          title: "Contas a receber",
+          url: "/app/contas-a-receber",
+          icon: Wallet,
           permission: "contas_a_pagar",
         },
         {

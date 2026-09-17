@@ -41,7 +41,7 @@ export const REPORT_CATALOG: ReportDefinition[] = [
     title: "Contas a receber em aberto",
     description: "Recebíveis pendentes no período.",
     group: "financeiro",
-    permission: "vendas_realizadas",
+    permission: "contas_a_pagar",
     filters: ["period", "openDueBucket", "category", "search"],
   },
   {
@@ -49,7 +49,7 @@ export const REPORT_CATALOG: ReportDefinition[] = [
     title: "Recebimentos realizados",
     description: "Entradas quitadas no período, pela data de recebimento.",
     group: "financeiro",
-    permission: "vendas_realizadas",
+    permission: "contas_a_pagar",
     filters: ["period", "category", "search"],
     defaults: { dateField: "paid_at" },
   },

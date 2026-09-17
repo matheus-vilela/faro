@@ -374,7 +374,7 @@ export function BoletosCalendar({
                                 (viewMode === "all" ||
                                   viewMode === "receivable") && (
                                   <CalendarDayValueBucket
-                                    label="Vendas realizadas"
+                                    label="A receber"
                                     amount={receivable}
                                     tone="receivable"
                                     formatCurrency={formatCurrency}

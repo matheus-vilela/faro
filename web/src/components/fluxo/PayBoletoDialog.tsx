@@ -77,6 +77,7 @@ export function PayBoletoDialog({
   const [payAmount, setPayAmount] = useState("");
   const [remainderDueDate, setRemainderDueDate] = useState("");
 
+  const isReceivable = boleto?.flow_type === "receivable";
   const allowPartial = !!boleto && !isBoletoTransfer(boleto);
   const originalAmount = boleto?.amount ?? 0;
   const payAmountNum = parseNonNegativeAmount(payAmount);
@@ -252,7 +253,9 @@ export function PayBoletoDialog({
     toast.success(
       isBoletoTransfer(boleto)
         ? "Transferência quitada com sucesso."
-        : "Pagamento registrado com sucesso.",
+        : isReceivable
+          ? "Recebimento registrado com sucesso."
+          : "Pagamento registrado com sucesso.",
     );
   };
 
@@ -276,15 +279,23 @@ export function PayBoletoDialog({
               {boleto && isBoletoTransfer(boleto)
                 ? "Quitar transferência"
                 : partial
-                  ? "Pagamento parcial"
-                  : "Registrar pagamento"}
+                  ? isReceivable
+                    ? "Recebimento parcial"
+                    : "Pagamento parcial"
+                  : isReceivable
+                    ? "Registrar recebimento"
+                    : "Registrar pagamento"}
             </DialogTitle>
             <DialogDescription>
               {boleto && isBoletoTransfer(boleto)
                 ? "Ao confirmar, a saída e a entrada da transferência serão quitadas."
                 : partial
-                  ? "A parte paga é quitada e o saldo vira uma nova conta com o vencimento informado."
-                  : "Informe os dados do pagamento desta conta a pagar."}
+                  ? isReceivable
+                    ? "A parte recebida é quitada e o saldo vira uma nova conta com o vencimento informado."
+                    : "A parte paga é quitada e o saldo vira uma nova conta com o vencimento informado."
+                  : isReceivable
+                    ? "Informe os dados do recebimento desta conta a receber."
+                    : "Informe os dados do pagamento desta conta a pagar."}
             </DialogDescription>
           </DialogHeader>
 
@@ -305,7 +316,9 @@ export function PayBoletoDialog({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="payment-date">Data do pagamento</Label>
+                  <Label htmlFor="payment-date">
+                    {isReceivable ? "Data do recebimento" : "Data do pagamento"}
+                  </Label>
                   <Input
                     id="payment-date"
                     type="date"
@@ -339,7 +352,11 @@ export function PayBoletoDialog({
                       className="mt-0.5"
                     />
                     <span className="text-sm">
-                      <span className="font-medium">Pagar apenas uma parte</span>
+                      <span className="font-medium">
+                        {isReceivable
+                          ? "Receber apenas uma parte"
+                          : "Pagar apenas uma parte"}
+                      </span>
                       <span className="block text-muted-foreground text-xs mt-0.5">
                         O valor restante vira uma nova conta com outro vencimento.
                       </span>
@@ -348,7 +365,11 @@ export function PayBoletoDialog({
                   {partial && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <Label htmlFor="pay-amount">Valor a pagar (R$)</Label>
+                        <Label htmlFor="pay-amount">
+                          {isReceivable
+                            ? "Valor a receber (R$)"
+                            : "Valor a pagar (R$)"}
+                        </Label>
                         <Input
                           id="pay-amount"
                           type="number"
@@ -386,7 +407,11 @@ export function PayBoletoDialog({
               )}
 
               <div>
-                <Label>Conta usada para pagar</Label>
+                <Label>
+                  {isReceivable
+                    ? "Conta que recebeu"
+                    : "Conta usada para pagar"}
+                </Label>
                 <SearchSelect
                   value={bankAccountId === "__create__" ? "" : bankAccountId}
                   onValueChange={handleBankAccountChange}
@@ -491,8 +516,12 @@ export function PayBoletoDialog({
               {submitting
                 ? "Registrando..."
                 : partial
-                  ? "Confirmar pagamento parcial"
-                  : "Confirmar pagamento"}
+                  ? isReceivable
+                    ? "Confirmar recebimento parcial"
+                    : "Confirmar pagamento parcial"
+                  : isReceivable
+                    ? "Confirmar recebimento"
+                    : "Confirmar pagamento"}
             </Button>
           </DialogFooter>
         </DialogContent>

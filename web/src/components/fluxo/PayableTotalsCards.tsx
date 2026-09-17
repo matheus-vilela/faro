@@ -100,22 +100,29 @@ export function PayableTotalsCards({
   loading,
   monthName,
   formatCurrency,
+  variant = "payable",
 }: {
   totals: PayableTotals;
   loading: boolean;
   /** Mês em pt-BR minúsculo, ex.: "julho" */
   monthName: string;
   formatCurrency: (v: number) => string;
+  variant?: "payable" | "receivable";
 }) {
   const overdueSubtitle =
     totals.overdue.count > 0
       ? `${formatContasCount(totals.overdue.count)} — resolva hoje`
       : formatContasCount(0);
+  const isReceivable = variant === "receivable";
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <TotalsCard
-        label={`A pagar em ${monthName}`}
+        label={
+          isReceivable
+            ? `A receber em ${monthName}`
+            : `A pagar em ${monthName}`
+        }
         amount={totals.toPayInMonth.amount}
         subtitle={formatContasCount(totals.toPayInMonth.count)}
         tone="neutral"
@@ -142,7 +149,7 @@ export function PayableTotalsCards({
         formatCurrency={formatCurrency}
       />
       <TotalsCard
-        label="Pagas no mês"
+        label={isReceivable ? "Recebidas no mês" : "Pagas no mês"}
         amount={totals.paidInMonth.amount}
         subtitle={formatContasCount(totals.paidInMonth.count)}
         tone="success"

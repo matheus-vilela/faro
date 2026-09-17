@@ -90,7 +90,7 @@ export function permissionKeyForPath(pathname: string): PermissionKey | null {
   ) {
     return "produtos";
   }
-  if (path.startsWith("/app/contas-a-pagar") || path.startsWith("/app/boletos")) {
+  if (path.startsWith("/app/contas-a-pagar") || path.startsWith("/app/contas-a-receber") || path.startsWith("/app/boletos")) {
     return "contas_a_pagar";
   }
   if (

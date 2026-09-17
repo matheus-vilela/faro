@@ -3,7 +3,7 @@ import {
   formatBoletoFluxoDescription,
 } from "@/lib/boletoFluxoDescription";
 import { localDateYmd } from "@/lib/boletoPayment";
-import { hasPermission } from "@/lib/permissions";
+import { hasAnyPermission, hasPermission } from "@/lib/permissions";
 import type { ReportColumn, ReportResult, ReportRunContext } from "../types";
 import {
   applyBoletoClientFilters,
@@ -252,7 +252,8 @@ export async function buildFinancialMovementReport(
   const includePayables =
     ctx.isCompanyOwner || hasPermission(ctx.permissions, "contas_a_pagar");
   const includeReceivables =
-    ctx.isCompanyOwner || hasPermission(ctx.permissions, "vendas_realizadas");
+    ctx.isCompanyOwner ||
+    hasAnyPermission(ctx.permissions, ["contas_a_pagar", "vendas_realizadas"]);
   const dateField =
     ctx.filters.dateField === "paid_at" ? "paid_at" : "due_date";
   const flow = ctx.filters.flowType;

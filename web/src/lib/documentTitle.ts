@@ -70,6 +70,8 @@ export function getDocumentTitle(pathname: string): string {
     { prefix: "/app/vendas", label: "Vendas" },
     { prefix: "/app/contas-a-pagar/listagem", label: "Contas a pagar" },
     { prefix: "/app/contas-a-pagar", label: "Contas a pagar" },
+    { prefix: "/app/contas-a-receber/listagem", label: "Contas a receber" },
+    { prefix: "/app/contas-a-receber", label: "Contas a receber" },
     { prefix: "/app/vendas-realizadas/faturamento", label: "Faturamento" },
     { prefix: "/app/vendas-realizadas/margens", label: "Margens" },
     { prefix: "/app/vendas-realizadas/calendario", label: "Vendas realizadas" },

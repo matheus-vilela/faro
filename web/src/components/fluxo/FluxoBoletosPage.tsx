@@ -66,7 +66,7 @@ import {
   type RateioLine,
 } from "@/lib/dre/rateioBoletoByItems";
 import {
-  fetchMergedPayableBoletosInRange,
+  fetchMergedBoletosInRange,
   fetchSeriesMastersWithAnchorBoletos,
   suppressProjectedMonth,
 } from "@/lib/expenseSeriesApi";
@@ -76,6 +76,7 @@ import {
 } from "@/lib/expenseSeriesProjection";
 import { fetchPayableReceiptContext } from "@/lib/fetchPayableReceiptContext";
 import { monthYmdBounds, orderedYmdRange } from "@/lib/monthYmdRange";
+import { isManualReceivableBoleto } from "@/lib/manualReceivableBoleto";
 import {
   EMPTY_PAYABLE_RECEIPT_CONTEXT,
   isBoletoPendingMerchandiseReceipt,
@@ -179,8 +180,12 @@ function fluxoBoletoSupplierLabel(b: FluxoBoletoRow): string | null {
   return b.supplier?.name?.trim() || null;
 }
 
+export type FluxoBoletosDataSource = "boletos" | "sales";
+
 export type FluxoBoletosPageConfig = {
   flowType: BoletoFlowType;
+  /** boletos = contas a pagar/receber; sales = calendário de vendas. */
+  dataSource: FluxoBoletosDataSource;
   title: string;
   description: string;
   icon: LucideIcon;
@@ -191,6 +196,7 @@ export type FluxoBoletosPageConfig = {
   emptyListMessage: string;
   addButtonLabel: string;
   calendarViewMode: BoletosCalendarViewMode;
+  showAddButton?: boolean;
 };
 
 export function FluxoBoletosPage({
@@ -209,6 +215,7 @@ export function FluxoBoletosPage({
 }) {
   const {
     flowType,
+    dataSource,
     title,
     description,
     icon: PageIcon,
@@ -219,7 +226,11 @@ export function FluxoBoletosPage({
     emptyListMessage,
     addButtonLabel,
     calendarViewMode,
+    showAddButton = true,
   } = config;
+  const isSalesSource = dataSource === "sales";
+  const isBoletosSource = dataSource === "boletos";
+  const isPayableFlow = isBoletosSource && flowType === "payable";
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.id;
   const navigate = useNavigate();
@@ -248,7 +259,6 @@ export function FluxoBoletosPage({
     ServiceDailySaleCalendarRow[]
   >([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
-  const isReceivableFlow = flowType === "receivable";
   const competenceMonthBounds = useMemo(
     () => monthYmdBounds(period.month, period.year),
     [period.month, period.year],
@@ -308,7 +318,6 @@ export function FluxoBoletosPage({
   const [expenseDetailId, setExpenseDetailId] = useState<string | null>(null);
   const [markPaidDialogOpen, setMarkPaidDialogOpen] = useState(false);
   const [payInitialPartial, setPayInitialPartial] = useState(false);
-  const [markingPaid, setMarkingPaid] = useState(false);
   const [editBoletoOpen, setEditBoletoOpen] = useState(false);
   const [editBoleto, setEditBoleto] = useState<FluxoBoletoRow | null>(null);
   const [undoPayDialogOpen, setUndoPayDialogOpen] = useState(false);
@@ -391,7 +400,7 @@ export function FluxoBoletosPage({
   }, [companyId]);
 
   useEffect(() => {
-    if (!companyId || flowType !== "payable") {
+    if (!companyId || !isBoletosSource) {
       queueMicrotask(() => setBankAccountsById(new Map()));
       return;
     }
@@ -407,21 +416,26 @@ export function FluxoBoletosPage({
         }
         setBankAccountsById(map);
       });
-  }, [companyId, flowType, boletosList]);
+  }, [companyId, isBoletosSource, boletosList]);
+
+  const fetchFluxoBoletos = useCallback(
+    (startYmd: string, endYmd: string) =>
+      fetchMergedBoletosInRange(companyId!, startYmd, endYmd, {
+        flowType,
+        manualReceivablesOnly: flowType === "receivable",
+      }),
+    [companyId, flowType],
+  );
 
   const fetchCalendarBoletos = useCallback(async () => {
-    if (!companyId || isReceivableFlow) return;
+    if (!companyId || !isBoletosSource) return;
     setCalendarLoading(true);
     const { startIso, endIso } = getCalendarGridDateRange(
       period.month,
       period.year,
     );
     try {
-      const merged = await fetchMergedPayableBoletosInRange(
-        companyId,
-        startIso,
-        endIso,
-      );
+      const merged = await fetchFluxoBoletos(startIso, endIso);
       const visible = merged.filter(
         (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
       );
@@ -442,10 +456,10 @@ export function FluxoBoletosPage({
       setCalendarBoletos([]);
     }
     setCalendarLoading(false);
-  }, [companyId, period.month, period.year, flowType, isReceivableFlow]);
+  }, [companyId, period.month, period.year, isBoletosSource, fetchFluxoBoletos]);
 
   const fetchCalendarRevenueEntries = useCallback(async () => {
-    if (!companyId || !isReceivableFlow) return;
+    if (!companyId || !isSalesSource) return;
     setCalendarLoading(true);
     const { startIso, endIso } = getCalendarGridDateRange(
       period.month,
@@ -500,10 +514,10 @@ export function FluxoBoletosPage({
       setCalendarServiceSales([]);
     }
     setCalendarLoading(false);
-  }, [companyId, period.month, period.year, isReceivableFlow]);
+  }, [companyId, period.month, period.year, isSalesSource]);
 
   const fetchMonthServiceSales = useCallback(async () => {
-    if (!companyId || !isReceivableFlow) {
+    if (!companyId || !isSalesSource) {
       setMonthServiceSales([]);
       return;
     }
@@ -524,7 +538,7 @@ export function FluxoBoletosPage({
       console.error(e);
       setMonthServiceSales([]);
     }
-  }, [companyId, isReceivableFlow, listDateRange]);
+  }, [companyId, isSalesSource, listDateRange]);
 
   const fetchBoletosList = useCallback(async () => {
     if (!companyId) return;
@@ -532,13 +546,9 @@ export function FluxoBoletosPage({
     const startYmd = listDateRange.gte;
     const endYmd = listDateRange.lte;
     try {
-      if (flowType === "payable") {
+      if (isBoletosSource) {
         setListRevenueEntries([]);
-        const merged = await fetchMergedPayableBoletosInRange(
-          companyId,
-          startYmd,
-          endYmd,
-        );
+        const merged = await fetchFluxoBoletos(startYmd, endYmd);
         const visible = merged.filter(
           (b) => isProjectedBoleto(b) || boletoVisibleInFluxo(b),
         );
@@ -581,14 +591,15 @@ export function FluxoBoletosPage({
     setLoadingList(false);
   }, [
     companyId,
-    flowType,
+    isBoletosSource,
+    fetchFluxoBoletos,
     debouncedSearch,
     boletosPage,
     listDateRange,
   ]);
 
   const fetchPayableTotals = useCallback(async () => {
-    if (!companyId || isReceivableFlow) {
+    if (!companyId || !isBoletosSource) {
       setPayableTotals(EMPTY_PAYABLE_TOTALS);
       setTotalsLoading(false);
       return;
@@ -597,11 +608,7 @@ export function FluxoBoletosPage({
     const todayYmd = localDateYmd();
     const { startYmd, endYmd } = getPayableTotalsFetchRange(period, todayYmd);
     try {
-      const merged = await fetchMergedPayableBoletosInRange(
-        companyId,
-        startYmd,
-        endYmd,
-      );
+      const merged = await fetchFluxoBoletos(startYmd, endYmd);
       const visible = merged.filter(
         (b) =>
           (isProjectedBoleto(b) || boletoVisibleInFluxo(b)) &&
@@ -613,17 +620,23 @@ export function FluxoBoletosPage({
       setPayableTotals(EMPTY_PAYABLE_TOTALS);
     }
     setTotalsLoading(false);
-  }, [companyId, period.month, period.year, isReceivableFlow]);
+  }, [companyId, period.month, period.year, isBoletosSource, fetchFluxoBoletos]);
 
   useEffect(() => {
-    if (!companyId || flowType !== "payable") {
+    if (!companyId || !isBoletosSource) {
       queueMicrotask(() => setSeriesMasters([]));
       return;
     }
-    void fetchSeriesMastersWithAnchorBoletos(companyId)
-      .then(setSeriesMasters)
+    void fetchSeriesMastersWithAnchorBoletos(companyId, flowType)
+      .then((masters) =>
+        setSeriesMasters(
+          flowType === "receivable"
+            ? masters.filter((m) => isManualReceivableBoleto(m.anchor_boleto))
+            : masters,
+        ),
+      )
       .catch(console.error);
-  }, [companyId, flowType, boletosList, calendarBoletos]);
+  }, [companyId, flowType, isBoletosSource, boletosList, calendarBoletos]);
 
   useEffect(() => {
     queueMicrotask(() => setBoletosPage(1));
@@ -631,10 +644,10 @@ export function FluxoBoletosPage({
 
   useEffect(() => {
     queueMicrotask(() => {
-      if (isReceivableFlow) void fetchCalendarRevenueEntries();
+      if (isSalesSource) void fetchCalendarRevenueEntries();
       else void fetchCalendarBoletos();
     });
-  }, [fetchCalendarBoletos, fetchCalendarRevenueEntries, isReceivableFlow]);
+  }, [fetchCalendarBoletos, fetchCalendarRevenueEntries, isSalesSource]);
 
   useEffect(() => {
     queueMicrotask(() => void fetchBoletosList());
@@ -649,7 +662,7 @@ export function FluxoBoletosPage({
   }, [fetchPayableTotals]);
 
   useEffect(() => {
-    if (!companyId || flowType !== "payable") {
+    if (!companyId || !isPayableFlow) {
       queueMicrotask(() => {
         setPayableReceiptContext(EMPTY_PAYABLE_RECEIPT_CONTEXT);
         setRateioItemsByExpenseId(new Map());
@@ -680,7 +693,7 @@ export function FluxoBoletosPage({
         console.error(error);
         setRateioItemsByExpenseId(new Map());
       });
-  }, [companyId, flowType, calendarBoletos, boletosMonthFiltered]);
+  }, [companyId, isPayableFlow, calendarBoletos, boletosMonthFiltered]);
 
   const scheduledMonthBoletos = useMemo(
     () => boletosMonthFiltered.filter((b) => isScheduledPayableBoleto(b)),
@@ -762,7 +775,7 @@ export function FluxoBoletosPage({
   }, [boletoResumo?.id]);
 
   const refreshAll = useCallback(() => {
-    if (isReceivableFlow) {
+    if (isSalesSource) {
       void fetchCalendarRevenueEntries();
       void fetchMonthServiceSales();
     } else {
@@ -776,7 +789,7 @@ export function FluxoBoletosPage({
     fetchMonthServiceSales,
     fetchBoletosList,
     fetchPayableTotals,
-    isReceivableFlow,
+    isSalesSource,
   ]);
 
   const refreshBoletoResumo = useCallback(async () => {
@@ -794,8 +807,7 @@ export function FluxoBoletosPage({
     if (
       !companyId ||
       !boletoResumo?.id ||
-      boletoResumo.status !== "paid" ||
-      !isBoletoPayable(boletoResumo)
+      boletoResumo.status !== "paid"
     ) {
       queueMicrotask(() => setSplitRemainderChildren([]));
       return;
@@ -944,77 +956,6 @@ export function FluxoBoletosPage({
     }
   }, [boletoResumo, companyId, pendingSplitRemainder.length, refreshAll]);
 
-  const confirmMarkReceivableAsPaid = useCallback(async () => {
-    if (!boletoResumo || !companyId) return;
-    if (isProjectedBoleto(boletoResumo)) {
-      toast.error(
-        "Esta ocorrência ainda é projetada. Edite e materialize antes de marcar como paga.",
-      );
-      return;
-    }
-    setMarkingPaid(true);
-    const updatedAt = new Date().toISOString();
-    const paidAt = localDateYmd();
-    const { data, error } = await supabase
-      .from("boletos")
-      .update({
-        status: "paid",
-        paid_at: paidAt,
-        updated_at: updatedAt,
-      })
-      .eq("id", boletoResumo.id)
-      .eq("company_id", companyId)
-      .select()
-      .single();
-
-    if (
-      !error &&
-      data &&
-      isBoletoTransfer(boletoResumo) &&
-      boletoResumo.transfer_group_id
-    ) {
-      const { error: pairErr } = await supabase
-        .from("boletos")
-        .update({
-          status: "paid",
-          paid_at: paidAt,
-          paid_amount: Number(boletoResumo.amount) || 0,
-          updated_at: updatedAt,
-        })
-        .eq("company_id", companyId)
-        .eq("transfer_group_id", boletoResumo.transfer_group_id)
-        .eq("entry_kind", "transfer")
-        .neq("id", boletoResumo.id)
-        .eq("status", "pending");
-      if (pairErr) {
-        console.error(pairErr);
-        toast.error(
-          "Recebimento registrado, mas a contraparte da transferência não foi quitada.",
-        );
-      }
-    }
-
-    setMarkingPaid(false);
-    if (error) {
-      toast.error(error.message ?? "Não foi possível atualizar o status.");
-      return;
-    }
-    const updated = data as FluxoBoletoRow;
-    setBoletoResumo(updated);
-    setCalendarDayList((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        items: prev.items.map((b) =>
-          b.id === updated.id ? { ...b, ...updated } : b,
-        ),
-      };
-    });
-    setMarkPaidDialogOpen(false);
-    refreshAll();
-    toast.success("Conta marcada como recebida.");
-  }, [boletoResumo, companyId, refreshAll]);
-
   const canDeleteBoletoResumo =
     !!boletoResumo &&
     (isProjectedBoleto(boletoResumo) || boletoResumo.status === "pending");
@@ -1096,7 +1037,7 @@ export function FluxoBoletosPage({
     const payable = isBoletoPayable(b);
     const projected = isProjectedBoleto(b);
     const pendingReceipt =
-      flowType === "payable" && boletoPendingMerchandiseReceipt(b);
+      isPayableFlow && boletoPendingMerchandiseReceipt(b);
     const statusLabel = projected
       ? "Projetada"
       : b.status === "pending"
@@ -1233,7 +1174,7 @@ export function FluxoBoletosPage({
   const renderCalendarDayCompactCard = (b: FluxoBoletoRow) => {
     const payable = isBoletoPayable(b);
     const pendingReceipt =
-      flowType === "payable" && boletoPendingMerchandiseReceipt(b);
+      isPayableFlow && boletoPendingMerchandiseReceipt(b);
     const statusLabel =
       b.status === "pending"
         ? pendingReceipt
@@ -1336,11 +1277,13 @@ export function FluxoBoletosPage({
 
   const calendarDayBuckets = useMemo(() => {
     const items = (calendarDayList?.items ?? []) as FluxoBoletoRow[];
-    if (flowType !== "payable") {
+    if (!isPayableFlow) {
+      const ready = items.filter((b) => isScheduledPayableBoleto(b));
+      const other = items.filter((b) => !isScheduledPayableBoleto(b));
       return {
-        ready: [] as FluxoBoletoRow[],
+        ready,
         pending: [] as FluxoBoletoRow[],
-        other: items,
+        other,
         totals: { readyToPay: 0, pendingReceipt: 0 },
       };
     }
@@ -1353,13 +1296,13 @@ export function FluxoBoletosPage({
     return { ready, pending, other, totals };
   }, [
     calendarDayList,
-    flowType,
+    isPayableFlow,
     boletoReadyToPay,
     boletoPendingMerchandiseReceipt,
     payableReceiptContext,
   ]);
 
-  const addButton = (
+  const addButton = showAddButton ? (
     <Button
       onClick={() => {
         setCreateBoletoDefaultDueDate(undefined);
@@ -1370,20 +1313,28 @@ export function FluxoBoletosPage({
       <Plus className="h-4 w-4 mr-2" />
       {addButtonLabel}
     </Button>
-  );
+  ) : null;
 
   const exportButton = currentCompany?.id ? (
     <ExportButton
-      reportId={isReceivableFlow ? "receivables_open" : "payables_open"}
+      reportId={
+        isSalesSource
+          ? "sales_summary"
+          : flowType === "receivable"
+            ? "receivables_open"
+            : "payables_open"
+      }
       allowedReportIds={
-        isReceivableFlow
-          ? ["receivables_open", "receipts_made", "financial_movement"]
-          : [
-              "payables_open",
-              "payables_overdue",
-              "payments_made",
-              "financial_movement",
-            ]
+        isSalesSource
+          ? ["sales_summary", "epoc_billing"]
+          : flowType === "receivable"
+            ? ["receivables_open", "receipts_made", "financial_movement"]
+            : [
+                "payables_open",
+                "payables_overdue",
+                "payments_made",
+                "financial_movement",
+              ]
       }
       lockReport={false}
       initialFilters={{
@@ -1475,16 +1426,17 @@ export function FluxoBoletosPage({
         </Button>
       </div>
 
-      {!isReceivableFlow && (
+      {isBoletosSource && (
         <PayableTotalsCards
           totals={payableTotals}
           loading={totalsLoading}
           monthName={formatPayableMonthName(period.month, period.year)}
           formatCurrency={formatCurrency}
+          variant={flowType === "receivable" ? "receivable" : "payable"}
         />
       )}
 
-      {currentCompany?.id && (
+      {currentCompany?.id && showAddButton && (
         <CreateBoletoSheet
           open={boletoSheetOpen}
           onOpenChange={(open) => {
@@ -1503,7 +1455,7 @@ export function FluxoBoletosPage({
           }}
         />
       )}
-      {section === "list" ? null : isReceivableFlow ? (
+      {section === "list" ? null : isSalesSource ? (
         <RevenueEntriesCalendar
           month={period.month}
           year={period.year}
@@ -1523,15 +1475,15 @@ export function FluxoBoletosPage({
           onDayListOpen={handleCalendarDayListOpen}
           formatCurrency={formatCurrency}
           isPayableReadyToPay={
-            flowType === "payable" ? boletoReadyToPay : undefined
+            isPayableFlow ? boletoReadyToPay : undefined
           }
           onlyScheduledPayables={
-            flowType === "payable" ? isScheduledPayableBoleto : undefined
+            isBoletosSource ? isScheduledPayableBoleto : undefined
           }
         />
       )}
 
-      {section === "calendar" ? null : !isReceivableFlow ? (
+      {section === "calendar" ? null : isBoletosSource ? (
         <div className="space-y-4">
           <PayableListViewToggle value={listView} onChange={setListView} />
           {listView === "category" && (
@@ -1578,10 +1530,14 @@ export function FluxoBoletosPage({
                       <div className="space-y-2">
                         <div>
                           <h3 className="text-sm font-semibold">
-                            Valores a pagar
+                            {isPayableFlow
+                              ? "Valores a pagar"
+                              : "Valores a receber"}
                           </h3>
                           <p className="text-xs text-muted-foreground">
-                            Contas agendadas liberadas para pagamento.
+                            {isPayableFlow
+                              ? "Contas agendadas liberadas para pagamento."
+                              : "Títulos em aberto neste período."}
                           </p>
                         </div>
                         {listReadyToPay.map((b) => renderListCard(b))}
@@ -1603,9 +1559,13 @@ export function FluxoBoletosPage({
                     {listOther.length > 0 && (
                       <div className="space-y-2">
                         <div>
-                          <h3 className="text-sm font-semibold">Quitadas</h3>
+                          <h3 className="text-sm font-semibold">
+                            {isPayableFlow ? "Quitadas" : "Recebidas"}
+                          </h3>
                           <p className="text-xs text-muted-foreground">
-                            Contas já pagas neste mês.
+                            {isPayableFlow
+                              ? "Contas já pagas neste mês."
+                              : "Contas já recebidas neste mês."}
                           </p>
                         </div>
                         {listOther.map((b) => renderListCard(b))}
@@ -1653,7 +1613,7 @@ export function FluxoBoletosPage({
         </Card>
       )}
 
-      {!isReceivableFlow && (
+      {isBoletosSource && (
         <Sheet
           open={!!calendarDayList}
           modal={false}
@@ -1681,7 +1641,7 @@ export function FluxoBoletosPage({
                   Nenhum lançamento com vencimento neste dia.
                 </p>
               )}
-              {flowType === "payable" && calendarDayItems.length > 0 && (
+              {isPayableFlow && calendarDayItems.length > 0 && (
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-destructive">
@@ -1738,10 +1698,14 @@ export function FluxoBoletosPage({
                         <div className="space-y-2">
                           <div>
                             <h3 className="text-sm font-semibold">
-                              Valores a pagar
+                              {isPayableFlow
+                                ? "Valores a pagar"
+                                : "Valores a receber"}
                             </h3>
                             <p className="text-xs text-muted-foreground">
-                              Liberadas para pagamento neste dia.
+                              {isPayableFlow
+                                ? "Liberadas para pagamento neste dia."
+                                : "Títulos em aberto neste dia."}
                             </p>
                           </div>
                           {calendarDayBuckets.ready.map((b) =>
@@ -1768,9 +1732,13 @@ export function FluxoBoletosPage({
                       {calendarDayBuckets.other.length > 0 && (
                         <div className="space-y-2">
                           <div>
-                            <h3 className="text-sm font-semibold">Quitadas</h3>
+                            <h3 className="text-sm font-semibold">
+                              {isPayableFlow ? "Quitadas" : "Recebidas"}
+                            </h3>
                             <p className="text-xs text-muted-foreground">
-                              Contas já pagas com vencimento neste dia.
+                              {isPayableFlow
+                                ? "Contas já pagas com vencimento neste dia."
+                                : "Contas já recebidas com vencimento neste dia."}
                             </p>
                           </div>
                           {calendarDayBuckets.other.map((b) =>
@@ -1803,7 +1771,7 @@ export function FluxoBoletosPage({
         </Sheet>
       )}
 
-      {isReceivableFlow && (
+      {isSalesSource && (
         <RevenueDaySalesSheet
           payload={revenueCalendarDayList}
           open={!!revenueCalendarDayList}
@@ -1822,7 +1790,7 @@ export function FluxoBoletosPage({
         />
       )}
 
-      {isReceivableFlow && (
+      {isSalesSource && (
         <RevenueDetailSheet
           revenueEntryId={detailRevenueId}
           onClose={() => setDetailRevenueId(null)}
@@ -1848,7 +1816,7 @@ export function FluxoBoletosPage({
             : null
         }
         pendingMerchandise={
-          flowType === "payable" &&
+          isPayableFlow &&
           !!boletoResumo &&
           boletoPendingMerchandiseReceipt(boletoResumo)
         }
@@ -1920,9 +1888,7 @@ export function FluxoBoletosPage({
       />
 
       <PayBoletoDialog
-        open={
-          markPaidDialogOpen && !!boletoResumo && isBoletoPayable(boletoResumo)
-        }
+        open={markPaidDialogOpen && !!boletoResumo}
         onOpenChange={setMarkPaidDialogOpen}
         boleto={boletoResumo}
         companyId={companyId ?? ""}
@@ -1932,71 +1898,6 @@ export function FluxoBoletosPage({
         initialPartial={payInitialPartial}
         onSuccess={handlePayBoletoSuccess}
       />
-
-      <Dialog
-        open={
-          markPaidDialogOpen && !!boletoResumo && !isBoletoPayable(boletoResumo)
-        }
-        onOpenChange={(open) => {
-          if (!open && markingPaid) return;
-          setMarkPaidDialogOpen(open);
-        }}
-      >
-        <DialogContent
-          overlayClassName="z-[80]"
-          className="z-[80]"
-          onPointerDownOutside={(e) => markingPaid && e.preventDefault()}
-          onEscapeKeyDown={(e) => markingPaid && e.preventDefault()}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {boletoResumo && isBoletoPayable(boletoResumo)
-                ? "Marcar como pago"
-                : "Marcar como recebido"}
-            </DialogTitle>
-            <DialogDescription>
-              {boletoResumo && isBoletoPayable(boletoResumo)
-                ? "Confirma que esta conta já foi quitada? Ela será marcada como paga nesta empresa."
-                : "Confirma que este valor já foi recebido? O lançamento será marcado como quitado nesta empresa."}
-            </DialogDescription>
-          </DialogHeader>
-          {boletoResumo && (
-            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-              <p className="font-medium">
-                {formatBoletoFluxoDescription(boletoResumo)}
-              </p>
-              <p className="text-muted-foreground tabular-nums">
-                {formatCurrency(boletoResumo.amount)} · venc.{" "}
-                {formatDate(boletoResumo.due_date)}
-              </p>
-            </div>
-          )}
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={markingPaid}
-              onClick={() => setMarkPaidDialogOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              disabled={markingPaid}
-              onClick={() => void confirmMarkReceivableAsPaid()}
-            >
-              {markingPaid ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Salvando…
-                </>
-              ) : (
-                "Confirmar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={undoPayDialogOpen}
@@ -2012,7 +1913,11 @@ export function FluxoBoletosPage({
           onEscapeKeyDown={(e) => undoingPay && e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>Desfazer pagamento</DialogTitle>
+            <DialogTitle>
+              {boletoResumo && !isBoletoPayable(boletoResumo)
+                ? "Desfazer recebimento"
+                : "Desfazer pagamento"}
+            </DialogTitle>
             <DialogDescription>
               {pendingSplitRemainder.length > 0
                 ? "A conta voltará para em aberto e o saldo restante será reunido neste lançamento, com o valor cheio."

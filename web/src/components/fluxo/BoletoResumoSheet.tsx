@@ -145,23 +145,18 @@ export function BoletoResumoSheet({
     : null;
   const canMarkSettled =
     !!boleto && boleto.status === "pending" && !projected;
-  const canEdit = flowType === "payable" && canMarkSettled;
+  const canEdit = canMarkSettled;
   const canEditSeries =
-    flowType === "payable" &&
     !!boleto &&
     (projected || !!boleto.series_master_expense_id);
   const canPayPartial =
-    flowType === "payable" &&
     canMarkSettled &&
-    payable &&
     !transfer;
   const canUndoPay =
-    flowType === "payable" &&
     !!boleto &&
     boleto.status === "paid" &&
-    !projected &&
-    payable;
-  const canViewExpense = !!boleto?.expense_id && !projected;
+    !projected;
+  const canViewExpense = flowType === "payable" && !!boleto?.expense_id && !projected;
   const showBarcode =
     canMarkSettled && paymentType === "boleto" && !!boleto?.barcode;
   const showPix = canMarkSettled && paymentType === "pix" && !!boleto?.pix_key;
@@ -404,7 +399,7 @@ export function BoletoResumoSheet({
                         className="w-full sm:w-auto sm:flex-1"
                         onClick={onPayPartial}
                       >
-                        Pagar parcialmente
+                        {payable ? "Pagar parcialmente" : "Receber parcialmente"}
                       </Button>
                     ) : null}
                     {canUndoPay ? (
@@ -415,7 +410,7 @@ export function BoletoResumoSheet({
                         onClick={onUndoPay}
                       >
                         <Undo2 className="mr-2 h-4 w-4" />
-                        Desfazer pagamento
+                        {payable ? "Desfazer pagamento" : "Desfazer recebimento"}
                       </Button>
                     ) : null}
                     {canViewExpense ? (
