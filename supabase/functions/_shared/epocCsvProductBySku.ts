@@ -4,6 +4,12 @@
  * - se existir (ativo), reutiliza; senão cria com unit=un
  * - coluna Grupo → categoria de catálogo (`company_product_categories`); cria se faltar
  */
+import {
+  resolveEpocGrupoCatalogName,
+  suggestCompanyProductCatalogCategoryId,
+  type CompanyProductCat,
+} from "./epocCsvRevenueClassification.ts";
+
 // deno-lint-ignore no-explicit-any
 type Admin = any;
 
@@ -65,7 +71,9 @@ export async function ensureCompanyProductCategoryByName(
   grupoName: string,
   localCache: Map<string, string>,
 ): Promise<string | null> {
-  const name = normalizeCategoryName(grupoName);
+  const resolved = resolveEpocGrupoCatalogName(grupoName);
+  if (!resolved) return null;
+  const name = normalizeCategoryName(resolved);
   if (!name) return null;
 
   const key = name.toLowerCase();
@@ -156,6 +164,7 @@ export async function ensureEpocProductBySku(input: {
   sku: string;
   name: string;
   grupoName?: string | null;
+  catalogCategories?: CompanyProductCat[];
   skuCache: Map<string, string>;
   categoryCache: Map<string, string>;
 }): Promise<EnsureEpocProductBySkuResult> {
@@ -164,13 +173,32 @@ export async function ensureEpocProductBySku(input: {
     return { productId: null, created: false, error: "codigo_vazio" };
   }
 
+  let grupoForCatalog = input.grupoName ?? null;
+  if (!resolveEpocGrupoCatalogName(grupoForCatalog ?? "")) {
+    grupoForCatalog = null;
+  }
+  if (!grupoForCatalog && input.name && input.catalogCategories?.length) {
+    const suggested = suggestCompanyProductCatalogCategoryId(
+      input.name,
+      input.catalogCategories,
+    );
+    if (
+      suggested &&
+      suggested.source !== "fallback_first" &&
+      suggested.source !== "fallback_diversos"
+    ) {
+      const hit = input.catalogCategories.find((c) => c.id === suggested.categoryId);
+      if (hit?.name) grupoForCatalog = hit.name;
+    }
+  }
+
   const cached = input.skuCache.get(sku);
   if (cached) {
-    if (input.grupoName) {
+    if (grupoForCatalog) {
       const catId = await ensureCompanyProductCategoryByName(
         input.admin,
         input.companyId,
-        input.grupoName,
+        grupoForCatalog,
         input.categoryCache,
       );
       if (catId) {
@@ -251,11 +279,11 @@ export async function ensureEpocProductBySku(input: {
 
   input.skuCache.set(sku, productId);
 
-  if (input.grupoName) {
+  if (grupoForCatalog) {
     const catId = await ensureCompanyProductCategoryByName(
       input.admin,
       input.companyId,
-      input.grupoName,
+      grupoForCatalog,
       input.categoryCache,
     );
     if (catId) {

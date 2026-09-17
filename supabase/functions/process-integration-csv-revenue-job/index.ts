@@ -4,10 +4,8 @@
  * até percorrer todo o CSV: coluna "Total Bruto(R$)" + `data_consumo`.
  * Lançamento: **venda de produto** (`entry_mode: product_sale`).
  * Produto: coluna **Codigo** → `products.sku` (acha ou cria com unit=un).
- * Categoria de catálogo: coluna **Grupo** → `company_product_categories` (acha ou cria).
- * Fluxo de produto: apenas por Codigo + Grupo (sem match por nome).
- * Quantidade na coluna Quant.; gross_amount = "Total Bruto(R$)"; pricing_mode: total.
- * Categoria financeira (folha RECEITA OPERACIONAL): heurísticas PT-BR (sem IA).
+ * Categoria de catálogo: coluna **Grupo** → seed (`CERVEJAS/CHOPP` → Cervejas); nomes de pagamento ignorados.
+ * Categoria financeira: mix Vendas de bebidas / Vendas de produtos (heurística + Grupo; sem forma de pagamento).
  *
  * Autenticação: `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
  * Corpo inicial: `{ "job_id" }` ou `{ "record": { "id" } }`.
@@ -28,7 +26,10 @@ import { patchEpocCsvSyncRunFlowDiagnosticFromImportJob } from "../_shared/patch
 import {
   classifyRevenueCategoryHeuristic,
   filterOperationalRevenueLeaves,
+  isUsableCachedSaleLeaf,
   pickDefaultRevenueLeaf,
+  resolveEpocGrupoCatalogName,
+  type CompanyProductCat,
   type RevenueOperationalLeaf,
   type StoredRevenueCat,
 } from "../_shared/epocCsvRevenueClassification.ts";
@@ -625,6 +626,15 @@ async function runCsvRevenueImportForJob(
   };
 
   try {
+    const { error: mixErr } = await admin.rpc("ensure_sale_mix_revenue_leaves", {
+      p_company_id: job.company_id,
+    });
+    if (mixErr) {
+      return await fail(
+        `Falha ao garantir categorias de mix de venda: ${mixErr.message}`,
+      );
+    }
+
     const leavesLoad = await loadOperationalRevenueLeaves(
       admin,
       job.company_id,
@@ -895,6 +905,17 @@ async function runCsvRevenueImportForJob(
     const excludeFromSalesByProduct = new Map<string, boolean>();
     const createdProductIdsThisChunk = new Set<string>();
 
+    const { data: catalogRows } = await admin
+      .from("company_product_categories")
+      .select("id, name")
+      .eq("company_id", job.company_id);
+    const catalogCategories: CompanyProductCat[] = (catalogRows ?? [])
+      .map((r: { id?: string; name?: string }) => ({
+        id: String(r.id ?? ""),
+        name: String(r.name ?? ""),
+      }))
+      .filter((c: CompanyProductCat) => c.id && c.name);
+
     const catByKey: Record<string, StoredRevenueCat> = {};
     const priorCat = priorMeta.epoc_revenue_category_by_product;
     if (priorCat && typeof priorCat === "object" && !Array.isArray(priorCat)) {
@@ -903,7 +924,7 @@ async function runCsvRevenueImportForJob(
         const row = v as Record<string, unknown>;
         const subId =
           typeof row.subcategory_id === "string" ? row.subcategory_id.trim() : "";
-        if (!subId) continue;
+        if (!subId || !isUsableCachedSaleLeaf(subId, leaves)) continue;
         catByKey[k] = {
           subcategory_id: subId,
           category_id:
@@ -934,7 +955,14 @@ async function runCsvRevenueImportForJob(
       const k = epocProductLineKey(rawP);
       if (!k || catByKey[k]) continue;
 
-      const h = classifyRevenueCategoryHeuristic(rawP, leaves, defaultLeaf);
+      const rawGrupo =
+        grupoCol >= 0
+          ? sanitizeCell(row[grupoCol] ?? "").replace(/\s+/g, " ")
+          : "";
+      const catalogHint = resolveEpocGrupoCatalogName(rawGrupo);
+      const h = classifyRevenueCategoryHeuristic(rawP, leaves, defaultLeaf, {
+        catalogNames: catalogHint ? [catalogHint, rawGrupo] : [rawGrupo],
+      });
       catByKey[k] = {
         subcategory_id: h.subcategoryId,
         category_id: h.categoryId,
@@ -1076,6 +1104,7 @@ async function runCsvRevenueImportForJob(
         sku: rawCodigo,
         name: rawProdutoForMatch,
         grupoName: rawGrupo || null,
+        catalogCategories,
         skuCache: skuProductCache,
         categoryCache: productCategoryCache,
       });

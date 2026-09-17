@@ -90,7 +90,7 @@ function suggestFromProductName(
     const hit = tryKeywords(["soft drink", "soft", "bebida"]);
     if (hit) return hit;
   }
-  if (/\b(cervej|chopp|lager|pilsen|ipa|stout|heine|brahma|skol)\b/.test(p)) {
+  if (/\b(cervej|chopp|lager|pilsen|ipa|stout|heineken|heine|brahma|skol)\b/.test(p) || /\bheine/.test(p)) {
     const hit = tryKeywords(["cervej", "cerve", "chopp", "bebida"]);
     if (hit) return hit;
   }

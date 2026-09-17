@@ -72,21 +72,164 @@ export function filterOperationalRevenueLeaves(
   return out;
 }
 
-export function pickDefaultRevenueLeaf(leaves: RevenueOperationalLeaf[]): RevenueOperationalLeaf | null {
-  if (!leaves.length) return null;
-  const byProd = leaves.find((l) => /venda.*produto|produtos/i.test(l.name));
-  return byProd ?? leaves[0]!;
+/** Folha DRE cujo nome é forma de pagamento, não mix de produto. */
+const PAYMENT_LEAF_NAME_RE =
+  /^(dinheiro|pix|especie|cash|cartao|credito|debito|voucher|vr|alelo|sodexo|ticket|vale)$/;
+const PAYMENT_LEAF_PHRASE_RE =
+  /^(venda\s+)?pix(\s+epoc)?$|vr\s*\/?\s*alelo|vale\s+refeicao|cartao\s+de\s+(credito|debito)/;
+
+/** Dump / não-mix: não usar como default nem reutilizar de cache. */
+const DUMP_LEAF_NAME_RE =
+  /adiantamento|reservas?\s+e\s+eventos|^reservas$|outras\s+entradas/;
+
+export function foldGrupoToken(s: string): string {
+  return normCatalogLine(s)
+    .replace(/^[\d]+(?:[.][\d]+)*\s*[-–:]\s*/, "")
+    .replace(/[.,;]+$/g, "")
+    .replace(/[/_.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
+export function isPaymentMethodCategoryName(name: string): boolean {
+  const n = foldGrupoToken(name);
+  if (!n) return true;
+  if (PAYMENT_LEAF_NAME_RE.test(n) || PAYMENT_LEAF_PHRASE_RE.test(n)) return true;
+  if (n.length <= 22 && /\b(dinheiro|especie|cash)\b/.test(n)) return true;
+  return false;
+}
+
+export function isExcludedSaleMixLeafName(name: string): boolean {
+  const n = foldGrupoToken(name);
+  if (!n) return true;
+  if (isPaymentMethodCategoryName(name)) return true;
+  if (DUMP_LEAF_NAME_RE.test(n)) return true;
+  return false;
+}
+
+export function isDrinkCatalogName(name: string): boolean {
+  const n = foldGrupoToken(name);
+  if (!n || isPaymentMethodCategoryName(name)) return false;
+  return /(cervej|chopp|soft|destil|vinho|gelo|bebida|agua|refriger|suco|alcool|energet|cachaca|\bgin\b|conhaque|licor|coquetel)/.test(
+    n,
+  );
+}
+
+export function isFoodCatalogName(name: string): boolean {
+  const n = foldGrupoToken(name);
+  if (!n || isPaymentMethodCategoryName(name)) return false;
+  return /(prato|comida|porcao|bolinho|pastel|caldo|salgado|sobremes|espet)/.test(
+    n,
+  );
+}
+
+const BEER_BRAND_RE =
+  /\b(heineken|heine|brahma|skol|amstel|stella|budweiser|corona|praya|eisenbahn|antarctica|bohemia|spaten|therezopolis|colorado)/;
+
+const DRINK_PRODUCT_RE =
+  /\b(cervej|chopp|chop\b|long\s*neck|lata\b|garrafa|drink|caipir|daiquir|mojito|whisk|vodka|gin\b|cachaca|cachaça|tequila|vinho|espum|prosecco|sangria)\b/;
+const SOFT_PRODUCT_RE =
+  /\b(refrigerante|refri\b|guaran|pepsi|coca|fanta|sprite|schweppes|tonica|tônica|gatorade|red\s*bull|monster\b|isoton|energ)\b/;
+const WATER_JUICE_RE =
+  /\b(suco\b|nectar|agua\b|água|mineral|com\s+gas|gaseific|smoothie)\b/;
+
+export function productLineLooksLikeDrink(productLine: string): boolean {
+  const n = normCatalogLine(productLine);
+  if (!n) return false;
+  if (BEER_BRAND_RE.test(n)) return true;
+  if (DRINK_PRODUCT_RE.test(n) || SOFT_PRODUCT_RE.test(n) || WATER_JUICE_RE.test(n)) {
+    return true;
+  }
+  if (/\b(ml|litro|l)\b.*\b(cervej|refriger|suco|agua|vinho)\b/.test(n)) return true;
+  return false;
+}
+
+export function productLineLooksLikeFood(productLine: string): boolean {
+  const n = normCatalogLine(productLine);
+  if (!n) return false;
+  return /\b(prato|porcao|porção|executivo|combo|menu|lanche|espetinho|hamburg|pizza|massa|rango|marmita|acomp|bolinho|pastel|caldo|feijoada)\b/.test(
+    n,
+  );
+}
+
+/** Grupo EPOC → nome do seed de catálogo; null = ignorar (pagamento / vazio). */
+export function resolveEpocGrupoCatalogName(grupoName: string): string | null {
+  if (isPaymentMethodCategoryName(grupoName)) return null;
+  const n = foldGrupoToken(grupoName);
+  if (!n) return null;
+  if (/(cervej|chopp)/.test(n)) return "Cervejas";
+  if (/(destil|cachaca|conhaque|licor|\bgin\b)/.test(n)) return "Destilados";
+  if (/vinho/.test(n)) return "Vinhos";
+  if (/(refriger|soft|energet|suco|agua)/.test(n)) return "Soft Drink";
+  if (/^gelo$/.test(n) || /\bgelo\b/.test(n)) return "Gelo";
+  const original = String(grupoName ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return original || null;
+}
+
+export function pickDefaultRevenueLeaf(
+  leaves: RevenueOperationalLeaf[],
+): RevenueOperationalLeaf | null {
+  const usable = leaves.filter((l) => !isExcludedSaleMixLeafName(l.name));
+  const pool = usable.length ? usable : leaves;
+  if (!pool.length) return null;
+  const byProd = pool.find(
+    (l) =>
+      /venda.*produto|produtos/i.test(l.name) && !/bebida/i.test(l.name),
+  );
+  return byProd ?? pool[0]!;
+}
+
+export function findBebidasRevenueLeaf(
+  leaves: RevenueOperationalLeaf[],
+): RevenueOperationalLeaf | null {
+  const usable = leaves.filter((l) => !isExcludedSaleMixLeafName(l.name));
+  return (
+    usable.find((l) => /venda.*bebida|bebidas/i.test(l.name)) ||
+    usable.find((l) => /bebida/i.test(l.name)) ||
+    null
+  );
+}
+
+export function findProdutosRevenueLeaf(
+  leaves: RevenueOperationalLeaf[],
+): RevenueOperationalLeaf | null {
+  const usable = leaves.filter((l) => !isExcludedSaleMixLeafName(l.name));
+  return (
+    usable.find(
+      (l) =>
+        /venda.*produto|produtos/i.test(l.name) && !/bebida/i.test(l.name),
+    ) || null
+  );
+}
+
+export function isUsableCachedSaleLeaf(
+  subcategoryId: string,
+  leaves: RevenueOperationalLeaf[],
+): boolean {
+  const leaf = leaves.find((l) => l.id === subcategoryId);
+  if (!leaf) return false;
+  return !isExcludedSaleMixLeafName(leaf.name);
+}
+
+export type ClassifyRevenueOptions = {
+  catalogNames?: string[] | null;
+};
+
 /**
- * Heurísticas PT-BR (restaurante / EPOC) + correspondência do nome da folha no texto da linha.
+ * Heurísticas PT-BR (restaurante / EPOC) + catálogo/Grupo + correspondência da folha.
  */
 export function classifyRevenueCategoryHeuristic(
   productLine: string,
   leaves: RevenueOperationalLeaf[],
   defaultLeaf: RevenueOperationalLeaf,
+  options?: ClassifyRevenueOptions,
 ): RevenueCategoryPick {
   const n = normCatalogLine(productLine);
+  const catalogNames = (options?.catalogNames ?? []).filter(Boolean);
   if (!n) {
     return {
       subcategoryId: defaultLeaf.id,
@@ -96,12 +239,25 @@ export function classifyRevenueCategoryHeuristic(
     };
   }
 
-  const leafMatch = (re: RegExp) => leaves.find((l) => re.test(l.name));
+  const leafMatch = (re: RegExp) =>
+    leaves.find((l) => !isExcludedSaleMixLeafName(l.name) && re.test(l.name));
   const leafIncludes = (...subs: string[]) =>
     leaves.find((l) => {
+      if (isExcludedSaleMixLeafName(l.name)) return false;
       const x = normCatalogLine(l.name);
       return subs.every((s) => x.includes(s));
     });
+
+  const pick = (
+    hit: RevenueOperationalLeaf,
+    confidence: number,
+    reason: string,
+  ): RevenueCategoryPick => ({
+    subcategoryId: hit.id,
+    categoryId: hit.parent_id,
+    confidence,
+    reason,
+  });
 
   // Taxa de serviço / gorjeta / couvert / % serviço
   if (
@@ -113,15 +269,13 @@ export function classifyRevenueCategoryHeuristic(
     const hit =
       leafIncludes("taxa", "serv") ||
       leafMatch(/taxa.*servi|servi.*taxa/i) ||
-      leaves.find((l) => /taxa/i.test(l.name) && /serv/i.test(l.name));
-    if (hit) {
-      return {
-        subcategoryId: hit.id,
-        categoryId: hit.parent_id,
-        confidence: 0.94,
-        reason: "heuristic_taxa_servico",
-      };
-    }
+      leaves.find(
+        (l) =>
+          !isExcludedSaleMixLeafName(l.name) &&
+          /taxa/i.test(l.name) &&
+          /serv/i.test(l.name),
+      );
+    if (hit) return pick(hit, 0.94, "heuristic_taxa_servico");
   }
 
   // Delivery / marketplaces
@@ -132,82 +286,53 @@ export function classifyRevenueCategoryHeuristic(
     const hit =
       leafMatch(/delivery|entrega/i) ||
       leafIncludes("receita", "delivery") ||
-      leaves.find((l) => /delivery/i.test(l.name));
-    if (hit) {
-      return {
-        subcategoryId: hit.id,
-        categoryId: hit.parent_id,
-        confidence: 0.9,
-        reason: "heuristic_delivery",
-      };
+      leaves.find(
+        (l) => !isExcludedSaleMixLeafName(l.name) && /delivery/i.test(l.name),
+      );
+    if (hit) return pick(hit, 0.9, "heuristic_delivery");
+  }
+
+  const catalogDrink = catalogNames.some((c) => isDrinkCatalogName(c));
+  const catalogFood = catalogNames.some((c) => isFoodCatalogName(c));
+  const bebidasLeaf = findBebidasRevenueLeaf(leaves);
+  const produtosLeaf = findProdutosRevenueLeaf(leaves) ?? defaultLeaf;
+
+  if (catalogDrink || productLineLooksLikeDrink(productLine)) {
+    if (bebidasLeaf) {
+      return pick(
+        bebidasLeaf,
+        catalogDrink ? 0.93 : 0.91,
+        catalogDrink ? "catalog_bebidas" : "heuristic_bebidas",
+      );
     }
   }
 
-  // Bebidas (alcool / soft / agua / suco em dose)
+  // Cobrança de copo / rolha / gelo
   if (
-    /\b(cervej|chopp|chop\b|long\s*neck|lata\b|garrafa|drink|caipir|daiquir|mojito|whisk|vodka|gin\b|cachaca|cachaça|tequila|vinho|espum|prosecco|sangria)\b/.test(n) ||
-    /\b(refrigerante|refri\b|guaran|pepsi|coca|fanta|sprite|schweppes|tonica|tônica|gatorade|red\s*bull|monster\b|isoton|energ)\b/.test(n) ||
-    /\b(suco\b|nectar|agua\b|água|mineral|com\s+gas|gaseific|smoothie)\b/.test(n) ||
-    /\b(ml|litro|l)\b.*\b(cervej|refriger|suco|agua|vinho)\b/.test(n)
+    /\b(copo|rolha|gelo|gelinho|shooter)\b/.test(n) &&
+    !/\b(prato|porcao|porção|combo\s+executivo)\b/.test(n)
   ) {
-    const hit = leafMatch(/bebida/i) || leafIncludes("venda", "bebida");
-    if (hit) {
-      return {
-        subcategoryId: hit.id,
-        categoryId: hit.parent_id,
-        confidence: 0.91,
-        reason: "heuristic_bebidas",
-      };
-    }
+    if (bebidasLeaf) return pick(bebidasLeaf, 0.72, "heuristic_copo_rolha_gelo");
   }
 
-  // Cobrança de copo / rolha / gelo (receita operacional, costuma ir em bebidas ou outras)
-  if (/\b(copo|rolha|gelo|gelinho|shooter)\b/.test(n) && !/\b(prato|porcao|porção|combo\s+executivo)\b/.test(n)) {
-    const hit = leafMatch(/bebida/i) || leafMatch(/outras/i);
-    if (hit) {
-      return {
-        subcategoryId: hit.id,
-        categoryId: hit.parent_id,
-        confidence: 0.72,
-        reason: "heuristic_copo_rolha_gelo",
-      };
-    }
-  }
-
-  // Nome da folha contido na linha (ex.: promoções nomeadas)
+  // Nome da folha contido na linha (ex.: promoções nomeadas) — nunca pagamento/dump
   for (const l of leaves) {
+    if (isExcludedSaleMixLeafName(l.name)) continue;
     const ln = normCatalogLine(l.name);
     if (ln.length >= 5 && n.includes(ln)) {
-      return {
-        subcategoryId: l.id,
-        categoryId: l.parent_id,
-        confidence: 0.78,
-        reason: "leaf_label_substring",
-      };
+      return pick(l, 0.78, "leaf_label_substring");
     }
   }
 
-  // Pratos / porções / comida (não bebida): preferir vendas de produtos ou outras operacionais
-  if (
-    /\b(prato|porcao|porção|executivo|combo|menu|lanche|espetinho|hamburg|pizza|massa|rango|marmita|acomp)\b/.test(n)
-  ) {
-    const hit = leafMatch(/venda.*produto|produtos/i) || leafMatch(/outras.*operac/i);
-    if (hit) {
-      return {
-        subcategoryId: hit.id,
-        categoryId: hit.parent_id,
-        confidence: 0.68,
-        reason: "heuristic_alimentacao_linha",
-      };
-    }
+  if (catalogFood || productLineLooksLikeFood(productLine)) {
+    return pick(
+      produtosLeaf,
+      catalogFood ? 0.74 : 0.68,
+      catalogFood ? "catalog_produtos" : "heuristic_alimentacao_linha",
+    );
   }
 
-  return {
-    subcategoryId: defaultLeaf.id,
-    categoryId: defaultLeaf.parent_id,
-    confidence: 0.45,
-    reason: "heuristic_fallback_default_leaf",
-  };
+  return pick(defaultLeaf, 0.45, "heuristic_fallback_default_leaf");
 }
 
 /** Tipo operacional para produto criado pelo import (sem ficha técnica). */
@@ -291,7 +416,7 @@ export function suggestCompanyProductCatalogCategoryId(
     const r = tryKws(["refriger", "suco", "bebida", "leite e bebida", "mini"], "name_soft_drinks");
     if (r) return r;
   }
-  if (/\b(cervej|chopp|lager|pilsen|ipa|stout|heine|brahma|skol)\b/i.test(p)) {
+  if (/\b(cervej|chopp|lager|pilsen|ipa|stout|heineken|heine|brahma|skol|amstel|stella|corona|praya)\b/i.test(p) || /\bheine/.test(p)) {
     const r = tryKws(["cervej", "cerve", "chopp", "bebida"], "name_beer");
     if (r) return r;
   }
